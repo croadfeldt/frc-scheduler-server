@@ -57,11 +57,15 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
     """
     ideal_gap = max(1, ideal_gap)
 
-    matches_per_round    = math.ceil(num_teams / 6)
-    surrogates_per_round = matches_per_round * 6 - num_teams
-    total_matches        = matches_per_round * matches_per_team
-    total_sur_slots      = surrogates_per_round * matches_per_team
-    fair_sur_cap         = math.ceil(total_sur_slots / num_teams) + 1 if num_teams > 0 else 1
+    # ── Step 1: Determine match count (pure math) ────────────────────────────
+    # total_matches = ceil(N * MPT / 6) — minimum 6-team matches to give every
+    # team exactly MPT plays. Any remainder is structural surplus (surrogates).
+    # matches_per_round = ceil(N/6) — Phase 1 size and cosmetic marker only.
+    total_matches     = math.ceil(num_teams * matches_per_team / 6)
+    matches_per_round = math.ceil(num_teams / 6)
+    total_sur_slots   = total_matches * 6 - num_teams * matches_per_team
+    phase1_surplus    = matches_per_round * 6 - num_teams
+    fair_sur_cap      = math.ceil(total_sur_slots / num_teams) + 1 if num_teams > 0 else 1
 
     # Shuffle team order — each call is a new random iteration
     teams = list(range(1, num_teams + 1))
@@ -79,10 +83,11 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
 
     matches: list[Match] = []
 
-    # Round boundaries
+    # Round boundaries are cosmetic markers every matches_per_round matches
+    total_rounds = math.ceil(total_matches / matches_per_round)
     round_boundaries: dict[int, int] = {
         r: (r - 1) * matches_per_round
-        for r in range(1, matches_per_team + 1)
+        for r in range(1, total_rounds + 1)
     }
 
     # ── Scoring helpers ───────────────────────────────────────────────────────
@@ -201,7 +206,8 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
     for m in range(matches_per_round):
         now      = len(matches)
         is_last  = (m == matches_per_round - 1)
-        extra    = surrogates_per_round if is_last else 0
+        phase1_surplus = matches_per_round * 6 - num_teams
+        extra    = phase1_surplus if is_last else 0
         first_s  = 6 - extra
 
         first_timers = sorted(
@@ -224,35 +230,33 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
         ))
         commit_match(red, blue, now)
 
-    # ── Phase 2: Open scheduling ──────────────────────────────────────────────
+    # ── Phase 2: Open scheduling — quota-driven, no round constraints ────────
+    # Pick the 6 best-scoring eligible teams per match.
+    # W_COUNT in team_score penalises higher mc, so under-played teams naturally
+    # score higher and get picked first — keeping play counts balanced.
+    # Surrogates only appear when structurally unavoidable (< 6 under-quota teams left).
     for i in range(total_matches - matches_per_round):
         now = len(matches)
 
-        # Bresenham surrogate slot distribution
-        sur_slots = (
-            math.floor(total_sur_slots * (now + 1) / total_matches) -
-            math.floor(total_sur_slots * now       / total_matches)
+        under_quota = sorted(
+            [t for t in teams if mc[t] < matches_per_team],
+            key=lambda t: (-team_score(t, now), random.random())
         )
-        reg_slots = 6 - sur_slots
-
-        expected = math.floor(now * 6 / num_teams)
-        regulars   = [t for t in teams if mc[t] <= expected and mc[t] < matches_per_team]
-        surrogates = [t for t in teams if mc[t] >  expected and mc[t] < matches_per_team + 1]
-
-        sorted_reg = sorted(regulars, key=lambda t: (-team_score(t, now), random.random()))
-        sur_pool   = sorted(
-            [t for t in surrogates if sc[t] < fair_sur_cap],
+        at_quota = sorted(
+            [t for t in teams if mc[t] == matches_per_team and sc[t] < fair_sur_cap],
             key=lambda t: -surrogate_score(t, now)
         )
-        if len(sur_pool) < sur_slots:
-            sur_pool = sorted(surrogates, key=lambda t: -surrogate_score(t, now))
-        sur_pool = sur_pool[:sur_slots + 2]
-        reg_pool = sorted_reg[:max(reg_slots + 6, 12)]
 
-        red, blue = best_of_attempts(reg_pool, reg_slots, sur_pool, sur_slots, False, now)
+        sur_needed = max(0, 6 - len(under_quota))
+        reg_slots  = 6 - sur_needed
 
-        red_sur  = tuple(mc[t] > expected for t in red)
-        blue_sur = tuple(mc[t] > expected for t in blue)
+        reg_pool = under_quota[:max(reg_slots + 6, 12)]
+        sur_pool = at_quota[:sur_needed + 2]
+
+        red, blue = best_of_attempts(reg_pool, reg_slots, sur_pool, sur_needed, False, now)
+
+        red_sur  = tuple(mc[t] >= matches_per_team for t in red)
+        blue_sur = tuple(mc[t] >= matches_per_team for t in blue)
         matches.append(Match(red=tuple(red), blue=tuple(blue),
                              red_surrogate=red_sur, blue_surrogate=blue_sur))
         commit_match(red, blue, now)

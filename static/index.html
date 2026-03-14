@@ -846,11 +846,20 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
   const W_SUR_RPT  = 200;
 
   const teams = shuffledTeams();
-  const matchesPerRound    = Math.ceil(numTeams / 6);
-  const surrogatesPerRound = matchesPerRound * 6 - numTeams;
-  const totalMatches       = matchesPerRound * matchesPerTeam;
-  const totalSurSlots      = surrogatesPerRound * matchesPerTeam;
-  const fairSurCap         = Math.ceil(totalSurSlots / numTeams) + 1;
+
+  // ── Step 1: Determine match count (pure math, no criteria involved) ──────────
+  // totalMatches = ceil(N * MPT / 6) — the minimum number of 6-team matches needed
+  // to give every team exactly MPT appearances, with the fewest possible extras.
+  // Any remainder (totalMatches*6 - N*MPT) represents structural surplus slots
+  // that must be filled by surrogates — this number cannot be reduced further.
+  //
+  // matchesPerRound = ceil(N/6) — used only for Phase 1 (guarantee every team
+  // plays once) and as a cosmetic round-boundary marker thereafter.
+  const totalMatches    = Math.ceil(numTeams * matchesPerTeam / 6);
+  const matchesPerRound = Math.ceil(numTeams / 6);
+  const totalSurSlots   = totalMatches * 6 - numTeams * matchesPerTeam;
+  const phase1Surplus   = matchesPerRound * 6 - numTeams;  // slots needing second-match fill in round 1
+  const fairSurCap      = Math.ceil(totalSurSlots / numTeams) + 1;  // max surrogate appearances per team
 
   const matchCounts    = new Array(numTeams + 1).fill(0);
   const lastPlayed     = new Array(numTeams + 1).fill(-999);
@@ -863,8 +872,11 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
   const matches = [];
 
   // Round boundaries: round 1 is exact; rounds 2+ are cosmetic markers.
+  // Round boundaries are cosmetic — mark every matchesPerRound matches.
+  // Round 1 is the strict phase; subsequent ones show approximate progress.
   const roundBoundaries = new Map();
-  for (let r = 1; r <= matchesPerTeam; r++) {
+  const totalRounds = Math.ceil(totalMatches / matchesPerRound);
+  for (let r = 1; r <= totalRounds; r++) {
     roundBoundaries.set(r, (r - 1) * matchesPerRound);
   }
 
@@ -922,7 +934,7 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     const now = matches.length;
     const isLast  = (m === matchesPerRound - 1);
     // Extra slots in the last match are filled by second-match teams, not surrogates
-    const extraSlots = isLast ? surrogatesPerRound : 0;
+    const extraSlots = isLast ? phase1Surplus : 0;
     const firstSlots = 6 - extraSlots;
 
     // First-timers: teams that haven't played yet
@@ -995,55 +1007,55 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     commitMatch(chosenRed, chosenBlue, now);
   }
 
-  // ── PHASE 2: Open scheduling — score-driven, no hard round constraints ────────
-  // After round 1, rounds are cosmetic. Teams are picked by score only.
+  // ── PHASE 2: Open scheduling — quota-driven, no round constraints ───────────
+  // There are no "rounds" after round 1. We simply pick the 6 best-scoring
+  // eligible teams for each match.
   //
-  // At match 'now', a team's "expected" match count is floor(now * 6 / numTeams).
-  // Regular:   matchCounts[t] <= expectedCount  (at or behind schedule)
-  // Surrogate: matchCounts[t] >  expectedCount  (ahead of schedule)
+  // Eligible (regular): mc[t] < matchesPerTeam  — hasn't reached quota yet
+  // Surrogate:          mc[t] === matchesPerTeam — at quota, only used when
+  //                     fewer than 6 under-quota teams are available to fill a match
   //
-  // This guarantees surrogates are always available: round 1 seeds surrogatesPerRound
-  // teams at mc=2 (ahead of the expected mc=1), and Bresenham distributes surrogate
-  // slots to match exactly how many "ahead" teams exist at each point.
-  //
-  // Hard cap: matchCounts[t] < matchesPerTeam + 1 prevents any team from playing
-  // more than matchesPerTeam + 1 times (their regular quota plus one surrogate max).
+  // W_COUNT in teamScore already penalises higher match counts, so teams with
+  // fewer plays naturally score higher and get picked first — this keeps play
+  // counts balanced without any round machinery or Bresenham distribution.
+  // Surrogates only appear when structurally unavoidable (surplus slots).
   const remainingMatches = totalMatches - matchesPerRound;
   for (let i = 0; i < remainingMatches; i++) {
     const now = matches.length;
 
-    // Bresenham: how many surrogate slots this specific match should have
-    const surSlots = Math.floor(totalSurSlots * (now + 1) / totalMatches)
-                   - Math.floor(totalSurSlots * now       / totalMatches);
-    const regSlots = 6 - surSlots;
+    // Candidates under quota — sorted by score (P4/P5/P7 drives equity)
+    const underQuota = teams
+      .filter(t => matchCounts[t] < matchesPerTeam)
+      .sort((a, b) => {
+        const d = teamScore(b, now) - teamScore(a, now);
+        return d !== 0 ? d : Math.random() - 0.5;
+      });
 
-    // Schedule-position split: "ahead" teams are surrogates
-    const expectedCount = Math.floor(now * 6 / numTeams);
-    const regulars   = teams.filter(t => matchCounts[t] <= expectedCount && matchCounts[t] < matchesPerTeam);
-    const surrogates = teams.filter(t => matchCounts[t] >  expectedCount && matchCounts[t] < matchesPerTeam + 1);
+    // Surrogate pool — teams at quota, sorted by fairness (least surrogated first)
+    const atQuota = teams
+      .filter(t => matchCounts[t] === matchesPerTeam && surrogateCount[t] < fairSurCap)
+      .sort((a, b) => surrogateScore(b, now) - surrogateScore(a, now));
 
-    // Sort regulars by individual score (P4/P5/P7)
-    const sortedReg = regulars.slice().sort((a, b) => {
-      const d = teamScore(b, now) - teamScore(a, now);
-      return d !== 0 ? d : Math.random() - 0.5;
-    });
+    // How many surrogates do we structurally need this match?
+    // Only draft surrogates if we can't fill 6 spots from under-quota teams.
+    const surNeeded = Math.max(0, 6 - underQuota.length);
+    const regSlots  = 6 - surNeeded;
 
-    // Sort surrogates by fairness score (P10), relaxing cap only if pool is too small
-    let surPool = surrogates.filter(t => surrogateCount[t] < fairSurCap)
-                            .sort((a, b) => surrogateScore(b, now) - surrogateScore(a, now));
-    if (surPool.length < surSlots)
-      surPool = surrogates.slice().sort((a, b) => surrogateScore(b, now) - surrogateScore(a, now));
-    surPool = surPool.slice(0, surSlots + 2);
-
-    const regPool = sortedReg.slice(0, Math.max(regSlots + 6, 12));
+    const regPool = underQuota.slice(0, Math.max(regSlots + 6, 12));
+    const surPool = atQuota.slice(0, surNeeded + 2);
 
     const cands = [];
     for (let attempt = 0; attempt < 60; attempt++) {
-      const six = [...shuffle(regPool.slice()).slice(0, regSlots),
-                   ...shuffle(surPool.slice()).slice(0, surSlots)];
+      const six = [
+        ...shuffle(regPool.slice()).slice(0, regSlots),
+        ...shuffle(surPool.slice()).slice(0, surNeeded),
+      ];
       if (six.length === 6 && new Set(six).size === 6) {
-        const {r, b} = assignAlliances(six);
-        if (r && b) cands.push({r, b, score: diversityScore(r, b) + six.reduce((a, t) => a + teamScore(t, now), 0) * 0.5});
+        const res = assignAlliances(six);
+        if (res) cands.push({
+          r: res.r, b: res.b,
+          score: diversityScore(res.r, res.b) + six.reduce((a, t) => a + teamScore(t, now), 0) * 0.5,
+        });
       }
     }
     cands.sort((a, b) => b.score - a.score);
@@ -1052,19 +1064,15 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     if (cands.length > 0) {
       chosenRed = cands[0].r; chosenBlue = cands[0].b;
     } else {
-      // Fallback: take best available teams regardless of reg/sur classification,
-      // but still respect the hard per-team quota cap
-      const eligible = teams.filter(t => matchCounts[t] < matchesPerTeam + 1)
-        .sort((a, b) => teamScore(b, now) - teamScore(a, now));
-      const padded = eligible.slice(0, 6);
-      const res = assignAlliances(padded);
-      chosenRed = res ? res.r : padded.slice(0, 3);
-      chosenBlue = res ? res.b : padded.slice(3, 6);
+      const eligible = [...underQuota.slice(0, regSlots), ...atQuota.slice(0, surNeeded)];
+      const res = assignAlliances(eligible.slice(0, 6));
+      chosenRed = res ? res.r : eligible.slice(0, 3);
+      chosenBlue = res ? res.b : eligible.slice(3, 6);
     }
 
-    // Mark as surrogate: any team that was "ahead" of schedule when picked
-    const redSurrogate  = chosenRed.map(t  => matchCounts[t] > expectedCount);
-    const blueSurrogate = chosenBlue.map(t => matchCounts[t] > expectedCount);
+    // A team is a surrogate only if it was at or over quota when selected
+    const redSurrogate  = chosenRed.map(t  => matchCounts[t] >= matchesPerTeam);
+    const blueSurrogate = chosenBlue.map(t => matchCounts[t] >= matchesPerTeam);
     matches.push({red: chosenRed, blue: chosenBlue, redSurrogate, blueSurrogate});
     commitMatch(chosenRed, chosenBlue, now);
   }
@@ -1770,8 +1778,11 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
   document.getElementById('statDays').textContent = days.length;
   document.getElementById('statB2B').textContent = b2b;
   document.getElementById('statB2B').style.color = b2b === 0 ? 'var(--accent3)' : b2b <= 2 ? 'var(--amber)' : 'var(--danger)';
-  const totalPlays = numTeams * matchesPerTeam;
-  const minSurrogates = Math.ceil(totalPlays / 6) * 6 - totalPlays;
+  const totalPlays    = numTeams * matchesPerTeam;
+  const matchesPerRound = Math.ceil(numTeams / 6);
+  const totalMatches2 = Math.ceil(totalPlays / 6);
+  const totalSlots    = totalMatches2 * 6;
+  const minSurrogates = totalSlots - totalPlays;
   document.getElementById('statSurrogates').textContent = totalSurrogates;
   document.getElementById('statSurrogates').style.color = totalSurrogates === 0 ? 'var(--accent3)' : 'var(--amber)';
   const minEl = document.getElementById('statSurrogatesMin');
@@ -1783,7 +1794,9 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
     minEl.textContent = minSurrogates + ' min · ' + (gap === 0 ? 'optimal' : '+' + gap + ' extra');
     minEl.style.color = gap === 0 ? 'var(--accent3)' : gap <= 3 ? 'var(--amber)' : 'var(--danger)';
   }
-  minEl.title = numTeams + ' teams × ' + matchesPerTeam + ' matches = ' + totalPlays + ' plays. Next multiple of 6 = ' + (Math.ceil(totalPlays / 6) * 6) + '. Theoretical minimum = ' + minSurrogates + '. Scheduled = ' + totalSurrogates + '.';
+  minEl.title = numTeams + ' teams × ' + matchesPerTeam + ' matches = ' + totalPlays + ' plays. ' +
+    'ceil(' + totalPlays + '/6) = ' + totalMatches2 + ' matches × 6 = ' + totalSlots + ' slots. ' +
+    'Minimum surrogates = ' + minSurrogates + '. Scheduled = ' + totalSurrogates + '.';
 
   const output = document.getElementById('scheduleOutput');
   output.innerHTML = '';
@@ -2172,11 +2185,20 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
   const W_SUR_RPT  = 200;
 
   const teams = shuffledTeams();
-  const matchesPerRound    = Math.ceil(numTeams / 6);
-  const surrogatesPerRound = matchesPerRound * 6 - numTeams;
-  const totalMatches       = matchesPerRound * matchesPerTeam;
-  const totalSurSlots      = surrogatesPerRound * matchesPerTeam;
-  const fairSurCap         = Math.ceil(totalSurSlots / numTeams) + 1;
+
+  // ── Step 1: Determine match count (pure math, no criteria involved) ──────────
+  // totalMatches = ceil(N * MPT / 6) — the minimum number of 6-team matches needed
+  // to give every team exactly MPT appearances, with the fewest possible extras.
+  // Any remainder (totalMatches*6 - N*MPT) represents structural surplus slots
+  // that must be filled by surrogates — this number cannot be reduced further.
+  //
+  // matchesPerRound = ceil(N/6) — used only for Phase 1 (guarantee every team
+  // plays once) and as a cosmetic round-boundary marker thereafter.
+  const totalMatches    = Math.ceil(numTeams * matchesPerTeam / 6);
+  const matchesPerRound = Math.ceil(numTeams / 6);
+  const totalSurSlots   = totalMatches * 6 - numTeams * matchesPerTeam;
+  const phase1Surplus   = matchesPerRound * 6 - numTeams;  // slots needing second-match fill in round 1
+  const fairSurCap      = Math.ceil(totalSurSlots / numTeams) + 1;  // max surrogate appearances per team
 
   const matchCounts    = new Array(numTeams + 1).fill(0);
   const lastPlayed     = new Array(numTeams + 1).fill(-999);
@@ -2189,8 +2211,11 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
   const matches = [];
 
   // Round boundaries: round 1 is exact; rounds 2+ are cosmetic markers.
+  // Round boundaries are cosmetic — mark every matchesPerRound matches.
+  // Round 1 is the strict phase; subsequent ones show approximate progress.
   const roundBoundaries = new Map();
-  for (let r = 1; r <= matchesPerTeam; r++) {
+  const totalRounds = Math.ceil(totalMatches / matchesPerRound);
+  for (let r = 1; r <= totalRounds; r++) {
     roundBoundaries.set(r, (r - 1) * matchesPerRound);
   }
 
@@ -2248,7 +2273,7 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     const now = matches.length;
     const isLast  = (m === matchesPerRound - 1);
     // Extra slots in the last match are filled by second-match teams, not surrogates
-    const extraSlots = isLast ? surrogatesPerRound : 0;
+    const extraSlots = isLast ? phase1Surplus : 0;
     const firstSlots = 6 - extraSlots;
 
     // First-timers: teams that haven't played yet
@@ -2321,55 +2346,55 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     commitMatch(chosenRed, chosenBlue, now);
   }
 
-  // ── PHASE 2: Open scheduling — score-driven, no hard round constraints ────────
-  // After round 1, rounds are cosmetic. Teams are picked by score only.
+  // ── PHASE 2: Open scheduling — quota-driven, no round constraints ───────────
+  // There are no "rounds" after round 1. We simply pick the 6 best-scoring
+  // eligible teams for each match.
   //
-  // At match 'now', a team's "expected" match count is floor(now * 6 / numTeams).
-  // Regular:   matchCounts[t] <= expectedCount  (at or behind schedule)
-  // Surrogate: matchCounts[t] >  expectedCount  (ahead of schedule)
+  // Eligible (regular): mc[t] < matchesPerTeam  — hasn't reached quota yet
+  // Surrogate:          mc[t] === matchesPerTeam — at quota, only used when
+  //                     fewer than 6 under-quota teams are available to fill a match
   //
-  // This guarantees surrogates are always available: round 1 seeds surrogatesPerRound
-  // teams at mc=2 (ahead of the expected mc=1), and Bresenham distributes surrogate
-  // slots to match exactly how many "ahead" teams exist at each point.
-  //
-  // Hard cap: matchCounts[t] < matchesPerTeam + 1 prevents any team from playing
-  // more than matchesPerTeam + 1 times (their regular quota plus one surrogate max).
+  // W_COUNT in teamScore already penalises higher match counts, so teams with
+  // fewer plays naturally score higher and get picked first — this keeps play
+  // counts balanced without any round machinery or Bresenham distribution.
+  // Surrogates only appear when structurally unavoidable (surplus slots).
   const remainingMatches = totalMatches - matchesPerRound;
   for (let i = 0; i < remainingMatches; i++) {
     const now = matches.length;
 
-    // Bresenham: how many surrogate slots this specific match should have
-    const surSlots = Math.floor(totalSurSlots * (now + 1) / totalMatches)
-                   - Math.floor(totalSurSlots * now       / totalMatches);
-    const regSlots = 6 - surSlots;
+    // Candidates under quota — sorted by score (P4/P5/P7 drives equity)
+    const underQuota = teams
+      .filter(t => matchCounts[t] < matchesPerTeam)
+      .sort((a, b) => {
+        const d = teamScore(b, now) - teamScore(a, now);
+        return d !== 0 ? d : Math.random() - 0.5;
+      });
 
-    // Schedule-position split: "ahead" teams are surrogates
-    const expectedCount = Math.floor(now * 6 / numTeams);
-    const regulars   = teams.filter(t => matchCounts[t] <= expectedCount && matchCounts[t] < matchesPerTeam);
-    const surrogates = teams.filter(t => matchCounts[t] >  expectedCount && matchCounts[t] < matchesPerTeam + 1);
+    // Surrogate pool — teams at quota, sorted by fairness (least surrogated first)
+    const atQuota = teams
+      .filter(t => matchCounts[t] === matchesPerTeam && surrogateCount[t] < fairSurCap)
+      .sort((a, b) => surrogateScore(b, now) - surrogateScore(a, now));
 
-    // Sort regulars by individual score (P4/P5/P7)
-    const sortedReg = regulars.slice().sort((a, b) => {
-      const d = teamScore(b, now) - teamScore(a, now);
-      return d !== 0 ? d : Math.random() - 0.5;
-    });
+    // How many surrogates do we structurally need this match?
+    // Only draft surrogates if we can't fill 6 spots from under-quota teams.
+    const surNeeded = Math.max(0, 6 - underQuota.length);
+    const regSlots  = 6 - surNeeded;
 
-    // Sort surrogates by fairness score (P10), relaxing cap only if pool is too small
-    let surPool = surrogates.filter(t => surrogateCount[t] < fairSurCap)
-                            .sort((a, b) => surrogateScore(b, now) - surrogateScore(a, now));
-    if (surPool.length < surSlots)
-      surPool = surrogates.slice().sort((a, b) => surrogateScore(b, now) - surrogateScore(a, now));
-    surPool = surPool.slice(0, surSlots + 2);
-
-    const regPool = sortedReg.slice(0, Math.max(regSlots + 6, 12));
+    const regPool = underQuota.slice(0, Math.max(regSlots + 6, 12));
+    const surPool = atQuota.slice(0, surNeeded + 2);
 
     const cands = [];
     for (let attempt = 0; attempt < 60; attempt++) {
-      const six = [...shuffle(regPool.slice()).slice(0, regSlots),
-                   ...shuffle(surPool.slice()).slice(0, surSlots)];
+      const six = [
+        ...shuffle(regPool.slice()).slice(0, regSlots),
+        ...shuffle(surPool.slice()).slice(0, surNeeded),
+      ];
       if (six.length === 6 && new Set(six).size === 6) {
-        const {r, b} = assignAlliances(six);
-        if (r && b) cands.push({r, b, score: diversityScore(r, b) + six.reduce((a, t) => a + teamScore(t, now), 0) * 0.5});
+        const res = assignAlliances(six);
+        if (res) cands.push({
+          r: res.r, b: res.b,
+          score: diversityScore(res.r, res.b) + six.reduce((a, t) => a + teamScore(t, now), 0) * 0.5,
+        });
       }
     }
     cands.sort((a, b) => b.score - a.score);
@@ -2378,19 +2403,15 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     if (cands.length > 0) {
       chosenRed = cands[0].r; chosenBlue = cands[0].b;
     } else {
-      // Fallback: take best available teams regardless of reg/sur classification,
-      // but still respect the hard per-team quota cap
-      const eligible = teams.filter(t => matchCounts[t] < matchesPerTeam + 1)
-        .sort((a, b) => teamScore(b, now) - teamScore(a, now));
-      const padded = eligible.slice(0, 6);
-      const res = assignAlliances(padded);
-      chosenRed = res ? res.r : padded.slice(0, 3);
-      chosenBlue = res ? res.b : padded.slice(3, 6);
+      const eligible = [...underQuota.slice(0, regSlots), ...atQuota.slice(0, surNeeded)];
+      const res = assignAlliances(eligible.slice(0, 6));
+      chosenRed = res ? res.r : eligible.slice(0, 3);
+      chosenBlue = res ? res.b : eligible.slice(3, 6);
     }
 
-    // Mark as surrogate: any team that was "ahead" of schedule when picked
-    const redSurrogate  = chosenRed.map(t  => matchCounts[t] > expectedCount);
-    const blueSurrogate = chosenBlue.map(t => matchCounts[t] > expectedCount);
+    // A team is a surrogate only if it was at or over quota when selected
+    const redSurrogate  = chosenRed.map(t  => matchCounts[t] >= matchesPerTeam);
+    const blueSurrogate = chosenBlue.map(t => matchCounts[t] >= matchesPerTeam);
     matches.push({red: chosenRed, blue: chosenBlue, redSurrogate, blueSurrogate});
     commitMatch(chosenRed, chosenBlue, now);
   }
