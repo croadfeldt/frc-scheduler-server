@@ -1500,8 +1500,14 @@ async function generateSchedule() {
 
   // If no event selected, fall back to client-side scheduling
   if (!_currentEventId) {
-    runClientSide(parseInt(document.getElementById('numTeams').value),
-      matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress);
+    const numTeams = parseInt(document.getElementById('numTeams').value);
+    if (!numTeams || numTeams < 6) {
+      showApiStatus('Set number of teams (minimum 6) or select an event', true);
+      btn.disabled = false;
+      document.getElementById('progressWrap').style.display = 'none';
+      return;
+    }
+    runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress);
     return;
   }
 
@@ -1570,7 +1576,7 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
   const numWorkers = Math.min(iterations, maxWorkers);
 
   let bestMatches = null, bestRoundBoundaries = null, bestSurrogateCount = null;
-  let bestScore = -Infinity, bestIteration = 0;
+  let bestScore = -1e18, bestIteration = 0;
   let totalDone = 0, workersFinished = 0;
 
   function _updateProgress() {
@@ -1606,7 +1612,8 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
         _updateProgress();
       } else if (msg.type === 'result') {
         const delta = workerIters - workerDone; totalDone += delta;
-        if (msg.bestScore > bestScore) {
+        console.log('Worker', w, 'result: score=', msg.bestScore, 'matches=', msg.bestMatches ? msg.bestMatches.length : null);
+        if (msg.bestScore !== null && msg.bestScore > bestScore) {
           bestScore = msg.bestScore; bestMatches = msg.bestMatches;
           bestRoundBoundaries = new Map(msg.bestRoundBoundaries);
           bestSurrogateCount = msg.bestSurrogateCount;
@@ -2447,7 +2454,7 @@ function scoreSchedule(matches, numTeams) {
 self.onmessage = function(e) {
   const { numTeams, matchesPerTeam, cooldown, iterationsToRun, workerId } = e.data;
   let bestMatches = null, bestRoundBoundaries = null, bestSurrogateCount = null;
-  let bestScore = -Infinity, bestIter = 0;
+  let bestScore = -1e18, bestIter = 0;  // avoid -Infinity which JSON serializes to null
   let lastReported = 0;
 
   for (let i = 0; i < iterationsToRun; i++) {
