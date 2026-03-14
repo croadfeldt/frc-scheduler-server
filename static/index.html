@@ -1600,12 +1600,15 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
     return;
   }
 
+  const allWorkers = [];
   for (let w = 0; w < numWorkers; w++) {
     const workerIters = Math.floor(iterations / numWorkers) + (w < iterations % numWorkers ? 1 : 0);
     const worker = new Worker(workerUrl);
+    allWorkers.push(worker);
     let workerDone = 0;
     worker.postMessage({ numTeams, matchesPerTeam, cooldown, iterationsToRun: workerIters, workerId: w });
     worker.onmessage = function(e) {
+      if (workersFailed) return;  // already falling back — ignore
       const msg = e.data;
       if (msg.type === 'progress') {
         const delta = msg.done - workerDone; workerDone = msg.done; totalDone += delta;
@@ -1621,7 +1624,7 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
           bestIteration = w * Math.floor(iterations / numWorkers) + msg.bestIter;
         }
         worker.terminate(); workersFinished++; _updateProgress();
-        if (workersFinished === numWorkers && !workersFailed) {
+        if (workersFinished === numWorkers) {
           if (workerUrl && workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
           finishGeneration(bestMatches, bestRoundBoundaries, bestSurrogateCount, bestIteration, iterations);
           btn.disabled = false;
@@ -1630,18 +1633,20 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
       }
     };
     worker.onerror = function(err) {
-      if (!workersFailed) {
-        workersFailed = true;
-        if (workerUrl && workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
-        totalDone = 0; bestScore = -1e18; bestMatches = null;
-        runSingleThreaded(numTeams, matchesPerTeam, cooldown, iterations, startTime,
-          formatETA, _updateProgress,
-          function(bm, brb, bsc, bi) {
-            finishGeneration(bm, brb, bsc, bi, iterations);
-            btn.disabled = false;
-            document.getElementById('progressWrap').style.display = 'none';
-          });
-      }
+      if (workersFailed) return;
+      workersFailed = true;
+      console.warn('Worker', w, 'error — terminating all workers, falling back to single-threaded:', err.message || '(load error)');
+      // Terminate every worker immediately to stop the race
+      allWorkers.forEach(function(wk) { try { wk.terminate(); } catch(e) {} });
+      if (workerUrl && workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
+      totalDone = 0; bestScore = -1e18; bestMatches = null;
+      runSingleThreaded(numTeams, matchesPerTeam, cooldown, iterations, startTime,
+        formatETA, _updateProgress,
+        function(bm, brb, bsc, bi) {
+          finishGeneration(bm, brb, bsc, bi, iterations);
+          btn.disabled = false;
+          document.getElementById('progressWrap').style.display = 'none';
+        });
     };
   }
 }
