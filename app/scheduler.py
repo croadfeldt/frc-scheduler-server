@@ -348,3 +348,124 @@ def run_iterations_worker(args: tuple) -> dict:
             for m in best.matches
         ],
     }
+
+
+# ── Stage 2: Team Assignment ──────────────────────────────────────────────────
+
+def assign_teams(
+    abstract_matches: list[dict],
+    num_teams: int,
+    team_numbers: list[int],
+    ideal_gap: int = 3,
+    n_iterations: int = 100,
+) -> dict:
+    """
+    Stage 2: Given an abstract slot-based schedule, find the best mapping of
+    real team numbers onto slot indices 1..N.
+
+    The abstract schedule defines WHEN each slot plays and on which alliance.
+    This function finds the optimal permutation of team numbers → slots such
+    that the placement criteria (P5-P10) are best satisfied.
+
+    Strategy: run n_iterations random shuffles of team_numbers, evaluate each
+    permutation's score against the placement criteria, return the best.
+
+    args:
+      abstract_matches — list of {red:[s1,s2,s3], blue:[s4,s5,s6],
+                                   red_surrogate:[...], blue_surrogate:[...]}
+      num_teams        — N (must equal len(team_numbers))
+      team_numbers     — list of real team numbers, length N
+      ideal_gap        — cooldown parameter
+      n_iterations     — how many random assignments to try
+    """
+    if len(team_numbers) != num_teams:
+        raise ValueError(f"team_numbers length {len(team_numbers)} != num_teams {num_teams}")
+
+    ideal_gap = max(1, ideal_gap)
+
+    def score_assignment(slot_map: dict[int, int]) -> float:
+        """Score a slot→team mapping against P5-P10 criteria."""
+        b2b = 0
+        surrogates = 0
+        repeat_opp = 0
+        repeat_part = 0
+        red_counts  = {}
+        blue_counts = {}
+        opp  = {}
+        par  = {}
+
+        def get_team(slot: int) -> int:
+            return slot_map[slot]
+
+        prev_teams: set[int] = set()
+        for i, m in enumerate(abstract_matches):
+            red_teams  = [get_team(s) for s in m['red']]
+            blue_teams = [get_team(s) for s in m['blue']]
+            all_teams  = red_teams + blue_teams
+
+            if i > 0 and any(t in prev_teams for t in all_teams):
+                b2b += 1
+            prev_teams = set(all_teams)
+
+            sur = sum(m['red_surrogate']) + sum(m['blue_surrogate'])
+            surrogates += sur
+
+            for t in red_teams:
+                red_counts[t] = red_counts.get(t, 0) + 1
+            for t in blue_teams:
+                blue_counts[t] = blue_counts.get(t, 0) + 1
+
+            for r in red_teams:
+                for b in blue_teams:
+                    key = (min(r,b), max(r,b))
+                    if opp.get(key, 0) > 0:
+                        repeat_opp += 1
+                    opp[key] = opp.get(key, 0) + 1
+
+            for lst in (red_teams, blue_teams):
+                for a in range(len(lst)):
+                    for b in range(a+1, len(lst)):
+                        key = (min(lst[a],lst[b]), max(lst[a],lst[b]))
+                        if par.get(key, 0) > 0:
+                            repeat_part += 1
+                        par[key] = par.get(key, 0) + 1
+
+        all_t = set(red_counts) | set(blue_counts)
+        max_imbalance = max(
+            abs(red_counts.get(t, 0) - blue_counts.get(t, 0))
+            for t in all_t
+        ) if all_t else 0
+
+        return -(b2b * 1000 + max_imbalance * 500 + surrogates * 200 +
+                 repeat_opp * 15 + repeat_part * 12)
+
+    best_score = -float('inf')
+    best_slot_map: dict[int, int] = {}
+
+    slots = list(range(1, num_teams + 1))
+
+    for _ in range(n_iterations):
+        shuffled = team_numbers[:]
+        random.shuffle(shuffled)
+        slot_map = {slot: team for slot, team in zip(slots, shuffled)}
+        score = score_assignment(slot_map)
+        if score > best_score:
+            best_score = score
+            best_slot_map = slot_map
+
+    return {
+        'slot_map': {str(k): v for k, v in best_slot_map.items()},
+        'score':    best_score,
+    }
+
+
+def run_assignment_worker(args: tuple) -> dict:
+    """
+    Worker for Stage 2 ProcessPoolExecutor.
+    Receives (abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, worker_id).
+    Returns best slot_map and score.
+    """
+    abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, worker_id = args
+    result = assign_teams(abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations)
+    result['worker_id'] = worker_id
+    return result

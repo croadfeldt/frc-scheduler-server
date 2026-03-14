@@ -479,8 +479,12 @@
   <div class="event-bar">
     <span class="event-bar-label">Event</span>
     <div style="display:flex;align-items:center;gap:0.4rem;flex:1;min-width:0;">
+      <input type="number" id="eventYear" placeholder="Year"
+        style="width:68px;flex-shrink:0;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
+               padding:0.4rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.88rem;"
+        onkeydown="if(event.key==='Enter')loadEventByCode()" min="2000" max="2099">
       <input type="text" id="eventCodeInput" placeholder="Event code (e.g. mnwi) or name…"
-        style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
+        style="flex:1;min-width:100px;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
                padding:0.4rem 0.7rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.88rem;"
         onkeydown="if(event.key==='Enter')loadEventByCode()"
         oninput="onEventCodeInput()" autocomplete="off" spellcheck="false">
@@ -593,14 +597,15 @@
             <select id="tzSelect" style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.5rem 0.75rem;font-family:'Barlow',sans-serif;font-size:0.9rem;border-radius:4px;width:100%;"></select>
           </div>
         </div>
-        <div class="field-row single" style="margin-top:0.5rem;">
-          <div class="field">
-            <label>Iterations (best of N attempts)</label>
-            <input type="number" id="iterations" value="1000" min="1">
-          </div>
+        <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;">
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
+            <input type="checkbox" id="autoPopulate" checked style="accent-color:var(--accent);width:14px;height:14px;">
+            Auto-generate on parameter change
+          </label>
+          <span style="font-size:0.68rem;color:var(--text-muted);">Regenerates Stage 1 automatically when any parameter changes</span>
         </div>
-        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:-0.25rem;margin-bottom:0.5rem;">
-          Each iteration shuffles team order and picks the schedule with the best composite score across all priorities. More iterations = better quality, longer wait.
+        <div id="paramChangedWarning" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.75rem;color:var(--amber);">
+          &#9888; Parameters changed — the current schedule structure is stale. Regenerate Stage 1 before assigning teams.
         </div>
 
         <div class="section-label">Cycle Time Changes</div>
@@ -618,7 +623,34 @@
           <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill"></div></div>
           <div class="progress-label" id="progressLabel">Running iteration 0 / 0&hellip;</div>
         </div>
-        <button class="btn-generate" id="btnGenerate" onclick="generateSchedule()">&#9889; Generate Schedule</button>
+        <button class="btn-generate" id="btnGenerate" onclick="generateSchedule()">&#9889; Stage 1: Generate Structure</button>
+
+        <!-- Stage 2: shown after Stage 1 completes -->
+        <div id="stage2Panel" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+          <div class="section-label" style="margin-top:0;">Stage 2: Assign Teams</div>
+          <!-- Load from DB option -->
+          <div id="loadFromDbBanner" style="display:none;background:rgba(122,164,240,0.1);border:1px solid var(--accent);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.6rem;font-size:0.75rem;">
+            <div style="color:var(--accent);font-weight:600;margin-bottom:0.25rem;">&#128190; Saved schedule found</div>
+            <div id="loadFromDbInfo" style="color:var(--text-muted);margin-bottom:0.4rem;"></div>
+            <button class="btn-sm btn-accent" onclick="loadSavedAssignment()" style="font-size:0.72rem;">Load Saved Schedule</button>
+            <button class="btn-sm" onclick="document.getElementById('loadFromDbBanner').style.display='none'" style="font-size:0.72rem;margin-left:0.3rem;">Dismiss</button>
+          </div>
+          <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.6rem;">
+            Abstract schedule ready. Select an event with a matching team count to assign real team numbers.
+          </div>
+          <div id="stage2Status" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
+          <div class="field-row single" style="margin-bottom:0.5rem;">
+            <div class="field">
+              <label>Assignment Iterations</label>
+              <input type="number" id="assignIterations" value="500" min="1">
+            </div>
+          </div>
+          <div class="progress-wrap" id="progressWrap2" style="display:none;">
+            <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill2"></div></div>
+            <div class="progress-label" id="progressLabel2">Assigning teams&hellip;</div>
+          </div>
+          <button class="btn-generate" id="btnAssign" onclick="assignTeams()" style="background:var(--accent3);margin-top:0.5rem;" disabled>&#9654; Assign Teams to Schedule</button>
+        </div>
       </div>
     </div>
 
@@ -654,7 +686,10 @@ const API = window.location.origin;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let _currentEventId = null;
-let _currentScheduleId = null;
+let _currentAbstractScheduleId = null;   // Stage 1 result
+let _currentAssignedScheduleId = null;   // Stage 2 result (assigned)
+let _abstractParams = null;              // params snapshot when Stage 1 last ran
+let _autoPopulateTimeout = null;         // debounce timer
 
 function timeToMin(t) {
   const [h, m] = t.split(':').map(Number);
@@ -762,7 +797,23 @@ function getTimezoneAbbr() {
 
 buildTimezoneSelect();
 document.getElementById('tbaYear').value = new Date().getFullYear();
+document.getElementById('eventYear').value = new Date().getFullYear();
 loadEvents();
+
+['numTeams','matchesPerTeam','cooldown'].forEach(function(id) {
+  document.getElementById(id).addEventListener('input', onParamChanged);
+});
+
+function onParamChanged() {
+  if (_abstractParams !== null) {
+    document.getElementById('paramChangedWarning').style.display = 'block';
+    document.getElementById('btnAssign').disabled = true;
+  }
+  if (document.getElementById('autoPopulate').checked) {
+    clearTimeout(_autoPopulateTimeout);
+    _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 800);
+  }
+}
 // Allow ?event=mnwi in the URL to auto-load an event
 (function() {
   const p = new URLSearchParams(window.location.search).get('event');
@@ -1216,9 +1267,8 @@ async function loadEventByCode() {
   const raw   = document.getElementById('eventCodeInput').value.trim();
   if (!raw) return;
 
-  // Accept bare codes like "mnwi" or full keys like "2025mnwi"
-  const year  = new Date().getFullYear();
-  // If it already starts with a 4-digit year, use as-is; otherwise prepend current year
+  // Use the year field (defaults to current year if empty)
+  const year  = parseInt(document.getElementById('eventYear').value) || new Date().getFullYear();
   const code  = /^\d{4}/.test(raw) ? raw.toLowerCase() : year + raw.toLowerCase();
 
   const input = document.getElementById('eventCodeInput');
@@ -1262,6 +1312,7 @@ function onEventCodeInput() {
 // Set the active event in UI state
 async function activateEvent(ev) {
   _currentEventId = ev.id;
+  document.getElementById('eventYear').value = ev.year;
   // Sync dropdown selection
   const sel = document.getElementById('eventSelect');
   if (![...sel.options].some(o => { if (o.value == ev.id) { o.selected = true; return true; } return false; })) {
@@ -1402,7 +1453,7 @@ async function removeTeam(teamNumber) {
 async function loadSavedSchedules() {
   if (!_currentEventId) return;
   try {
-    const schedules = await apiFetch('/api/events/' + _currentEventId + '/schedules');
+    const schedules = await apiFetch('/api/events/' + _currentEventId + '/assigned-schedules');
     const list = document.getElementById('savedScheduleList');
     list.innerHTML = '';
     if (!schedules.length) {
@@ -1415,8 +1466,8 @@ async function loadSavedSchedules() {
       const dt = new Date(s.created_at).toLocaleString();
       row.innerHTML =
         '<div style="flex:1">' +
-          '<div class="saved-sched-name">' + s.name + (s.is_active ? ' <span style="color:var(--accent3);font-size:0.65rem;">● ACTIVE</span>' : '') + '</div>' +
-          '<div class="saved-sched-meta">' + s.num_teams + ' teams · ' + s.matches_per_team + ' mpt · score ' + s.score.toFixed(0) + ' · ' + dt + '</div>' +
+          '<div class="saved-sched-name">' + s.name + (s.is_active ? ' <span style="color:var(--accent3);font-size:0.65rem;">\u25cf ACTIVE</span>' : '') + '</div>' +
+          '<div class="saved-sched-meta">Abstract #' + s.abstract_schedule_id + ' \u00b7 ' + dt + '</div>' +
         '</div>' +
         '<button class="btn-sm" onclick="loadSchedule(' + s.id + ')" style="margin-left:0.4rem;">Load</button>' +
         (!s.is_active ? '<button class="btn-sm" onclick="activateSchedule(' + s.id + ')" style="margin-left:0.3rem;">Set Active</button>' : '') +
@@ -1427,27 +1478,13 @@ async function loadSavedSchedules() {
 }
 
 async function loadSchedule(scheduleId) {
-  try {
-    const sched = await apiFetch('/api/schedules/' + scheduleId);
-    _currentScheduleId = scheduleId;
-    // Normalise API response to match finishGeneration signature
-    const matches = sched.matches.map(m => ({
-      red:           m.red,
-      blue:          m.blue,
-      redSurrogate:  m.red_surrogate,
-      blueSurrogate: m.blue_surrogate,
-    }));
-    const roundBoundaries = new Map(Object.entries(sched.round_boundaries).map(([k, v]) => [parseInt(k), v]));
-    const surrogateCount  = sched.surrogate_count;
-    finishGeneration(matches, roundBoundaries, surrogateCount, sched.best_iteration, sched.iterations_run);
-    closeModal('modalSchedules');
-    showApiStatus('Schedule loaded: ' + sched.name);
-  } catch(e) { showApiStatus(e.message, true); }
+  closeModal('modalSchedules');
+  await loadAssignedSchedule(scheduleId, null);
 }
 
 async function activateSchedule(scheduleId) {
   try {
-    await apiFetch('/api/schedules/' + scheduleId + '/activate', { method: 'POST' });
+    await apiFetch('/api/assigned-schedules/' + scheduleId + '/activate', { method: 'POST' });
     await loadSavedSchedules();
   } catch(e) { showApiStatus(e.message, true); }
 }
@@ -1455,21 +1492,27 @@ async function activateSchedule(scheduleId) {
 async function deleteSchedule(scheduleId) {
   if (!confirm('Delete this schedule?')) return;
   try {
-    await apiFetch('/api/schedules/' + scheduleId, { method: 'DELETE' });
-    if (_currentScheduleId === scheduleId) _currentScheduleId = null;
+    await apiFetch('/api/assigned-schedules/' + scheduleId, { method: 'DELETE' });
+    if (_currentAssignedScheduleId === scheduleId) _currentAssignedScheduleId = null;
     await loadSavedSchedules();
   } catch(e) { showApiStatus(e.message, true); }
 }
 
-// ── Generate schedule — server-side with SSE progress ─────────────────────────
+// ── Stage 1: Generate abstract schedule (slot structure, no team numbers) ─────
 async function generateSchedule() {
+  const numTeams       = parseInt(document.getElementById('numTeams').value) || 0;
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value);
   const cooldown       = parseInt(document.getElementById('cooldown').value) || 3;
-  const iterations     = Math.max(1, parseInt(document.getElementById('iterations').value) || 1);
+  const iterations     = 1; // Stage 1 is deterministic — no iterations needed
+
+  if (numTeams < 6) { showApiStatus('Enter at least 6 teams', true); return; }
 
   const btn = document.getElementById('btnGenerate');
   btn.disabled = true;
   document.getElementById('progressWrap').style.display = 'block';
+  document.getElementById('stage2Panel').style.display = 'none';
+  document.getElementById('btnAssign').disabled = true;
+  document.getElementById('paramChangedWarning').style.display = 'none';
 
   const startTime = performance.now();
 
@@ -1484,65 +1527,214 @@ async function generateSchedule() {
   function updateProgress(done, total, best, bestIter) {
     const pct = Math.round(done / total * 100);
     document.getElementById('progressFill').style.width = pct + '%';
-    const elapsed  = performance.now() - startTime;
+    const elapsed = performance.now() - startTime;
     const eta = done > 1 ? formatETA((elapsed / done) * (total - done)) : '';
-    let scoreStr = '';
-    if (best !== undefined && best > -1e17) {
-      // Show component breakdown: penalties as counts
-      // best is -(b2b*1000 + imbal*500 + sur*200 + ...) — extract rough b2b count
-      scoreStr = ' · score ' + best.toFixed(0);
-      if (bestIter !== undefined) scoreStr += ' (iter ' + bestIter + ')';
-    }
+    const scoreStr = (best !== undefined && best > -1e17)
+      ? ' \u00b7 score ' + best.toFixed(0) + (bestIter !== undefined ? ' (iter ' + bestIter + ')' : '')
+      : '';
     document.getElementById('progressLabel').textContent =
-      done + ' / ' + total + ' iterations' +
-      (eta ? ' · ' + eta : '') +
-      scoreStr + '…';
+      done + ' / ' + total + ' iterations' + (eta ? ' \u00b7 ' + eta : '') + scoreStr + '\u2026';
   }
 
-  // Collect day/timing config to store with the schedule
-  const dayConfig = {
-    cycleTime:    parseInt(document.getElementById('cycleTime').value),
-    numDays:      parseInt(document.getElementById('numDays').value),
-    cycleChanges: getCycleTimeChanges(),
-    days: Array.from(document.querySelectorAll('.day-row')).map(row => ({
-      start: row.querySelector('.day-start').value,
-      end:   row.querySelector('.day-end').value,
-      breaks: Array.from(row.querySelectorAll('.break-row')).map(br => ({
-        name:  br.querySelector('.break-name').value || 'Break',
-        start: br.querySelector('.break-start').value,
-        end:   br.querySelector('.break-end').value,
-      })).filter(b => b.start && b.end),
-    })),
-  };
-
-  const numTeams = parseInt(document.getElementById('numTeams').value) || 0;
-  if (numTeams < 6) {
-    showApiStatus('Enter at least 6 teams', true);
-    btn.disabled = false;
-    document.getElementById('progressWrap').style.display = 'none';
-    return;
-  }
-
-  // No event selected — run entirely client-side and render directly
-  if (!_currentEventId) {
-    runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress);
-    return;
-  }
-
-  const body = JSON.stringify({
-    event_id: parseInt(_currentEventId),
-    matches_per_team: matchesPerTeam,
-    cooldown,
-    iterations,
-    schedule_name: 'Schedule ' + new Date().toLocaleTimeString(),
-    day_config: dayConfig,
-  });
+  const dayConfig = collectDayConfig();
 
   try {
-    const res = await fetch(API + '/api/events/' + _currentEventId + '/generate', {
+    const res = await fetch(API + '/api/generate-abstract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body,
+      body: JSON.stringify({
+        num_teams: numTeams,
+        matches_per_team: matchesPerTeam,
+        cooldown,
+        iterations,
+        name: 'Abstract ' + new Date().toLocaleTimeString(),
+        event_id: _currentEventId ? parseInt(_currentEventId) : null,
+      }),
+    });
+
+    if (!res.ok) throw new Error(await res.text());
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', bestScore = -1e18, bestIter = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const msg = JSON.parse(line.slice(6));
+          if (msg.type === 'progress') {
+            updateProgress(msg.done, msg.total, bestScore > -1e17 ? bestScore : undefined, bestIter);
+          } else if (msg.type === 'done') {
+            _currentAbstractScheduleId = msg.abstract_schedule_id;
+            bestScore = msg.score;
+            _abstractParams = { numTeams, matchesPerTeam, cooldown };
+            const sched = await apiFetch('/api/abstract-schedules/' + msg.abstract_schedule_id);
+            displayAbstractSchedule(sched, dayConfig);
+            showStage2Panel(numTeams);
+            await checkForSavedAssignment(msg.abstract_schedule_id);
+            btn.disabled = false;
+            document.getElementById('progressWrap').style.display = 'none';
+            showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
+          } else if (msg.type === 'error') {
+            throw new Error(msg.message);
+          }
+        } catch(e2) { console.warn('SSE parse error:', e2, line); }
+      }
+    }
+    btn.disabled = false;
+    document.getElementById('progressWrap').style.display = 'none';
+  } catch(err) {
+    console.error('Server Stage 1 error:', err.message);
+    showApiStatus('Server error: ' + err.message + ' \u2014 falling back to client-side', true);
+    runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA,
+      function(done, total, best, bi) { updateProgress(done, total, best, bi); },
+      function(matches, roundBoundaries, surrogateCount, bestIteration) {
+        _currentAbstractScheduleId = null;
+        _abstractParams = { numTeams, matchesPerTeam, cooldown };
+        const pseudoSched = {
+          num_teams: numTeams, matches_per_team: matchesPerTeam,
+          matches: matches.map(function(m) { return {
+            red: m.red, blue: m.blue,
+            red_surrogate: m.redSurrogate, blue_surrogate: m.blueSurrogate,
+          }; }),
+          surrogate_count: surrogateCount,
+          round_boundaries: Object.fromEntries(roundBoundaries),
+          iterations_run: iterations,
+        };
+        displayAbstractSchedule(pseudoSched, dayConfig);
+        showStage2Panel(numTeams);
+        btn.disabled = false;
+        document.getElementById('progressWrap').style.display = 'none';
+      }
+    );
+  }
+}
+
+// Collect day/timing config from UI
+function collectDayConfig() {
+  return {
+    cycleTime: parseInt(document.getElementById('cycleTime').value),
+    numDays: parseInt(document.getElementById('numDays').value),
+    cycleChanges: getCycleTimeChanges(),
+    days: Array.from(document.querySelectorAll('.day-row')).map(function(row) {
+      return {
+        start: row.querySelector('.day-start').value,
+        end:   row.querySelector('.day-end').value,
+        breaks: Array.from(row.querySelectorAll('.break-row')).map(function(br) {
+          return {
+            name:  br.querySelector('.break-name').value || 'Break',
+            start: br.querySelector('.break-start').value,
+            end:   br.querySelector('.break-end').value,
+          };
+        }).filter(function(b) { return b.start && b.end; }),
+      };
+    }),
+  };
+}
+
+// Display abstract schedule — slot indices shown as team placeholders
+function displayAbstractSchedule(sched, dayConfig) {
+  const matches = sched.matches.map(function(m) {
+    return {
+      red:           m.red,
+      blue:          m.blue,
+      redSurrogate:  m.red_surrogate || [false,false,false],
+      blueSurrogate: m.blue_surrogate || [false,false,false],
+    };
+  });
+  const roundBoundaries = new Map(
+    Object.entries(sched.round_boundaries || {}).map(function(e) { return [parseInt(e[0]), e[1]]; })
+  );
+  window._frcAbstractMode = true;
+  finishGeneration(matches, roundBoundaries, sched.surrogate_count, 0, sched.iterations_run || 0, dayConfig);
+  window._frcAbstractMode = false;
+}
+
+// Check if a saved assignment exists for this abstract schedule + event
+async function checkForSavedAssignment(abstractScheduleId) {
+  if (!_currentEventId) return;
+  try {
+    const schedules = await apiFetch('/api/events/' + _currentEventId + '/assigned-schedules');
+    const match = schedules.find(function(s) { return s.abstract_schedule_id === abstractScheduleId; });
+    if (match) {
+      const banner = document.getElementById('loadFromDbBanner');
+      document.getElementById('loadFromDbInfo').textContent =
+        match.name + ' — saved ' + new Date(match.created_at).toLocaleString();
+      banner.dataset.scheduleId = match.id;
+      banner.style.display = 'block';
+    }
+  } catch(e) { /* no saved schedule is fine */ }
+}
+
+async function loadSavedAssignment() {
+  const scheduleId = parseInt(document.getElementById('loadFromDbBanner').dataset.scheduleId);
+  if (!scheduleId) return;
+  await loadAssignedSchedule(scheduleId, collectDayConfig());
+  document.getElementById('loadFromDbBanner').style.display = 'none';
+  showApiStatus('Loaded saved schedule from database');
+}
+
+// Show Stage 2 panel after Stage 1 completes
+function showStage2Panel(numTeams) {
+  document.getElementById('stage2Panel').style.display = 'block';
+  const status  = document.getElementById('stage2Status');
+  const btnAssign = document.getElementById('btnAssign');
+  const rosterCount = parseInt(document.getElementById('numTeams').value);
+  if (_currentEventId && rosterCount === numTeams) {
+    status.textContent = '\u2713 Event loaded with ' + numTeams + ' teams \u2014 ready to assign';
+    status.style.color = 'var(--accent3)';
+    btnAssign.disabled = false;
+  } else if (_currentEventId) {
+    status.textContent = '\u26a0 Event has ' + rosterCount + ' teams but schedule needs ' + numTeams;
+    status.style.color = 'var(--amber)';
+    btnAssign.disabled = true;
+  } else {
+    status.textContent = 'Select an event with ' + numTeams + ' teams to assign real numbers';
+    status.style.color = 'var(--text-muted)';
+    btnAssign.disabled = true;
+  }
+}
+
+// ── Stage 2: Assign real team numbers to abstract schedule ────────────────────
+async function assignTeams() {
+  if (!_currentEventId) { showApiStatus('Select an event first', true); return; }
+  if (!_currentAbstractScheduleId) {
+    showApiStatus('No saved abstract schedule \u2014 regenerate with server connected', true);
+    return;
+  }
+
+  const btn = document.getElementById('btnAssign');
+  btn.disabled = true;
+  document.getElementById('progressWrap2').style.display = 'block';
+
+  const iterations = Math.max(1, parseInt(document.getElementById('assignIterations').value) || 500);
+  const startTime  = performance.now();
+  const dayConfig  = collectDayConfig();
+
+  function formatETA(ms) {
+    if (ms < 1000) return 'almost done';
+    const s = Math.round(ms / 1000);
+    if (s < 60) return s + 's remaining';
+    const m = Math.floor(s / 60), rs = s % 60;
+    return m + 'm ' + String(rs).padStart(2,'0') + 's remaining';
+  }
+
+  try {
+    const res = await fetch(API + '/api/abstract-schedules/' + _currentAbstractScheduleId + '/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event_id: parseInt(_currentEventId),
+        abstract_schedule_id: _currentAbstractScheduleId,
+        iterations,
+        name: 'Schedule ' + new Date().toLocaleTimeString(),
+        day_config: dayConfig,
+      }),
     });
 
     if (!res.ok) throw new Error(await res.text());
@@ -1555,40 +1747,67 @@ async function generateSchedule() {
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
+      const lines = buf.split('\n'); buf = lines.pop();
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         try {
           const msg = JSON.parse(line.slice(6));
           if (msg.type === 'progress') {
-            updateProgress(msg.done, msg.total, undefined);
+            const pct = Math.round(msg.done / msg.total * 100);
+            document.getElementById('progressFill2').style.width = pct + '%';
+            const elapsed = performance.now() - startTime;
+            const eta = msg.done > 1 ? formatETA((elapsed/msg.done)*(msg.total-msg.done)) : '';
+            document.getElementById('progressLabel2').textContent =
+              msg.done + ' / ' + msg.total + ' assignments' + (eta ? ' \u00b7 ' + eta : '') + '\u2026';
           } else if (msg.type === 'done') {
-            updateProgress(msg.total || iterations, iterations, msg.score);
-            _currentScheduleId = msg.schedule_id;
+            _currentAssignedScheduleId = msg.assigned_schedule_id;
+            await loadAssignedSchedule(msg.assigned_schedule_id, dayConfig);
             await loadSavedSchedules();
-            await loadSchedule(msg.schedule_id);
             btn.disabled = false;
-            document.getElementById('progressWrap').style.display = 'none';
-            showApiStatus('Schedule generated and saved');
+            document.getElementById('progressWrap2').style.display = 'none';
+            showApiStatus('Stage 2 complete \u2014 teams assigned');
           } else if (msg.type === 'error') {
             throw new Error(msg.message);
           }
-        } catch(e2) { console.warn('SSE parse error:', e2, 'line:', line); }
+        } catch(e2) { console.warn('SSE parse error:', e2, line); }
       }
     }
-    // Stream closed without a done event — reset UI
     btn.disabled = false;
-    document.getElementById('progressWrap').style.display = 'none';
+    document.getElementById('progressWrap2').style.display = 'none';
   } catch(err) {
-    console.error('Server generate error:', err.message);
-    showApiStatus('Server error: ' + err.message + ' — falling back to client-side', true);
-    runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress);
+    showApiStatus('Assignment error: ' + err.message, true);
+    btn.disabled = false;
+    document.getElementById('progressWrap2').style.display = 'none';
   }
 }
 
+// Load and display an assigned schedule (Stage 2 result)
+async function loadAssignedSchedule(scheduleId, dayConfig) {
+  try {
+    const sched = await apiFetch('/api/assigned-schedules/' + scheduleId);
+    _currentAssignedScheduleId = scheduleId;
+    const matches = sched.matches.map(function(m) {
+      return {
+        red:           m.red,
+        blue:          m.blue,
+        redSurrogate:  m.red_surrogate,
+        blueSurrogate: m.blue_surrogate,
+      };
+    });
+    const roundBoundaries = new Map(
+      Object.entries(sched.round_boundaries || {}).map(function(e) { return [parseInt(e[0]), e[1]]; })
+    );
+    window._frcAbstractMode = false;
+    finishGeneration(matches, roundBoundaries, sched.surrogate_count,
+      0, 0, dayConfig || sched.day_config);
+    showApiStatus('Schedule loaded');
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
 // Client-side fallback (original worker-based scheduler)
-function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress) {
+function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress, onComplete) {
+  // onComplete(matches, roundBoundaries, surrogateCount, bestIteration) — called when done
+  // If not provided, falls back to calling finishGeneration directly
   const btn = document.getElementById('btnGenerate');
   const maxWorkers = navigator.hardwareConcurrency || 4;
   const numWorkers = Math.min(iterations, maxWorkers);
@@ -1610,11 +1829,15 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
     return null;
   }
   const workerUrl = makeWorkerUrl();
+  function _done(bm, brb, bsc, bi) {
+    if (onComplete) { onComplete(bm, brb, bsc, bi); }
+    else { finishGeneration(bm, brb, bsc, bi, iterations); }
+  }
 
   if (!workerUrl || typeof Worker === 'undefined') {
     runSingleThreaded(numTeams, matchesPerTeam, cooldown, iterations, startTime,
       formatETA, _updateProgress,
-      function(bm, brb, bsc, bi) { finishGeneration(bm, brb, bsc, bi, iterations); });
+      function(bm, brb, bsc, bi) { _done(bm, brb, bsc, bi); });
     return;
   }
 
@@ -1626,12 +1849,10 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
     let workerDone = 0;
     worker.postMessage({ numTeams, matchesPerTeam, cooldown, iterationsToRun: workerIters, workerId: w });
     worker.onmessage = function(e) {
-      if (workersFailed) return;  // already falling back — ignore
+      if (workersFailed) return;
       const msg = e.data;
       if (msg.type === 'progress') {
         const delta = msg.done - workerDone; workerDone = msg.done; totalDone += delta;
-        // Don't update bestScore from progress — we don't have bestMatches yet.
-        // Only update score+matches together in the result handler.
         _updateProgress();
       } else if (msg.type === 'result') {
         const delta = workerIters - workerDone; totalDone += delta;
@@ -1642,11 +1863,10 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
           bestIteration = w * Math.floor(iterations / numWorkers) + msg.bestIter;
         }
         worker.terminate(); workersFinished++;
-        // Pass bestIteration to show in progress label
         updateProgress(totalDone, iterations, bestScore > -1e17 ? bestScore : undefined, bestIteration);
         if (workersFinished === numWorkers) {
           if (workerUrl && workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
-          finishGeneration(bestMatches, bestRoundBoundaries, bestSurrogateCount, bestIteration, iterations);
+          _done(bestMatches, bestRoundBoundaries, bestSurrogateCount, bestIteration);
           btn.disabled = false;
           document.getElementById('progressWrap').style.display = 'none';
         }
@@ -1655,15 +1875,14 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
     worker.onerror = function(err) {
       if (workersFailed) return;
       workersFailed = true;
-      console.warn('Worker', w, 'error — terminating all workers, falling back to single-threaded:', err.message || '(load error)');
-      // Terminate every worker immediately to stop the race
+      console.warn('Worker', w, 'error — terminating all, falling back:', err.message || '(load error)');
       allWorkers.forEach(function(wk) { try { wk.terminate(); } catch(e) {} });
       if (workerUrl && workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
       totalDone = 0; bestScore = -1e18; bestMatches = null;
       runSingleThreaded(numTeams, matchesPerTeam, cooldown, iterations, startTime,
         formatETA, _updateProgress,
         function(bm, brb, bsc, bi) {
-          finishGeneration(bm, brb, bsc, bi, iterations);
+          _done(bm, brb, bsc, bi);
           btn.disabled = false;
           document.getElementById('progressWrap').style.display = 'none';
         });
@@ -1672,7 +1891,7 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
 }
 
 
-function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations) {
+function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride) {
   if (!matches || matches.length === 0) {
     console.error('finishGeneration called with empty matches');
     document.getElementById('btnGenerate').disabled = false;
@@ -1681,19 +1900,26 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
   }
   const numTeams = parseInt(document.getElementById('numTeams').value);
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value);
-  const defaultCycleTime = parseInt(document.getElementById('cycleTime').value);
-  const cycleChanges = getCycleTimeChanges();
   const tzAbbr = getTimezoneAbbr();
-  const days = Array.from(document.querySelectorAll('.day-row')).map(row => ({
-    start: timeToMin(row.querySelector('.day-start').value),
-    end: timeToMin(row.querySelector('.day-end').value),
-    breaks: Array.from(row.querySelectorAll('.break-row')).map(br => ({
-      name: br.querySelector('.break-name').value || 'Break',
-      start: timeToMin(br.querySelector('.break-start').value),
-      end: timeToMin(br.querySelector('.break-end').value),
-      done: false,
-    })).filter(b => b.end > b.start).sort((a,b) => a.start - b.start)
-  }));
+  // Use override day config if provided (e.g. from loaded schedule), else read from UI
+  const _dc = dayConfigOverride;
+  const defaultCycleTime = _dc ? _dc.cycleTime : parseInt(document.getElementById('cycleTime').value);
+  const cycleChanges = _dc ? (_dc.cycleChanges || []) : getCycleTimeChanges();
+  const days = (_dc && _dc.days ? _dc.days : Array.from(document.querySelectorAll('.day-row'))).map(row => {
+    const isObj = typeof row === 'object' && row.start && !row.querySelector;
+    return {
+      start: isObj ? timeToMin(row.start) : timeToMin(row.querySelector('.day-start').value),
+      end:   isObj ? timeToMin(row.end)   : timeToMin(row.querySelector('.day-end').value),
+      breaks: (isObj ? (row.breaks||[]) : Array.from(row.querySelectorAll('.break-row')).map(br => ({
+        name: br.querySelector('.break-name').value || 'Break',
+        start: br.querySelector('.break-start').value,
+        end:   br.querySelector('.break-end').value,
+      }))).map(b => ({
+        name: b.name || 'Break',
+        start: timeToMin(b.start), end: timeToMin(b.end), done: false,
+      })).filter(b => b.end > b.start).sort((a,b) => a.start - b.start),
+    };
+  });
 
   window._frcFinalDayOverflow = null;
   const totalMatches = matches.length;
@@ -1999,7 +2225,9 @@ function renderTeam(team, isSurrogate, isB2B, colorClass) {
   var surBadge = isSurrogate ? '<span class="surrogate-badge">S</span>' : '';
   var b2bBadge = isB2B ? '<span class="b2b-badge">B2B</span>' : '';
   var extraClass = (isSurrogate ? ' team-surrogate' : '') + (isB2B ? ' team-b2b' : '');
-  return '<span class="' + colorClass + extraClass + ' team-link" onclick="addFilter(&apos;team&apos;,' + team + ')">' + team + surBadge + b2bBadge + '</span>';
+  // In abstract mode show slot labels (S1, S2...) instead of real team numbers
+  var label = window._frcAbstractMode ? ('S' + team) : team;
+  return '<span class="' + colorClass + extraClass + ' team-link" onclick="addFilter(&apos;team&apos;,' + team + ')">' + label + surBadge + b2bBadge + '</span>';
 }
 
 function renderSchedule() {
