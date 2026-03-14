@@ -274,6 +274,82 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
                              red_surrogate=red_sur, blue_surrogate=blue_sur))
         commit_match(red, blue, now)
 
+    # ── Post-generation: move surrogate appearances out of the last match ────────
+    # Surrogates cluster at the end naturally. Swap them to earlier matches.
+    # For each surrogate in the last match, find a non-surrogate in the same match,
+    # locate an earlier match where the surrogate team appears (and the non-surrogate
+    # doesn't), and swap the two team positions between those matches.
+    if matches:
+        last_idx = len(matches) - 1
+        last = matches[last_idx]
+        last_red  = list(last.red);  last_rs = list(last.red_surrogate)
+        last_blue = list(last.blue); last_bs = list(last.blue_surrogate)
+
+        # Collect surrogate slots in last match
+        sur_slots = []
+        for i, t in enumerate(last_red):
+            if last_rs[i]: sur_slots.append(('red', i, t))
+        for i, t in enumerate(last_blue):
+            if last_bs[i]: sur_slots.append(('blue', i, t))
+
+        for alliance, pos, sur_team in sur_slots:
+            # Find a non-surrogate in last match to swap into the early match
+            swap_a, swap_p, swap_t = None, -1, -1
+            for i, t in enumerate(last_red):
+                if not last_rs[i] and t != sur_team:
+                    swap_a, swap_p, swap_t = 'red', i, t; break
+            if swap_t == -1:
+                for i, t in enumerate(last_blue):
+                    if not last_bs[i] and t != sur_team:
+                        swap_a, swap_p, swap_t = 'blue', i, t; break
+            if swap_t == -1: continue
+
+            # Find earlier match containing sur_team but NOT swap_t
+            early_idx, early_a, early_p = -1, None, -1
+            for m_idx in range(last_idx):
+                m = matches[m_idx]
+                all_t = list(m.red) + list(m.blue)
+                if swap_t in all_t: continue
+                if sur_team in m.red:
+                    early_idx, early_a, early_p = m_idx, 'red', list(m.red).index(sur_team); break
+                if sur_team in m.blue:
+                    early_idx, early_a, early_p = m_idx, 'blue', list(m.blue).index(sur_team); break
+            if early_idx == -1: continue
+
+            # Perform swap
+            em = matches[early_idx]
+            er = list(em.red);  ers = list(em.red_surrogate)
+            eb = list(em.blue); ebs = list(em.blue_surrogate)
+
+            # Early match: sur_team's slot → swap_t (non-surrogate)
+            if early_a == 'red':   er[early_p]  = swap_t; ers[early_p]  = False
+            else:                  eb[early_p]  = swap_t; ebs[early_p]  = False
+
+            # Last match: sur_team's surrogate slot → swap_t (now regular)
+            if alliance == 'red':  last_red[pos]  = swap_t; last_rs[pos]  = False
+            else:                  last_blue[pos] = swap_t; last_bs[pos]  = False
+
+            # Last match: swap_t's old slot → sur_team (regular, not surrogate)
+            if swap_a == 'red':    last_red[swap_p]  = sur_team; last_rs[swap_p]  = False
+            else:                  last_blue[swap_p] = sur_team; last_bs[swap_p]  = False
+
+            # Early match: sur_team is now the surrogate there
+            if early_a == 'red':   ers[early_p]  = True
+            else:                  ebs[early_p]  = True
+
+            matches[early_idx] = Match(
+                red=tuple(er), blue=tuple(eb),
+                red_surrogate=tuple(ers), blue_surrogate=tuple(ebs)
+            )
+            matches[last_idx] = Match(
+                red=tuple(last_red), blue=tuple(last_blue),
+                red_surrogate=tuple(last_rs), blue_surrogate=tuple(last_bs)
+            )
+            # Reload last match refs for next iteration
+            last = matches[last_idx]
+            last_red  = list(last.red);  last_rs = list(last.red_surrogate)
+            last_blue = list(last.blue); last_bs = list(last.blue_surrogate)
+
     return ScheduleResult(
         matches=matches,
         surrogate_count=sc,

@@ -1180,6 +1180,101 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     for (let i = 0; i < blue.length; i++) for (let j = i+1; j < blue.length; j++) { partners[blue[i]][blue[j]]++; partners[blue[j]][blue[i]]++; }
   }
 
+  // ── Post-generation: move all surrogate appearances out of the last match ──
+  // After greedy scheduling, surrogates tend to cluster at the end because that
+  // is when most teams have hit quota. Swap them to earlier matches.
+  //
+  // For each surrogate slot in the last match:
+  //   Find an earlier match M where a non-surrogate regular from the last match
+  //   also appears (so we can swap the two team slots between M and last match).
+  //   After the swap, the surrogate appearance is in M (not the last match).
+  const swapFinalIdx = matches.length - 1;
+  const last = matches[swapFinalIdx];
+
+  // Collect surrogate positions in the last match: [{alliance, pos, team}]
+  const lastSurrogates = [];
+  last.red.forEach((t, i)  => { if (last.redSurrogate[i])  lastSurrogates.push({ alliance: 'red',  pos: i, team: t }); });
+  last.blue.forEach((t, i) => { if (last.blueSurrogate[i]) lastSurrogates.push({ alliance: 'blue', pos: i, team: t }); });
+
+  for (const surSlot of lastSurrogates) {
+    const surTeam = surSlot.team;
+
+    // Find a non-surrogate team in the last match to swap with
+    let swapLastAlliance = null, swapLastPos = -1, swapLastTeam = -1;
+    for (let i = 0; i < last.red.length; i++) {
+      if (!last.redSurrogate[i] && last.red[i] !== surTeam) {
+        swapLastAlliance = 'red'; swapLastPos = i; swapLastTeam = last.red[i]; break;
+      }
+    }
+    if (swapLastAlliance === null) {
+      for (let i = 0; i < last.blue.length; i++) {
+        if (!last.blueSurrogate[i] && last.blue[i] !== surTeam) {
+          swapLastAlliance = 'blue'; swapLastPos = i; swapLastTeam = last.blue[i]; break;
+        }
+      }
+    }
+    if (swapLastTeam === -1) continue; // no non-surrogate available — skip
+
+    // Find an earlier match where surTeam appears (any position, any alliance)
+    // and where swapLastTeam does NOT appear (no duplicates in a match)
+    let earlyMatchIdx = -1, earlyAlliance = null, earlyPos = -1;
+    for (let m = 0; m < swapFinalIdx; m++) {
+      const em = matches[m];
+      const allTeams = [...em.red, ...em.blue];
+      if (allTeams.includes(swapLastTeam)) continue; // would duplicate swapLastTeam
+      const rIdx = em.red.indexOf(surTeam);
+      if (rIdx !== -1) { earlyMatchIdx = m; earlyAlliance = 'red'; earlyPos = rIdx; break; }
+      const bIdx = em.blue.indexOf(surTeam);
+      if (bIdx !== -1) { earlyMatchIdx = m; earlyAlliance = 'blue'; earlyPos = bIdx; break; }
+    }
+    if (earlyMatchIdx === -1) continue; // can't find a valid earlier match — skip
+
+    // Perform the swap
+    const em = matches[earlyMatchIdx];
+
+    // In the early match: replace surTeam with swapLastTeam
+    if (earlyAlliance === 'red') {
+      em.red[earlyPos] = swapLastTeam;
+      // swapLastTeam is a regular (under-quota) player — not a surrogate in early match
+      em.redSurrogate[earlyPos] = false;
+    } else {
+      em.blue[earlyPos] = swapLastTeam;
+      em.blueSurrogate[earlyPos] = false;
+    }
+
+    // In the last match: replace surTeam (surrogate) with swapLastTeam was occupying surSlot
+    // Actually we swap: surTeam moves out of last, swapLastTeam takes its place
+    // and swapLastTeam's original spot gets surTeam (non-surrogate now)
+    if (surSlot.alliance === 'red') {
+      last.red[surSlot.pos] = swapLastTeam;
+      last.redSurrogate[surSlot.pos] = false; // swapLastTeam is regular here now
+    } else {
+      last.blue[surSlot.pos] = swapLastTeam;
+      last.blueSurrogate[surSlot.pos] = false;
+    }
+
+    // swapLastTeam's original last-match slot now gets surTeam (as a non-surrogate —
+    // surTeam's quota play is the early match; here it's completing a regular slot
+    // because the swap means this IS their mth regular appearance)
+    // Actually: surTeam was a surrogate in last match. After swap, surTeam appears
+    // in early match (swapLastTeam's old slot) — this is now their regular appearance.
+    // surTeam is now a surrogate in the EARLY match (not the last one).
+    if (swapLastAlliance === 'red') {
+      last.red[swapLastPos] = surTeam;
+      last.redSurrogate[swapLastPos] = false; // surTeam is regular in last match now
+    } else {
+      last.blue[swapLastPos] = surTeam;
+      last.blueSurrogate[swapLastPos] = false;
+    }
+
+    // Mark surTeam as surrogate in the early match (their extra appearance is now there)
+    if (earlyAlliance === 'red') {
+      em.redSurrogate[earlyPos] = true;
+    } else {
+      em.blueSurrogate[earlyPos] = true;
+    }
+  }
+
   return { matches, surrogateCount, roundBoundaries };
 }
 
@@ -2003,7 +2098,6 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
   const totalMatches = matches.length;
   const scheduled = [];
   let matchIdx = 0;
-  let hadOverflow = false;
 
   for (let d = 0; d < days.length && matchIdx < totalMatches; d++) {
     const day = days[d];
@@ -2039,8 +2133,11 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
 
       // Check if match fits in the day
       if (matchEnd > day.end) {
-        if (d < days.length - 1) hadOverflow = true;
-        else window._frcFinalDayOverflow = { unscheduled: totalMatches - matchIdx, dayEnd: day.end };
+        // On intermediate days: matches roll to the next day silently (expected).
+        // Only warn if it's the last day — nowhere left to roll.
+        if (d === days.length - 1) {
+          window._frcFinalDayOverflow = { unscheduled: totalMatches - matchIdx, dayEnd: day.end };
+        }
         break;
       }
 
@@ -2104,13 +2201,6 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
 
   const output = document.getElementById('scheduleOutput');
   output.innerHTML = '';
-
-  if (hadOverflow) {
-    const w = document.createElement('div');
-    w.className = 'warning-box';
-    w.textContent = 'Some matches overflowed from earlier days due to time constraints.';
-    output.appendChild(w);
-  }
 
   if (window._frcFinalDayOverflow) {
     const ov = window._frcFinalDayOverflow;
@@ -2736,6 +2826,102 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     for (let i = 0; i < red.length;  i++) for (let j = i+1; j < red.length;  j++)  { partners[red[i]][red[j]]++;   partners[red[j]][red[i]]++;   }
     for (let i = 0; i < blue.length; i++) for (let j = i+1; j < blue.length; j++) { partners[blue[i]][blue[j]]++; partners[blue[j]][blue[i]]++; }
   }
+
+  // ── Post-generation: move all surrogate appearances out of the last match ──
+  // After greedy scheduling, surrogates tend to cluster at the end because that
+  // is when most teams have hit quota. Swap them to earlier matches.
+  //
+  // For each surrogate slot in the last match:
+  //   Find an earlier match M where a non-surrogate regular from the last match
+  //   also appears (so we can swap the two team slots between M and last match).
+  //   After the swap, the surrogate appearance is in M (not the last match).
+  const swapFinalIdx = matches.length - 1;
+  const last = matches[swapFinalIdx];
+
+  // Collect surrogate positions in the last match: [{alliance, pos, team}]
+  const lastSurrogates = [];
+  last.red.forEach((t, i)  => { if (last.redSurrogate[i])  lastSurrogates.push({ alliance: 'red',  pos: i, team: t }); });
+  last.blue.forEach((t, i) => { if (last.blueSurrogate[i]) lastSurrogates.push({ alliance: 'blue', pos: i, team: t }); });
+
+  for (const surSlot of lastSurrogates) {
+    const surTeam = surSlot.team;
+
+    // Find a non-surrogate team in the last match to swap with
+    let swapLastAlliance = null, swapLastPos = -1, swapLastTeam = -1;
+    for (let i = 0; i < last.red.length; i++) {
+      if (!last.redSurrogate[i] && last.red[i] !== surTeam) {
+        swapLastAlliance = 'red'; swapLastPos = i; swapLastTeam = last.red[i]; break;
+      }
+    }
+    if (swapLastAlliance === null) {
+      for (let i = 0; i < last.blue.length; i++) {
+        if (!last.blueSurrogate[i] && last.blue[i] !== surTeam) {
+          swapLastAlliance = 'blue'; swapLastPos = i; swapLastTeam = last.blue[i]; break;
+        }
+      }
+    }
+    if (swapLastTeam === -1) continue; // no non-surrogate available — skip
+
+    // Find an earlier match where surTeam appears (any position, any alliance)
+    // and where swapLastTeam does NOT appear (no duplicates in a match)
+    let earlyMatchIdx = -1, earlyAlliance = null, earlyPos = -1;
+    for (let m = 0; m < swapFinalIdx; m++) {
+      const em = matches[m];
+      const allTeams = [...em.red, ...em.blue];
+      if (allTeams.includes(swapLastTeam)) continue; // would duplicate swapLastTeam
+      const rIdx = em.red.indexOf(surTeam);
+      if (rIdx !== -1) { earlyMatchIdx = m; earlyAlliance = 'red'; earlyPos = rIdx; break; }
+      const bIdx = em.blue.indexOf(surTeam);
+      if (bIdx !== -1) { earlyMatchIdx = m; earlyAlliance = 'blue'; earlyPos = bIdx; break; }
+    }
+    if (earlyMatchIdx === -1) continue; // can't find a valid earlier match — skip
+
+    // Perform the swap
+    const em = matches[earlyMatchIdx];
+
+    // In the early match: replace surTeam with swapLastTeam
+    if (earlyAlliance === 'red') {
+      em.red[earlyPos] = swapLastTeam;
+      // swapLastTeam is a regular (under-quota) player — not a surrogate in early match
+      em.redSurrogate[earlyPos] = false;
+    } else {
+      em.blue[earlyPos] = swapLastTeam;
+      em.blueSurrogate[earlyPos] = false;
+    }
+
+    // In the last match: replace surTeam (surrogate) with swapLastTeam was occupying surSlot
+    // Actually we swap: surTeam moves out of last, swapLastTeam takes its place
+    // and swapLastTeam's original spot gets surTeam (non-surrogate now)
+    if (surSlot.alliance === 'red') {
+      last.red[surSlot.pos] = swapLastTeam;
+      last.redSurrogate[surSlot.pos] = false; // swapLastTeam is regular here now
+    } else {
+      last.blue[surSlot.pos] = swapLastTeam;
+      last.blueSurrogate[surSlot.pos] = false;
+    }
+
+    // swapLastTeam's original last-match slot now gets surTeam (as a non-surrogate —
+    // surTeam's quota play is the early match; here it's completing a regular slot
+    // because the swap means this IS their mth regular appearance)
+    // Actually: surTeam was a surrogate in last match. After swap, surTeam appears
+    // in early match (swapLastTeam's old slot) — this is now their regular appearance.
+    // surTeam is now a surrogate in the EARLY match (not the last one).
+    if (swapLastAlliance === 'red') {
+      last.red[swapLastPos] = surTeam;
+      last.redSurrogate[swapLastPos] = false; // surTeam is regular in last match now
+    } else {
+      last.blue[swapLastPos] = surTeam;
+      last.blueSurrogate[swapLastPos] = false;
+    }
+
+    // Mark surTeam as surrogate in the early match (their extra appearance is now there)
+    if (earlyAlliance === 'red') {
+      em.redSurrogate[earlyPos] = true;
+    } else {
+      em.blueSurrogate[earlyPos] = true;
+    }
+  }
+
 
   return { matches, surrogateCount, roundBoundaries };
 }
