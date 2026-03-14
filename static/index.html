@@ -1147,10 +1147,11 @@ let _currentScheduleId = null;
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 async function apiFetch(path, opts = {}) {
-  const res = await fetch(API + path, {
-    headers: { 'Content-Type': 'application/json', ...opts.headers },
-    ...opts,
-  });
+  const method = (opts.method || 'GET').toUpperCase();
+  const headers = { ...opts.headers };
+  // Only set Content-Type for requests that have a body
+  if (opts.body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(API + path, { ...opts, method, headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || res.statusText);
@@ -1185,7 +1186,10 @@ async function loadEvents() {
       if (String(e.id) === String(cur)) opt.selected = true;
       sel.appendChild(opt);
     });
-  } catch(e) { showApiStatus('Server unreachable — running offline', true); }
+  } catch(e) {
+    console.error('loadEvents failed:', e);
+    showApiStatus('API error: ' + e.message, true);
+  }
 }
 
 // Called when user selects from the recent-events dropdown
