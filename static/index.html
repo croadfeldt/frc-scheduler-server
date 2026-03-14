@@ -1546,9 +1546,12 @@ async function generateSchedule() {
           } else if (msg.type === 'error') {
             throw new Error(msg.message);
           }
-        } catch(e2) { /* skip malformed SSE line */ }
+        } catch(e2) { console.warn('SSE parse error:', e2, 'line:', line); }
       }
     }
+    // Stream closed without a done event — reset UI
+    btn.disabled = false;
+    document.getElementById('progressWrap').style.display = 'none';
   } catch(err) {
     showApiStatus('Server error: ' + err.message + ' — falling back to client-side', true);
     const numTeams = parseInt(document.getElementById('numTeams').value);

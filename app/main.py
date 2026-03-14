@@ -334,45 +334,48 @@ async def generate_schedule(
     loop = asyncio.get_event_loop()
 
     async def run_and_stream() -> AsyncGenerator[str, None]:
-        # Split iterations across CPU workers
-        n_workers = min(iterations, CPU_WORKERS)
+        # CPU_WORKERS is None when auto-detecting — fall back to cpu_count()
+        import os as _os
+        actual_workers = CPU_WORKERS or _os.cpu_count() or 4
+        n_workers = min(iterations, actual_workers)
         base      = iterations // n_workers
         remainder = iterations % n_workers
 
-        futures = []
+        # Wrap each executor future in a real asyncio.Task so asyncio.wait works
+        tasks: list[asyncio.Task] = []
+        worker_iters: list[int] = []
         for w in range(n_workers):
             w_iters = base + (1 if w < remainder else 0)
-            future  = loop.run_in_executor(
-                pool, run_iterations_worker,
-                (num_teams, matches_per_team, cooldown, w_iters, w)
+            worker_iters.append(w_iters)
+            task = asyncio.ensure_future(
+                loop.run_in_executor(
+                    pool, run_iterations_worker,
+                    (num_teams, matches_per_team, cooldown, w_iters, w)
+                )
             )
-            futures.append(future)
+            tasks.append(task)
 
-        total_done     = 0
-        best_result    = None
+        total_done  = 0
+        best_result = None
+        pending     = set(tasks)
 
-        # Poll futures every 200ms and stream progress
-        pending = list(futures)
         while pending:
-            done, pending_set = await asyncio.wait(
-                [asyncio.ensure_future(f) for f in pending],
+            # Wait up to 200ms for any task to finish, then yield a progress ping
+            done_set, pending = await asyncio.wait(
+                pending,
                 timeout=0.2,
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            still_pending = []
-            for f in pending:
-                fut = asyncio.ensure_future(f)
-                if fut in done:
-                    try:
-                        result = fut.result()
-                        total_done += iterations // n_workers + (1 if len(futures) - pending.index(f) <= remainder else 0)
-                        if best_result is None or result["score"] > best_result["score"]:
-                            best_result = result
-                    except Exception as e:
-                        log.error("Worker error: %s", e)
-                else:
-                    still_pending.append(f)
-            pending = still_pending
+            for task in done_set:
+                try:
+                    result = task.result()
+                    total_done += worker_iters[tasks.index(task)]
+                    if best_result is None or result["score"] > best_result["score"]:
+                        best_result = result
+                except Exception as e:
+                    log.error("Worker error: %s", e)
+                    total_done += worker_iters[tasks.index(task)]
+
             pct = min(99, round(total_done / iterations * 100))
             yield f"data: {json.dumps({'type': 'progress', 'done': total_done, 'total': iterations, 'pct': pct})}\n\n"
 
@@ -421,7 +424,7 @@ async def generate_schedule(
             ))
         await db.commit()
 
-        yield f"data: {json.dumps({'type': 'done', 'schedule_id': sched.id, 'score': best_result['score'], 'pct': 100})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'schedule_id': sched.id, 'score': best_result['score'], 'total': iterations, 'pct': 100})}\n\n"
 
     return StreamingResponse(
         run_and_stream(),
