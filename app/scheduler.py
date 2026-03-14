@@ -63,12 +63,14 @@ _SPLITS = [
 ]
 
 
-def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> ScheduleResult:
+def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
+                     seed: int | None = None) -> ScheduleResult:
     """
     Run one iteration of the two-phase greedy scheduler.
-    Returns a ScheduleResult with the schedule and its composite score.
+    If seed is provided, the schedule is fully deterministic and reproducible.
     """
     ideal_gap = max(1, ideal_gap)
+    rng = random.Random(seed)
 
     # ── Step 1: Determine match count (pure math) ────────────────────────────
     # total_matches = ceil(N * MPT / 6) — minimum 6-team matches to give every
@@ -80,9 +82,9 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
     phase1_surplus    = matches_per_round * 6 - num_teams
     fair_sur_cap      = math.ceil(total_sur_slots / num_teams) + 1 if num_teams > 0 else 1
 
-    # Shuffle team order — each call is a new random iteration
+    # Shuffle team order — deterministic if seed provided
     teams = list(range(1, num_teams + 1))
-    random.shuffle(teams)
+    rng.shuffle(teams)
 
     # Per-team state (1-indexed; index 0 unused)
     mc  = [0] * (num_teams + 1)   # match counts
@@ -225,7 +227,7 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
 
         first_timers = sorted(
             [t for t in teams if mc[t] == 0],
-            key=lambda t: (-team_score(t, now), random.random())
+            key=lambda t: (-team_score(t, now), rng.random())
         )
         second_timers = sorted(
             [t for t in teams if mc[t] == 1],
@@ -253,7 +255,7 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
 
         under_quota = sorted(
             [t for t in teams if mc[t] < matches_per_team],
-            key=lambda t: (-team_score(t, now), random.random())
+            key=lambda t: (-team_score(t, now), rng.random())
         )
         at_quota = sorted(
             [t for t in teams if mc[t] == matches_per_team and sc[t] < fair_sur_cap],
@@ -274,18 +276,29 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
                              red_surrogate=red_sur, blue_surrogate=blue_sur))
         commit_match(red, blue, now)
 
-    # ── Post-generation: move surrogate appearances out of the last match ────────
-    # Surrogates cluster at the end naturally. Swap them to earlier matches.
-    # For each surrogate in the last match, find a non-surrogate in the same match,
-    # locate an earlier match where the surrogate team appears (and the non-surrogate
-    # doesn't), and swap the two team positions between those matches.
+    # ── Post-generation sweeps ────────────────────────────────────────────────────
+    # Rule 1: No surrogate in last match (swap block below)
+    # Rule 2: No surrogate as a team's first appearance (guard in swap search)
+    # Rule 3: No surrogate as a team's last appearance (flag reassignment sweep)
+
+    def build_appearance_map():
+        """Return {team: first_match_idx} and {team: last_match_idx}."""
+        first: dict[int, int] = {}
+        last_a: dict[int, int] = {}
+        for idx, m in enumerate(matches):
+            for t in list(m.red) + list(m.blue):
+                if t not in first:
+                    first[t] = idx
+                last_a[t] = idx
+        return first, last_a
+
+    # ── Rule 1+2: move last-match surrogates to earlier matches ──────────────────
     if matches:
         last_idx = len(matches) - 1
         last = matches[last_idx]
         last_red  = list(last.red);  last_rs = list(last.red_surrogate)
         last_blue = list(last.blue); last_bs = list(last.blue_surrogate)
 
-        # Collect surrogate slots in last match
         sur_slots = []
         for i, t in enumerate(last_red):
             if last_rs[i]: sur_slots.append(('red', i, t))
@@ -293,7 +306,8 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
             if last_bs[i]: sur_slots.append(('blue', i, t))
 
         for alliance, pos, sur_team in sur_slots:
-            # Find a non-surrogate in last match to swap into the early match
+            first_app, _ = build_appearance_map()
+
             swap_a, swap_p, swap_t = None, -1, -1
             for i, t in enumerate(last_red):
                 if not last_rs[i] and t != sur_team:
@@ -302,38 +316,38 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
                 for i, t in enumerate(last_blue):
                     if not last_bs[i] and t != sur_team:
                         swap_a, swap_p, swap_t = 'blue', i, t; break
-            if swap_t == -1: continue
+            if swap_t == -1:
+                continue
 
-            # Find earlier match containing sur_team but NOT swap_t
             early_idx, early_a, early_p = -1, None, -1
             for m_idx in range(last_idx):
                 m = matches[m_idx]
                 all_t = list(m.red) + list(m.blue)
-                if swap_t in all_t: continue
+                if swap_t in all_t:
+                    continue
+                # Rule 2 guard: skip if this is sur_team's first appearance
+                if m_idx <= first_app.get(sur_team, -1):
+                    continue
                 if sur_team in m.red:
                     early_idx, early_a, early_p = m_idx, 'red', list(m.red).index(sur_team); break
                 if sur_team in m.blue:
                     early_idx, early_a, early_p = m_idx, 'blue', list(m.blue).index(sur_team); break
-            if early_idx == -1: continue
+            if early_idx == -1:
+                continue
 
-            # Perform swap
             em = matches[early_idx]
             er = list(em.red);  ers = list(em.red_surrogate)
             eb = list(em.blue); ebs = list(em.blue_surrogate)
 
-            # Early match: sur_team's slot → swap_t (non-surrogate)
             if early_a == 'red':   er[early_p]  = swap_t; ers[early_p]  = False
             else:                  eb[early_p]  = swap_t; ebs[early_p]  = False
 
-            # Last match: sur_team's surrogate slot → swap_t (now regular)
             if alliance == 'red':  last_red[pos]  = swap_t; last_rs[pos]  = False
             else:                  last_blue[pos] = swap_t; last_bs[pos]  = False
 
-            # Last match: swap_t's old slot → sur_team (regular, not surrogate)
             if swap_a == 'red':    last_red[swap_p]  = sur_team; last_rs[swap_p]  = False
             else:                  last_blue[swap_p] = sur_team; last_bs[swap_p]  = False
 
-            # Early match: sur_team is now the surrogate there
             if early_a == 'red':   ers[early_p]  = True
             else:                  ebs[early_p]  = True
 
@@ -345,10 +359,55 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int) -> S
                 red=tuple(last_red), blue=tuple(last_blue),
                 red_surrogate=tuple(last_rs), blue_surrogate=tuple(last_bs)
             )
-            # Reload last match refs for next iteration
             last = matches[last_idx]
             last_red  = list(last.red);  last_rs = list(last.red_surrogate)
             last_blue = list(last.blue); last_bs = list(last.blue_surrogate)
+
+    # ── Rule 3: no surrogate as a team's last appearance ─────────────────────────
+    # Move the surrogate flag to an earlier appearance — no teams change matches.
+    for _pass in range(3):
+        first_app, last_app = build_appearance_map()
+        changed = False
+        all_teams = list({t for m in matches for t in list(m.red) + list(m.blue)})
+        for team in all_teams:
+            last_m_idx = last_app.get(team)
+            if last_m_idx is None:
+                continue
+            lm = matches[last_m_idx]
+            r_pos = list(lm.red).index(team)  if team in lm.red  else -1
+            b_pos = list(lm.blue).index(team) if team in lm.blue else -1
+            is_sur = (r_pos != -1 and lm.red_surrogate[r_pos]) or \
+                     (b_pos != -1 and lm.blue_surrogate[b_pos])
+            if not is_sur:
+                continue
+
+            # Find an earlier non-first appearance to receive the flag
+            for m_idx in range(last_m_idx - 1, first_app.get(team, -1), -1):
+                em = matches[m_idx]
+                er_idx = list(em.red).index(team)  if team in em.red  else -1
+                eb_idx = list(em.blue).index(team) if team in em.blue else -1
+                if er_idx != -1 and not em.red_surrogate[er_idx]:
+                    nrs = list(em.red_surrogate); nrs[er_idx] = True
+                    matches[m_idx] = Match(em.red, em.blue, tuple(nrs), em.blue_surrogate)
+                    if r_pos != -1:
+                        nlrs = list(lm.red_surrogate); nlrs[r_pos] = False
+                        matches[last_m_idx] = Match(lm.red, lm.blue, tuple(nlrs), lm.blue_surrogate)
+                    else:
+                        nlbs = list(lm.blue_surrogate); nlbs[b_pos] = False
+                        matches[last_m_idx] = Match(lm.red, lm.blue, lm.red_surrogate, tuple(nlbs))
+                    changed = True; break
+                if eb_idx != -1 and not em.blue_surrogate[eb_idx]:
+                    nbs = list(em.blue_surrogate); nbs[eb_idx] = True
+                    matches[m_idx] = Match(em.red, em.blue, em.red_surrogate, tuple(nbs))
+                    if r_pos != -1:
+                        nlrs = list(lm.red_surrogate); nlrs[r_pos] = False
+                        matches[last_m_idx] = Match(lm.red, lm.blue, tuple(nlrs), lm.blue_surrogate)
+                    else:
+                        nlbs = list(lm.blue_surrogate); nlbs[b_pos] = False
+                        matches[last_m_idx] = Match(lm.red, lm.blue, lm.red_surrogate, tuple(nlbs))
+                    changed = True; break
+        if not changed:
+            break
 
     return ScheduleResult(
         matches=matches,
@@ -408,14 +467,18 @@ def score_schedule(matches: list[Match], num_teams: int) -> float:
 def run_iterations_worker(args: tuple) -> dict:
     """
     Worker function for ProcessPoolExecutor.
-    Receives (num_teams, matches_per_team, ideal_gap, n_iterations, worker_id).
-    Returns best result as a JSON-serialisable dict.
+    Receives (num_teams, matches_per_team, ideal_gap, n_iterations, worker_id, seed).
+    If seed is provided and n_iterations==1, uses it directly for reproducibility.
+    For multiple iterations, each uses seed+iteration_index so results are still
+    deterministic given the same seed.
     """
-    num_teams, matches_per_team, ideal_gap, n_iterations, worker_id = args
+    num_teams, matches_per_team, ideal_gap, n_iterations, worker_id, seed = args
     best: ScheduleResult | None = None
 
-    for _ in range(n_iterations):
-        result = generate_matches(num_teams, matches_per_team, ideal_gap)
+    for i in range(n_iterations):
+        # Each iteration gets a derived seed: seed XOR (worker_id * 1000 + i)
+        iter_seed = (seed ^ (worker_id * 1000 + i)) if seed is not None else None
+        result = generate_matches(num_teams, matches_per_team, ideal_gap, iter_seed)
         if best is None or result.score > best.score:
             best = result
 
@@ -447,6 +510,7 @@ def assign_teams(
     team_numbers: list[int],
     ideal_gap: int = 3,
     n_iterations: int = 100,
+    seed: int | None = None,
 ) -> dict:
     """
     Stage 2: Given an abstract slot-based schedule, find the best mapping of
@@ -530,12 +594,12 @@ def assign_teams(
 
     best_score = -float('inf')
     best_slot_map: dict[int, int] = {}
-
     slots = list(range(1, num_teams + 1))
+    _rng = random.Random(seed)
 
-    for _ in range(n_iterations):
+    for i in range(n_iterations):
         shuffled = team_numbers[:]
-        random.shuffle(shuffled)
+        _rng.shuffle(shuffled)
         slot_map = {slot: team for slot, team in zip(slots, shuffled)}
         score = score_assignment(slot_map)
         if score > best_score:
@@ -551,10 +615,10 @@ def assign_teams(
 def run_assignment_worker(args: tuple) -> dict:
     """
     Worker for Stage 2 ProcessPoolExecutor.
-    Receives (abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, worker_id).
+    Receives (abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, worker_id, seed).
     Returns best slot_map and score.
     """
-    abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, worker_id = args
-    result = assign_teams(abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations)
+    abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, worker_id, seed = args
+    result = assign_teams(abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, seed)
     result['worker_id'] = worker_id
     return result

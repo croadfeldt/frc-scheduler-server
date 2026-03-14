@@ -489,6 +489,25 @@
   .api-status.ok  { background: rgba(92,184,122,0.12); color: var(--accent3); border: 1px solid rgba(92,184,122,0.3); }
   .api-status.err { background: rgba(204,85,85,0.10); color: var(--danger);   border: 1px solid rgba(204,85,85,0.3); }
 
+  /* Auth */
+  .auth-bar { display:flex; align-items:center; gap:0.5rem; margin-left:auto; }
+  .btn-auth {
+    background:none; border:1px solid var(--border); color:var(--text-muted);
+    border-radius:4px; padding:0.3rem 0.7rem; font-family:'Barlow',sans-serif;
+    font-size:0.75rem; cursor:pointer; white-space:nowrap;
+  }
+  .btn-auth:hover { border-color:var(--accent); color:var(--accent); }
+  .btn-auth.signed-in { border-color:var(--accent3); color:var(--accent3); }
+  .user-chip { font-size:0.7rem; color:var(--text-muted); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Share / duplicate */
+  .btn-share { background:var(--surface2); border:1px solid var(--border); color:var(--text-muted); border-radius:4px; padding:0.3rem 0.7rem; font-size:0.75rem; cursor:pointer; }
+  .btn-share:hover { border-color:var(--accent); color:var(--accent); }
+  .btn-duplicate { background:var(--surface2); border:1px solid var(--accent2); color:var(--accent2); border-radius:4px; padding:0.3rem 0.7rem; font-size:0.75rem; cursor:pointer; }
+  .btn-duplicate:hover { background:rgba(224,123,80,0.12); }
+  /* Seed display */
+  .seed-row { display:flex; align-items:center; gap:0.4rem; font-size:0.68rem; color:var(--text-muted); margin-top:0.25rem; }
+  .seed-val { font-family:monospace; color:var(--accent); cursor:pointer; }
+  .seed-val:hover { text-decoration:underline; }
   @media (max-width: 900px) {
     .layout { grid-template-columns: 1fr; }
     .results-panel { position: static; }
@@ -504,7 +523,24 @@
       <h1>Match <span>Scheduler</span></h1>
       <div class="subtitle">Competition Schedule Generator</div>
     </div>
+    <div class="auth-bar" id="authBar">
+      <button class="btn-auth" id="btnSignIn" onclick="openAuthModal()" style="display:none;">Sign In</button>
+      <span class="user-chip" id="userChip" style="display:none;"></span>
+      <button class="btn-auth signed-in" id="btnSignOut" onclick="signOut()" style="display:none;">Sign Out</button>
+    </div>
   </header>
+  <!-- Share/seed bar — shown after schedule is generated -->
+  <div id="shareBar" style="display:none;background:var(--surface);border-bottom:1px solid var(--border);padding:0.4rem 1.25rem;display:none;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+    <div class="seed-row">
+      <span style="color:var(--text-muted);font-size:0.7rem;">Seed:</span>
+      <span class="seed-val" id="displaySeed" title="Click to copy seed" onclick="copySeed()"></span>
+      <span id="assignSeedDisplay" style="display:none;color:var(--text-muted);font-size:0.68rem;"> · assign: <span class="seed-val" id="displayAssignSeed" onclick="copyAssignSeed()"></span></span>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:0.5rem;">
+      <button class="btn-share" onclick="shareSchedule()" title="Copy shareable URL">&#128279; Share</button>
+      <button class="btn-duplicate" id="btnDuplicate" onclick="duplicateSchedule()" style="display:none;" title="Duplicate this schedule as your own">&#10560; Duplicate</button>
+    </div>
+  </div>
 
   <!-- API status indicator -->
   <div id="apiStatus" class="api-status" style="display:none"></div>
@@ -559,6 +595,25 @@
           <input type="number" id="newEventYear" placeholder="Year" style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.4rem 0.6rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.85rem;">
           <button class="btn-sm btn-accent" onclick="createEvent()" style="align-self:flex-start;">Create Event</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auth modal -->
+  <div class="modal-overlay" id="modalAuth">
+    <div class="modal" style="max-width:360px;text-align:center;">
+      <button class="modal-close" onclick="closeModal('modalAuth')">&#x2715;</button>
+      <div class="modal-title">Sign In</div>
+      <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:1.25rem;">Sign in to save, manage, and share your schedules. All schedules are publicly readable without an account.</p>
+      <div id="authButtons" style="display:flex;flex-direction:column;gap:0.6rem;">
+        <button id="btnGoogleAuth" onclick="signInWith('google')" style="display:none;background:#fff;color:#333;border:1px solid #ddd;border-radius:4px;padding:0.55rem 1rem;font-size:0.85rem;cursor:pointer;font-family:'Barlow',sans-serif;font-weight:500;">
+          <svg width="16" height="16" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:8px;"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+          Continue with Google
+        </button>
+        <button id="btnAppleAuth" onclick="signInWith('apple')" style="display:none;background:#000;color:#fff;border:none;border-radius:4px;padding:0.55rem 1rem;font-size:0.85rem;cursor:pointer;font-family:'Barlow',sans-serif;font-weight:500;">
+          &#63743; Continue with Apple
+        </button>
+        <div id="authNoProviders" style="display:none;color:var(--text-muted);font-size:0.8rem;">No auth providers configured on this server.</div>
       </div>
     </div>
   </div>
@@ -727,6 +782,9 @@ let _currentAbstractScheduleId = null;   // Stage 1 result
 let _currentAssignedScheduleId = null;   // Stage 2 result (assigned)
 let _abstractParams = null;              // params snapshot when Stage 1 last ran
 let _autoPopulateTimeout = null;         // debounce timer
+let _currentSlotMap = null;              // {slot_str: team_number} from Stage 2
+let _currentSeed = null;                 // hex Stage 1 seed
+let _currentAssignSeed = null;           // hex Stage 2 seed
 
 function timeToMin(t) {
   const [h, m] = t.split(':').map(Number);
@@ -742,12 +800,32 @@ function minToTime(m) {
   return h12 + ':' + String(min).padStart(2,'0') + ' ' + ampm;
 }
 
-function shuffle(arr) {
+// ── Seeded PRNG (mulberry32) ──────────────────────────────────────────────────
+// Returns a seeded random function. Same seed always produces the same sequence.
+function makeRng(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s += 0x6D2B79F5;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Seeded shuffle using a provided rng function
+function shuffle(arr, rng) {
+  const r = rng || Math.random.bind(Math);
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(r() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+// Generate a random seed string (8 hex chars)
+function randomSeed() {
+  return Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart(8, '0');
 }
 
 function buildDaysUI() {
@@ -836,10 +914,229 @@ buildTimezoneSelect();
 document.getElementById('tbaYear').value = new Date().getFullYear();
 document.getElementById('eventYear').value = new Date().getFullYear();
 loadEvents();
+initAuth();
+autoRunFromUrl();
 
 ['numTeams','matchesPerTeam','cooldown'].forEach(function(id) {
   document.getElementById(id).addEventListener('input', onParamChanged);
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUTH STATE
+// ══════════════════════════════════════════════════════════════════════════════
+let _authUser = null;  // {sub, email, provider, uid} or null
+
+
+function getToken() { try { return localStorage.getItem('frc_token'); } catch(e) { return null; } }
+function setToken(t) { try { localStorage.setItem('frc_token', t); } catch(e) {} }
+function clearToken() { try { localStorage.removeItem('frc_token'); } catch(e) {} }
+
+async function initAuth() {
+  // Check for token in URL fragment (OAuth popup callback)
+  const hash = window.location.hash;
+  if (hash && hash.includes('token=')) {
+    const m = hash.match(/token=([^&]+)/);
+    if (m) { setToken(m[1]); window.location.hash = ''; }
+  }
+  // Listen for postMessage from OAuth popup
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.token) { setToken(e.data.token); refreshAuthUI(); }
+  });
+  await refreshAuthUI();
+}
+
+async function refreshAuthUI() {
+  const token = getToken();
+  if (!token) { _authUser = null; renderAuthBar(); return; }
+  try {
+    const r = await fetch(API + '/auth/me', { headers: { Authorization: 'Bearer ' + token } });
+    const d = await r.json();
+    _authUser = d.authenticated ? d : null;
+  } catch(e) { _authUser = null; }
+  renderAuthBar();
+}
+
+function renderAuthBar() {
+  const chip   = document.getElementById('userChip');
+  const btnIn  = document.getElementById('btnSignIn');
+  const btnOut = document.getElementById('btnSignOut');
+  if (_authUser) {
+    chip.textContent = _authUser.email || _authUser.sub || '';
+    chip.style.display = 'inline';
+    btnIn.style.display  = 'none';
+    btnOut.style.display = 'inline';
+  } else {
+    chip.style.display  = 'none';
+    btnOut.style.display = 'none';
+    btnIn.style.display  = 'inline';
+  }
+}
+
+async function openAuthModal() {
+  try {
+    const p = await fetch(API + '/auth/providers').then(function(r) { return r.json(); });
+    document.getElementById('btnGoogleAuth').style.display = p.google ? '' : 'none';
+    document.getElementById('btnAppleAuth').style.display  = p.apple  ? '' : 'none';
+    document.getElementById('authNoProviders').style.display = (!p.google && !p.apple) ? '' : 'none';
+  } catch(e) {
+    document.getElementById('authNoProviders').style.display = '';
+  }
+  openModal('modalAuth');
+}
+
+function signInWith(provider) {
+  const popup = window.open(API + '/auth/' + provider + '/login', 'frc_auth',
+    'width=500,height=620,left=' + ((screen.width-500)/2) + ',top=' + ((screen.height-620)/2));
+  const timer = setInterval(function() {
+    if (popup && popup.closed) { clearInterval(timer); refreshAuthUI(); }
+  }, 500);
+}
+
+function signOut() {
+  clearToken();
+  _authUser = null;
+  renderAuthBar();
+  showApiStatus('Signed out');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SEED HELPERS
+// ══════════════════════════════════════════════════════════════════════════════
+function copySeed() {
+  if (_currentSeed) { navigator.clipboard.writeText(_currentSeed).catch(function(){}); showApiStatus('Seed copied'); }
+}
+function copyAssignSeed() {
+  if (_currentAssignSeed) { navigator.clipboard.writeText(_currentAssignSeed).catch(function(){}); showApiStatus('Assign seed copied'); }
+}
+
+function updateSeedDisplay(seed, assignSeed) {
+  _currentSeed = seed || null;
+  _currentAssignSeed = assignSeed || null;
+  const bar = document.getElementById('shareBar');
+  bar.style.display = 'flex';
+  document.getElementById('displaySeed').textContent = seed || '(client-side)';
+  const assignRow = document.getElementById('assignSeedDisplay');
+  if (assignSeed) {
+    document.getElementById('displayAssignSeed').textContent = assignSeed;
+    assignRow.style.display = 'inline';
+  } else {
+    assignRow.style.display = 'none';
+  }
+  updateDuplicateButton();
+}
+
+function updateDuplicateButton() {
+  const btn = document.getElementById('btnDuplicate');
+  if (!btn) return;
+  if (_currentAssignedScheduleId) {
+    btn.style.display = '';
+    // If user owns this schedule, don't show duplicate (they can just re-assign)
+    // Show it for everyone including anonymous
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// URL ENCODING / DECODING
+// ══════════════════════════════════════════════════════════════════════════════
+function buildShareUrl() {
+  const params = new URLSearchParams();
+  const n   = document.getElementById('numTeams').value;
+  const mpt = document.getElementById('matchesPerTeam').value;
+  const cd  = document.getElementById('cooldown').value;
+  if (n)   params.set('n',   n);
+  if (mpt) params.set('mpt', mpt);
+  if (cd)  params.set('cd',  cd);
+  if (_currentSeed)       params.set('seed',  _currentSeed);
+  if (_currentAssignSeed) params.set('aseed', _currentAssignSeed);
+
+  // Encode team numbers from slot_map if we have an assigned schedule
+  if (_currentSlotMap && Object.keys(_currentSlotMap).length > 0) {
+    const numTeams = parseInt(n) || 0;
+    const teams = [];
+    for (let i = 1; i <= numTeams; i++) {
+      teams.push(_currentSlotMap[String(i)] || 0);
+    }
+    if (teams.some(function(t) { return t > 0; })) {
+      params.set('teams', teams.join(','));
+    }
+  }
+
+  return window.location.origin + window.location.pathname + '?' + params.toString();
+}
+
+function shareSchedule() {
+  const url = buildShareUrl();
+  navigator.clipboard.writeText(url).then(function() {
+    showApiStatus('Share URL copied to clipboard');
+  }).catch(function() {
+    prompt('Copy this URL:', url);
+  });
+}
+
+function parseUrlParams() {
+  const p = new URLSearchParams(window.location.search);
+  return {
+    n:      parseInt(p.get('n'))   || null,
+    mpt:    parseInt(p.get('mpt')) || null,
+    cd:     parseInt(p.get('cd'))  || null,
+    seed:   p.get('seed')  || null,
+    aseed:  p.get('aseed') || null,
+    teams:  p.get('teams') ? p.get('teams').split(',').map(Number).filter(Boolean) : null,
+    event:  p.get('event') || null,
+  };
+}
+
+function applyUrlParams(params) {
+  if (params.n)   document.getElementById('numTeams').value       = params.n;
+  if (params.mpt) document.getElementById('matchesPerTeam').value = params.mpt;
+  if (params.cd)  document.getElementById('cooldown').value       = params.cd;
+  if (params.seed) {
+    _currentSeed = params.seed;
+    // Show seed in UI immediately
+    document.getElementById('shareBar').style.display = 'flex';
+    document.getElementById('displaySeed').textContent = params.seed;
+  }
+}
+
+// Auto-run from URL params on load
+async function autoRunFromUrl() {
+  const params = parseUrlParams();
+  if (!params.seed && !params.n) return;  // nothing to auto-run
+  applyUrlParams(params);
+
+  // Auto-generate Stage 1 with the seed
+  if (params.seed) {
+    _urlAutoTeams = params.teams;  // stash for Stage 2
+    await generateScheduleWithSeed(params.seed);
+  }
+}
+
+let _urlAutoTeams = null;
+
+async function generateScheduleWithSeed(seed) {
+  // Trigger generateSchedule but with an explicit seed
+  window._pendingSeed = seed;
+  await generateSchedule();
+  window._pendingSeed = null;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DUPLICATE
+// ══════════════════════════════════════════════════════════════════════════════
+async function duplicateSchedule() {
+  if (!_currentAssignedScheduleId) { showApiStatus('No schedule to duplicate', true); return; }
+  try {
+    const result = await apiFetch('/api/assigned-schedules/' + _currentAssignedScheduleId + '/duplicate',
+      { method: 'POST' });
+    _currentAssignedScheduleId = result.id;
+    _currentAbstractScheduleId = result.abstract_schedule_id;
+    await loadSavedSchedules();
+    showApiStatus('\u2713 Duplicated — you now own a copy');
+    document.getElementById('btnDuplicate').style.display = 'none';
+  } catch(e) { showApiStatus('Duplicate failed: ' + e.message, true); }
+}
 
 function onParamChanged() {
   if (_abstractParams !== null) {
@@ -891,12 +1188,14 @@ function getCycleTime(matchNum, defaultTime, changes) {
 
 buildDaysUI();
 
-function generateMatches(numTeams, matchesPerTeam, idealGap) {
-  // Shuffle team order so each iteration explores a different schedule space
+function generateMatches(numTeams, matchesPerTeam, idealGap, seed) {
+  // Seeded RNG — same seed always produces identical schedule
+  const _rng = makeRng(seed !== undefined ? parseInt(seed, 16) || seed : Math.floor(Math.random() * 0xFFFFFFFF));
+  function rng() { return _rng(); }
+
   function shuffledTeams() {
     const t = Array.from({length: numTeams}, (_, i) => i + 1);
-    for (let i = t.length - 1; i > 0; i--) { const j = Math.floor(Math.random()*(i+1)); [t[i],t[j]]=[t[j],t[i]]; }
-    return t;
+    return shuffle(t, rng);
   }
   // ─────────────────────────────────────────────────────────────────
   // SCHEDULING CRITERIA (ordered by priority)
@@ -1029,7 +1328,7 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     let firstTimers = teams.filter(t => matchCounts[t] === 0)
       .sort((a, b) => {
         const d = teamScore(b, now) - teamScore(a, now);
-        return d !== 0 ? d : Math.random() - 0.5;
+        return d !== 0 ? d : rng() - 0.5;
       });
 
     // Second-match candidates for the extra slots: prefer teams that scored well
@@ -1069,8 +1368,8 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
 
     const cands = [];
     for (let attempt = 0; attempt < 60; attempt++) {
-      const six = [...shuffle(firstPool.slice()).slice(0, firstSlots),
-                   ...shuffle(secondPool.slice()).slice(0, extraSlots)];
+      const six = [...shuffle(firstPool.slice(), rng).slice(0, firstSlots),
+                   ...shuffle(secondPool.slice(), rng).slice(0, extraSlots)];
       if (six.length === 6 && new Set(six).size === 6) {
         const res = isLast ? assignAlliancesR1(six) : assignAlliances(six);
         if (res) cands.push({r: res.r, b: res.b, score: diversityScore(res.r, res.b) + six.reduce((a, t) => a + teamScore(t, now), 0) * 0.5});
@@ -1116,7 +1415,7 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
       .filter(t => matchCounts[t] < matchesPerTeam)
       .sort((a, b) => {
         const d = teamScore(b, now) - teamScore(a, now);
-        return d !== 0 ? d : Math.random() - 0.5;
+        return d !== 0 ? d : rng() - 0.5;
       });
 
     // Surrogate pool — teams at quota, sorted by fairness (least surrogated first)
@@ -1135,8 +1434,8 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     const cands = [];
     for (let attempt = 0; attempt < 60; attempt++) {
       const six = [
-        ...shuffle(regPool.slice()).slice(0, regSlots),
-        ...shuffle(surPool.slice()).slice(0, surNeeded),
+        ...shuffle(regPool.slice(), rng).slice(0, regSlots),
+        ...shuffle(surPool.slice(), rng).slice(0, surNeeded),
       ];
       if (six.length === 6 && new Set(six).size === 6) {
         const res = assignAlliances(six);
@@ -1180,14 +1479,31 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     for (let i = 0; i < blue.length; i++) for (let j = i+1; j < blue.length; j++) { partners[blue[i]][blue[j]]++; partners[blue[j]][blue[i]]++; }
   }
 
-  // ── Post-generation: move all surrogate appearances out of the last match ──
-  // After greedy scheduling, surrogates tend to cluster at the end because that
-  // is when most teams have hit quota. Swap them to earlier matches.
+  // ── Post-generation sweeps ───────────────────────────────────────────────────
   //
-  // For each surrogate slot in the last match:
-  //   Find an earlier match M where a non-surrogate regular from the last match
-  //   also appears (so we can swap the two team slots between M and last match).
-  //   After the swap, the surrogate appearance is in M (not the last match).
+  // Three rules enforced after greedy scheduling:
+  //   Rule 1: No surrogate in the last match (already handled by swap below)
+  //   Rule 2: No surrogate as a team's FIRST appearance (mc=0 before the match)
+  //   Rule 3: No surrogate as a team's LAST appearance
+  //
+  // Rule 1+2: Swap last-match surrogates to earlier matches, guarding against
+  //   placing a surrogate before a team's first regular appearance.
+  // Rule 3:   For each team whose surrogate slot is their last appearance,
+  //   reassign the surrogate flag to an earlier appearance (no team movement needed).
+
+  // Helper: build first/last appearance index for each team
+  function buildAppearanceMap() {
+    const first = {}, last_app = {};
+    matches.forEach(function(m, idx) {
+      [...m.red, ...m.blue].forEach(function(t) {
+        if (first[t] === undefined) first[t] = idx;
+        last_app[t] = idx;
+      });
+    });
+    return { first, last: last_app };
+  }
+
+  // ── Rule 1+2: move last-match surrogates to earlier matches ──────────────────
   const swapFinalIdx = matches.length - 1;
   const last = matches[swapFinalIdx];
 
@@ -1198,6 +1514,7 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
 
   for (const surSlot of lastSurrogates) {
     const surTeam = surSlot.team;
+    let { first: firstApp } = buildAppearanceMap();
 
     // Find a non-surrogate team in the last match to swap with
     let swapLastAlliance = null, swapLastPos = -1, swapLastTeam = -1;
@@ -1216,12 +1533,16 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     if (swapLastTeam === -1) continue; // no non-surrogate available — skip
 
     // Find an earlier match where surTeam appears (any position, any alliance)
-    // and where swapLastTeam does NOT appear (no duplicates in a match)
+    // and where swapLastTeam does NOT appear (no duplicates in a match).
+    // RULE 2 GUARD: the earlier match must not be surTeam's very first appearance
+    // (mc[surTeam] >= 1 before that match, i.e. match index > firstApp[surTeam]).
     let earlyMatchIdx = -1, earlyAlliance = null, earlyPos = -1;
     for (let m = 0; m < swapFinalIdx; m++) {
       const em = matches[m];
       const allTeams = [...em.red, ...em.blue];
       if (allTeams.includes(swapLastTeam)) continue; // would duplicate swapLastTeam
+      // Rule 2 guard: skip if this is surTeam's first appearance
+      if (m <= firstApp[surTeam]) continue;
       const rIdx = em.red.indexOf(surTeam);
       if (rIdx !== -1) { earlyMatchIdx = m; earlyAlliance = 'red'; earlyPos = rIdx; break; }
       const bIdx = em.blue.indexOf(surTeam);
@@ -1274,6 +1595,100 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
       em.blueSurrogate[earlyPos] = true;
     }
   }
+
+  // ── Rule 3: no surrogate as a team's last appearance ────────────────────────
+  // For each team that has a surrogate flag on their last appearance:
+  //   Find any earlier appearance of that team (not their first, not a surrogate already)
+  //   and move the surrogate flag there instead.
+  //   This is a pure flag reassignment — no teams move between matches.
+  (function applyRule3() {
+    for (let pass = 0; pass < 3; pass++) { // up to 3 passes in case of cascading
+      const { first: firstApp, last: lastApp } = buildAppearanceMap();
+      let changed = false;
+      const allTeams = [...new Set(matches.flatMap(m => [...m.red, ...m.blue]))];
+      for (const team of allTeams) {
+        const lastMatchIdx = lastApp[team];
+        if (lastMatchIdx === undefined) continue;
+        const lm = matches[lastMatchIdx];
+        const rPos = lm.red.indexOf(team);
+        const bPos = lm.blue.indexOf(team);
+        const isSurInLast = (rPos !== -1 && lm.redSurrogate[rPos]) ||
+                            (bPos !== -1 && lm.blueSurrogate[bPos]);
+        if (!isSurInLast) continue;
+
+        // Find an earlier appearance (not first, not already a surrogate)
+        // to receive the surrogate flag instead
+        let moved = false;
+        for (let m = lastMatchIdx - 1; m > firstApp[team]; m--) {
+          const em = matches[m];
+          const erIdx = em.red.indexOf(team);
+          const ebIdx = em.blue.indexOf(team);
+          if (erIdx !== -1 && !em.redSurrogate[erIdx]) {
+            // Move surrogate flag from last to here
+            const nrs = em.redSurrogate.slice(); nrs[erIdx] = true;
+            matches[m] = Object.assign({}, em, { redSurrogate: nrs });
+            // Clear surrogate flag in last match
+            if (rPos !== -1) {
+              const nlrs = lm.redSurrogate.slice(); nlrs[rPos] = false;
+              matches[lastMatchIdx] = Object.assign({}, lm, { redSurrogate: nlrs });
+            } else {
+              const nlbs = lm.blueSurrogate.slice(); nlbs[bPos] = false;
+              matches[lastMatchIdx] = Object.assign({}, lm, { blueSurrogate: nlbs });
+            }
+            moved = true; changed = true; break;
+          }
+          if (ebIdx !== -1 && !em.blueSurrogate[ebIdx]) {
+            const nbs = em.blueSurrogate.slice(); nbs[ebIdx] = true;
+            matches[m] = Object.assign({}, em, { blueSurrogate: nbs });
+            if (rPos !== -1) {
+              const nlrs = lm.redSurrogate.slice(); nlrs[rPos] = false;
+              matches[lastMatchIdx] = Object.assign({}, lm, { redSurrogate: nlrs });
+            } else {
+              const nlbs = lm.blueSurrogate.slice(); nlbs[bPos] = false;
+              matches[lastMatchIdx] = Object.assign({}, lm, { blueSurrogate: nlbs });
+            }
+            moved = true; changed = true; break;
+          }
+        }
+        // If we couldn't find a middle appearance, try moving to second appearance
+        // (first+1) as long as it's not the same as lastMatchIdx
+        if (!moved && firstApp[team] + 1 < lastMatchIdx) {
+          const fm1 = firstApp[team] + 1;
+          // find team in that match - might not be there, search nearby
+          for (let m = firstApp[team] + 1; m < lastMatchIdx; m++) {
+            const em = matches[m];
+            const erIdx = em.red.indexOf(team);
+            const ebIdx = em.blue.indexOf(team);
+            if (erIdx !== -1 && !em.redSurrogate[erIdx]) {
+              const nrs = em.redSurrogate.slice(); nrs[erIdx] = true;
+              matches[m] = Object.assign({}, em, { redSurrogate: nrs });
+              if (rPos !== -1) {
+                const nlrs = lm.redSurrogate.slice(); nlrs[rPos] = false;
+                matches[lastMatchIdx] = Object.assign({}, lm, { redSurrogate: nlrs });
+              } else {
+                const nlbs = lm.blueSurrogate.slice(); nlbs[bPos] = false;
+                matches[lastMatchIdx] = Object.assign({}, lm, { blueSurrogate: nlbs });
+              }
+              changed = true; break;
+            }
+            if (ebIdx !== -1 && !em.blueSurrogate[ebIdx]) {
+              const nbs = em.blueSurrogate.slice(); nbs[ebIdx] = true;
+              matches[m] = Object.assign({}, em, { blueSurrogate: nbs });
+              if (rPos !== -1) {
+                const nlrs = lm.redSurrogate.slice(); nlrs[rPos] = false;
+                matches[lastMatchIdx] = Object.assign({}, lm, { redSurrogate: nlrs });
+              } else {
+                const nlbs = lm.blueSurrogate.slice(); nlbs[bPos] = false;
+                matches[lastMatchIdx] = Object.assign({}, lm, { blueSurrogate: nlbs });
+              }
+              changed = true; break;
+            }
+          }
+        }
+      }
+      if (!changed) break;
+    }
+  })();
 
   return { matches, surrogateCount, roundBoundaries };
 }
@@ -1341,8 +1756,9 @@ function scoreSchedule(matches, numTeams) {
 async function apiFetch(path, opts = {}) {
   const method = (opts.method || 'GET').toUpperCase();
   const headers = { ...opts.headers };
-  // Only set Content-Type for requests that have a body
   if (opts.body) headers['Content-Type'] = 'application/json';
+  const token = getToken();
+  if (token) headers['Authorization'] = 'Bearer ' + token;
   const res = await fetch(API + path, { ...opts, method, headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -1677,6 +2093,8 @@ async function generateSchedule() {
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value);
   const cooldown       = parseInt(document.getElementById('cooldown').value) || 3;
   const iterations     = 1; // Stage 1 is deterministic — no iterations needed
+  const seed = window._pendingSeed || randomSeed();
+  _currentSeed = seed;
 
   if (numTeams < 6) { showApiStatus('Enter at least 6 teams', true); return; }
 
@@ -1720,6 +2138,7 @@ async function generateSchedule() {
         matches_per_team: matchesPerTeam,
         cooldown,
         iterations,
+        seed,
         name: 'Abstract ' + new Date().toLocaleTimeString(),
         event_id: _currentEventId ? parseInt(_currentEventId) : null,
       }),
@@ -1786,6 +2205,11 @@ async function generateSchedule() {
       }
     );
   }
+}
+
+// Push current params + seed into browser URL without page reload
+function updateUrlFromState() {
+  try { window.history.replaceState(null, '', buildShareUrl()); } catch(e) {}
 }
 
 // Collect day/timing config from UI
@@ -1885,9 +2309,11 @@ async function assignTeams() {
   btn.disabled = true;
   document.getElementById('progressWrap2').style.display = 'block';
 
-  const iterations = Math.max(1, parseInt(document.getElementById('assignIterations').value) || 500);
-  const startTime  = performance.now();
-  const dayConfig  = collectDayConfig();
+  const iterations  = Math.max(1, parseInt(document.getElementById('assignIterations').value) || 500);
+  const assignSeed  = randomSeed();
+  _currentAssignSeed = assignSeed;
+  const startTime   = performance.now();
+  const dayConfig   = collectDayConfig();
 
   function formatETA(ms) {
     if (ms < 1000) return 'almost done';
@@ -1905,6 +2331,7 @@ async function assignTeams() {
         event_id: parseInt(_currentEventId),
         abstract_schedule_id: _currentAbstractScheduleId,
         iterations,
+        assign_seed: assignSeed,
         name: 'Schedule ' + new Date().toLocaleTimeString(),
         day_config: dayConfig,
       }),
@@ -1934,11 +2361,17 @@ async function assignTeams() {
               msg.done + ' / ' + msg.total + ' assignments' + (eta ? ' \u00b7 ' + eta : '') + '\u2026';
           } else if (msg.type === 'done') {
             _currentAssignedScheduleId = msg.assigned_schedule_id;
+            const _adResp = await apiFetch('/api/assigned-schedules/' + msg.assigned_schedule_id);
+            _currentSlotMap = _adResp.slot_map || null;
+            _currentAssignSeed = _adResp.assign_seed || _currentAssignSeed;
+            updateSeedDisplay(_currentSeed, _currentAssignSeed);
+            updateUrlFromState();
             await loadAssignedSchedule(msg.assigned_schedule_id, dayConfig);
             await loadSavedSchedules();
             btn.disabled = false;
             document.getElementById('progressWrap2').style.display = 'none';
-            showApiStatus('Stage 2 complete \u2014 teams assigned');
+            document.getElementById('loadFromDbBanner').style.display = 'none';
+            showApiStatus('Teams assigned and saved');
           } else if (msg.type === 'error') {
             throw new Error(msg.message);
           }
@@ -1959,6 +2392,10 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
   try {
     const sched = await apiFetch('/api/assigned-schedules/' + scheduleId);
     _currentAssignedScheduleId = scheduleId;
+    _currentSlotMap = sched.slot_map || null;
+    _currentSeed = sched.seed || _currentSeed;
+    _currentAssignSeed = sched.assign_seed || null;
+    updateSeedDisplay(_currentSeed, _currentAssignSeed);
     const matches = sched.matches.map(function(m) {
       return {
         red:           m.red,
@@ -2530,20 +2967,42 @@ function exportCSV(scheduled) {
 </script>
 <script type="text/plain" id="workerSrc">
 
-function shuffle(arr) {
+// ── Seeded PRNG (mulberry32) ──────────────────────────────────────────────────
+// Returns a seeded random function. Same seed always produces the same sequence.
+function makeRng(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s += 0x6D2B79F5;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Seeded shuffle using a provided rng function
+function shuffle(arr, rng) {
+  const r = rng || Math.random.bind(Math);
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(r() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
 }
 
-function generateMatches(numTeams, matchesPerTeam, idealGap) {
-  // Shuffle team order so each iteration explores a different schedule space
+// Generate a random seed string (8 hex chars)
+function randomSeed() {
+  return Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart(8, '0');
+}
+
+function generateMatches(numTeams, matchesPerTeam, idealGap, seed) {
+  // Seeded RNG — same seed always produces identical schedule
+  const _rng = makeRng(seed !== undefined ? parseInt(seed, 16) || seed : Math.floor(Math.random() * 0xFFFFFFFF));
+  function rng() { return _rng(); }
+
   function shuffledTeams() {
     const t = Array.from({length: numTeams}, (_, i) => i + 1);
-    for (let i = t.length - 1; i > 0; i--) { const j = Math.floor(Math.random()*(i+1)); [t[i],t[j]]=[t[j],t[i]]; }
-    return t;
+    return shuffle(t, rng);
   }
   // ─────────────────────────────────────────────────────────────────
   // SCHEDULING CRITERIA (ordered by priority)
@@ -2676,7 +3135,7 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     let firstTimers = teams.filter(t => matchCounts[t] === 0)
       .sort((a, b) => {
         const d = teamScore(b, now) - teamScore(a, now);
-        return d !== 0 ? d : Math.random() - 0.5;
+        return d !== 0 ? d : rng() - 0.5;
       });
 
     // Second-match candidates for the extra slots: prefer teams that scored well
@@ -2716,8 +3175,8 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
 
     const cands = [];
     for (let attempt = 0; attempt < 60; attempt++) {
-      const six = [...shuffle(firstPool.slice()).slice(0, firstSlots),
-                   ...shuffle(secondPool.slice()).slice(0, extraSlots)];
+      const six = [...shuffle(firstPool.slice(), rng).slice(0, firstSlots),
+                   ...shuffle(secondPool.slice(), rng).slice(0, extraSlots)];
       if (six.length === 6 && new Set(six).size === 6) {
         const res = isLast ? assignAlliancesR1(six) : assignAlliances(six);
         if (res) cands.push({r: res.r, b: res.b, score: diversityScore(res.r, res.b) + six.reduce((a, t) => a + teamScore(t, now), 0) * 0.5});
@@ -2763,7 +3222,7 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
       .filter(t => matchCounts[t] < matchesPerTeam)
       .sort((a, b) => {
         const d = teamScore(b, now) - teamScore(a, now);
-        return d !== 0 ? d : Math.random() - 0.5;
+        return d !== 0 ? d : rng() - 0.5;
       });
 
     // Surrogate pool — teams at quota, sorted by fairness (least surrogated first)
@@ -2782,8 +3241,8 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     const cands = [];
     for (let attempt = 0; attempt < 60; attempt++) {
       const six = [
-        ...shuffle(regPool.slice()).slice(0, regSlots),
-        ...shuffle(surPool.slice()).slice(0, surNeeded),
+        ...shuffle(regPool.slice(), rng).slice(0, regSlots),
+        ...shuffle(surPool.slice(), rng).slice(0, surNeeded),
       ];
       if (six.length === 6 && new Set(six).size === 6) {
         const res = assignAlliances(six);
@@ -2827,14 +3286,31 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     for (let i = 0; i < blue.length; i++) for (let j = i+1; j < blue.length; j++) { partners[blue[i]][blue[j]]++; partners[blue[j]][blue[i]]++; }
   }
 
-  // ── Post-generation: move all surrogate appearances out of the last match ──
-  // After greedy scheduling, surrogates tend to cluster at the end because that
-  // is when most teams have hit quota. Swap them to earlier matches.
+  // ── Post-generation sweeps ───────────────────────────────────────────────────
   //
-  // For each surrogate slot in the last match:
-  //   Find an earlier match M where a non-surrogate regular from the last match
-  //   also appears (so we can swap the two team slots between M and last match).
-  //   After the swap, the surrogate appearance is in M (not the last match).
+  // Three rules enforced after greedy scheduling:
+  //   Rule 1: No surrogate in the last match (already handled by swap below)
+  //   Rule 2: No surrogate as a team's FIRST appearance (mc=0 before the match)
+  //   Rule 3: No surrogate as a team's LAST appearance
+  //
+  // Rule 1+2: Swap last-match surrogates to earlier matches, guarding against
+  //   placing a surrogate before a team's first regular appearance.
+  // Rule 3:   For each team whose surrogate slot is their last appearance,
+  //   reassign the surrogate flag to an earlier appearance (no team movement needed).
+
+  // Helper: build first/last appearance index for each team
+  function buildAppearanceMap() {
+    const first = {}, last_app = {};
+    matches.forEach(function(m, idx) {
+      [...m.red, ...m.blue].forEach(function(t) {
+        if (first[t] === undefined) first[t] = idx;
+        last_app[t] = idx;
+      });
+    });
+    return { first, last: last_app };
+  }
+
+  // ── Rule 1+2: move last-match surrogates to earlier matches ──────────────────
   const swapFinalIdx = matches.length - 1;
   const last = matches[swapFinalIdx];
 
@@ -2845,6 +3321,7 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
 
   for (const surSlot of lastSurrogates) {
     const surTeam = surSlot.team;
+    let { first: firstApp } = buildAppearanceMap();
 
     // Find a non-surrogate team in the last match to swap with
     let swapLastAlliance = null, swapLastPos = -1, swapLastTeam = -1;
@@ -2863,12 +3340,16 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     if (swapLastTeam === -1) continue; // no non-surrogate available — skip
 
     // Find an earlier match where surTeam appears (any position, any alliance)
-    // and where swapLastTeam does NOT appear (no duplicates in a match)
+    // and where swapLastTeam does NOT appear (no duplicates in a match).
+    // RULE 2 GUARD: the earlier match must not be surTeam's very first appearance
+    // (mc[surTeam] >= 1 before that match, i.e. match index > firstApp[surTeam]).
     let earlyMatchIdx = -1, earlyAlliance = null, earlyPos = -1;
     for (let m = 0; m < swapFinalIdx; m++) {
       const em = matches[m];
       const allTeams = [...em.red, ...em.blue];
       if (allTeams.includes(swapLastTeam)) continue; // would duplicate swapLastTeam
+      // Rule 2 guard: skip if this is surTeam's first appearance
+      if (m <= firstApp[surTeam]) continue;
       const rIdx = em.red.indexOf(surTeam);
       if (rIdx !== -1) { earlyMatchIdx = m; earlyAlliance = 'red'; earlyPos = rIdx; break; }
       const bIdx = em.blue.indexOf(surTeam);
@@ -2922,6 +3403,100 @@ function generateMatches(numTeams, matchesPerTeam, idealGap) {
     }
   }
 
+
+  // ── Rule 3: no surrogate as a team's last appearance ────────────────────────
+  // For each team that has a surrogate flag on their last appearance:
+  //   Find any earlier appearance of that team (not their first, not a surrogate already)
+  //   and move the surrogate flag there instead.
+  //   This is a pure flag reassignment — no teams move between matches.
+  (function applyRule3() {
+    for (let pass = 0; pass < 3; pass++) { // up to 3 passes in case of cascading
+      const { first: firstApp, last: lastApp } = buildAppearanceMap();
+      let changed = false;
+      const allTeams = [...new Set(matches.flatMap(m => [...m.red, ...m.blue]))];
+      for (const team of allTeams) {
+        const lastMatchIdx = lastApp[team];
+        if (lastMatchIdx === undefined) continue;
+        const lm = matches[lastMatchIdx];
+        const rPos = lm.red.indexOf(team);
+        const bPos = lm.blue.indexOf(team);
+        const isSurInLast = (rPos !== -1 && lm.redSurrogate[rPos]) ||
+                            (bPos !== -1 && lm.blueSurrogate[bPos]);
+        if (!isSurInLast) continue;
+
+        // Find an earlier appearance (not first, not already a surrogate)
+        // to receive the surrogate flag instead
+        let moved = false;
+        for (let m = lastMatchIdx - 1; m > firstApp[team]; m--) {
+          const em = matches[m];
+          const erIdx = em.red.indexOf(team);
+          const ebIdx = em.blue.indexOf(team);
+          if (erIdx !== -1 && !em.redSurrogate[erIdx]) {
+            // Move surrogate flag from last to here
+            const nrs = em.redSurrogate.slice(); nrs[erIdx] = true;
+            matches[m] = Object.assign({}, em, { redSurrogate: nrs });
+            // Clear surrogate flag in last match
+            if (rPos !== -1) {
+              const nlrs = lm.redSurrogate.slice(); nlrs[rPos] = false;
+              matches[lastMatchIdx] = Object.assign({}, lm, { redSurrogate: nlrs });
+            } else {
+              const nlbs = lm.blueSurrogate.slice(); nlbs[bPos] = false;
+              matches[lastMatchIdx] = Object.assign({}, lm, { blueSurrogate: nlbs });
+            }
+            moved = true; changed = true; break;
+          }
+          if (ebIdx !== -1 && !em.blueSurrogate[ebIdx]) {
+            const nbs = em.blueSurrogate.slice(); nbs[ebIdx] = true;
+            matches[m] = Object.assign({}, em, { blueSurrogate: nbs });
+            if (rPos !== -1) {
+              const nlrs = lm.redSurrogate.slice(); nlrs[rPos] = false;
+              matches[lastMatchIdx] = Object.assign({}, lm, { redSurrogate: nlrs });
+            } else {
+              const nlbs = lm.blueSurrogate.slice(); nlbs[bPos] = false;
+              matches[lastMatchIdx] = Object.assign({}, lm, { blueSurrogate: nlbs });
+            }
+            moved = true; changed = true; break;
+          }
+        }
+        // If we couldn't find a middle appearance, try moving to second appearance
+        // (first+1) as long as it's not the same as lastMatchIdx
+        if (!moved && firstApp[team] + 1 < lastMatchIdx) {
+          const fm1 = firstApp[team] + 1;
+          // find team in that match - might not be there, search nearby
+          for (let m = firstApp[team] + 1; m < lastMatchIdx; m++) {
+            const em = matches[m];
+            const erIdx = em.red.indexOf(team);
+            const ebIdx = em.blue.indexOf(team);
+            if (erIdx !== -1 && !em.redSurrogate[erIdx]) {
+              const nrs = em.redSurrogate.slice(); nrs[erIdx] = true;
+              matches[m] = Object.assign({}, em, { redSurrogate: nrs });
+              if (rPos !== -1) {
+                const nlrs = lm.redSurrogate.slice(); nlrs[rPos] = false;
+                matches[lastMatchIdx] = Object.assign({}, lm, { redSurrogate: nlrs });
+              } else {
+                const nlbs = lm.blueSurrogate.slice(); nlbs[bPos] = false;
+                matches[lastMatchIdx] = Object.assign({}, lm, { blueSurrogate: nlbs });
+              }
+              changed = true; break;
+            }
+            if (ebIdx !== -1 && !em.blueSurrogate[ebIdx]) {
+              const nbs = em.blueSurrogate.slice(); nbs[ebIdx] = true;
+              matches[m] = Object.assign({}, em, { blueSurrogate: nbs });
+              if (rPos !== -1) {
+                const nlrs = lm.redSurrogate.slice(); nlrs[rPos] = false;
+                matches[lastMatchIdx] = Object.assign({}, lm, { redSurrogate: nlrs });
+              } else {
+                const nlbs = lm.blueSurrogate.slice(); nlbs[bPos] = false;
+                matches[lastMatchIdx] = Object.assign({}, lm, { blueSurrogate: nlbs });
+              }
+              changed = true; break;
+            }
+          }
+        }
+      }
+      if (!changed) break;
+    }
+  })();
 
   return { matches, surrogateCount, roundBoundaries };
 }

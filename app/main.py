@@ -36,11 +36,18 @@ from sqlalchemy.orm import selectinload
 
 from app.db import (
     AbstractSchedule, AssignedSchedule, AsyncSessionLocal,
-    Event, EventTeam, MatchRow, Team,
+    Event, EventTeam, MatchRow, Team, User,
     get_session, init_db,
 )
 from app.scheduler import run_iterations_worker, run_assignment_worker
 from app import tba as tba_client
+from app.auth import (
+    get_current_user, require_auth,
+    google_login_url, google_exchange_code,
+    apple_login_url, apple_exchange_code,
+    upsert_user, create_jwt,
+    GOOGLE_CLIENT_ID, APPLE_CLIENT_ID,
+)
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -108,21 +115,23 @@ class TeamIn(BaseModel):
 
 class AbstractGenerateRequest(BaseModel):
     """Stage 1: generate slot-based abstract schedule."""
-    num_teams:        int = Field(..., ge=6, le=120)
-    matches_per_team: int = Field(6, ge=1, le=20)
-    cooldown:         int = Field(3, ge=1, le=20)
-    iterations:       int = Field(1000, ge=1)
-    name:             str = "Abstract Schedule"
-    event_id:         int | None = None  # optional — link to an event
+    num_teams:        int         = Field(..., ge=6, le=120)
+    matches_per_team: int         = Field(6, ge=1, le=20)
+    cooldown:         int         = Field(3, ge=1, le=20)
+    iterations:       int         = Field(1, ge=1)   # Stage 1 is single deterministic pass
+    seed:             str | None  = None              # hex seed for reproducibility
+    name:             str         = "Abstract Schedule"
+    event_id:         int | None  = None              # optional — link to an event
 
 
 class AssignRequest(BaseModel):
     """Stage 2: assign real team numbers to an abstract schedule."""
     event_id:             int
     abstract_schedule_id: int
-    iterations:           int = Field(500, ge=1)
-    name:                 str = "Schedule"
-    day_config:           Any = None
+    iterations:           int         = Field(500, ge=1)
+    assign_seed:          str | None  = None
+    name:                 str         = "Schedule"
+    day_config:           Any         = None
 
 
 # ── Events ────────────────────────────────────────────────────────────────────
@@ -300,6 +309,7 @@ async def remove_team(event_id: int, team_number: int, db: AsyncSession = Depend
 async def generate_abstract(
     body: AbstractGenerateRequest,
     db: AsyncSession = Depends(get_session),
+    current_user: dict | None = Depends(get_current_user),
 ):
     """
     Stage 1 — Generate a slot-based abstract schedule (no team numbers).
@@ -320,9 +330,11 @@ async def generate_abstract(
         for w in range(n_workers):
             w_iters = base + (1 if w < remainder else 0)
             worker_iters.append(w_iters)
+            _seed_int = int(body.seed, 16) if body.seed else None
+            _w_seed = (_seed_int ^ w) if _seed_int is not None else None
             task = asyncio.ensure_future(
                 loop.run_in_executor(pool, run_iterations_worker,
-                    (body.num_teams, body.matches_per_team, body.cooldown, w_iters, w))
+                    (body.num_teams, body.matches_per_team, body.cooldown, w_iters, w, _w_seed))
             )
             tasks.append(task)
 
@@ -355,9 +367,11 @@ async def generate_abstract(
             num_teams=body.num_teams,
             matches_per_team=body.matches_per_team,
             cooldown=body.cooldown,
+            seed=body.seed,
             iterations_run=iterations,
             best_iteration=best_result.get("worker_id", 0),
             score=best_result["score"],
+            created_by=current_user["sub"] if current_user else None,
             matches=best_result["matches"],
             surrogate_count=best_result["surrogate_count"],
             round_boundaries={str(k): v for k, v in best_result["round_boundaries"].items()},
@@ -398,10 +412,12 @@ async def get_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(get
     return {
         "id": sched.id, "name": sched.name, "event_id": sched.event_id,
         "num_teams": sched.num_teams, "matches_per_team": sched.matches_per_team,
-        "cooldown": sched.cooldown, "iterations_run": sched.iterations_run,
+        "cooldown": sched.cooldown, "seed": sched.seed,
+        "iterations_run": sched.iterations_run,
         "score": sched.score, "matches": sched.matches,
         "surrogate_count": sched.surrogate_count,
         "round_boundaries": sched.round_boundaries,
+        "created_by": sched.created_by,
         "created_at": sched.created_at.isoformat(),
     }
 
@@ -421,6 +437,7 @@ async def assign_teams(
     abstract_id: int,
     body: AssignRequest,
     db: AsyncSession = Depends(get_session),
+    current_user: dict | None = Depends(get_current_user),
 ):
     """
     Stage 2 — Assign real team numbers to an abstract schedule.
@@ -459,10 +476,12 @@ async def assign_teams(
         for w in range(n_workers):
             w_iters = base + (1 if w < remainder else 0)
             worker_iters.append(w_iters)
+            _aseed_int = int(body.assign_seed, 16) if body.assign_seed else None
+            _aw_seed = (_aseed_int ^ w) if _aseed_int is not None else None
             task = asyncio.ensure_future(
                 loop.run_in_executor(pool, run_assignment_worker,
                     (abstract_matches, abstract.num_teams, team_numbers,
-                     abstract.cooldown, w_iters, w))
+                     abstract.cooldown, w_iters, w, _aw_seed))
             )
             tasks.append(task)
 
@@ -504,6 +523,8 @@ async def assign_teams(
             is_active=True,
             slot_map=best_result["slot_map"],
             day_config=body.day_config,
+            assign_seed=body.assign_seed,
+            created_by=current_user["sub"] if current_user else None,
         )
         db.add(assigned)
         await db.flush()
@@ -583,6 +604,10 @@ async def get_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get
         "abstract_schedule_id": assigned.abstract_schedule_id,
         "num_teams":            abstract.num_teams,
         "matches_per_team":     abstract.matches_per_team,
+        "cooldown":             abstract.cooldown,
+        "seed":                 abstract.seed,
+        "assign_seed":          assigned.assign_seed,
+        "created_by":           assigned.created_by,
         "slot_map":             assigned.slot_map,
         "matches":              resolved_matches,
         "surrogate_count":      abstract.surrogate_count,
@@ -608,10 +633,16 @@ async def activate_assigned_schedule(schedule_id: int, db: AsyncSession = Depend
 
 
 @app.delete("/api/assigned-schedules/{schedule_id}", status_code=204)
-async def delete_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get_session)):
+async def delete_assigned_schedule(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_session),
+    current_user: dict | None = Depends(get_current_user),
+):
     assigned = await db.get(AssignedSchedule, schedule_id)
     if not assigned:
         raise HTTPException(404, "Assigned schedule not found")
+    if assigned.created_by and (not current_user or current_user.get("sub") != assigned.created_by):
+        raise HTTPException(403, "You do not own this schedule")
     await db.delete(assigned); await db.commit()
 
 
@@ -621,3 +652,174 @@ async def delete_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(
 async def health():
     actual_workers = CPU_WORKERS or os.cpu_count() or 1
     return {"status": "ok", "cpu_workers": actual_workers}
+
+
+# ── Auth routes ───────────────────────────────────────────────────────────────
+
+@app.get("/auth/google/login")
+async def google_login(state: str = ""):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(501, "Google OAuth not configured (GOOGLE_CLIENT_ID missing)")
+    return RedirectResponse(google_login_url(state))
+
+
+@app.get("/auth/google/callback")
+async def google_callback(code: str, db: AsyncSession = Depends(get_session)):
+    try:
+        info = await google_exchange_code(code)
+    except Exception as e:
+        raise HTTPException(400, f"Google OAuth failed: {e}")
+    user = await upsert_user(
+        sub=f"google:{info['sub']}", provider="google",
+        email=info.get("email"), name=info.get("name"), db=db,
+    )
+    token = create_jwt(user.id, user.sub, "google", user.email)
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(f"""<!doctype html><html><body><script>
+window.opener ? window.opener.postMessage({{token:'{token}'}}, '*') : (localStorage.setItem('frc_token','{token}'), window.location='/');
+window.close();
+</script></body></html>""")
+
+
+@app.get("/auth/apple/login")
+async def apple_login(state: str = ""):
+    if not APPLE_CLIENT_ID:
+        raise HTTPException(501, "Apple OAuth not configured (APPLE_CLIENT_ID missing)")
+    return RedirectResponse(apple_login_url(state))
+
+
+@app.post("/auth/apple/callback")
+async def apple_callback(
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+):
+    """Apple uses form_post so we need to parse form data."""
+    form = await request.form()
+    code = form.get("code")
+    id_token_raw = form.get("id_token")
+    if not code:
+        raise HTTPException(400, "No code in Apple callback")
+    try:
+        info = await apple_exchange_code(str(code), str(id_token_raw) if id_token_raw else None)
+    except Exception as e:
+        raise HTTPException(400, f"Apple OAuth failed: {e}")
+    # Apple may send user name only on first login via form field
+    user_json = form.get("user")
+    name = None
+    if user_json:
+        import json as _json
+        try:
+            u = _json.loads(str(user_json))
+            n = u.get("name", {})
+            name = f"{n.get('firstName','')} {n.get('lastName','')}".strip() or None
+        except Exception:
+            pass
+    user = await upsert_user(
+        sub=f"apple:{info['sub']}", provider="apple",
+        email=info.get("email"), name=name, db=db,
+    )
+    token = create_jwt(user.id, user.sub, "apple", user.email)
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(f"""<!doctype html><html><body><script>
+window.opener ? window.opener.postMessage({{token:'{token}'}}, '*') : (localStorage.setItem('frc_token','{token}'), window.location='/');
+window.close();
+</script></body></html>""")
+
+
+@app.get("/auth/me")
+async def auth_me(current_user: dict | None = Depends(get_current_user)):
+    """Return current user info from JWT, or null if not authenticated."""
+    if not current_user:
+        return {"authenticated": False}
+    return {
+        "authenticated": True,
+        "sub":      current_user.get("sub"),
+        "email":    current_user.get("email"),
+        "provider": current_user.get("provider"),
+        "uid":      current_user.get("uid"),
+    }
+
+
+@app.get("/auth/providers")
+async def auth_providers():
+    """Return which OAuth providers are configured."""
+    return {
+        "google": bool(GOOGLE_CLIENT_ID),
+        "apple":  bool(APPLE_CLIENT_ID),
+    }
+
+
+# ── Duplicate schedule ────────────────────────────────────────────────────────
+
+@app.post("/api/assigned-schedules/{schedule_id}/duplicate", status_code=201)
+async def duplicate_assigned_schedule(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_session),
+    current_user: dict | None = Depends(get_current_user),
+):
+    """
+    Duplicate an assigned schedule — anyone can do this.
+    Creates a new AssignedSchedule (and a copy of its AbstractSchedule) owned
+    by the requesting user.  The original is not modified.
+    """
+    result = await db.execute(
+        select(AssignedSchedule)
+        .options(selectinload(AssignedSchedule.abstract_schedule))
+        .where(AssignedSchedule.id == schedule_id)
+    )
+    src = result.scalar_one_or_none()
+    if not src:
+        raise HTTPException(404, "Schedule not found")
+
+    abs_src = src.abstract_schedule
+
+    # Duplicate abstract schedule
+    new_abs = AbstractSchedule(
+        event_id=abs_src.event_id,
+        name=f"{abs_src.name} (copy)",
+        num_teams=abs_src.num_teams,
+        matches_per_team=abs_src.matches_per_team,
+        cooldown=abs_src.cooldown,
+        seed=abs_src.seed,
+        iterations_run=abs_src.iterations_run,
+        best_iteration=abs_src.best_iteration,
+        score=abs_src.score,
+        matches=abs_src.matches,
+        surrogate_count=abs_src.surrogate_count,
+        round_boundaries=abs_src.round_boundaries,
+        created_by=current_user["sub"] if current_user else None,
+    )
+    db.add(new_abs)
+    await db.flush()
+
+    # Duplicate assigned schedule
+    new_asgn = AssignedSchedule(
+        abstract_schedule_id=new_abs.id,
+        event_id=src.event_id,
+        name=f"{src.name} (copy)",
+        is_active=False,
+        slot_map=src.slot_map,
+        day_config=src.day_config,
+        assign_seed=src.assign_seed,
+        created_by=current_user["sub"] if current_user else None,
+    )
+    db.add(new_asgn)
+    await db.flush()
+
+    # Copy match rows
+    mr_result = await db.execute(
+        select(MatchRow).where(MatchRow.assigned_schedule_id == schedule_id)
+    )
+    for mr in mr_result.scalars():
+        db.add(MatchRow(
+            assigned_schedule_id=new_asgn.id, match_num=mr.match_num,
+            red1=mr.red1, red2=mr.red2, red3=mr.red3,
+            blue1=mr.blue1, blue2=mr.blue2, blue3=mr.blue3,
+            red1_surrogate=mr.red1_surrogate, red2_surrogate=mr.red2_surrogate,
+            red3_surrogate=mr.red3_surrogate,
+            blue1_surrogate=mr.blue1_surrogate, blue2_surrogate=mr.blue2_surrogate,
+            blue3_surrogate=mr.blue3_surrogate,
+        ))
+
+    await db.commit()
+    return {"id": new_asgn.id, "abstract_schedule_id": new_abs.id, "name": new_asgn.name}

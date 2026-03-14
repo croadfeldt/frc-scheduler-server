@@ -115,12 +115,14 @@ class AbstractSchedule(Base):
     name:             Mapped[str]      = mapped_column(String(128), default="Abstract Schedule")
 
     # Scheduling parameters
-    num_teams:        Mapped[int]   = mapped_column(Integer)
-    matches_per_team: Mapped[int]   = mapped_column(Integer)
-    cooldown:         Mapped[int]   = mapped_column(Integer)
-    iterations_run:   Mapped[int]   = mapped_column(Integer)
-    best_iteration:   Mapped[int]   = mapped_column(Integer)
-    score:            Mapped[float] = mapped_column(Float)
+    num_teams:        Mapped[int]      = mapped_column(Integer)
+    matches_per_team: Mapped[int]      = mapped_column(Integer)
+    cooldown:         Mapped[int]      = mapped_column(Integer)
+    seed:             Mapped[str|None] = mapped_column(String(16), nullable=True)
+    iterations_run:   Mapped[int]      = mapped_column(Integer)
+    best_iteration:   Mapped[int]      = mapped_column(Integer)
+    score:            Mapped[float]    = mapped_column(Float)
+    created_by:       Mapped[str|None] = mapped_column(String(256), nullable=True, index=True)
 
     # Slot-based match data — red/blue contain slot indices 1..N, not team numbers
     matches:          Mapped[Any] = mapped_column(JSON)  # [{red:[s1,s2,s3], blue:[s4,s5,s6], red_surrogate:[...], blue_surrogate:[...]}]
@@ -150,14 +152,29 @@ class AssignedSchedule(Base):
     is_active:            Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Slot → team number mapping: {"1": 254, "2": 1114, ...}
-    slot_map:   Mapped[Any]      = mapped_column(JSON)
-    day_config: Mapped[Any|None] = mapped_column(JSON, nullable=True)
+    slot_map:     Mapped[Any]      = mapped_column(JSON)
+    day_config:   Mapped[Any|None] = mapped_column(JSON, nullable=True)
+    assign_seed:  Mapped[str|None] = mapped_column(String(16), nullable=True)
+    created_by:   Mapped[str|None] = mapped_column(String(256), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     abstract_schedule: Mapped["AbstractSchedule"] = relationship(back_populates="assigned_schedules")
     event:             Mapped["Event"]             = relationship(back_populates="assigned_schedules")
     match_rows:        Mapped[list["MatchRow"]]    = relationship(back_populates="assigned_schedule", cascade="all, delete-orphan")
+
+
+class User(Base):
+    """OAuth user — created on first login via Google or Apple."""
+    __tablename__ = "users"
+
+    id:         Mapped[int]      = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    sub:        Mapped[str]      = mapped_column(String(256), unique=True, index=True)  # OAuth subject
+    provider:   Mapped[str]      = mapped_column(String(32))   # "google" | "apple"
+    email:      Mapped[str|None] = mapped_column(String(256), nullable=True)
+    name:       Mapped[str|None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 class MatchRow(Base):
