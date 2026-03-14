@@ -561,7 +561,7 @@
         <div class="field-row">
           <div class="field">
             <label>Number of Teams</label>
-            <input type="number" id="numTeams" value="24" min="6" max="120" title="Controlled by event team roster when an event is selected">
+            <input type="number" id="numTeams" value="24" min="6" max="120" title="Set manually, or auto-populated from event roster">
           </div>
           <div class="field">
             <label>Matches per Team</label>
@@ -1265,7 +1265,7 @@ async function activateEvent(ev) {
   document.getElementById('btnManageTeams').disabled    = false;
   document.getElementById('btnSavedSchedules').disabled = false;
   document.getElementById('btnDeleteEvent').disabled    = false;
-  document.getElementById('numTeams').disabled          = false;
+  // numTeams is always editable
   await loadRoster();
   await loadSavedSchedules();
 }
@@ -1303,6 +1303,7 @@ async function deleteEvent() {
     document.getElementById('btnManageTeams').disabled    = true;
     document.getElementById('btnSavedSchedules').disabled = true;
     document.getElementById('btnDeleteEvent').disabled    = true;
+    document.getElementById('numTeams').disabled          = false;
   } catch(e) { showApiStatus(e.message, true); }
 }
 
@@ -1351,7 +1352,7 @@ async function loadRoster() {
   if (!_currentEventId) return;
   try {
     const teams = await apiFetch('/api/events/' + _currentEventId + '/teams');
-    // Update numTeams to reflect roster
+    // Sync numTeams with roster count — but keep input editable
     document.getElementById('numTeams').value = teams.length;
     document.getElementById('rosterCount').textContent = teams.length;
     const roster = document.getElementById('teamRoster');
@@ -1498,15 +1499,16 @@ async function generateSchedule() {
     })),
   };
 
-  // If no event selected, fall back to client-side scheduling
+  const numTeams = parseInt(document.getElementById('numTeams').value) || 0;
+  if (numTeams < 6) {
+    showApiStatus('Enter at least 6 teams', true);
+    btn.disabled = false;
+    document.getElementById('progressWrap').style.display = 'none';
+    return;
+  }
+
+  // No event selected — run entirely client-side and render directly
   if (!_currentEventId) {
-    const numTeams = parseInt(document.getElementById('numTeams').value);
-    if (!numTeams || numTeams < 6) {
-      showApiStatus('Set number of teams (minimum 6) or select an event', true);
-      btn.disabled = false;
-      document.getElementById('progressWrap').style.display = 'none';
-      return;
-    }
     runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress);
     return;
   }
@@ -1563,8 +1565,8 @@ async function generateSchedule() {
     btn.disabled = false;
     document.getElementById('progressWrap').style.display = 'none';
   } catch(err) {
+    console.error('Server generate error:', err.message);
     showApiStatus('Server error: ' + err.message + ' — falling back to client-side', true);
-    const numTeams = parseInt(document.getElementById('numTeams').value);
     runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress);
   }
 }
@@ -1616,7 +1618,7 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
         _updateProgress();
       } else if (msg.type === 'result') {
         const delta = workerIters - workerDone; totalDone += delta;
-        console.log('Worker', w, 'result: score=', msg.bestScore, 'matches=', msg.bestMatches ? msg.bestMatches.length : null);
+        console.log('Worker', w, 'result: score=', msg.bestScore, 'typeof=', typeof msg.bestScore, 'matches=', msg.bestMatches ? msg.bestMatches.length : null, 'currentBest=', bestScore, 'comparison=', msg.bestScore !== null && msg.bestScore > bestScore);
         if (msg.bestScore !== null && msg.bestScore > bestScore) {
           bestScore = msg.bestScore; bestMatches = msg.bestMatches;
           bestRoundBoundaries = new Map(msg.bestRoundBoundaries);
