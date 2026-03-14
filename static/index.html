@@ -1045,11 +1045,31 @@ function buildShareUrl() {
   const n   = document.getElementById('numTeams').value;
   const mpt = document.getElementById('matchesPerTeam').value;
   const cd  = document.getElementById('cooldown').value;
+  const ct  = document.getElementById('cycleTime').value;
+  const nd  = document.getElementById('numDays').value;
   if (n)   params.set('n',   n);
   if (mpt) params.set('mpt', mpt);
   if (cd)  params.set('cd',  cd);
+  if (ct)  params.set('ct',  ct);
+  if (nd)  params.set('days', nd);
   if (_currentSeed)       params.set('seed',  _currentSeed);
   if (_currentAssignSeed) params.set('aseed', _currentAssignSeed);
+
+  // Encode per-day schedule: d1=HH:MM-HH:MM, d1b=Name|HH:MM|HH:MM,...
+  document.querySelectorAll('.day-row').forEach(function(row, i) {
+    const dayNum = i + 1;
+    const start = row.querySelector('.day-start').value;
+    const end   = row.querySelector('.day-end').value;
+    if (start && end) params.set('d' + dayNum, start + '-' + end);
+
+    const breaks = Array.from(row.querySelectorAll('.break-row')).map(function(br) {
+      const bname  = (br.querySelector('.break-name').value  || 'Break').replace(/[|,]/g, ' ');
+      const bstart = br.querySelector('.break-start').value;
+      const bend   = br.querySelector('.break-end').value;
+      return bstart && bend ? bname + '|' + bstart + '|' + bend : null;
+    }).filter(Boolean);
+    if (breaks.length) params.set('d' + dayNum + 'b', breaks.join(','));
+  });
 
   // Encode team numbers from slot_map if we have an assigned schedule
   if (_currentSlotMap && Object.keys(_currentSlotMap).length > 0) {
@@ -1077,10 +1097,27 @@ function shareSchedule() {
 
 function parseUrlParams() {
   const p = new URLSearchParams(window.location.search);
+  // Parse per-day schedule params
+  const days = [];
+  const nd = parseInt(p.get('days')) || 0;
+  for (let i = 1; i <= Math.max(nd, 5); i++) {
+    const dayStr   = p.get('d' + i);
+    const breaksStr= p.get('d' + i + 'b');
+    if (!dayStr) continue;
+    const [start, end] = dayStr.split('-');
+    const breaks = breaksStr ? breaksStr.split(',').map(function(b) {
+      const parts = b.split('|');
+      return parts.length === 3 ? { name: parts[0], start: parts[1], end: parts[2] } : null;
+    }).filter(Boolean) : [];
+    days.push({ start, end, breaks });
+  }
   return {
-    n:      parseInt(p.get('n'))   || null,
-    mpt:    parseInt(p.get('mpt')) || null,
-    cd:     parseInt(p.get('cd'))  || null,
+    n:      parseInt(p.get('n'))    || null,
+    mpt:    parseInt(p.get('mpt'))  || null,
+    cd:     parseInt(p.get('cd'))   || null,
+    ct:     parseInt(p.get('ct'))   || null,
+    days:   days.length ? days : null,
+    numDays:nd || null,
     seed:   p.get('seed')  || null,
     aseed:  p.get('aseed') || null,
     teams:  p.get('teams') ? p.get('teams').split(',').map(Number).filter(Boolean) : null,
@@ -1092,9 +1129,33 @@ function applyUrlParams(params) {
   if (params.n)   document.getElementById('numTeams').value       = params.n;
   if (params.mpt) document.getElementById('matchesPerTeam').value = params.mpt;
   if (params.cd)  document.getElementById('cooldown').value       = params.cd;
+  if (params.ct)  document.getElementById('cycleTime').value      = params.ct;
+
+  // Restore day count and rebuild UI, then fill in times
+  if (params.numDays || (params.days && params.days.length)) {
+    const nd = params.numDays || params.days.length;
+    document.getElementById('numDays').value = nd;
+    buildDaysUI();
+    if (params.days) {
+      const dayRows = document.querySelectorAll('.day-row');
+      params.days.forEach(function(day, i) {
+        const row = dayRows[i];
+        if (!row) return;
+        if (day.start) row.querySelector('.day-start').value = day.start;
+        if (day.end)   row.querySelector('.day-end').value   = day.end;
+        // Clear default breaks and add URL breaks
+        if (day.breaks && day.breaks.length) {
+          row.querySelector('.breaks-list').innerHTML = '';
+          day.breaks.forEach(function(b) {
+            addBreak(row.querySelector('.btn-add-break'), b.start, b.end, b.name);
+          });
+        }
+      });
+    }
+  }
+
   if (params.seed) {
     _currentSeed = params.seed;
-    // Show seed in UI immediately
     document.getElementById('shareBar').style.display = 'flex';
     document.getElementById('displaySeed').textContent = params.seed;
   }
@@ -1103,7 +1164,7 @@ function applyUrlParams(params) {
 // Auto-run from URL params on load
 async function autoRunFromUrl() {
   const params = parseUrlParams();
-  if (!params.seed && !params.n) return;  // nothing to auto-run
+  if (!params.seed && !params.n && !params.days) return;  // nothing to auto-run
   applyUrlParams(params);
 
   // Auto-generate Stage 1 with the seed

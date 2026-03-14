@@ -12,7 +12,7 @@ OpenShift-deployable via Containerfile. GNU GPL v3. AI-generated with human revi
 
 ```
 totalMatches    = ceil(N × MPT / 6)
-matchesPerRound = ceil(N / 6)          ← Phase 1 only; cosmetic marker after
+matchesPerRound = ceil(N / 6)
 totalSurSlots   = totalMatches × 6 − N × MPT
 phase1Surplus   = matchesPerRound × 6 − N
 fairSurCap      = ceil(totalSurSlots / N) + 1
@@ -20,41 +20,33 @@ fairSurCap      = ceil(totalSurSlots / N) + 1
 
 ### Team Placement (Step 2)
 
-Phase 1 — matchesPerRound matches, Round 1 strict:
+Phase 1 — matchesPerRound matches:
 - Every slot plays once before any plays twice.
 - Last match fills phase1Surplus slots with early second-plays (NOT surrogates).
 - Alliance assignment: enumerate all C(6,3)=20 splits; last-match variant penalises
   unequal second-play distribution (−500 per imbalance unit).
 - No slot in Phase 1 is flagged surrogate.
 
-Phase 2 — remaining matches, open scheduling:
+Phase 2 — remaining matches:
 ```
 underQuota = slots with mc[s] < MPT
-atQuota    = slots with mc[s] == MPT  (only drafted when surNeeded > 0)
+atQuota    = slots with mc[s] == MPT  (only when surNeeded > 0)
 surNeeded  = max(0, 6 − len(underQuota))
 ```
-Run 60 random candidate sets per match. Score each. Pick best.
+60 random candidate sets per match; score each; pick best.
 Flag slot as surrogate only when mc[s] >= MPT at selection time.
 
-### Post-Generation Sweeps (deterministic, after greedy phase)
+### Post-Generation Sweeps
 
-R1 — No surrogate in last match:
-  For each surrogate S in last match, find non-surrogate R in same match.
-  Find earlier match M where S appears and R is absent, and M > first_appearance[S].
-  Swap S↔R between M and last match. Surrogate flag moves to M.
-
-R2 — No surrogate as first appearance:
-  Guard inside R1: only accept match M if M index > first_appearance[S].
-
-R3 — No surrogate as last appearance:
-  If a slot's last appearance is flagged surrogate, move the flag to any earlier
-  non-first appearance of the same slot. No teams change matches. Up to 3 passes.
+R1 — No surrogate in last match: swap with earlier match (R2 guard prevents first-appearance)
+R2 — No surrogate as first appearance: guard in R1, skip M if M ≤ first_appearance[S]
+R3 — No surrogate as last appearance: move flag to earlier non-first appearance (up to 3 passes)
 
 ### Priorities
 
 ```
 P1  [HARD]  6 teams/match, 3 red / 3 blue
-P2  [HARD]  Each slot plays exactly MPT times. Surrogates fill structural surplus (cap fairSurCap)
+P2  [HARD]  Each slot plays exactly MPT times; surrogates fill structural surplus (cap fairSurCap)
 P3  [HARD]  Round 1: all slots play once before any plays twice
 P4  [HARD]  Cooldown: −1000×(idealGap−gap) if gap < cooldown
 P5  [SOFT]  Match equity:       W_COUNT   = 5
@@ -78,112 +70,110 @@ Stage 1 runs as a single deterministic pass (iterations=1, no UI iterations fiel
 
 ### Seeding
 
-```js
-generateMatches(numTeams, matchesPerTeam, idealGap, seed)
-```
-
-`seed` is a hex string. JS uses mulberry32 PRNG (`makeRng(parseInt(seed,16))`),
-Python uses `random.Random(int(seed,16))`. Both replace all Math.random() / random.random()
-calls so the same seed always produces identical output.
-A new seed is auto-generated (`randomSeed()`) on each Stage 1 run.
+`generateMatches(numTeams, matchesPerTeam, idealGap, seed)` — hex string.
+JS: mulberry32 (`makeRng(parseInt(seed,16))`). Python: `random.Random(int(seed,16))`.
+Same seed → identical output always. Auto-generated per run via `randomSeed()`.
 
 ---
 
 ## STAGE 2 — TEAM ASSIGNMENT
 
-Input: abstract schedule + N real team numbers + assign_seed (hex string)
-Method: N iterations with seeded RNG. Each shuffles team numbers into slots,
-scores against P5–P10 with real numbers, returns best slot_map {slot: team_number}.
-Default iterations: 500. Same seeded approach — same assign_seed → same mapping.
+Input: abstract schedule + N real team numbers + assign_seed (hex)
+Method: N iterations with seeded RNG; each shuffles team numbers into slots;
+scores against P5–P10 with real numbers; returns best slot_map {slot: team_number}.
+Default: 500 iterations. Same assign_seed → same mapping always.
 
 ---
 
 ## URL REPRODUCIBILITY
 
-After generating, browser URL is updated (no page reload) with all params:
+After generating, browser URL is updated (no page reload). Opening the URL
+auto-restores all config and re-runs Stage 1 (and optionally Stage 2).
+
+### URL Parameter Reference
+
+| Parameter | Example | Description |
+|-----------|---------|-------------|
+| `n` | `51` | Number of teams |
+| `mpt` | `11` | Matches per team |
+| `cd` | `3` | Cooldown (matches between appearances) |
+| `ct` | `8` | Default cycle time in minutes |
+| `days` | `2` | Number of competition days |
+| `seed` | `a1b2c3d4` | Stage 1 hex seed |
+| `aseed` | `cafebabe` | Stage 2 hex seed |
+| `teams` | `254,1114,...` | Team numbers in slot order |
+| `d1` | `08:00-17:00` | Day 1 start-end (`HH:MM-HH:MM`) |
+| `d2` | `08:00-15:30` | Day 2 start-end |
+| `d1b` | `Lunch\|12:00\|13:00,...` | Day 1 breaks: `Name\|start\|end`, comma-separated |
+| `d2b` | `Break\|14:30\|14:45` | Day 2 breaks |
+
+Up to 5 days: `d1`–`d5` and `d1b`–`d5b`.
+
+Without `teams`: abstract schedule with S1/S2 labels.
+Without `seed`: params applied to UI but auto-run not triggered.
+
+### Example
 
 ```
-?n=51&mpt=11&cd=3&seed=a1b2c3d4&aseed=cafebabe&teams=254,1114,2052,...
+?n=51&mpt=11&cd=3&ct=8&days=2&seed=a1b2c3d4&aseed=cafebabe
+  &d1=08:00-17:00&d1b=Lunch|12:00|13:00
+  &d2=08:00-15:00
+  &teams=254,1114,2052,...
 ```
-
-- `n` = numTeams, `mpt` = matchesPerTeam, `cd` = cooldown
-- `seed` = Stage 1 hex seed, `aseed` = Stage 2 hex seed
-- `teams` = comma-separated team numbers in slot order (slot 1 first)
-
-On load: parse URL → pre-fill config → auto-run Stage 1 with seed.
-If teams present and event loaded → auto-run Stage 2.
-Without teams: abstract schedule shows with S1/S2 slot labels.
-Share button copies the full URL to clipboard.
 
 ---
 
 ## UI FLOW
 
 ### Event bar (top)
-[Year input (default current year)] [Event code input e.g. "mnwi"] [Load]
-- Prepends year: "mnwi" + 2025 → "2025mnwi". Checks local DB first, falls back to TBA.
-- Year auto-sets when event loads from TBA or dropdown.
-- Recent events dropdown (secondary).
-- Auth bar on right: Sign In button / user email chip + Sign Out.
+[Year input] [Event code e.g. "mnwi"] [Load]
+- Prepends year: "mnwi" + 2025 → "2025mnwi". Checks DB first, falls back to TBA.
+- Year auto-sets on event load. Recent events dropdown (secondary).
+- Auth bar on right: Sign In / user email + Sign Out.
 
-### Header / Share bar
-Shown after schedule generated. Contains:
-- Seed display: "Seed: a1b2c3d4" (click to copy) + "· assign: cafebabe" if Stage 2 done
-- Share button: copies full reproducible URL
-- Duplicate button: shown when a saved assigned schedule is loaded (any user can duplicate)
+### Header / Share bar (shown after schedule generated)
+- Seed: `a1b2c3d4` (click-to-copy) · assign: `cafebabe`
+- Share button: copies full reproducible URL (includes all day/time/break params)
+- Duplicate button: shown for any loaded assigned schedule
 
 ### Config panel
-- Number of Teams, Matches/Team, Cycle Time (min), Number of Days
-- Match Cooldown (matches between appearances for a team)
-- Timezone selector (IANA, display-only, appends abbreviation to match times)
+- Number of Teams, Matches/Team, Cycle Time (min), Number of Days (1–5)
+- Match Cooldown
+- Timezone selector (IANA, display-only, appends abbreviation to times)
 - Auto-generate on parameter change (default ON, 800ms debounce)
-  - Changes to Teams, MPT, Cooldown trigger automatic Stage 1 regeneration
-  - Amber warning banner if params changed with auto-populate OFF
-  - Assign button disables until Stage 1 re-run
+  Triggers on Teams, MPT, Cooldown changes. Amber warning if OFF and params changed.
 - Cycle Time Changes (per-match overrides)
-- Daily Schedule (per-day start/end, named breaks)
+- Daily Schedule:
+  Per-day rows (up to 5), each with:
+    - Start Time and End Time (time inputs, HH:MM)
+    - Named breaks with start/end times (+ Add Break button)
 
 ### Stage 1 button: "⚡ Stage 1: Generate Structure"
-- Streams SSE progress
-- Displays abstract schedule with S1/S2 slot labels
-- Updates URL with seed and params
-- Stage 2 panel opens below
+→ SSE → abstract schedule (S1/S2 labels) → URL updated with seed + all day params
 
 ### Stage 2 panel
-- Blue "Saved schedule found" banner if saved assignment exists for this abstract+event
-- Stage 2 status: event team count vs schedule count, ready/mismatch
-- Assignment Iterations input (default 500)
-- "▶ Assign Teams to Schedule" button (green)
-- Streams SSE progress → displays resolved schedule with real team numbers
-- Updates URL with aseed and teams, saves to DB (always new record = history preserved)
+- Blue banner if saved assignment found in DB
+- Event team count status, Assignment Iterations (default 500)
+- "▶ Assign Teams to Schedule" (green)
+→ SSE → real team numbers displayed → URL updated with aseed + teams
 
 ### Schedule output
-- Stats bar: Total Matches, Teams, Matches/Team, Days, Back-to-Backs (clickable), Surrogates (clickable)
-- Surrogates subtitle: "N min · optimal" or "N min · +X extra"
-  Minimum = ceil(N×MPT/6)×6 − N×MPT (tooltip shows full math)
-- Filter chips (team number, alliance header, day title, stat tiles)
-- Per-day tables: match#, time (AM/PM + TZ abbr), Red Alliance, Blue Alliance
-- Surrogate: amber "S" badge
-- Back-to-back: blue "B2B" badge
-- Round boundary rows every matchesPerRound matches
-- Overflow warning ONLY if last day runs out of time (not for intermediate days)
-- Export CSV
+- Stats bar: Total Matches, Teams, Matches/Team, Days, B2Bs (filter), Surrogates (filter)
+- Surrogates subtitle: "N min · optimal" or "+X extra"
+- Filter chips (team, alliance header, day title, stat tiles)
+- Per-day tables: match#, time (AM/PM + TZ abbr), Red, Blue
+- Surrogate: amber S badge. Back-to-back: blue B2B badge.
+- Round boundary rows. Overflow warning only if last day runs out of time.
+- Export CSV.
 
 ### Schedules modal (History)
-- Versions grouped by abstract schedule parameters (teams/MPT/cooldown)
-- Each version: Latest/v2/v1 badge, timestamp, name
-- View button, prominent "⬆ Promote to Active" button (accent colour, non-active only)
-- Delete button per version
+- Versions grouped by abstract schedule params
+- Latest/v2/v1 badges, timestamps
+- View, prominent "⬆ Promote to Active" (accent), Delete per version
 
 ### Auth modal
-- Google "Continue with Google" button (shown if GOOGLE_CLIENT_ID configured)
-- Apple "Continue with Apple" button (shown if APPLE_CLIENT_ID configured)
-- Opens OAuth in popup window; token posted back via postMessage then stored in localStorage
-
-### Client/server fallback
-- Server available → SSE streams, saves to DB
-- Server error → Web Workers (one per hardware core) → single-threaded fallback
-- Client-side generates abstract schedule (S1/S2 labels); Stage 2 requires server
+- Google / Apple buttons (shown only if server has credentials configured)
+- Popup OAuth flow; token stored in localStorage; Bearer header on all API calls
 
 ---
 
@@ -191,41 +181,37 @@ Shown after schedule generated. Contains:
 
 ```
 # Events
-GET  /api/events
-POST /api/events
-GET  /api/events/{event_id}
-DEL  /api/events/{event_id}
-GET  /api/events/{event_id}/teams
-POST /api/events/{event_id}/teams
-DEL  /api/events/{event_id}/teams/{number}
+GET/POST  /api/events
+GET/DEL   /api/events/{id}
+GET/POST  /api/events/{id}/teams
+DEL       /api/events/{id}/teams/{number}
 
 # TBA
-GET  /api/tba/events/{year}?search=
-POST /api/tba/import/{event_key}
+GET       /api/tba/events/{year}?search=
+POST      /api/tba/import/{event_key}
 
 # Stage 1
-POST /api/generate-abstract                    → SSE stream → abstract_schedule_id
-GET  /api/abstract-schedules?event_id=N
-GET  /api/abstract-schedules/{id}              (includes seed, created_by)
-DEL  /api/abstract-schedules/{id}
+POST      /api/generate-abstract                    SSE → abstract_schedule_id
+GET       /api/abstract-schedules?event_id=N
+GET/DEL   /api/abstract-schedules/{id}
 
 # Stage 2
-POST /api/abstract-schedules/{id}/assign       → SSE stream → assigned_schedule_id
-GET  /api/events/{id}/assigned-schedules       (version history, includes num_teams/MPT/cooldown)
-GET  /api/assigned-schedules/{id}              (resolved matches with real team numbers, seed, assign_seed)
-POST /api/assigned-schedules/{id}/activate     (promote to active — ownership not required)
-DEL  /api/assigned-schedules/{id}              (requires matching created_by)
-POST /api/assigned-schedules/{id}/duplicate    (anyone; creates new record owned by caller)
+POST      /api/abstract-schedules/{id}/assign       SSE → assigned_schedule_id
+GET       /api/events/{id}/assigned-schedules        version history
+GET       /api/assigned-schedules/{id}               resolved matches + seeds
+POST      /api/assigned-schedules/{id}/activate
+DEL       /api/assigned-schedules/{id}              requires ownership
+POST      /api/assigned-schedules/{id}/duplicate    open to all
 
 # Auth
-GET  /auth/google/login                        redirect to Google consent
-GET  /auth/google/callback                     exchange code → JWT → HTML popup closer
-GET  /auth/apple/login                         redirect to Apple consent
-POST /auth/apple/callback                      exchange code (form_post) → JWT → HTML popup closer
-GET  /auth/me                                  {authenticated, sub, email, provider, uid}
-GET  /auth/providers                           {google: bool, apple: bool}
+GET       /auth/google/login        redirect to Google
+GET       /auth/google/callback     code exchange → JWT → popup closer
+GET       /auth/apple/login         redirect to Apple
+POST      /auth/apple/callback      form_post exchange → JWT → popup closer
+GET       /auth/me                  {authenticated, sub, email, provider}
+GET       /auth/providers           {google: bool, apple: bool}
 
-GET  /api/health
+GET       /api/health
 ```
 
 ---
@@ -234,7 +220,7 @@ GET  /api/health
 
 ```
 users
-  id, sub (unique — "google:<id>" or "apple:<id>"), provider,
+  id, sub (unique: "google:<id>" or "apple:<id>"), provider,
   email, name, created_at, updated_at
 
 events
@@ -242,30 +228,28 @@ events
   start_date, end_date, tba_synced, created_at, updated_at
 
 teams
-  id, number (unique), name, nickname, city, state, country,
-  rookie_year, created_at, updated_at
+  id, number (unique), name, nickname, city, state, country, rookie_year
 
 event_teams
-  id, event_id FK, team_id FK  (unique constraint)
+  id, event_id FK, team_id FK  (unique)
 
 abstract_schedules
   id, event_id (nullable FK), name,
   num_teams, matches_per_team, cooldown,
-  seed (hex string, nullable),
+  seed (hex, nullable),
   iterations_run, best_iteration, score,
-  created_by (nullable — OAuth sub),
-  matches (JSON — slot indices, not team numbers),
-  surrogate_count (JSON), round_boundaries (JSON),
+  created_by (nullable OAuth sub),
+  matches (JSON — slot indices), surrogate_count (JSON), round_boundaries (JSON),
   created_at
 
 assigned_schedules
   id, abstract_schedule_id FK, event_id FK, name, is_active,
-  slot_map (JSON — {"1": 254, "2": 1114, ...}),
-  day_config (JSON),
-  assign_seed (hex string, nullable),
-  created_by (nullable — OAuth sub),
+  slot_map (JSON {"1": 254, "2": 1114, ...}),
+  day_config (JSON — cycle time, days with start/end/breaks),
+  assign_seed (hex, nullable),
+  created_by (nullable OAuth sub),
   created_at
-  ← Always INSERT new record. History preserved for revert.
+  ← Always INSERT. History preserved for revert.
 
 match_rows
   id, assigned_schedule_id FK, match_num,
@@ -273,70 +257,22 @@ match_rows
   red1/2/3_surrogate, blue1/2/3_surrogate (bool)
 ```
 
-**Access control:**
-- All reads: public (no auth required)
-- Delete: requires JWT with matching `created_by`
-- Duplicate: open to all; creates new records owned by caller
-- NULL `created_by`: anonymous schedule, cannot be deleted
-
----
-
-## AUTH IMPLEMENTATION
-
-**JWT:** `python-jose[cryptography]`, HS256, 30-day expiry.
-Payload: `{sub, uid, provider, email, iat, exp}`.
-Sent by frontend as `Authorization: Bearer <token>`.
-
-**Google OAuth:**
-- Redirect URI: `${BASE_URL}/auth/google/callback`
-- Scopes: `openid email profile`
-- On success: fetch userinfo → upsert User → issue JWT → HTML that postMessages token to opener
-
-**Apple OAuth:**
-- Service ID (web), `response_mode: form_post`
-- Redirect URI: `${BASE_URL}/auth/apple/callback`
-- Client secret: signed ES256 JWT from APPLE_PRIVATE_KEY (PEM)
-- ID token verified against Apple's JWKS endpoint
-- User name only available on first login (from form field)
-- On success: verify ID token → upsert User → issue JWT → HTML that postMessages token to opener
-
-**Frontend flow:**
-1. User clicks Sign In → `openAuthModal()` calls `/auth/providers` to show available buttons
-2. `signInWith(provider)` opens popup: `window.open('/auth/{provider}/login', ...)`
-3. OAuth completes → server returns HTML with JS that `postMessage({token})` to opener
-4. Frontend stores token in `localStorage('frc_token')`
-5. Every `apiFetch` adds `Authorization: Bearer <token>` header
-6. `/auth/me` verifies token and returns user info on page load
-
 ---
 
 ## ENV VARS
 
 ```bash
-# Database
 DATABASE_URL=postgresql+asyncpg://frc:frc@localhost:5432/frc_scheduler
-
-# TBA (optional — get free key at thebluealliance.com/account)
-TBA_API_KEY=
-
-# CPU workers (0 = auto-detect)
-CPU_WORKERS=0
-
-# Auth
-JWT_SECRET=              # openssl rand -hex 32
-BASE_URL=                # public URL e.g. https://frc-scheduler.apps.my-cluster.com
-
-# Google OAuth — https://console.cloud.google.com/apis/credentials
-# Redirect URI: ${BASE_URL}/auth/google/callback
+TBA_API_KEY=                # optional
+CPU_WORKERS=0               # 0 = auto-detect
+JWT_SECRET=                 # openssl rand -hex 32
+BASE_URL=                   # https://your-host.example.com
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
-
-# Apple Sign In — https://developer.apple.com/account/resources/identifiers
-# Service ID (web), redirect URI: ${BASE_URL}/auth/apple/callback
 APPLE_CLIENT_ID=
 APPLE_TEAM_ID=
 APPLE_KEY_ID=
-APPLE_PRIVATE_KEY=       # PEM content with \n for newlines
+APPLE_PRIVATE_KEY=          # PEM with \n for newlines
 ```
 
 ---
@@ -344,54 +280,36 @@ APPLE_PRIVATE_KEY=       # PEM content with \n for newlines
 ## DESIGN SYSTEM
 
 ```css
---bg: #1a1d27    --surface: #22263a    --surface2: #2a2f46    --border: #3a4060
---accent: #7aa4f0    --accent2: #e07b50    --accent3: #5cb87a
---text: #dde2f0    --text-strong: #f2f5ff    --text-muted: #929cb6
---red-team: #e87878    --blue-team: #6fa8e8    --amber: #c8992a    --danger: #cc5555
+--bg #1a1d27  --surface #22263a  --surface2 #2a2f46  --border #3a4060
+--accent #7aa4f0  --accent2 #e07b50  --accent3 #5cb87a
+--text #dde2f0  --text-strong #f2f5ff  --text-muted #929cb6
+--red-team #e87878  --blue-team #6fa8e8  --amber #c8992a  --danger #cc5555
 ```
-
 Fonts: Barlow Condensed (700/900) + Barlow (300/400/500). Google Fonts.
-Layout: 390px config panel + fluid results panel. Dark theme throughout.
+Layout: 390px config panel + fluid results panel.
 
 ---
 
 ## CONTAINER / OPENSHIFT
 
-**Containerfile** (not Dockerfile):
-- `chgrp -R 0 /app && chmod -R g=u /app` for OpenShift arbitrary UID
-- `USER 1001`, unprivileged port 8000
+Containerfile (not Dockerfile). `chgrp -R 0 /app && chmod -R g=u /app`. USER 1001.
+Namespace: `frc-scheduler-server`
 
-**Namespace:** `frc-scheduler-server`
-
-**openshift/ manifests:**
 ```
-00-namespace.yaml        Project namespace
-01-secrets.yaml          frc-db-secret, frc-app-secret (TBA key),
-                         git-contents-token (GitHub PAT),
-                         frc-auth-secret (JWT_SECRET, BASE_URL, GOOGLE_*, APPLE_*)
-02-postgres.yaml         PVC (5Gi) + Deployment + ClusterIP Service
-03-buildconfig.yaml      ImageStream (frc-scheduler-server-git) + BuildConfig
-                         Source: github.com/croadfeldt/frc-scheduler-server main
-                         Strategy: Docker, dockerfilePath: Containerfile
-                         No webhooks — CronJob polls instead
-04-deployment.yaml       App Deployment + ClusterIP Service
-                         DATABASE_URL assembled from frc-db-secret at runtime
-                         initContainer waits for Postgres TCP readiness
-05-route.yaml            Edge-terminated HTTPS, HTTP→HTTPS redirect
-07-build-trigger-sa.yaml ServiceAccount + Role + RoleBindings for CronJob
-08-build-cronjob.yaml    git-commit-hash ConfigMap + CronJob (every 5 min)
-                         git ls-remote → oc start-build on commit change
-                         Image: quay.io/croadfel/origin-cli-git:4.18
+01-secrets.yaml  frc-db-secret, frc-app-secret (TBA), git-contents-token,
+                 frc-auth-secret (JWT_SECRET, BASE_URL, GOOGLE_*, APPLE_*)
+02-postgres.yaml PVC 5Gi + Deployment + Service
+03-buildconfig.yaml  ImageStream + BuildConfig (GitHub, Containerfile, no webhooks)
+04-deployment.yaml   App + Service (DATABASE_URL from secret)
+05-route.yaml    Edge HTTPS
+07-build-trigger-sa.yaml  RBAC for CronJob
+08-build-cronjob.yaml     git ls-remote poll every 5 min → oc start-build
 ```
 
 ---
 
 ## LICENSING
 
-GNU GPL v3. All source files include:
-```
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2025 FRC Match Scheduler Contributors
-# NOTE: Substantially generated with Claude (Anthropic AI), reviewed by humans.
-```
-LICENSE file contains full GPL v3 text and AI-generation disclosure note.
+GNU GPL v3. SPDX-License-Identifier: GPL-3.0-or-later in all source files.
+LICENSE includes full GPL v3 text + AI-generation disclosure.
+AI use disclosed, human review confirmed, license terms unaffected.
