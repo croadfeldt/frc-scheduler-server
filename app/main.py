@@ -341,22 +341,23 @@ async def generate_schedule(
     iterations       = body.iterations
 
     pool = get_pool()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # correct for Python 3.10+
 
     async def run_and_stream() -> AsyncGenerator[str, None]:
-        # CPU_WORKERS is None when auto-detecting — fall back to cpu_count()
         import os as _os
         actual_workers = CPU_WORKERS or _os.cpu_count() or 4
         n_workers = min(iterations, actual_workers)
         base      = iterations // n_workers
         remainder = iterations % n_workers
 
-        # Wrap each executor future in a real asyncio.Task so asyncio.wait works
+        log.info("Generation started: event=%d teams=%d mpt=%d iters=%d workers=%d",
+                 event_id, num_teams, matches_per_team, iterations, n_workers)
+
+        # Build tasks — map task → iteration count for progress tracking
         tasks: list[asyncio.Task] = []
-        worker_iters: list[int] = []
+        task_iters: dict[asyncio.Task, int] = {}
         for w in range(n_workers):
             w_iters = base + (1 if w < remainder else 0)
-            worker_iters.append(w_iters)
             task = asyncio.ensure_future(
                 loop.run_in_executor(
                     pool, run_iterations_worker,
@@ -364,77 +365,93 @@ async def generate_schedule(
                 )
             )
             tasks.append(task)
+            task_iters[task] = w_iters
 
         total_done  = 0
         best_result = None
         pending     = set(tasks)
 
-        while pending:
-            # Wait up to 200ms for any task to finish, then yield a progress ping
-            done_set, pending = await asyncio.wait(
-                pending,
-                timeout=0.2,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in done_set:
-                try:
-                    result = task.result()
-                    total_done += worker_iters[tasks.index(task)]
-                    if best_result is None or result["score"] > best_result["score"]:
-                        best_result = result
-                except Exception as e:
-                    log.error("Worker error: %s", e)
-                    total_done += worker_iters[tasks.index(task)]
+        try:
+            while pending:
+                done_set, pending = await asyncio.wait(
+                    pending,
+                    timeout=0.2,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in done_set:
+                    try:
+                        result = task.result()
+                        total_done += task_iters[task]
+                        if best_result is None or result["score"] > best_result["score"]:
+                            best_result = result
+                        log.info("Worker done: score=%.0f total_done=%d/%d",
+                                 result["score"], total_done, iterations)
+                    except Exception as e:
+                        log.error("Worker failed: %s", e, exc_info=True)
+                        total_done += task_iters.get(task, 0)
 
-            pct = min(99, round(total_done / iterations * 100))
-            yield f"data: {json.dumps({'type': 'progress', 'done': total_done, 'total': iterations, 'pct': pct})}\n\n"
+                pct = min(99, round(total_done / iterations * 100))
+                yield f"data: {json.dumps({'type': 'progress', 'done': total_done, 'total': iterations, 'pct': pct})}\n\n"
 
-        # All workers done — save to DB
-        if not best_result or not best_result.get("matches"):
-            yield f"data: {json.dumps({'type': 'error', 'message': 'No schedule generated'})}\n\n"
+        except Exception as e:
+            log.error("Generation loop error: %s", e, exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Generation failed: {e}'})}\n\n"
             return
 
-        # Deactivate existing schedules for this event
-        await db.execute(
-            update(Schedule)
-            .where(Schedule.event_id == event_id)
-            .values(is_active=False)
-        )
+        log.info("All workers done. best_result=%s", "found" if best_result else "None")
 
-        sched = Schedule(
-            event_id=event_id,
-            name=body.schedule_name,
-            is_active=True,
-            num_teams=num_teams,
-            matches_per_team=matches_per_team,
-            cooldown=cooldown,
-            iterations_run=iterations,
-            best_iteration=best_result.get("worker_id", 0),
-            score=best_result["score"],
-            matches=best_result["matches"],
-            surrogate_count=best_result["surrogate_count"],
-            round_boundaries={str(k): v for k, v in best_result["round_boundaries"].items()},
-            day_config=body.day_config,
-        )
-        db.add(sched)
-        await db.flush()
+        if not best_result or not best_result.get("matches"):
+            yield f"data: {json.dumps({'type': 'error', 'message': 'No schedule produced — all workers failed'})}\n\n"
+            return
 
-        # Denormalise into match_rows for queryability
-        for i, m in enumerate(best_result["matches"], start=1):
-            db.add(MatchRow(
-                schedule_id=sched.id, match_num=i,
-                red1=m["red"][0], red2=m["red"][1], red3=m["red"][2],
-                blue1=m["blue"][0], blue2=m["blue"][1], blue3=m["blue"][2],
-                red1_surrogate=m["red_surrogate"][0],
-                red2_surrogate=m["red_surrogate"][1],
-                red3_surrogate=m["red_surrogate"][2],
-                blue1_surrogate=m["blue_surrogate"][0],
-                blue2_surrogate=m["blue_surrogate"][1],
-                blue3_surrogate=m["blue_surrogate"][2],
-            ))
-        await db.commit()
+        # Save to DB — use a fresh session since the request session may be closed
+        try:
+            async with AsyncSessionLocal() as save_db:
+                await save_db.execute(
+                    update(Schedule)
+                    .where(Schedule.event_id == event_id)
+                    .values(is_active=False)
+                )
 
-        yield f"data: {json.dumps({'type': 'done', 'schedule_id': sched.id, 'score': best_result['score'], 'total': iterations, 'pct': 100})}\n\n"
+                sched = Schedule(
+                    event_id=event_id,
+                    name=body.schedule_name,
+                    is_active=True,
+                    num_teams=num_teams,
+                    matches_per_team=matches_per_team,
+                    cooldown=cooldown,
+                    iterations_run=iterations,
+                    best_iteration=best_result.get("worker_id", 0),
+                    score=best_result["score"],
+                    matches=best_result["matches"],
+                    surrogate_count=best_result["surrogate_count"],
+                    round_boundaries={str(k): v for k, v in best_result["round_boundaries"].items()},
+                    day_config=body.day_config,
+                )
+                save_db.add(sched)
+                await save_db.flush()
+
+                for i, m in enumerate(best_result["matches"], start=1):
+                    save_db.add(MatchRow(
+                        schedule_id=sched.id, match_num=i,
+                        red1=m["red"][0], red2=m["red"][1], red3=m["red"][2],
+                        blue1=m["blue"][0], blue2=m["blue"][1], blue3=m["blue"][2],
+                        red1_surrogate=m["red_surrogate"][0],
+                        red2_surrogate=m["red_surrogate"][1],
+                        red3_surrogate=m["red_surrogate"][2],
+                        blue1_surrogate=m["blue_surrogate"][0],
+                        blue2_surrogate=m["blue_surrogate"][1],
+                        blue3_surrogate=m["blue_surrogate"][2],
+                    ))
+                await save_db.commit()
+                schedule_id = sched.id
+
+            log.info("Schedule saved: id=%d score=%.0f", schedule_id, best_result["score"])
+            yield f"data: {json.dumps({'type': 'done', 'schedule_id': schedule_id, 'score': best_result['score'], 'total': iterations, 'pct': 100})}\n\n"
+
+        except Exception as e:
+            log.error("DB save failed: %s", e, exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to save schedule: {e}'})}\n\n"
 
     return StreamingResponse(
         run_and_stream(),
