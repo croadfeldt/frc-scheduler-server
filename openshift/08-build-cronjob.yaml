@@ -1,0 +1,82 @@
+---
+# ConfigMap — stores the last-seen commit hash so the poller can detect changes.
+# Seeded with a zeroed hash to force a build on first run.
+# Updated in-place by the CronJob after each successful build trigger.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: git-commit-hash
+  namespace: frc-scheduler-server
+  labels:
+    app.kubernetes.io/part-of: frc-scheduler-server-git-app
+data:
+  commit-hash: "0000000000000000000000000000000000000000"
+---
+# CronJob — polls GitHub every 5 minutes and triggers a build when the
+# commit hash on main changes. No webhook required.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: git-poll-trigger
+  namespace: frc-scheduler-server
+  labels:
+    app.kubernetes.io/part-of: frc-scheduler-server-git-app
+spec:
+  schedule: "*/5 * * * *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  concurrencyPolicy: Replace
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: build-trigger-sa
+          restartPolicy: OnFailure
+          volumes:
+            - name: git-commit-hash-volume
+              configMap:
+                name: git-commit-hash
+          containers:
+            - name: git-poll-script
+              image: quay.io/croadfel/origin-cli-git:4.18
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: GIT_REPO_URL
+                  value: "github.com/croadfeldt/frc-scheduler-server.git"
+                - name: GIT_BRANCH
+                  value: "main"
+                - name: BUILD_CONFIG_NAME
+                  value: "frc-scheduler-server-git"
+                - name: BUILD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: GIT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: git-contents-token
+                      key: token
+              volumeMounts:
+                - name: git-commit-hash-volume
+                  mountPath: /etc/config
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+
+                  PREVIOUS_COMMIT=$(cat /etc/config/commit-hash)
+                  LATEST_COMMIT=$(git ls-remote "https://${GIT_TOKEN}@${GIT_REPO_URL}" ${GIT_BRANCH} | head -n 1 | awk '{print $1}')
+
+                  echo "Previous commit: ${PREVIOUS_COMMIT}"
+                  echo "Latest commit:   ${LATEST_COMMIT}"
+
+                  if [ "${PREVIOUS_COMMIT}" != "${LATEST_COMMIT}" ]; then
+                    echo "Change detected. Triggering build..."
+                    oc start-build "${BUILD_CONFIG_NAME}" --wait -n "${BUILD_NAMESPACE}"
+                    echo "Build complete. Updating commit hash to ${LATEST_COMMIT}"
+                    oc patch configmap git-commit-hash \
+                      -p "{\"data\":{\"commit-hash\":\"${LATEST_COMMIT}\"}}" \
+                      -n "${BUILD_NAMESPACE}"
+                  else
+                    echo "No change detected. Exiting."
+                  fi
