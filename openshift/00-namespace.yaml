@@ -1,10 +1,7 @@
 ---
-# Create the project namespace.
-# Apply once with: oc new-project frc-scheduler
-# OR apply this file: oc apply -f openshift/00-namespace.yaml
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: frc-scheduler
+  name: frc-scheduler-server
   labels:
-    app.kubernetes.io/part-of: frc-scheduler
+    app.kubernetes.io/part-of: frc-scheduler-server-git-app

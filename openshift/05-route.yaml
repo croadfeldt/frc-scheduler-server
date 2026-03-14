@@ -1,29 +1,19 @@
 ---
-# Route — OpenShift's ingress primitive.
-# Exposes the app externally at https://<host>.
-#
-# The host is auto-assigned by the cluster's ingress controller if left blank.
-# Set it explicitly if you have a custom domain:
-#   host: frc-scheduler.apps.your-cluster.example.com
-#
-# TLS is terminated at the router (edge termination) — traffic inside the
-# cluster travels as plain HTTP, which is fine since it never leaves the cluster.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: frc-scheduler
-  namespace: frc-scheduler
+  name: frc-scheduler-server
+  namespace: frc-scheduler-server
   labels:
-    app: frc-scheduler
-    app.kubernetes.io/part-of: frc-scheduler
+    app: frc-scheduler-server-git
+    app.kubernetes.io/part-of: frc-scheduler-server-git-app
 spec:
-  # host: frc-scheduler.apps.your-cluster.example.com   # optional custom domain
   to:
     kind: Service
-    name: frc-scheduler
+    name: frc-scheduler-server
   port:
     targetPort: http
   tls:
     termination: edge
-    insecureEdgeTerminationPolicy: Redirect  # HTTP → HTTPS redirect
+    insecureEdgeTerminationPolicy: Redirect
   wildcardPolicy: None

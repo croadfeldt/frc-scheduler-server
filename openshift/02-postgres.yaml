@@ -4,7 +4,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: frc-postgres-pvc
-  namespace: frc-scheduler
+  namespace: frc-scheduler-server
   labels:
     app: frc-postgres
     app.kubernetes.io/part-of: frc-scheduler
@@ -22,7 +22,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frc-postgres
-  namespace: frc-scheduler
+  namespace: frc-scheduler-server
   labels:
     app: frc-postgres
     app.kubernetes.io/part-of: frc-scheduler
@@ -95,7 +95,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: frc-postgres
-  namespace: frc-scheduler
+  namespace: frc-scheduler-server
   labels:
     app: frc-postgres
     app.kubernetes.io/part-of: frc-scheduler

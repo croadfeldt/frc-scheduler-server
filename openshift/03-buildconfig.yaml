@@ -1,61 +1,64 @@
 ---
-# ImageStream — stores the built application image tag-by-tag.
-# The Deployment references this stream so a new build auto-triggers a rollout.
+# ImageStream — matches the name OpenShift web console created: frc-scheduler-server-git
 apiVersion: image.openshift.io/v1
 kind: ImageStream
 metadata:
-  name: frc-scheduler
-  namespace: frc-scheduler
+  annotations:
+    app.openshift.io/vcs-ref: ""
+    app.openshift.io/vcs-uri: https://github.com/croadfeldt/frc-scheduler-server.git
   labels:
-    app: frc-scheduler
-    app.kubernetes.io/part-of: frc-scheduler
+    app: frc-scheduler-server-git
+    app.kubernetes.io/component: frc-scheduler-server-git
+    app.kubernetes.io/instance: frc-scheduler-server-git
+    app.kubernetes.io/name: frc-scheduler-server-git
+    app.kubernetes.io/part-of: frc-scheduler-server-git-app
+  name: frc-scheduler-server-git
+  namespace: frc-scheduler-server
 spec:
   lookupPolicy:
-    local: true     # allow Deployments in the same namespace to ref by short name
+    local: true
 ---
-# BuildConfig — builds the image from the Containerfile using a binary (local dir)
-# or a Git repository.
+# BuildConfig — pulls from GitHub, built with Containerfile, no webhooks.
+# Builds are triggered by the git-poll-trigger CronJob (see 07-build-cronjob.yaml).
 #
-# OPTION A — Build from a Git repo (recommended for CI/CD):
-#   Set spec.source.git.uri to your repo URL and remove the Binary block.
-#
-# OPTION B — Build from local source (one-off / dev):
-#   oc start-build frc-scheduler-build --from-dir=. --follow -n frc-scheduler
+# Trigger a manual build:
+#   oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
 #
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
 metadata:
-  name: frc-scheduler-build
-  namespace: frc-scheduler
+  annotations:
+    app.openshift.io/vcs-ref: ""
+    app.openshift.io/vcs-uri: https://github.com/croadfeldt/frc-scheduler-server.git
   labels:
-    app: frc-scheduler
-    app.kubernetes.io/part-of: frc-scheduler
+    app: frc-scheduler-server-git
+    app.kubernetes.io/component: frc-scheduler-server-git
+    app.kubernetes.io/instance: frc-scheduler-server-git
+    app.kubernetes.io/name: frc-scheduler-server-git
+    app.kubernetes.io/part-of: frc-scheduler-server-git-app
+  name: frc-scheduler-server-git
+  namespace: frc-scheduler-server
 spec:
+  failedBuildsHistoryLimit: 5
+  successfulBuildsHistoryLimit: 5
+  runPolicy: Serial
+  nodeSelector: null
   source:
-    # ── Option A: Git source ──────────────────────────────────────────────────
-    # Uncomment and edit to build from a Git repo automatically.
-    # type: Git
-    # git:
-    #   uri: https://github.com/your-org/frc-scheduler.git
-    #   ref: main
-    # contextDir: /                  # root of the repo
-
-    # ── Option B: Binary upload (default) ────────────────────────────────────
-    type: Binary
-    binary: {}
-
+    type: Git
+    git:
+      uri: https://github.com/croadfeldt/frc-scheduler-server.git
+      ref: refs/heads/main
+    contextDir: /
   strategy:
     type: Docker
     dockerStrategy:
-      dockerfilePath: Containerfile  # tells OpenShift to use Containerfile, not Dockerfile
-
+      dockerfilePath: Containerfile
   output:
     to:
       kind: ImageStreamTag
-      name: frc-scheduler:latest
-
+      name: frc-scheduler-server-git:latest
+  postCommit: {}
+  resources: {}
   triggers:
-    # Re-build automatically when the base image updates (Option A only)
-    - type: ImageChange
-    # Re-build when this BuildConfig changes (Option A only)
+    # Only ConfigChange — no webhooks, polling handled by CronJob
     - type: ConfigChange

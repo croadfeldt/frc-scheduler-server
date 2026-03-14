@@ -15,7 +15,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://frc:frc@db:5432/frc_scheduler"
+    "postgresql+asyncpg://frc:frc@localhost:5432/frc_scheduler"
 )
 
 engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
@@ -148,10 +148,29 @@ class MatchRow(Base):
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
-async def init_db() -> None:
-    """Create all tables (idempotent — use Alembic for migrations in prod)."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+async def init_db(retries: int = 10, delay: float = 2.0) -> None:
+    """
+    Create all tables (idempotent).
+    Retries on connection failure so the app survives a slow Postgres start,
+    even if the initContainer or healthcheck doesn't catch every edge case.
+    """
+    import asyncio
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            return
+        except Exception as e:
+            last_error = e
+            if attempt < retries:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "DB not ready (attempt %d/%d): %s — retrying in %.0fs",
+                    attempt, retries, e, delay
+                )
+                await asyncio.sleep(delay)
+    raise RuntimeError(f"Could not connect to database after {retries} attempts") from last_error
 
 
 async def get_session() -> AsyncSession:
