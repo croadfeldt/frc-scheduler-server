@@ -307,7 +307,8 @@ def score_schedule(matches: list[Match], num_teams: int) -> float:
                 par[bl[a]][bl[b]] += 1; par[bl[b]][bl[a]] += 1
 
     max_imbalance = max(abs(red_counts[t] - blue_counts[t]) for t in range(1, num_teams + 1))
-    return -(b2b * 1000 + surrogates * 100 + max_imbalance * 50 +
+    # Priority: P1 back-to-backs, P2 alliance balance, P3 surrogates, P4/P5 diversity
+    return -(b2b * 1000 + max_imbalance * 500 + surrogates * 200 +
              repeat_opp * 15 + repeat_part * 12)
 
 
