@@ -1577,7 +1577,9 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
 
   let bestMatches = null, bestRoundBoundaries = null, bestSurrogateCount = null;
   let bestScore = -1e18, bestIteration = 0;
+  // Always reset these counters — a previous failed run may have left them dirty
   let totalDone = 0, workersFinished = 0;
+  let workersFailed = false;
 
   function _updateProgress() {
     updateProgress(totalDone, iterations, bestScore > -Infinity ? bestScore : undefined);
@@ -1598,7 +1600,6 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
     return;
   }
 
-  let workersTested = false;
   for (let w = 0; w < numWorkers; w++) {
     const workerIters = Math.floor(iterations / numWorkers) + (w < iterations % numWorkers ? 1 : 0);
     const worker = new Worker(workerUrl);
@@ -1620,8 +1621,8 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
           bestIteration = w * Math.floor(iterations / numWorkers) + msg.bestIter;
         }
         worker.terminate(); workersFinished++; _updateProgress();
-        if (workersFinished === numWorkers) {
-          if (workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
+        if (workersFinished === numWorkers && !workersFailed) {
+          if (workerUrl && workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
           finishGeneration(bestMatches, bestRoundBoundaries, bestSurrogateCount, bestIteration, iterations);
           btn.disabled = false;
           document.getElementById('progressWrap').style.display = 'none';
@@ -1629,10 +1630,10 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
       }
     };
     worker.onerror = function(err) {
-      if (!workersTested) {
-        workersTested = true; workersFinished = numWorkers;
-        if (workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
-        totalDone = 0; bestScore = -Infinity; bestMatches = null;
+      if (!workersFailed) {
+        workersFailed = true;
+        if (workerUrl && workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
+        totalDone = 0; bestScore = -1e18; bestMatches = null;
         runSingleThreaded(numTeams, matchesPerTeam, cooldown, iterations, startTime,
           formatETA, _updateProgress,
           function(bm, brb, bsc, bi) {
