@@ -29,7 +29,10 @@ log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # ── ProcessPoolExecutor — one pool shared across all requests ─────────────────
-CPU_WORKERS = int(os.getenv("CPU_WORKERS", os.cpu_count() or 4))
+# CPU_WORKERS=0 means auto-detect (passes None to ProcessPoolExecutor).
+# ProcessPoolExecutor with max_workers=None uses os.cpu_count() automatically.
+_cpu_workers_env = int(os.getenv("CPU_WORKERS", "0"))
+CPU_WORKERS: int | None = _cpu_workers_env if _cpu_workers_env > 0 else None
 _pool: ProcessPoolExecutor | None = None
 
 def get_pool() -> ProcessPoolExecutor:
@@ -528,4 +531,6 @@ async def team_matches(schedule_id: int, slot: int, db: AsyncSession = Depends(g
 # ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "cpu_workers": CPU_WORKERS}
+    import os
+    actual_workers = CPU_WORKERS or os.cpu_count() or 1
+    return {"status": "ok", "cpu_workers": actual_workers}
