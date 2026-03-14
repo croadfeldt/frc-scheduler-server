@@ -1614,12 +1614,12 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
       const msg = e.data;
       if (msg.type === 'progress') {
         const delta = msg.done - workerDone; workerDone = msg.done; totalDone += delta;
-        if (msg.bestScore > bestScore) bestScore = msg.bestScore;
+        // Don't update bestScore from progress — we don't have bestMatches yet.
+        // Only update score+matches together in the result handler.
         _updateProgress();
       } else if (msg.type === 'result') {
         const delta = workerIters - workerDone; totalDone += delta;
-        console.log('Worker', w, 'result: score=', msg.bestScore, 'typeof=', typeof msg.bestScore, 'matches=', msg.bestMatches ? msg.bestMatches.length : null, 'currentBest=', bestScore, 'comparison=', msg.bestScore !== null && msg.bestScore > bestScore);
-        if (msg.bestScore !== null && msg.bestScore > bestScore) {
+        if (msg.bestScore !== null && msg.bestMatches && msg.bestScore > bestScore) {
           bestScore = msg.bestScore; bestMatches = msg.bestMatches;
           bestRoundBoundaries = new Map(msg.bestRoundBoundaries);
           bestSurrogateCount = msg.bestSurrogateCount;
