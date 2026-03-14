@@ -649,6 +649,13 @@
 
 
 <script>
+// ── API base URL — must be declared before any function that references it ────
+const API = window.location.origin;
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let _currentEventId = null;
+let _currentScheduleId = null;
+
 function timeToMin(t) {
   const [h, m] = t.split(':').map(Number);
   return h * 60 + m;
@@ -1137,13 +1144,6 @@ function scoreSchedule(matches, numTeams) {
   // Lower = better (all terms are penalties)
   return -(b2b * 1000 + surrogates * 100 + maxImbalance * 50 + repeatOpp * 15 + repeatPart * 12);
 }
-
-// ── API base URL (auto-detects: same origin when served by FastAPI) ───────────
-const API = window.location.origin;
-
-// ── State ─────────────────────────────────────────────────────────────────────
-let _currentEventId = null;
-let _currentScheduleId = null;
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 async function apiFetch(path, opts = {}) {
@@ -1640,6 +1640,12 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
 
 
 function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations) {
+  if (!matches || matches.length === 0) {
+    console.error('finishGeneration called with empty matches');
+    document.getElementById('btnGenerate').disabled = false;
+    document.getElementById('progressWrap').style.display = 'none';
+    return;
+  }
   const numTeams = parseInt(document.getElementById('numTeams').value);
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value);
   const defaultCycleTime = parseInt(document.getElementById('cycleTime').value);
