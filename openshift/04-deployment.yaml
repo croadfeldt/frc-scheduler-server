@@ -1,0 +1,132 @@
+---
+# App Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frc-scheduler
+  namespace: frc-scheduler
+  labels:
+    app: frc-scheduler
+    app.kubernetes.io/part-of: frc-scheduler
+  annotations:
+    # Automatically roll out when the image changes (works with ImageStream)
+    image.openshift.io/triggers: |
+      [{"from":{"kind":"ImageStreamTag","name":"frc-scheduler:latest"},"fieldPath":"spec.template.spec.containers[0].image"}]
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frc-scheduler
+  template:
+    metadata:
+      labels:
+        app: frc-scheduler
+    spec:
+      # OpenShift's restricted SCC requires containers to run as non-root.
+      # The Containerfile sets USER 1001; this securityContext enforces it.
+      securityContext:
+        runAsNonRoot: true
+
+      containers:
+        - name: frc-scheduler
+          image: frc-scheduler:latest    # resolved via ImageStream lookupPolicy
+          ports:
+            - containerPort: 8000
+
+          env:
+            # Assemble DATABASE_URL from the DB secret
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: frc-db-secret
+                  key: POSTGRES_USER
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: frc-db-secret
+                  key: POSTGRES_PASSWORD
+            - name: PGDB
+              valueFrom:
+                secretKeyRef:
+                  name: frc-db-secret
+                  key: POSTGRES_DB
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(PGUSER):$(PGPASSWORD)@frc-postgres:5432/$(PGDB)"
+
+            - name: TBA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: frc-app-secret
+                  key: TBA_API_KEY
+
+            # 0 = auto-detect cores. Set explicitly if you want to cap worker count.
+            - name: CPU_WORKERS
+              value: "0"
+
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false  # uvicorn writes tmp files
+
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu:    500m
+              memory: 512Mi
+            limits:
+              cpu:    "2"              # allow bursting for parallel scheduling
+              memory: 1Gi
+
+      # Wait for Postgres to be ready before starting the app
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z frc-postgres 5432; do
+                echo "Waiting for postgres…"; sleep 2;
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+---
+# ClusterIP service — internal traffic only; the Route below exposes it externally
+apiVersion: v1
+kind: Service
+metadata:
+  name: frc-scheduler
+  namespace: frc-scheduler
+  labels:
+    app: frc-scheduler
+    app.kubernetes.io/part-of: frc-scheduler
+spec:
+  selector:
+    app: frc-scheduler
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP

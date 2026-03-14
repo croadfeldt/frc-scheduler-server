@@ -1,0 +1,108 @@
+---
+# Persistent storage for PostgreSQL
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: frc-postgres-pvc
+  namespace: frc-scheduler
+  labels:
+    app: frc-postgres
+    app.kubernetes.io/part-of: frc-scheduler
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+# PostgreSQL Deployment
+# Uses the official postgres image which is compatible with OpenShift's
+# restricted SCC when the UID range is set via the namespace annotation.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frc-postgres
+  namespace: frc-scheduler
+  labels:
+    app: frc-postgres
+    app.kubernetes.io/part-of: frc-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frc-postgres
+  strategy:
+    type: Recreate           # single replica with PVC — Recreate avoids two pods
+  template:
+    metadata:
+      labels:
+        app: frc-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: registry.redhat.io/rhel9/postgresql-16:latest
+          # Alternative if you don't have Red Hat registry access:
+          # image: docker.io/library/postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRESQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: frc-db-secret
+                  key: POSTGRES_USER
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: frc-db-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRESQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: frc-db-secret
+                  key: POSTGRES_DB
+            # rhel9/postgresql-16 uses POSTGRESQL_* env vars.
+            # If using docker.io/postgres, also set:
+            # - name: POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/pgsql/data   # rhel image path
+              # If using docker.io/postgres, use: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "frc"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "frc"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu:    250m
+              memory: 256Mi
+            limits:
+              cpu:    500m
+              memory: 512Mi
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: frc-postgres-pvc
+---
+# Internal service — only the app pod needs to reach Postgres
+apiVersion: v1
+kind: Service
+metadata:
+  name: frc-postgres
+  namespace: frc-scheduler
+  labels:
+    app: frc-postgres
+    app.kubernetes.io/part-of: frc-scheduler
+spec:
+  selector:
+    app: frc-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  type: ClusterIP

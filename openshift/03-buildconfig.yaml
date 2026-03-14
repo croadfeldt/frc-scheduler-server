@@ -1,0 +1,61 @@
+---
+# ImageStream — stores the built application image tag-by-tag.
+# The Deployment references this stream so a new build auto-triggers a rollout.
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: frc-scheduler
+  namespace: frc-scheduler
+  labels:
+    app: frc-scheduler
+    app.kubernetes.io/part-of: frc-scheduler
+spec:
+  lookupPolicy:
+    local: true     # allow Deployments in the same namespace to ref by short name
+---
+# BuildConfig — builds the image from the Containerfile using a binary (local dir)
+# or a Git repository.
+#
+# OPTION A — Build from a Git repo (recommended for CI/CD):
+#   Set spec.source.git.uri to your repo URL and remove the Binary block.
+#
+# OPTION B — Build from local source (one-off / dev):
+#   oc start-build frc-scheduler-build --from-dir=. --follow -n frc-scheduler
+#
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: frc-scheduler-build
+  namespace: frc-scheduler
+  labels:
+    app: frc-scheduler
+    app.kubernetes.io/part-of: frc-scheduler
+spec:
+  source:
+    # ── Option A: Git source ──────────────────────────────────────────────────
+    # Uncomment and edit to build from a Git repo automatically.
+    # type: Git
+    # git:
+    #   uri: https://github.com/your-org/frc-scheduler.git
+    #   ref: main
+    # contextDir: /                  # root of the repo
+
+    # ── Option B: Binary upload (default) ────────────────────────────────────
+    type: Binary
+    binary: {}
+
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile  # tells OpenShift to use Containerfile, not Dockerfile
+
+  output:
+    to:
+      kind: ImageStreamTag
+      name: frc-scheduler:latest
+
+  triggers:
+    # Re-build automatically when the base image updates (Option A only)
+    - type: ImageChange
+    # Re-build when this BuildConfig changes (Option A only)
+    - type: ConfigChange

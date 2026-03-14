@@ -1,0 +1,32 @@
+---
+# HorizontalPodAutoscaler — optional.
+# Scales the app deployment between 1 and 4 replicas based on CPU utilisation.
+#
+# Note: each replica spawns its own ProcessPoolExecutor workers, so 4 replicas
+# on a 16-core node each get ~4 workers. For scheduling throughput, a single
+# larger pod (more CPU limit) generally beats many smaller pods.
+# Tune replicas and CPU limits in 04-deployment.yaml to match your node size.
+#
+# Requires the metrics-server to be installed in the cluster.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frc-scheduler-hpa
+  namespace: frc-scheduler
+  labels:
+    app: frc-scheduler
+    app.kubernetes.io/part-of: frc-scheduler
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frc-scheduler
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

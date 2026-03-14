@@ -1,0 +1,2462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FRC Match Scheduler</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #1a1d27;
+    --surface: #22263a;
+    --surface2: #2a2f46;
+    --border: #3a4060;
+    --accent: #7aa4f0;       /* soft blue — readable on dark */
+    --accent2: #e07b50;      /* warm orange — distinct, not harsh */
+    --accent3: #5cb87a;      /* muted green */
+    --text: #dde2f0;         /* off-white, easy on eyes */
+    --text-muted: #929cb6;   /* visible but secondary — passes 4.5:1 on all surfaces */
+    --text-strong: #f2f5ff;  /* headings & important values */
+    --red-team: #e87878;     /* alliance red — clear, not neon */
+    --blue-team: #6fa8e8;    /* alliance blue — clear, distinct from red */
+    --amber: #c8992a;        /* surrogate / break color */
+    --danger: #cc5555;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Barlow', sans-serif;
+    font-weight: 400;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Subtle grid — barely visible */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(122,164,240,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(122,164,240,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 2rem; position: relative; z-index: 1; }
+
+  header {
+    display: flex;
+    align-items: flex-end;
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo-mark {
+    width: 56px; height: 56px;
+    background: var(--accent2);
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900; font-size: 1.1rem; color: #fff; flex-shrink: 0;
+  }
+
+  h1 {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 900;
+    font-size: 2.8rem; letter-spacing: 0.02em; line-height: 1;
+    text-transform: uppercase; color: var(--text-strong);
+  }
+  h1 span { color: var(--accent); }
+
+  .subtitle { color: var(--text-muted); font-size: 0.85rem; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 0.3rem; }
+
+  .layout { display: grid; grid-template-columns: 390px 1fr; gap: 2rem; align-items: start; }
+
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+
+  .panel-header {
+    background: var(--surface2); padding: 0.75rem 1.25rem;
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.8rem;
+    letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-strong);
+    border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.5rem;
+  }
+  .panel-header::before {
+    content: ''; width: 6px; height: 6px; background: var(--accent); border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .panel-body { padding: 1.25rem; }
+
+  .section-label {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.7rem;
+    letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-muted);
+    margin-bottom: 0.75rem; margin-top: 1.25rem; padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+  }
+  .section-label:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem; }
+  .field-row.single { grid-template-columns: 1fr; }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
+
+  label { font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0.05em; text-transform: uppercase; font-weight: 500; }
+
+  input[type="number"], input[type="time"], input[type="text"] {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text-strong);
+    padding: 0.5rem 0.75rem; font-family: 'Barlow', sans-serif; font-size: 0.9rem;
+    border-radius: 4px; width: 100%; transition: border-color 0.2s;
+    -webkit-appearance: none; appearance: none;
+  }
+  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(122,164,240,0.18); }
+
+  .days-container { display: flex; flex-direction: column; gap: 0.5rem; }
+  .day-row { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem; }
+  .day-row-header { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent2); margin-bottom: 0.6rem; }
+  .day-times { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .breaks-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.5rem; }
+  .break-row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 0.4rem; align-items: end; }
+
+  .btn-icon {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted);
+    width: 32px; height: 32px; border-radius: 4px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 1rem;
+    transition: all 0.2s; flex-shrink: 0;
+  }
+  .btn-icon:hover { border-color: var(--danger); color: var(--danger); background: rgba(204,85,85,0.1); }
+
+  .btn-add-break {
+    background: none; border: 1px dashed var(--border); color: var(--text-muted);
+    padding: 0.4rem 0.75rem; font-family: 'Barlow', sans-serif; font-size: 0.78rem;
+    border-radius: 4px; cursor: pointer; transition: all 0.2s; width: 100%; text-align: left;
+  }
+  .btn-add-break:hover { border-color: var(--accent3); color: var(--accent3); background: rgba(92,184,122,0.06); }
+
+  .btn-generate {
+    background: var(--accent); border: none; color: #0e1320;
+    padding: 0.85rem 2rem; font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800; font-size: 1rem; letter-spacing: 0.12em; text-transform: uppercase;
+    border-radius: 4px; cursor: pointer; width: 100%; margin-top: 1.25rem;
+    transition: background 0.2s;
+  }
+  .btn-generate:hover { background: #93b8f5; }
+  .btn-generate:disabled { background: var(--border); color: var(--text-muted); cursor: not-allowed; }
+
+  .progress-wrap {
+    margin-top: 1rem; display: none;
+  }
+  .progress-bar-track {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    height: 8px; overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%; background: var(--accent); border-radius: 4px;
+    width: 0%; transition: width 0.15s ease;
+  }
+  .progress-label {
+    font-size: 0.68rem; color: var(--text-muted); margin-top: 0.35rem;
+    letter-spacing: 0.05em; text-align: center;
+  }
+  .iteration-badge {
+    display: inline-block; font-size: 0.6rem; font-weight: 700;
+    background: rgba(92,184,122,0.15); color: var(--accent3);
+    border: 1px solid rgba(92,184,122,0.4);
+    border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle;
+    letter-spacing: 0.04em;
+  }
+
+
+  .results-panel { position: sticky; top: 2rem; }
+
+  .stats-bar { display: grid; grid-template-columns: repeat(6, 1fr); border-bottom: 1px solid var(--border); }
+  .stat { padding: 1rem; text-align: center; border-right: 1px solid var(--border); }
+  .stat:last-child { border-right: none; }
+  .stat-value { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-size: 1.8rem; color: var(--text-strong); line-height: 1; }
+  .stat-label { font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 0.3rem; }
+
+  .schedule-output { padding: 1.25rem; max-height: 70vh; overflow-y: auto; }
+  .schedule-output::-webkit-scrollbar { width: 5px; }
+  .schedule-output::-webkit-scrollbar-track { background: var(--bg); }
+  .schedule-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .day-block { margin-bottom: 2rem; }
+  .day-title {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 1rem;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-strong);
+    margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.75rem;
+  }
+  .day-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .match-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .match-table th {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.68rem;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted);
+    padding: 0.45rem 0.7rem; text-align: left; border-bottom: 2px solid var(--border);
+    background: var(--surface2);
+  }
+  .match-table td { padding: 0.45rem 0.7rem; border-bottom: 1px solid rgba(58,64,96,0.5); vertical-align: middle; }
+  .match-table tr:last-child td { border-bottom: none; }
+  .match-table tbody tr:hover td { background: rgba(122,164,240,0.06); }
+
+  .match-num { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; color: var(--text-muted); font-size: 0.9rem; }
+  .match-time { color: var(--text-muted); font-size: 0.82rem; white-space: nowrap; }
+
+  /* Alliance team colors — high contrast, clearly distinct */
+  .teams-red  { color: var(--red-team);  font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.95rem; }
+  .teams-blue { color: var(--blue-team); font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.95rem; }
+
+  /* Break rows */
+  .break-row-display { background: rgba(200,153,42,0.07); border-left: 3px solid var(--amber); }
+  .break-row-display td { color: #b89040; font-size: 0.78rem; letter-spacing: 0.04em; padding: 0.45rem 0.7rem; }
+
+  .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4rem 2rem; color: var(--text-muted); text-align: center; gap: 1rem; }
+  .empty-icon { font-size: 3rem; opacity: 0.25; }
+  .empty-state p { font-size: 0.85rem; letter-spacing: 0.05em; }
+
+  .warning-box { background: rgba(204,85,85,0.08); border: 1px solid rgba(204,85,85,0.35); border-radius: 4px; padding: 0.75rem 1rem; font-size: 0.82rem; color: #d97070; margin-bottom: 1rem; }
+  .warning-box-final { background: rgba(200,120,42,0.10); border-color: rgba(200,153,42,0.45); color: var(--amber); }
+
+  .btn-export {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted);
+    padding: 0.45rem 1rem; font-family: 'Barlow Condensed', sans-serif; font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; border-radius: 4px;
+    cursor: pointer; transition: all 0.2s; margin-left: auto; display: block; margin-bottom: 1rem;
+  }
+  .btn-export:hover { border-color: var(--accent); color: var(--accent); background: rgba(122,164,240,0.08); }
+
+  /* Surrogate badge */
+  .surrogate-badge {
+    display: inline-block;
+    background: rgba(200,153,42,0.18);
+    border: 1px solid rgba(200,153,42,0.6);
+    color: #c8992a;
+    font-size: 0.6rem;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.05rem 0.3rem;
+    border-radius: 2px;
+    margin-left: 0.35rem;
+    vertical-align: middle;
+  }
+  .team-surrogate { color: #c8992a !important; }
+  .b2b-badge {
+    display: inline-block; font-size: 0.52rem; font-weight: 700;
+    background: rgba(111,168,232,0.18); color: var(--blue-team);
+    border: 1px solid rgba(111,168,232,0.5);
+    border-radius: 3px; padding: 0 3px; margin-left: 3px;
+    vertical-align: middle; letter-spacing: 0.04em;
+  }
+  .team-b2b { color: var(--blue-team) !important; }
+  tr.b2b-match td { background: rgba(111,168,232,0.05) !important; }
+  tr.b2b-match td:first-child { border-left: 2px solid rgba(111,168,232,0.4); }
+  .stat-clickable { cursor: pointer; transition: opacity 0.15s; }
+  .stat-clickable:hover { opacity: 0.75; }
+  .stat-clickable.stat-active .stat-value { text-decoration: underline dotted; text-underline-offset: 3px; }
+  .filter-chip.b2b-filter { background: rgba(111,168,232,0.12); border-color: rgba(111,168,232,0.55); color: var(--blue-team); }
+  .filter-chip.b2b-filter:hover { background: rgba(111,168,232,0.22); }
+  .filter-chip.surrogate-filter { background: rgba(200,153,42,0.12); border-color: rgba(200,153,42,0.55); color: var(--amber); }
+  .filter-chip.surrogate-filter:hover { background: rgba(200,153,42,0.22); }
+
+  /* Filter bar */
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.6rem 1.25rem;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    min-height: 44px;
+  }
+  .filter-bar-label {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--text-muted); flex-shrink: 0;
+  }
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    background: rgba(122,164,240,0.14);
+    border: 1px solid rgba(122,164,240,0.5);
+    color: var(--accent);
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
+    font-size: 0.75rem; letter-spacing: 0.06em;
+    padding: 0.2rem 0.55rem; border-radius: 3px;
+    cursor: pointer; transition: all 0.15s; user-select: none;
+  }
+  .filter-chip:hover { background: rgba(122,164,240,0.24); border-color: var(--accent); }
+  .filter-chip .chip-remove { font-size: 0.65rem; opacity: 0.65; }
+
+  .filter-chip.red-filter    { background: rgba(232,120,120,0.12); border-color: rgba(232,120,120,0.55); color: var(--red-team); }
+  .filter-chip.red-filter:hover { background: rgba(232,120,120,0.22); }
+  .filter-chip.blue-filter   { background: rgba(111,168,232,0.12); border-color: rgba(111,168,232,0.55); color: var(--blue-team); }
+  .filter-chip.blue-filter:hover { background: rgba(111,168,232,0.22); }
+  .filter-chip.day-filter    { background: rgba(224,123,80,0.12); border-color: rgba(224,123,80,0.55); color: var(--accent2); }
+  .filter-chip.day-filter:hover { background: rgba(224,123,80,0.22); }
+  .filter-chip.alliance-filter { background: rgba(92,184,122,0.1); border-color: rgba(92,184,122,0.5); color: var(--accent3); }
+  .filter-chip.alliance-filter:hover { background: rgba(92,184,122,0.2); }
+
+  .filter-reset {
+    margin-left: auto; background: none; border: none;
+    color: var(--text-muted); font-family: 'Barlow Condensed', sans-serif;
+    font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer; padding: 0.2rem 0.4rem; border-radius: 3px;
+    transition: color 0.15s; text-decoration: underline; text-underline-offset: 3px;
+  }
+  .filter-reset:hover { color: var(--danger); }
+  .filter-empty { color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
+
+  th.filterable { cursor: pointer; user-select: none; transition: color 0.15s; }
+  th.filterable:hover { color: var(--accent); }
+  th.filterable.active { color: var(--accent); }
+  th.filterable::after { content: ' ▾'; font-size: 0.6rem; opacity: 0.45; }
+  th.filterable.active::after { content: ' ✕'; opacity: 1; }
+
+  .team-link { cursor: pointer; transition: opacity 0.15s; border-bottom: 1px dashed transparent; }
+  .team-link:hover { border-bottom-color: currentColor; opacity: 0.75; }
+
+  tr.filtered-out { display: none; }
+  tr.filtered-highlight td { background: rgba(122,164,240,0.09) !important; }
+
+  .cycle-changes-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.5rem; }
+  .cycle-change-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.4rem; align-items: end; }
+
+  /* Round boundary marker row */
+  tr.round-boundary-row td {
+    padding: 0;
+    border-bottom: none;
+  }
+  .round-boundary-label {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.55rem 0.7rem 0.3rem;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border-top: 1px solid rgba(122,164,240,0.3);
+    margin-top: 0.15rem;
+  }
+  .round-boundary-label::before {
+    content: '';
+    width: 8px; height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+    flex-shrink: 0;
+    opacity: 0.8;
+  }
+  .round-boundary-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(122,164,240,0.2);
+  }
+
+  /* ── Event management panel ── */
+  .event-bar {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.75rem 1.25rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; margin-bottom: 1.5rem; flex-wrap: wrap;
+  }
+  .event-bar-label { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; }
+  .event-select { flex: 1; min-width: 180px; background: var(--bg); border: 1px solid var(--border); color: var(--text-strong);
+    padding: 0.4rem 0.6rem; border-radius: 4px; font-family: 'Barlow',sans-serif; font-size: 0.85rem; }
+  .event-select:focus { outline: none; border-color: var(--accent); }
+  .btn-sm {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted);
+    padding: 0.38rem 0.75rem; border-radius: 4px; font-family: 'Barlow Condensed',sans-serif;
+    font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+    transition: all 0.15s; white-space: nowrap;
+  }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent); background: rgba(122,164,240,0.08); }
+  .btn-sm.btn-danger:hover { border-color: var(--danger); color: var(--danger); background: rgba(204,85,85,0.08); }
+  .btn-sm.btn-accent { background: var(--accent); color: #0e1320; border-color: var(--accent); }
+  .btn-sm.btn-accent:hover { background: #93b8f5; }
+
+  /* Modal */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 1000; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.5rem; width: min(540px, 95vw); max-height: 85vh; overflow-y: auto;
+    position: relative;
+  }
+  .modal-title {
+    font-family: 'Barlow Condensed',sans-serif; font-weight: 700; font-size: 1.1rem;
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-strong);
+    margin-bottom: 1rem;
+  }
+  .modal-close {
+    position: absolute; top: 1rem; right: 1rem;
+    background: none; border: none; color: var(--text-muted); font-size: 1.2rem;
+    cursor: pointer; line-height: 1; padding: 0.2rem 0.4rem; border-radius: 3px;
+  }
+  .modal-close:hover { color: var(--danger); }
+  .modal-section { margin-bottom: 1.25rem; }
+  .modal-section-label {
+    font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.1em; margin-bottom: 0.5rem; font-weight: 600;
+  }
+
+  /* Team roster */
+  .team-roster { display: flex; flex-direction: column; gap: 0.3rem; max-height: 260px; overflow-y: auto; margin-bottom: 0.5rem; }
+  .team-row {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.35rem 0.6rem; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; font-size: 0.8rem;
+  }
+  .team-num { font-family: 'Barlow Condensed',sans-serif; font-weight: 700; color: var(--accent); min-width: 3rem; }
+  .team-name { color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .team-remove { margin-left: auto; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.8rem; padding: 0 0.2rem; }
+  .team-remove:hover { color: var(--danger); }
+  .tba-result-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 200px; overflow-y: auto; }
+  .tba-result {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.4rem 0.6rem; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; cursor: pointer; transition: border-color 0.15s;
+  }
+  .tba-result:hover { border-color: var(--accent); }
+  .tba-result-key { font-family: 'Barlow Condensed',sans-serif; font-weight: 700; color: var(--accent); font-size: 0.8rem; min-width: 6rem; }
+  .tba-result-name { font-size: 0.8rem; color: var(--text); }
+  .tba-result-date { font-size: 0.7rem; color: var(--text-muted); margin-left: auto; }
+
+  /* Saved schedules */
+  .saved-schedule-list { display: flex; flex-direction: column; gap: 0.4rem; }
+  .saved-schedule-row {
+    display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.7rem;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    font-size: 0.78rem;
+  }
+  .saved-schedule-row.active-sched { border-color: var(--accent3); background: rgba(92,184,122,0.06); }
+  .saved-sched-name { flex: 1; color: var(--text); font-weight: 500; }
+  .saved-sched-meta { font-size: 0.68rem; color: var(--text-muted); }
+
+  #eventCodeInput.loading { opacity: 0.6; }
+  #eventCodeInput.valid   { border-color: var(--accent3); }
+  #eventCodeInput.invalid { border-color: var(--danger); }
+  .api-status {
+    font-size: 0.68rem; padding: 0.25rem 0.6rem; border-radius: 3px;
+    display: inline-block; margin-bottom: 0.75rem;
+  }
+  .api-status.ok  { background: rgba(92,184,122,0.12); color: var(--accent3); border: 1px solid rgba(92,184,122,0.3); }
+  .api-status.err { background: rgba(204,85,85,0.10); color: var(--danger);   border: 1px solid rgba(204,85,85,0.3); }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .results-panel { position: static; }
+    .stats-bar { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="logo-mark">FRC</div>
+    <div>
+      <h1>Match <span>Scheduler</span></h1>
+      <div class="subtitle">Competition Schedule Generator</div>
+    </div>
+  </header>
+
+  <!-- API status indicator -->
+  <div id="apiStatus" class="api-status" style="display:none"></div>
+
+  <!-- Event bar -->
+  <div class="event-bar">
+    <span class="event-bar-label">Event</span>
+    <div style="display:flex;align-items:center;gap:0.4rem;flex:1;min-width:0;">
+      <input type="text" id="eventCodeInput" placeholder="Event code (e.g. mnwi) or name…"
+        style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
+               padding:0.4rem 0.7rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.88rem;"
+        onkeydown="if(event.key==='Enter')loadEventByCode()"
+        oninput="onEventCodeInput()" autocomplete="off" spellcheck="false">
+      <button class="btn-sm btn-accent" onclick="loadEventByCode()" id="btnLoadEvent">Load</button>
+      <div id="eventCodeStatus" style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;"></div>
+    </div>
+    <div style="height:1.5rem;width:1px;background:var(--border);margin:0 0.25rem;flex-shrink:0;"></div>
+    <select class="event-select" id="eventSelect" onchange="onEventSelectChange()"
+      title="Recent events" style="max-width:200px;">
+      <option value="">Recent events…</option>
+    </select>
+    <button class="btn-sm" id="btnManageTeams" onclick="openModal('modalTeams')" disabled>&#9707; Teams</button>
+    <button class="btn-sm" id="btnSavedSchedules" onclick="openModal('modalSchedules')" disabled>&#9776; Schedules</button>
+    <button class="btn-sm btn-danger" id="btnDeleteEvent" onclick="deleteEvent()" disabled style="margin-left:auto;">&#x2715;</button>
+  </div>
+
+  <!-- New Event modal -->
+  <div class="modal-overlay" id="modalNewEvent">
+    <div class="modal">
+      <button class="modal-close" onclick="closeModal('modalNewEvent')">&#x2715;</button>
+      <div class="modal-title">New Event</div>
+      <!-- TBA search -->
+      <div class="modal-section">
+        <div class="modal-section-label">Import from The Blue Alliance</div>
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
+          <input type="number" id="tbaYear" placeholder="Year" value="" style="width:80px;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.4rem 0.6rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.85rem;">
+          <input type="text" id="tbaSearch" placeholder="Search event name or key…" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.4rem 0.6rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.85rem;">
+          <button class="btn-sm btn-accent" onclick="searchTBA()">Search</button>
+        </div>
+        <div class="tba-result-list" id="tbaResults"></div>
+      </div>
+      <!-- Manual creation -->
+      <div class="modal-section">
+        <div class="modal-section-label">Create manually</div>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+          <input type="text" id="newEventKey" placeholder="Event key (e.g. 2025mnmi)" style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.4rem 0.6rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.85rem;">
+          <input type="text" id="newEventName" placeholder="Event name" style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.4rem 0.6rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.85rem;">
+          <input type="number" id="newEventYear" placeholder="Year" style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.4rem 0.6rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.85rem;">
+          <button class="btn-sm btn-accent" onclick="createEvent()" style="align-self:flex-start;">Create Event</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Team roster modal -->
+  <div class="modal-overlay" id="modalTeams">
+    <div class="modal">
+      <button class="modal-close" onclick="closeModal('modalTeams')">&#x2715;</button>
+      <div class="modal-title">Team Roster</div>
+      <div class="modal-section">
+        <div class="modal-section-label">Teams in event (<span id="rosterCount">0</span>)</div>
+        <div class="team-roster" id="teamRoster"></div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+          <input type="number" id="addTeamNum" placeholder="Team number" min="1"
+            style="width:130px;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.4rem 0.6rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.85rem;">
+          <button class="btn-sm btn-accent" onclick="addTeam()">+ Add Team</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saved schedules modal -->
+  <div class="modal-overlay" id="modalSchedules">
+    <div class="modal">
+      <button class="modal-close" onclick="closeModal('modalSchedules')">&#x2715;</button>
+      <div class="modal-title">Saved Schedules</div>
+      <div class="saved-schedule-list" id="savedScheduleList">
+        <div style="color:var(--text-muted);font-size:0.8rem;">No schedules saved yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div class="panel">
+      <div class="panel-header">Configuration</div>
+      <div class="panel-body">
+        <div class="section-label">Competition Parameters</div>
+        <div class="field-row">
+          <div class="field">
+            <label>Number of Teams</label>
+            <input type="number" id="numTeams" value="24" min="6" max="120" title="Controlled by event team roster when an event is selected">
+          </div>
+          <div class="field">
+            <label>Matches per Team</label>
+            <input type="number" id="matchesPerTeam" value="8" min="1" max="20">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Cycle Time (min)</label>
+            <input type="number" id="cycleTime" value="8" min="1" max="60">
+          </div>
+          <div class="field">
+            <label>Number of Days</label>
+            <input type="number" id="numDays" value="2" min="1" max="5">
+          </div>
+        </div>
+        <div class="field-row single">
+          <div class="field">
+            <label>Match Cooldown (matches between appearances)</label>
+            <input type="number" id="cooldown" value="3" min="1" max="20">
+          </div>
+        </div>
+        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:-0.25rem;margin-bottom:0.5rem;">
+          Minimum matches that must pass before a team can play again. Higher = fewer back-to-backs but harder to satisfy with small team counts.
+        </div>
+        <div class="field-row single" style="margin-top:0.5rem;">
+          <div class="field">
+            <label>Timezone</label>
+            <select id="tzSelect" style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.5rem 0.75rem;font-family:'Barlow',sans-serif;font-size:0.9rem;border-radius:4px;width:100%;"></select>
+          </div>
+        </div>
+        <div class="field-row single" style="margin-top:0.5rem;">
+          <div class="field">
+            <label>Iterations (best of N attempts)</label>
+            <input type="number" id="iterations" value="1000" min="1">
+          </div>
+        </div>
+        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:-0.25rem;margin-bottom:0.5rem;">
+          Each iteration shuffles team order and picks the schedule with the best composite score across all priorities. More iterations = better quality, longer wait.
+        </div>
+
+        <div class="section-label">Cycle Time Changes</div>
+        <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.6rem;">
+          Override the default cycle time after a specific match number. Useful when the event speeds up or slows down mid-competition.
+        </div>
+        <div class="cycle-changes-list" id="cycleChangesList"></div>
+        <button class="btn-add-break" onclick="addCycleChange()" style="margin-bottom:0.5rem;">+ Add Cycle Time Change</button>
+
+
+        <div class="section-label">Daily Schedule</div>
+        <div class="days-container" id="daysContainer"></div>
+
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill"></div></div>
+          <div class="progress-label" id="progressLabel">Running iteration 0 / 0&hellip;</div>
+        </div>
+        <button class="btn-generate" id="btnGenerate" onclick="generateSchedule()">&#9889; Generate Schedule</button>
+      </div>
+    </div>
+
+    <div class="panel results-panel">
+      <div class="panel-header">Schedule Output</div>
+      <div class="stats-bar">
+        <div class="stat"><div class="stat-value" id="statMatches">&#8212;</div><div class="stat-label">Total Matches</div></div>
+        <div class="stat"><div class="stat-value" id="statTeams">&#8212;</div><div class="stat-label">Teams</div></div>
+        <div class="stat"><div class="stat-value" id="statPerTeam">&#8212;</div><div class="stat-label">Matches/Team</div></div>
+        <div class="stat"><div class="stat-value" id="statDays">&#8212;</div><div class="stat-label">Days</div></div>
+        <div class="stat stat-clickable" id="statB2BContainer" onclick="toggleStatFilter('b2b')" title="Click to filter back-to-back matches"><div class="stat-value" id="statB2B" style="color:var(--text-muted)">&#8212;</div><div class="stat-label">Back-to-Backs &#9660;</div></div>
+        <div class="stat stat-clickable" id="statSurrogatesContainer" onclick="toggleStatFilter('surrogate')" title="Click to filter surrogate matches"><div class="stat-value" id="statSurrogates" style="color:var(--text-muted)">&#8212;</div><div class="stat-label">Surrogates &#9660;</div><div id="statSurrogatesMin" style="font-size:0.65rem;font-weight:700;font-family:'Barlow Condensed',sans-serif;letter-spacing:0.04em;margin-top:0.2rem;" title=""></div></div>
+      </div>
+      <div class="filter-bar" id="filterBar" style="display:none">
+        <span class="filter-bar-label">Filters:</span>
+        <span class="filter-empty" id="filterEmpty">None active &mdash; click column headers or team numbers to filter</span>
+        <button class="filter-reset" id="filterReset" onclick="resetFilters()" style="display:none">&#x2715; Reset all</button>
+      </div>
+      <div class="schedule-output" id="scheduleOutput">
+        <div class="empty-state">
+          <div class="empty-icon">&#127942;</div>
+          <p>Configure your competition parameters<br>and click Generate Schedule</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+
+<script>
+function timeToMin(t) {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function minToTime(m) {
+  const totalMin = ((m % 1440) + 1440) % 1440; // wrap to 0-1439
+  const h24 = Math.floor(totalMin / 60);
+  const min = totalMin % 60;
+  const ampm = h24 < 12 ? 'AM' : 'PM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return h12 + ':' + String(min).padStart(2,'0') + ' ' + ampm;
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function buildDaysUI() {
+  const n = parseInt(document.getElementById('numDays').value) || 2;
+  const container = document.getElementById('daysContainer');
+  const existing = container.querySelectorAll('.day-row');
+  for (let i = existing.length; i < n; i++) {
+    const d = document.createElement('div');
+    d.className = 'day-row';
+    d.dataset.day = i;
+    d.innerHTML =
+      '<div class="day-row-header">Day ' + (i+1) + '</div>' +
+      '<div class="day-times">' +
+        '<div class="field"><label>Start Time</label><input type="time" class="day-start" value="08:00"></div>' +
+        '<div class="field"><label>End Time</label><input type="time" class="day-end" value="17:00"></div>' +
+      '</div>' +
+      '<div class="breaks-list"></div>' +
+      '<button class="btn-add-break" onclick="addBreak(this)">+ Add Break</button>';
+    container.appendChild(d);
+    if (i === 0) addBreak(d.querySelector('.btn-add-break'), '12:00', '13:00', 'Lunch');
+  }
+  const rows = container.querySelectorAll('.day-row');
+  for (let i = n; i < rows.length; i++) rows[i].remove();
+}
+
+function addBreak(btn, startVal, endVal, nameVal) {
+  startVal = startVal || '';
+  endVal = endVal || '';
+  nameVal = nameVal || '';
+  const list = btn.closest('.day-row').querySelector('.breaks-list');
+  const row = document.createElement('div');
+  row.className = 'break-row';
+  row.innerHTML =
+    '<div class="field"><label>Name</label><input type="text" class="break-name" placeholder="Lunch" value="' + nameVal + '"></div>' +
+    '<div class="field"><label>Start</label><input type="time" class="break-start" value="' + startVal + '"></div>' +
+    '<div class="field"><label>End</label><input type="time" class="break-end" value="' + endVal + '"></div>' +
+    '<button class="btn-icon" onclick="this.closest(\'.break-row\').remove()" title="Remove">&#x2715;</button>';
+  list.appendChild(row);
+}
+
+document.getElementById('numDays').addEventListener('change', buildDaysUI);
+buildDaysUI();
+
+function buildTimezoneSelect() {
+  const sel = document.getElementById('tzSelect');
+  // Get all supported IANA timezone names via Intl
+  const allZones = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : [];
+  const sysTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // If Intl.supportedValuesOf not available (older browsers), fall back to common list
+  const zones = allZones.length > 0 ? allZones : [
+    'Pacific/Honolulu','America/Anchorage','America/Los_Angeles','America/Denver',
+    'America/Chicago','America/New_York','America/Halifax','America/St_Johns',
+    'America/Sao_Paulo','UTC','Europe/London','Europe/Paris','Europe/Helsinki',
+    'Asia/Dubai','Asia/Kolkata','Asia/Bangkok','Asia/Shanghai','Asia/Tokyo',
+    'Australia/Sydney','Pacific/Auckland'
+  ];
+  sel.innerHTML = '';
+  zones.forEach(tz => {
+    const opt = document.createElement('option');
+    opt.value = tz;
+    // Show UTC offset alongside name
+    try {
+      const now = new Date();
+      const fmt = new Intl.DateTimeFormat('en', {timeZone: tz, timeZoneName: 'shortOffset'});
+      const parts = fmt.formatToParts(now);
+      const offset = (parts.find(p => p.type === 'timeZoneName') || {}).value || '';
+      opt.textContent = tz.replace(/_/g,' ') + '   ' + offset;
+    } catch(e) {
+      opt.textContent = tz;
+    }
+    if (tz === sysTz) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function getTimezoneAbbr() {
+  const tz = document.getElementById('tzSelect').value;
+  if (!tz) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en', {timeZone: tz, timeZoneName: 'short'}).formatToParts(new Date());
+    return (parts.find(p => p.type === 'timeZoneName') || {}).value || '';
+  } catch(e) { return ''; }
+}
+
+buildTimezoneSelect();
+document.getElementById('tbaYear').value = new Date().getFullYear();
+loadEvents();
+// Allow ?event=mnwi in the URL to auto-load an event
+(function() {
+  const p = new URLSearchParams(window.location.search).get('event');
+  if (p) { document.getElementById('eventCodeInput').value = p; setTimeout(loadEventByCode, 600); }
+})();
+
+function addCycleChange(afterMatch, newTime) {
+  afterMatch = afterMatch || '';
+  newTime = newTime || '';
+  const list = document.getElementById('cycleChangesList');
+  const row = document.createElement('div');
+  row.className = 'cycle-change-row';
+  row.innerHTML =
+    '<div class="field"><label>After Match #</label><input type="number" class="cc-after" placeholder="e.g. 20" min="1" value="' + afterMatch + '"></div>' +
+    '<div class="field"><label>New Cycle Time (min)</label><input type="number" class="cc-time" placeholder="e.g. 7" min="1" max="60" value="' + newTime + '"></div>' +
+    '<button class="btn-icon" onclick="this.closest(&apos;.cycle-change-row&apos;).remove()" title="Remove">&#x2715;</button>';
+  list.appendChild(row);
+}
+
+function getCycleTimeChanges() {
+  return Array.from(document.querySelectorAll('.cycle-change-row'))
+    .map(row => ({
+      after: parseInt(row.querySelector('.cc-after').value),
+      time: parseInt(row.querySelector('.cc-time').value),
+    }))
+    .filter(c => !isNaN(c.after) && !isNaN(c.time) && c.after >= 1 && c.time >= 1)
+    .sort((a, b) => a.after - b.after);
+}
+
+// Returns the cycle time that applies at a given match number (1-based)
+function getCycleTime(matchNum, defaultTime, changes) {
+  let t = defaultTime;
+  for (const c of changes) {
+    if (matchNum > c.after) t = c.time;
+  }
+  return t;
+}
+
+buildDaysUI();
+
+function generateMatches(numTeams, matchesPerTeam, idealGap) {
+  // Shuffle team order so each iteration explores a different schedule space
+  function shuffledTeams() {
+    const t = Array.from({length: numTeams}, (_, i) => i + 1);
+    for (let i = t.length - 1; i > 0; i--) { const j = Math.floor(Math.random()*(i+1)); [t[i],t[j]]=[t[j],t[i]]; }
+    return t;
+  }
+  // ─────────────────────────────────────────────────────────────────
+  // SCHEDULING CRITERIA (ordered by priority)
+  //
+  // P1  [HARD]   Each match has exactly 6 teams (3 red, 3 blue).
+  // P2  [HARD]   Each team plays exactly matchesPerTeam times as a regular.
+  //              Surrogates play one extra time to fill structural gaps.
+  // P3  [HARD]   Round 1 is strict: all teams must play once before any team plays twice.
+  //              This guarantees no team waits while others get a head start.
+  // P4  [HARD]   Cooldown: penalty of -1000 × (idealGap - gap) if a team replays
+  //              within idealGap matches of their last appearance.
+  // P5  [SOFT]   Match count equity: prefer teams that have played fewer times overall.
+  //              After round 1 the schedule is open — round boundaries are cosmetic.
+  //              Weight: -W_COUNT per match played (default 5).
+  // P6  [SOFT]   Alliance balance: each team plays red and blue equally often.
+  //              All C(6,3)=20 red/blue splits evaluated; best balance wins.
+  //              Weight: -W_BALANCE per unit of imbalance (default 50).
+  // P7  [SOFT]   Gap maximization: prefer teams that have waited longer.
+  //              Weight: +W_GAP per match waited (default 10).
+  // P8  [SOFT]   Opponent diversity: minimize repeat opponents (teams faced across the net).
+  //              Penalty: -W_OPPONENT per prior encounter (default 15).
+  // P9  [SOFT]   Partner diversity: minimize repeat alliance partners.
+  //              Penalty: -W_PARTNER per prior encounter (default 12).
+  // P10 [SOFT]   Surrogate fairness: spread surrogate appearances across as many
+  //              different teams as possible.
+  //              Hard cap: ceil(totalSurSlots / numTeams) + 1 per team.
+  //              Penalty for repeat surrogating: -W_SUR_RPT (default 200).
+  // ─────────────────────────────────────────────────────────────────
+
+  const W_BALANCE  = 50;
+  const W_GAP      = 10;
+  const W_COUNT    = 5;
+  const W_OPPONENT = 15;
+  const W_PARTNER  = 12;
+  const W_SUR_RPT  = 200;
+
+  const teams = shuffledTeams();
+  const matchesPerRound    = Math.ceil(numTeams / 6);
+  const surrogatesPerRound = matchesPerRound * 6 - numTeams;
+  const totalMatches       = matchesPerRound * matchesPerTeam;
+  const totalSurSlots      = surrogatesPerRound * matchesPerTeam;
+  const fairSurCap         = Math.ceil(totalSurSlots / numTeams) + 1;
+
+  const matchCounts    = new Array(numTeams + 1).fill(0);
+  const lastPlayed     = new Array(numTeams + 1).fill(-999);
+  const surrogateCount = new Array(numTeams + 1).fill(0);
+  const redCount       = new Array(numTeams + 1).fill(0);
+  const blueCount      = new Array(numTeams + 1).fill(0);
+  const opponents = Array.from({length: numTeams + 1}, () => new Array(numTeams + 1).fill(0));
+  const partners  = Array.from({length: numTeams + 1}, () => new Array(numTeams + 1).fill(0));
+
+  const matches = [];
+
+  // Round boundaries: round 1 is exact; rounds 2+ are cosmetic markers.
+  const roundBoundaries = new Map();
+  for (let r = 1; r <= matchesPerTeam; r++) {
+    roundBoundaries.set(r, (r - 1) * matchesPerRound);
+  }
+
+  idealGap = Math.max(1, idealGap);
+
+  // Individual team score for regular candidate ranking (P4/P5/P7)
+  function teamScore(t, now) {
+    const gap = now - lastPlayed[t];
+    if (gap < idealGap) return -1000 * (idealGap - gap); // P4 hard cooldown penalty
+    return gap * W_GAP - matchCounts[t] * W_COUNT;       // P7 gap reward + P5 equity
+  }
+
+  // Surrogate candidate score (P10)
+  function surrogateScore(t, now) {
+    return -surrogateCount[t] * W_SUR_RPT + (now - lastPlayed[t]) * 2;
+  }
+
+  // Match-level diversity score for a proposed red/blue split (P8/P9)
+  function diversityScore(red, blue) {
+    let s = 0;
+    for (const r of red)  for (const b of blue)       s -= opponents[r][b] * W_OPPONENT;
+    for (let i = 0; i < red.length;  i++) for (let j = i+1; j < red.length;  j++) s -= partners[red[i]][red[j]]   * W_PARTNER;
+    for (let i = 0; i < blue.length; i++) for (let j = i+1; j < blue.length; j++) s -= partners[blue[i]][blue[j]] * W_PARTNER;
+    return s;
+  }
+
+  // Given exactly 6 teams, enumerate all C(6,3)=20 red/blue splits and pick the one
+  // that best balances alliance counts (P6), with diversity as tiebreak (P8/P9).
+  function assignAlliances(six) {
+    if (!six || six.length !== 6 || six.some(t => !t)) return null; // safety guard
+    let best = null, bestScore = -Infinity;
+    for (let mask = 0; mask < 64; mask++) {
+      if (mask.toString(2).split('').filter(c => c === '1').length !== 3) continue;
+      const r = [], b = [];
+      for (let i = 0; i < 6; i++) ((mask >> i) & 1) ? r.push(six[i]) : b.push(six[i]);
+      const balScore = -W_BALANCE * (
+        r.reduce((a, t) => a + Math.abs((redCount[t]+1) - blueCount[t]), 0) +
+        b.reduce((a, t) => a + Math.abs(redCount[t] - (blueCount[t]+1)), 0)
+      );
+      const total = balScore + diversityScore(r, b);
+      if (total > bestScore) { bestScore = total; best = {r, b}; }
+    }
+    return best;
+  }
+
+  // ── PHASE 1: Round 1 — every team gets their first match ────────────────────
+  // Matches 0 through matchesPerRound-2: pick 6 teams who haven't played yet.
+  // Last match of round 1: only (6 - surrogatesPerRound) first-timers remain, so the
+  // extra slots are filled by teams playing their SECOND match early — NOT surrogates.
+  // This avoids an all-second-match alliance and reduces total surrogate count.
+  // No team in round 1 is ever flagged as a surrogate.
+  // Round 1 is considered complete once every team has played once; the boundary
+  // marker is placed at matchesPerRound regardless of the extra second-match plays.
+  for (let m = 0; m < matchesPerRound; m++) {
+    const now = matches.length;
+    const isLast  = (m === matchesPerRound - 1);
+    // Extra slots in the last match are filled by second-match teams, not surrogates
+    const extraSlots = isLast ? surrogatesPerRound : 0;
+    const firstSlots = 6 - extraSlots;
+
+    // First-timers: teams that haven't played yet
+    let firstTimers = teams.filter(t => matchCounts[t] === 0)
+      .sort((a, b) => {
+        const d = teamScore(b, now) - teamScore(a, now);
+        return d !== 0 ? d : Math.random() - 0.5;
+      });
+
+    // Second-match candidates for the extra slots: prefer teams that scored well
+    // (good gap reward since they played earlier in round 1) and haven't surrogated
+    let secondTimers = extraSlots > 0
+      ? teams.filter(t => matchCounts[t] === 1)
+             .sort((a, b) => teamScore(b, now) - teamScore(a, now))
+      : [];
+
+    const firstPool  = firstTimers.slice(0, Math.max(firstSlots + 6, 12));
+    const secondPool = secondTimers.slice(0, extraSlots + 2);
+
+    // For last match: override assignAlliances to also minimise second-timer imbalance.
+    // We enumerate all C(6,3) splits and pick the one that best balances:
+    //   1. Number of second-timers per alliance (primary in last match)
+    //   2. Alliance balance (red/blue counts) and diversity (normal weights)
+    function assignAlliancesR1(six) {
+      if (!six || six.length !== 6 || six.some(t => !t)) return null;
+      let best = null, bestScore = -Infinity;
+      for (let mask = 0; mask < 64; mask++) {
+        if (mask.toString(2).split('').filter(c => c === '1').length !== 3) continue;
+        const r = [], b = [];
+        for (let i = 0; i < 6; i++) ((mask >> i) & 1) ? r.push(six[i]) : b.push(six[i]);
+        const rSecond = r.filter(t => matchCounts[t] >= 1).length;
+        const bSecond = b.filter(t => matchCounts[t] >= 1).length;
+        // Heavy penalty for second-timer imbalance across alliances (P2 fairness)
+        const balancePenalty = -500 * Math.abs(rSecond - bSecond);
+        const allianceScore = -W_BALANCE * (
+          r.reduce((a, t) => a + Math.abs((redCount[t]+1) - blueCount[t]), 0) +
+          b.reduce((a, t) => a + Math.abs(redCount[t] - (blueCount[t]+1)), 0)
+        );
+        const total = balancePenalty + allianceScore + diversityScore(r, b);
+        if (total > bestScore) { bestScore = total; best = {r, b}; }
+      }
+      return best;
+    }
+
+    const cands = [];
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const six = [...shuffle(firstPool.slice()).slice(0, firstSlots),
+                   ...shuffle(secondPool.slice()).slice(0, extraSlots)];
+      if (six.length === 6 && new Set(six).size === 6) {
+        const res = isLast ? assignAlliancesR1(six) : assignAlliances(six);
+        if (res) cands.push({r: res.r, b: res.b, score: diversityScore(res.r, res.b) + six.reduce((a, t) => a + teamScore(t, now), 0) * 0.5});
+      }
+    }
+    cands.sort((a, b) => b.score - a.score);
+
+    let chosenRed, chosenBlue;
+    if (cands.length > 0) {
+      chosenRed = cands[0].r; chosenBlue = cands[0].b;
+    } else {
+      const six = [...firstTimers.slice(0, firstSlots), ...secondTimers.slice(0, extraSlots)];
+      const res = isLast ? assignAlliancesR1(six) : assignAlliances(six);
+      chosenRed = res ? res.r : six.slice(0, 3);
+      chosenBlue = res ? res.b : six.slice(3, 6);
+    }
+
+    // No one in round 1 is a surrogate — second-match teams are just playing early
+    matches.push({red: chosenRed, blue: chosenBlue,
+                  redSurrogate:  chosenRed.map(() => false),
+                  blueSurrogate: chosenBlue.map(() => false)});
+    commitMatch(chosenRed, chosenBlue, now);
+  }
+
+  // ── PHASE 2: Open scheduling — score-driven, no hard round constraints ────────
+  // After round 1, rounds are cosmetic. Teams are picked by score only.
+  //
+  // At match 'now', a team's "expected" match count is floor(now * 6 / numTeams).
+  // Regular:   matchCounts[t] <= expectedCount  (at or behind schedule)
+  // Surrogate: matchCounts[t] >  expectedCount  (ahead of schedule)
+  //
+  // This guarantees surrogates are always available: round 1 seeds surrogatesPerRound
+  // teams at mc=2 (ahead of the expected mc=1), and Bresenham distributes surrogate
+  // slots to match exactly how many "ahead" teams exist at each point.
+  //
+  // Hard cap: matchCounts[t] < matchesPerTeam + 1 prevents any team from playing
+  // more than matchesPerTeam + 1 times (their regular quota plus one surrogate max).
+  const remainingMatches = totalMatches - matchesPerRound;
+  for (let i = 0; i < remainingMatches; i++) {
+    const now = matches.length;
+
+    // Bresenham: how many surrogate slots this specific match should have
+    const surSlots = Math.floor(totalSurSlots * (now + 1) / totalMatches)
+                   - Math.floor(totalSurSlots * now       / totalMatches);
+    const regSlots = 6 - surSlots;
+
+    // Schedule-position split: "ahead" teams are surrogates
+    const expectedCount = Math.floor(now * 6 / numTeams);
+    const regulars   = teams.filter(t => matchCounts[t] <= expectedCount && matchCounts[t] < matchesPerTeam);
+    const surrogates = teams.filter(t => matchCounts[t] >  expectedCount && matchCounts[t] < matchesPerTeam + 1);
+
+    // Sort regulars by individual score (P4/P5/P7)
+    const sortedReg = regulars.slice().sort((a, b) => {
+      const d = teamScore(b, now) - teamScore(a, now);
+      return d !== 0 ? d : Math.random() - 0.5;
+    });
+
+    // Sort surrogates by fairness score (P10), relaxing cap only if pool is too small
+    let surPool = surrogates.filter(t => surrogateCount[t] < fairSurCap)
+                            .sort((a, b) => surrogateScore(b, now) - surrogateScore(a, now));
+    if (surPool.length < surSlots)
+      surPool = surrogates.slice().sort((a, b) => surrogateScore(b, now) - surrogateScore(a, now));
+    surPool = surPool.slice(0, surSlots + 2);
+
+    const regPool = sortedReg.slice(0, Math.max(regSlots + 6, 12));
+
+    const cands = [];
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const six = [...shuffle(regPool.slice()).slice(0, regSlots),
+                   ...shuffle(surPool.slice()).slice(0, surSlots)];
+      if (six.length === 6 && new Set(six).size === 6) {
+        const {r, b} = assignAlliances(six);
+        if (r && b) cands.push({r, b, score: diversityScore(r, b) + six.reduce((a, t) => a + teamScore(t, now), 0) * 0.5});
+      }
+    }
+    cands.sort((a, b) => b.score - a.score);
+
+    let chosenRed, chosenBlue;
+    if (cands.length > 0) {
+      chosenRed = cands[0].r; chosenBlue = cands[0].b;
+    } else {
+      // Fallback: take best available teams regardless of reg/sur classification,
+      // but still respect the hard per-team quota cap
+      const eligible = teams.filter(t => matchCounts[t] < matchesPerTeam + 1)
+        .sort((a, b) => teamScore(b, now) - teamScore(a, now));
+      const padded = eligible.slice(0, 6);
+      const res = assignAlliances(padded);
+      chosenRed = res ? res.r : padded.slice(0, 3);
+      chosenBlue = res ? res.b : padded.slice(3, 6);
+    }
+
+    // Mark as surrogate: any team that was "ahead" of schedule when picked
+    const redSurrogate  = chosenRed.map(t  => matchCounts[t] > expectedCount);
+    const blueSurrogate = chosenBlue.map(t => matchCounts[t] > expectedCount);
+    matches.push({red: chosenRed, blue: chosenBlue, redSurrogate, blueSurrogate});
+    commitMatch(chosenRed, chosenBlue, now);
+  }
+
+  // ─── shared post-match bookkeeping ───────────────────────────────────────────
+  function commitMatch(red, blue, now) {
+    const allSix = [...red, ...blue];
+    allSix.forEach(t => {
+      if (matchCounts[t] >= matchesPerTeam) surrogateCount[t]++;
+      matchCounts[t]++;
+      lastPlayed[t] = now;
+    });
+    red.forEach(t  => redCount[t]++);
+    blue.forEach(t => blueCount[t]++);
+    for (const r of red)  for (const b of blue) { opponents[r][b]++; opponents[b][r]++; }
+    for (let i = 0; i < red.length;  i++) for (let j = i+1; j < red.length;  j++)  { partners[red[i]][red[j]]++;   partners[red[j]][red[i]]++;   }
+    for (let i = 0; i < blue.length; i++) for (let j = i+1; j < blue.length; j++) { partners[blue[i]][blue[j]]++; partners[blue[j]][blue[i]]++; }
+  }
+
+  return { matches, surrogateCount, roundBoundaries };
+}
+
+function countBackToBacks(matches) {
+  let count = 0;
+  for (let i = 1; i < matches.length; i++) {
+    const prev = new Set([...matches[i-1].red, ...matches[i-1].blue]);
+    const curr = [...matches[i].red, ...matches[i].blue];
+    if (curr.some(t => prev.has(t))) count++;
+  }
+  return count;
+}
+
+function countSurrogates(matches) {
+  return matches.reduce((acc, m) => {
+    return acc + m.redSurrogate.filter(Boolean).length + m.blueSurrogate.filter(Boolean).length;
+  }, 0);
+}
+
+// Composite score for comparing iterations — lower penalties = better.
+// Weights mirror the scheduling priorities so we pick the iteration
+// that best satisfies them holistically.
+function scoreSchedule(matches, numTeams) {
+  if (!matches || matches.length === 0) return -Infinity;
+  let b2b = 0, surrogates = 0, repeatOpp = 0, repeatPart = 0;
+  const red = new Array(numTeams + 1).fill(0);
+  const blue = new Array(numTeams + 1).fill(0);
+  const opp = Array.from({length: numTeams + 1}, () => new Array(numTeams + 1).fill(0));
+  const par = Array.from({length: numTeams + 1}, () => new Array(numTeams + 1).fill(0));
+
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    // B2B (P4)
+    if (i > 0) {
+      const prev = new Set([...matches[i-1].red, ...matches[i-1].blue]);
+      if ([...m.red, ...m.blue].some(t => prev.has(t))) b2b++;
+    }
+    // Surrogates (P2/P10)
+    surrogates += m.redSurrogate.filter(Boolean).length + m.blueSurrogate.filter(Boolean).length;
+    // Alliance balance (P6)
+    m.red.forEach(t => red[t]++);
+    m.blue.forEach(t => blue[t]++);
+    // Opponent/partner diversity (P8/P9) — count repeats
+    for (const r of m.red) for (const b of m.blue) {
+      if (opp[r][b] > 0) repeatOpp++;
+      opp[r][b]++; opp[b][r]++;
+    }
+    for (let a = 0; a < m.red.length; a++) for (let b = a+1; b < m.red.length; b++) {
+      if (par[m.red[a]][m.red[b]] > 0) repeatPart++;
+      par[m.red[a]][m.red[b]]++; par[m.red[b]][m.red[a]]++;
+    }
+    for (let a = 0; a < m.blue.length; a++) for (let b = a+1; b < m.blue.length; b++) {
+      if (par[m.blue[a]][m.blue[b]] > 0) repeatPart++;
+      par[m.blue[a]][m.blue[b]]++; par[m.blue[b]][m.blue[a]]++;
+    }
+  }
+  const maxImbalance = Math.max(...Array.from({length: numTeams}, (_, i) => Math.abs(red[i+1] - blue[i+1])));
+  // Lower = better (all terms are penalties)
+  return -(b2b * 1000 + surrogates * 100 + maxImbalance * 50 + repeatOpp * 15 + repeatPart * 12);
+}
+
+// ── API base URL (auto-detects: same origin when served by FastAPI) ───────────
+const API = window.location.origin;
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let _currentEventId = null;
+let _currentScheduleId = null;
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function showApiStatus(msg, isErr = false) {
+  const el = document.getElementById('apiStatus');
+  el.textContent = msg;
+  el.className = 'api-status ' + (isErr ? 'err' : 'ok');
+  el.style.display = 'inline-block';
+  if (!isErr) setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+// ── Modal helpers ─────────────────────────────────────────────────────────────
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open')); });
+
+// ── Events ────────────────────────────────────────────────────────────────────
+async function loadEvents() {
+  try {
+    const events = await apiFetch('/api/events');
+    const sel = document.getElementById('eventSelect');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Recent events…</option>';
+    events.forEach(e => {
+      const opt = document.createElement('option');
+      opt.value = e.id;
+      opt.textContent = e.key + ' — ' + e.name + ' (' + e.year + ')';
+      if (String(e.id) === String(cur)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch(e) { showApiStatus('Server unreachable — running offline', true); }
+}
+
+// Called when user selects from the recent-events dropdown
+async function onEventSelectChange() {
+  const id = document.getElementById('eventSelect').value;
+  if (!id) return;
+  try {
+    const ev = await apiFetch('/api/events/' + id);
+    activateEvent(ev);
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
+// Primary workflow: type event code, press Enter or Load
+async function loadEventByCode() {
+  const raw   = document.getElementById('eventCodeInput').value.trim();
+  if (!raw) return;
+
+  // Accept bare codes like "mnwi" or full keys like "2025mnwi"
+  const year  = new Date().getFullYear();
+  // If it already starts with a 4-digit year, use as-is; otherwise prepend current year
+  const code  = /^\d{4}/.test(raw) ? raw.toLowerCase() : year + raw.toLowerCase();
+
+  const input = document.getElementById('eventCodeInput');
+  const status = document.getElementById('eventCodeStatus');
+  input.className = 'loading'; status.textContent = 'Looking up…';
+
+  try {
+    // Check if we already have it locally
+    const events = await apiFetch('/api/events');
+    const local  = events.find(e => e.key === code || e.key === raw.toLowerCase());
+    if (local) {
+      const ev = await apiFetch('/api/events/' + local.id);
+      activateEvent(ev);
+      input.className = 'valid';
+      status.textContent = '✓ ' + local.name;
+      return;
+    }
+
+    // Not local — try TBA import
+    status.textContent = 'Importing from TBA…';
+    const result = await apiFetch('/api/tba/import/' + code, { method: 'POST' });
+    const ev = await apiFetch('/api/events/' + result.id);
+    activateEvent(ev);
+    await loadEvents();
+    input.className = 'valid';
+    status.textContent = '✓ ' + result.name + ' (' + result.teams_imported + ' teams)';
+    showApiStatus('Imported from TBA: ' + result.name);
+  } catch(e) {
+    input.className = 'invalid';
+    status.textContent = '✗ Not found';
+    showApiStatus('Event "' + raw + '" not found in TBA or local DB', true);
+  }
+}
+
+function onEventCodeInput() {
+  const input = document.getElementById('eventCodeInput');
+  input.className = '';
+  document.getElementById('eventCodeStatus').textContent = '';
+}
+
+// Set the active event in UI state
+async function activateEvent(ev) {
+  _currentEventId = ev.id;
+  // Sync dropdown selection
+  const sel = document.getElementById('eventSelect');
+  if (![...sel.options].some(o => { if (o.value == ev.id) { o.selected = true; return true; } return false; })) {
+    const opt = document.createElement('option');
+    opt.value = ev.id;
+    opt.textContent = ev.key + ' — ' + ev.name + ' (' + ev.year + ')';
+    opt.selected = true;
+    sel.appendChild(opt);
+  }
+  document.getElementById('btnManageTeams').disabled    = false;
+  document.getElementById('btnSavedSchedules').disabled = false;
+  document.getElementById('btnDeleteEvent').disabled    = false;
+  document.getElementById('numTeams').disabled          = false;
+  await loadRoster();
+  await loadSavedSchedules();
+}
+
+async function createEvent() {
+  const key  = document.getElementById('newEventKey').value.trim();
+  const name = document.getElementById('newEventName').value.trim();
+  const year = parseInt(document.getElementById('newEventYear').value);
+  if (!key || !name || !year) { showApiStatus('Fill in all fields', true); return; }
+  try {
+    const result = await apiFetch('/api/events', { method: 'POST', body: JSON.stringify({ key, name, year }) });
+    showApiStatus('Event created: ' + result.name);
+    closeModal('modalNewEvent');
+    await loadEvents();
+    const ev = await apiFetch('/api/events/' + result.id);
+    document.getElementById('eventCodeInput').value = key;
+    document.getElementById('eventCodeStatus').textContent = '✓ ' + result.name;
+    document.getElementById('eventCodeInput').className = 'valid';
+    activateEvent(ev);
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
+async function deleteEvent() {
+  if (!_currentEventId) return;
+  if (!confirm('Delete this event and all its schedules? This cannot be undone.')) return;
+  try {
+    await apiFetch('/api/events/' + _currentEventId, { method: 'DELETE' });
+    _currentEventId = null;
+    showApiStatus('Event deleted');
+    await loadEvents();
+    document.getElementById('eventSelect').value = '';
+    document.getElementById('eventCodeInput').value = '';
+    document.getElementById('eventCodeInput').className = '';
+    document.getElementById('eventCodeStatus').textContent = '';
+    document.getElementById('btnManageTeams').disabled    = true;
+    document.getElementById('btnSavedSchedules').disabled = true;
+    document.getElementById('btnDeleteEvent').disabled    = true;
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
+// ── TBA search ────────────────────────────────────────────────────────────────
+async function searchTBA() {
+  const year   = document.getElementById('tbaYear').value || new Date().getFullYear();
+  const search = document.getElementById('tbaSearch').value.trim();
+  const list   = document.getElementById('tbaResults');
+  list.innerHTML = '<div style="color:var(--text-muted);font-size:0.78rem;">Searching…</div>';
+  try {
+    const events = await apiFetch('/api/tba/events/' + year + (search ? '?search=' + encodeURIComponent(search) : ''));
+    list.innerHTML = '';
+    if (!events.length) { list.innerHTML = '<div style="color:var(--text-muted);font-size:0.78rem;">No results</div>'; return; }
+    events.slice(0, 30).forEach(e => {
+      const row = document.createElement('div');
+      row.className = 'tba-result';
+      row.innerHTML = '<span class="tba-result-key">' + e.key + '</span>' +
+        '<span class="tba-result-name">' + e.name + '</span>' +
+        '<span class="tba-result-date">' + (e.start_date || '') + '</span>';
+      row.onclick = () => importFromTBA(e.key);
+      list.appendChild(row);
+    });
+  } catch(e) { list.innerHTML = '<div style="color:var(--danger);font-size:0.78rem;">' + e.message + '</div>'; }
+}
+
+async function importFromTBA(eventKey) {
+  const list = document.getElementById('tbaResults');
+  list.innerHTML = '<div style="color:var(--text-muted);font-size:0.78rem;">Importing ' + eventKey + '…</div>';
+  try {
+    const result = await apiFetch('/api/tba/import/' + eventKey, { method: 'POST' });
+    showApiStatus('Imported ' + result.name + ' with ' + result.teams_imported + ' teams');
+    closeModal('modalNewEvent');
+    await loadEvents();
+    document.getElementById('eventCodeInput').value = result.key;
+    document.getElementById('eventCodeStatus').textContent = '✓ ' + result.name;
+    document.getElementById('eventCodeInput').className = 'valid';
+    const ev = await apiFetch('/api/events/' + result.id);
+    activateEvent(ev);
+  } catch(e) {
+    list.innerHTML = '<div style="color:var(--danger);font-size:0.78rem;">' + e.message + '</div>';
+  }
+}
+
+// ── Team roster ───────────────────────────────────────────────────────────────
+async function loadRoster() {
+  if (!_currentEventId) return;
+  try {
+    const teams = await apiFetch('/api/events/' + _currentEventId + '/teams');
+    // Update numTeams to reflect roster
+    document.getElementById('numTeams').value = teams.length;
+    document.getElementById('rosterCount').textContent = teams.length;
+    const roster = document.getElementById('teamRoster');
+    roster.innerHTML = '';
+    teams.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'team-row';
+      row.innerHTML = '<span class="team-num">' + t.number + '</span>' +
+        '<span class="team-name">' + (t.nickname || t.name || '') + '</span>' +
+        '<button class="team-remove" onclick="removeTeam(' + t.number + ')" title="Remove">&#x2715;</button>';
+      roster.appendChild(row);
+    });
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
+async function addTeam() {
+  if (!_currentEventId) return;
+  const num = parseInt(document.getElementById('addTeamNum').value);
+  if (!num || num < 1) { showApiStatus('Enter a valid team number', true); return; }
+  try {
+    await apiFetch('/api/events/' + _currentEventId + '/teams', {
+      method: 'POST', body: JSON.stringify({ number: num })
+    });
+    document.getElementById('addTeamNum').value = '';
+    await loadRoster();
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
+async function removeTeam(teamNumber) {
+  if (!_currentEventId) return;
+  try {
+    await apiFetch('/api/events/' + _currentEventId + '/teams/' + teamNumber, { method: 'DELETE' });
+    await loadRoster();
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
+// ── Saved schedules ───────────────────────────────────────────────────────────
+async function loadSavedSchedules() {
+  if (!_currentEventId) return;
+  try {
+    const schedules = await apiFetch('/api/events/' + _currentEventId + '/schedules');
+    const list = document.getElementById('savedScheduleList');
+    list.innerHTML = '';
+    if (!schedules.length) {
+      list.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;">No schedules saved yet.</div>';
+      return;
+    }
+    schedules.forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'saved-schedule-row' + (s.is_active ? ' active-sched' : '');
+      const dt = new Date(s.created_at).toLocaleString();
+      row.innerHTML =
+        '<div style="flex:1">' +
+          '<div class="saved-sched-name">' + s.name + (s.is_active ? ' <span style="color:var(--accent3);font-size:0.65rem;">● ACTIVE</span>' : '') + '</div>' +
+          '<div class="saved-sched-meta">' + s.num_teams + ' teams · ' + s.matches_per_team + ' mpt · score ' + s.score.toFixed(0) + ' · ' + dt + '</div>' +
+        '</div>' +
+        '<button class="btn-sm" onclick="loadSchedule(' + s.id + ')" style="margin-left:0.4rem;">Load</button>' +
+        (!s.is_active ? '<button class="btn-sm" onclick="activateSchedule(' + s.id + ')" style="margin-left:0.3rem;">Set Active</button>' : '') +
+        '<button class="btn-sm btn-danger" onclick="deleteSchedule(' + s.id + ')" style="margin-left:0.3rem;">&#x2715;</button>';
+      list.appendChild(row);
+    });
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
+async function loadSchedule(scheduleId) {
+  try {
+    const sched = await apiFetch('/api/schedules/' + scheduleId);
+    _currentScheduleId = scheduleId;
+    // Normalise API response to match finishGeneration signature
+    const matches = sched.matches.map(m => ({
+      red:           m.red,
+      blue:          m.blue,
+      redSurrogate:  m.red_surrogate,
+      blueSurrogate: m.blue_surrogate,
+    }));
+    const roundBoundaries = new Map(Object.entries(sched.round_boundaries).map(([k, v]) => [parseInt(k), v]));
+    const surrogateCount  = sched.surrogate_count;
+    finishGeneration(matches, roundBoundaries, surrogateCount, sched.best_iteration, sched.iterations_run);
+    closeModal('modalSchedules');
+    showApiStatus('Schedule loaded: ' + sched.name);
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
+async function activateSchedule(scheduleId) {
+  try {
+    await apiFetch('/api/schedules/' + scheduleId + '/activate', { method: 'POST' });
+    await loadSavedSchedules();
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
+async function deleteSchedule(scheduleId) {
+  if (!confirm('Delete this schedule?')) return;
+  try {
+    await apiFetch('/api/schedules/' + scheduleId, { method: 'DELETE' });
+    if (_currentScheduleId === scheduleId) _currentScheduleId = null;
+    await loadSavedSchedules();
+  } catch(e) { showApiStatus(e.message, true); }
+}
+
+// ── Generate schedule — server-side with SSE progress ─────────────────────────
+async function generateSchedule() {
+  const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value);
+  const cooldown       = parseInt(document.getElementById('cooldown').value) || 3;
+  const iterations     = Math.max(1, parseInt(document.getElementById('iterations').value) || 1);
+
+  const btn = document.getElementById('btnGenerate');
+  btn.disabled = true;
+  document.getElementById('progressWrap').style.display = 'block';
+
+  const startTime = performance.now();
+
+  function formatETA(ms) {
+    if (ms < 1000) return 'almost done';
+    const s = Math.round(ms / 1000);
+    if (s < 60) return s + 's remaining';
+    const m = Math.floor(s / 60), rs = s % 60;
+    return m + 'm ' + String(rs).padStart(2,'0') + 's remaining';
+  }
+
+  function updateProgress(done, total, best) {
+    const pct = Math.round(done / total * 100);
+    document.getElementById('progressFill').style.width = pct + '%';
+    const elapsed  = performance.now() - startTime;
+    const eta = done > 1 ? formatETA((elapsed / done) * (total - done)) : '';
+    document.getElementById('progressLabel').textContent =
+      done + ' / ' + total + ' iterations' +
+      (eta ? ' · ' + eta : '') +
+      (best !== undefined ? ' · best: ' + best.toFixed(0) : '') + '…';
+  }
+
+  // Collect day/timing config to store with the schedule
+  const dayConfig = {
+    cycleTime:    parseInt(document.getElementById('cycleTime').value),
+    numDays:      parseInt(document.getElementById('numDays').value),
+    cycleChanges: getCycleTimeChanges(),
+    days: Array.from(document.querySelectorAll('.day-row')).map(row => ({
+      start: row.querySelector('.day-start').value,
+      end:   row.querySelector('.day-end').value,
+      breaks: Array.from(row.querySelectorAll('.break-row')).map(br => ({
+        name:  br.querySelector('.break-name').value || 'Break',
+        start: br.querySelector('.break-start').value,
+        end:   br.querySelector('.break-end').value,
+      })).filter(b => b.start && b.end),
+    })),
+  };
+
+  // If no event selected, fall back to client-side scheduling
+  if (!_currentEventId) {
+    runClientSide(parseInt(document.getElementById('numTeams').value),
+      matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress);
+    return;
+  }
+
+  const body = JSON.stringify({
+    event_id: parseInt(_currentEventId),
+    matches_per_team: matchesPerTeam,
+    cooldown,
+    iterations,
+    schedule_name: 'Schedule ' + new Date().toLocaleTimeString(),
+    day_config: dayConfig,
+  });
+
+  try {
+    const res = await fetch(API + '/api/events/' + _currentEventId + '/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+
+    if (!res.ok) throw new Error(await res.text());
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const msg = JSON.parse(line.slice(6));
+          if (msg.type === 'progress') {
+            updateProgress(msg.done, msg.total, undefined);
+          } else if (msg.type === 'done') {
+            updateProgress(msg.total || iterations, iterations, msg.score);
+            _currentScheduleId = msg.schedule_id;
+            await loadSavedSchedules();
+            await loadSchedule(msg.schedule_id);
+            btn.disabled = false;
+            document.getElementById('progressWrap').style.display = 'none';
+            showApiStatus('Schedule generated and saved');
+          } else if (msg.type === 'error') {
+            throw new Error(msg.message);
+          }
+        } catch(e2) { /* skip malformed SSE line */ }
+      }
+    }
+  } catch(err) {
+    showApiStatus('Server error: ' + err.message + ' — falling back to client-side', true);
+    const numTeams = parseInt(document.getElementById('numTeams').value);
+    runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress);
+  }
+}
+
+// Client-side fallback (original worker-based scheduler)
+function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA, updateProgress) {
+  const btn = document.getElementById('btnGenerate');
+  const maxWorkers = navigator.hardwareConcurrency || 4;
+  const numWorkers = Math.min(iterations, maxWorkers);
+
+  let bestMatches = null, bestRoundBoundaries = null, bestSurrogateCount = null;
+  let bestScore = -Infinity, bestIteration = 0;
+  let totalDone = 0, workersFinished = 0;
+
+  function _updateProgress() {
+    updateProgress(totalDone, iterations, bestScore > -Infinity ? bestScore : undefined);
+  }
+
+  const workerSrc = document.getElementById('workerSrc').textContent.trim();
+  function makeWorkerUrl() {
+    try { return URL.createObjectURL(new Blob([workerSrc], {type: 'application/javascript'})); } catch(e) {}
+    try { return 'data:application/javascript;base64,' + btoa(unescape(encodeURIComponent(workerSrc))); } catch(e) {}
+    return null;
+  }
+  const workerUrl = makeWorkerUrl();
+
+  if (!workerUrl || typeof Worker === 'undefined') {
+    runSingleThreaded(numTeams, matchesPerTeam, cooldown, iterations, startTime,
+      formatETA, _updateProgress,
+      function(bm, brb, bsc, bi) { finishGeneration(bm, brb, bsc, bi, iterations); });
+    return;
+  }
+
+  let workersTested = false;
+  for (let w = 0; w < numWorkers; w++) {
+    const workerIters = Math.floor(iterations / numWorkers) + (w < iterations % numWorkers ? 1 : 0);
+    const worker = new Worker(workerUrl);
+    let workerDone = 0;
+    worker.postMessage({ numTeams, matchesPerTeam, cooldown, iterationsToRun: workerIters, workerId: w });
+    worker.onmessage = function(e) {
+      const msg = e.data;
+      if (msg.type === 'progress') {
+        const delta = msg.done - workerDone; workerDone = msg.done; totalDone += delta;
+        if (msg.bestScore > bestScore) bestScore = msg.bestScore;
+        _updateProgress();
+      } else if (msg.type === 'result') {
+        const delta = workerIters - workerDone; totalDone += delta;
+        if (msg.bestScore > bestScore) {
+          bestScore = msg.bestScore; bestMatches = msg.bestMatches;
+          bestRoundBoundaries = new Map(msg.bestRoundBoundaries);
+          bestSurrogateCount = msg.bestSurrogateCount;
+          bestIteration = w * Math.floor(iterations / numWorkers) + msg.bestIter;
+        }
+        worker.terminate(); workersFinished++; _updateProgress();
+        if (workersFinished === numWorkers) {
+          if (workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
+          finishGeneration(bestMatches, bestRoundBoundaries, bestSurrogateCount, bestIteration, iterations);
+          btn.disabled = false;
+          document.getElementById('progressWrap').style.display = 'none';
+        }
+      }
+    };
+    worker.onerror = function(err) {
+      if (!workersTested) {
+        workersTested = true; workersFinished = numWorkers;
+        if (workerUrl.startsWith('blob:')) URL.revokeObjectURL(workerUrl);
+        totalDone = 0; bestScore = -Infinity; bestMatches = null;
+        runSingleThreaded(numTeams, matchesPerTeam, cooldown, iterations, startTime,
+          formatETA, _updateProgress,
+          function(bm, brb, bsc, bi) {
+            finishGeneration(bm, brb, bsc, bi, iterations);
+            btn.disabled = false;
+            document.getElementById('progressWrap').style.display = 'none';
+          });
+      }
+    };
+  }
+}
+
+
+function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations) {
+  const numTeams = parseInt(document.getElementById('numTeams').value);
+  const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value);
+  const defaultCycleTime = parseInt(document.getElementById('cycleTime').value);
+  const cycleChanges = getCycleTimeChanges();
+  const tzAbbr = getTimezoneAbbr();
+  const days = Array.from(document.querySelectorAll('.day-row')).map(row => ({
+    start: timeToMin(row.querySelector('.day-start').value),
+    end: timeToMin(row.querySelector('.day-end').value),
+    breaks: Array.from(row.querySelectorAll('.break-row')).map(br => ({
+      name: br.querySelector('.break-name').value || 'Break',
+      start: timeToMin(br.querySelector('.break-start').value),
+      end: timeToMin(br.querySelector('.break-end').value),
+      done: false,
+    })).filter(b => b.end > b.start).sort((a,b) => a.start - b.start)
+  }));
+
+  window._frcFinalDayOverflow = null;
+  const totalMatches = matches.length;
+  const scheduled = [];
+  let matchIdx = 0;
+  let hadOverflow = false;
+
+  for (let d = 0; d < days.length && matchIdx < totalMatches; d++) {
+    const day = days[d];
+    // Deep copy breaks with done flag
+    const breaks = day.breaks.map(b => Object.assign({}, b, {done: false}));
+    const entries = [];
+    let cursor = day.start;
+
+    while (matchIdx < totalMatches) {
+      // Flush any breaks whose start time has passed
+      let flushed = true;
+      while (flushed) {
+        flushed = false;
+        for (const brk of breaks) {
+          if (!brk.done && brk.start <= cursor) {
+            entries.push({type:'break', name:brk.name, start:brk.start, end:brk.end});
+            cursor = Math.max(cursor, brk.end);
+            brk.done = true;
+            flushed = true;
+          }
+        }
+      }
+
+      // Check if a break interrupts the next match
+      const matchEnd = cursor + getCycleTime(matchIdx + 1, defaultCycleTime, cycleChanges);
+      const interrupt = breaks.find(b => !b.done && b.start > cursor && b.start < matchEnd);
+      if (interrupt) {
+        entries.push({type:'break', name:interrupt.name, start:interrupt.start, end:interrupt.end});
+        cursor = Math.max(cursor, interrupt.end);
+        interrupt.done = true;
+        continue;
+      }
+
+      // Check if match fits in the day
+      if (matchEnd > day.end) {
+        if (d < days.length - 1) hadOverflow = true;
+        else window._frcFinalDayOverflow = { unscheduled: totalMatches - matchIdx, dayEnd: day.end };
+        break;
+      }
+
+      // Compute back-to-back teams for this match
+      var b2bSet = new Set();
+      if (matchIdx > 0) {
+        var prevTeams = new Set([...matches[matchIdx-1].red, ...matches[matchIdx-1].blue]);
+        [...matches[matchIdx].red, ...matches[matchIdx].blue].forEach(function(t) { if (prevTeams.has(t)) b2bSet.add(t); });
+      }
+      entries.push({
+        type: 'match',
+        num: matchIdx + 1,
+        startMin: cursor,
+        endMin: matchEnd,
+        red: matches[matchIdx].red,
+        blue: matches[matchIdx].blue,
+        redSurrogate: matches[matchIdx].redSurrogate,
+        blueSurrogate: matches[matchIdx].blueSurrogate,
+        b2bTeams: b2bSet,
+      });
+      cursor = matchEnd;
+      matchIdx++;
+    }
+
+    // Add any remaining breaks
+    breaks.filter(b => !b.done).forEach(b => {
+      entries.push({type:'break', name:b.name, start:b.start, end:b.end});
+    });
+
+    scheduled.push({dayNum: d+1, entries});
+  }
+
+  // Update stats
+  const b2b = countBackToBacks(matches);
+  const totalSurrogates = countSurrogates(matches);
+  document.getElementById('statMatches').textContent = totalMatches;
+  document.getElementById('statTeams').textContent = numTeams;
+  document.getElementById('statPerTeam').textContent = matchesPerTeam;
+  document.getElementById('statDays').textContent = days.length;
+  document.getElementById('statB2B').textContent = b2b;
+  document.getElementById('statB2B').style.color = b2b === 0 ? 'var(--accent3)' : b2b <= 2 ? 'var(--amber)' : 'var(--danger)';
+  const totalPlays = numTeams * matchesPerTeam;
+  const minSurrogates = Math.ceil(totalPlays / 6) * 6 - totalPlays;
+  document.getElementById('statSurrogates').textContent = totalSurrogates;
+  document.getElementById('statSurrogates').style.color = totalSurrogates === 0 ? 'var(--accent3)' : 'var(--amber)';
+  const minEl = document.getElementById('statSurrogatesMin');
+  if (minSurrogates === 0) {
+    minEl.textContent = 'none required';
+    minEl.style.color = 'var(--accent3)';
+  } else {
+    const gap = totalSurrogates - minSurrogates;
+    minEl.textContent = minSurrogates + ' min · ' + (gap === 0 ? 'optimal' : '+' + gap + ' extra');
+    minEl.style.color = gap === 0 ? 'var(--accent3)' : gap <= 3 ? 'var(--amber)' : 'var(--danger)';
+  }
+  minEl.title = numTeams + ' teams × ' + matchesPerTeam + ' matches = ' + totalPlays + ' plays. Next multiple of 6 = ' + (Math.ceil(totalPlays / 6) * 6) + '. Theoretical minimum = ' + minSurrogates + '. Scheduled = ' + totalSurrogates + '.';
+
+  const output = document.getElementById('scheduleOutput');
+  output.innerHTML = '';
+
+  if (hadOverflow) {
+    const w = document.createElement('div');
+    w.className = 'warning-box';
+    w.textContent = 'Some matches overflowed from earlier days due to time constraints.';
+    output.appendChild(w);
+  }
+
+  if (window._frcFinalDayOverflow) {
+    const ov = window._frcFinalDayOverflow;
+    const w = document.createElement('div');
+    w.className = 'warning-box warning-box-final';
+    w.innerHTML = '&#9888; <strong>' + ov.unscheduled + ' match' + (ov.unscheduled !== 1 ? 'es' : '') +
+      ' could not fit within the final day\u2019s scheduled end time of ' + minToTime(ov.dayEnd) + '.</strong>' +
+      ' Extend the final day end time, add another day, or reduce the cycle time.';
+    output.appendChild(w);
+  }
+
+  if (matchIdx < totalMatches) {
+    const w = document.createElement('div');
+    w.className = 'warning-box';
+    w.style.color = '#ff6b6b';
+    w.textContent = 'Only ' + matchIdx + ' of ' + totalMatches + ' matches could be scheduled. Add more days or extend daily hours.';
+    output.appendChild(w);
+  }
+
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'btn-export';
+  exportBtn.textContent = 'Export CSV';
+  exportBtn.onclick = function() { exportCSV(scheduled); };
+  output.appendChild(exportBtn);
+
+  // Store scheduled globally for filter re-application
+  window._frcTzAbbr = tzAbbr;
+  window._frcScheduled = scheduled;
+  window._frcRoundBoundaries = roundBoundaries;
+  window._frcMatchesPerRound = Math.ceil(numTeams / 6);
+  window._frcSurrogatesPerRound = window._frcMatchesPerRound * 6 - numTeams;
+
+  // Update panel header with iteration badge
+  const panelHeader = document.querySelector('.results-panel .panel-header');
+  const existingBadge = panelHeader.querySelector('.iteration-badge');
+  if (existingBadge) existingBadge.remove();
+  if (totalIterations > 1) {
+    const badge = document.createElement('span');
+    badge.className = 'iteration-badge';
+    badge.textContent = 'Best of ' + totalIterations + ' (iter ' + bestIteration + ')';
+    panelHeader.appendChild(badge);
+  }
+
+  // Hide progress bar, re-enable button
+  document.getElementById('progressWrap').style.display = 'none';
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('btnGenerate').disabled = false;
+
+  renderSchedule();
+  document.getElementById('filterBar').style.display = 'flex';
+}
+
+// ── Filter state ─────────────────────────────────────────────────────────────
+window._frcFilters = { teams: [], alliance: null, day: null, b2b: false, surrogate: false };
+
+function toggleStatFilter(type) {
+  var f = window._frcFilters;
+  f[type] = !f[type];
+  var cid = type === 'b2b' ? 'statB2BContainer' : 'statSurrogatesContainer';
+  document.getElementById(cid).classList.toggle('stat-active', f[type]);
+  renderSchedule();
+  updateFilterBar();
+}
+
+function addFilter(type, value) {
+  var f = window._frcFilters;
+  if (type === 'team') {
+    if (f.teams.indexOf(value) === -1) f.teams.push(value);
+  } else if (type === 'alliance') {
+    f.alliance = f.alliance === value ? null : value;
+  } else if (type === 'day') {
+    f.day = f.day === value ? null : value;
+  }
+  renderSchedule();
+  updateFilterBar();
+}
+
+function removeFilter(type, value) {
+  var f = window._frcFilters;
+  if (type === 'team') {
+    f.teams = f.teams.filter(function(t) { return t !== value; });
+  } else if (type === 'alliance') {
+    f.alliance = null;
+  } else if (type === 'day') {
+    f.day = null;
+  }
+  renderSchedule();
+  updateFilterBar();
+}
+
+function resetFilters() {
+  window._frcFilters = { teams: [], alliance: null, day: null, b2b: false, surrogate: false };
+  var b2bC = document.getElementById('statB2BContainer');
+  var surC = document.getElementById('statSurrogatesContainer');
+  if (b2bC) b2bC.classList.remove('stat-active');
+  if (surC) surC.classList.remove('stat-active');
+  renderSchedule();
+  updateFilterBar();
+}
+
+function updateFilterBar() {
+  var f = window._frcFilters;
+  var bar = document.getElementById('filterBar');
+  var empty = document.getElementById('filterEmpty');
+  var reset = document.getElementById('filterReset');
+
+  // Remove all chips (keep label, empty msg, reset btn)
+  var chips = bar.querySelectorAll('.filter-chip');
+  chips.forEach(function(c) { c.remove(); });
+
+  var hasFilter = f.teams.length > 0 || f.alliance !== null || f.day !== null || f.b2b || f.surrogate;
+  empty.style.display = hasFilter ? 'none' : 'inline';
+  reset.style.display = hasFilter ? 'inline' : 'none';
+
+  // Day chip
+  if (f.day !== null) {
+    var chip = document.createElement('span');
+    chip.className = 'filter-chip day-filter';
+    chip.innerHTML = 'Day ' + f.day + ' <span class="chip-remove">&#x2715;</span>';
+    chip.onclick = function() { removeFilter('day', f.day); };
+    bar.insertBefore(chip, reset);
+  }
+
+  // Alliance chip
+  if (f.alliance !== null) {
+    var chip = document.createElement('span');
+    chip.className = 'filter-chip alliance-filter';
+    chip.innerHTML = (f.alliance === 'red' ? '&#9632; Red' : '&#9632; Blue') + ' Alliance <span class="chip-remove">&#x2715;</span>';
+    chip.style.color = f.alliance === 'red' ? '#ff6b6b' : '#6bb5ff';
+    chip.style.borderColor = f.alliance === 'red' ? '#ff6b6b' : '#6bb5ff';
+    chip.style.background = f.alliance === 'red' ? 'rgba(255,107,107,0.12)' : 'rgba(107,181,255,0.12)';
+    chip.onclick = function() { removeFilter('alliance', f.alliance); };
+    bar.insertBefore(chip, reset);
+  }
+
+  // B2B chip
+  if (f.b2b) {
+    var chip = document.createElement('span');
+    chip.className = 'filter-chip b2b-filter';
+    chip.innerHTML = '&#8651; Back-to-Backs <span class="chip-remove">&#x2715;</span>';
+    chip.onclick = function() { toggleStatFilter('b2b'); };
+    bar.insertBefore(chip, reset);
+  }
+  // Surrogate chip
+  if (f.surrogate) {
+    var chip = document.createElement('span');
+    chip.className = 'filter-chip surrogate-filter';
+    chip.innerHTML = '<b>S</b> Surrogates <span class="chip-remove">&#x2715;</span>';
+    chip.onclick = function() { toggleStatFilter('surrogate'); };
+    bar.insertBefore(chip, reset);
+  }
+  // Team chips
+  f.teams.forEach(function(t) {
+    var chip = document.createElement('span');
+    chip.className = 'filter-chip';
+    chip.innerHTML = 'Team ' + t + ' <span class="chip-remove">&#x2715;</span>';
+    chip.onclick = function() { removeFilter('team', t); };
+    bar.insertBefore(chip, reset);
+  });
+}
+
+function matchPassesFilter(entry) {
+  var f = window._frcFilters;
+  var hasB2B = entry.b2bTeams && entry.b2bTeams.size > 0;
+  var hasSur = (entry.redSurrogate && entry.redSurrogate.some(Boolean)) ||
+               (entry.blueSurrogate && entry.blueSurrogate.some(Boolean));
+  if (f.b2b && !hasB2B) return 'hide';
+  if (f.surrogate && !hasSur) return 'hide';
+
+  if (f.teams.length === 0 && f.alliance === null && f.day === null) return 'show';
+
+  var allTeams = entry.red.concat(entry.blue);
+  var teamMatch = f.teams.length === 0 || f.teams.some(function(t) {
+    return allTeams.indexOf(t) !== -1;
+  });
+  var allianceMatch = true;
+  if (f.alliance === 'red' && f.teams.length > 0) {
+    allianceMatch = f.teams.some(function(t) { return entry.red.indexOf(t) !== -1; });
+  } else if (f.alliance === 'blue' && f.teams.length > 0) {
+    allianceMatch = f.teams.some(function(t) { return entry.blue.indexOf(t) !== -1; });
+  } else if (f.alliance === 'red' || f.alliance === 'blue') {
+    allianceMatch = true;
+  }
+  if (!teamMatch) return 'hide';
+  if (!allianceMatch) return 'hide';
+  return 'highlight';
+}
+
+function renderTeam(team, isSurrogate, isB2B, colorClass) {
+  var surBadge = isSurrogate ? '<span class="surrogate-badge">S</span>' : '';
+  var b2bBadge = isB2B ? '<span class="b2b-badge">B2B</span>' : '';
+  var extraClass = (isSurrogate ? ' team-surrogate' : '') + (isB2B ? ' team-b2b' : '');
+  return '<span class="' + colorClass + extraClass + ' team-link" onclick="addFilter(&apos;team&apos;,' + team + ')">' + team + surBadge + b2bBadge + '</span>';
+}
+
+function renderSchedule() {
+  var scheduled = window._frcScheduled;
+  if (!scheduled) return;
+  var f = window._frcFilters;
+  var rb = window._frcRoundBoundaries || new Map();
+  // Build a reverse map: matchNum (1-based) -> round number
+  var matchNumToRound = new Map();
+  rb.forEach(function(matchIdx, round) {
+    matchNumToRound.set(matchIdx + 1, round); // matchIdx is 0-based, entry.num is 1-based
+  });
+  var output = document.getElementById('scheduleOutput');
+
+  // Rebuild from scratch each render
+  // Preserve warning boxes and export button (first children before day blocks)
+  var dayBlocks = output.querySelectorAll('.day-block');
+  dayBlocks.forEach(function(b) { b.remove(); });
+
+  scheduled.forEach(function(day) {
+    if (f.day !== null && f.day !== day.dayNum) return;
+
+    var block = document.createElement('div');
+    block.className = 'day-block';
+
+    var matchCount = day.entries.filter(function(e) { return e.type === 'match'; }).length;
+    var title = document.createElement('div');
+    title.className = 'day-title';
+    title.innerHTML =
+      '<span class="filterable' + (f.day === day.dayNum ? ' active' : '') + '" ' +
+      'onclick="addFilter(&apos;day&apos;,' + day.dayNum + ')" title="Filter to Day ' + day.dayNum + '">' +
+      'Day ' + day.dayNum + '</span>' +
+      ' <span style="font-size:0.75rem;color:var(--text-muted);font-weight:400">' + matchCount + ' matches</span>';
+    block.appendChild(title);
+
+    var table = document.createElement('table');
+    table.className = 'match-table';
+
+    var redActiveClass = f.alliance === 'red' ? ' active' : '';
+    var blueActiveClass = f.alliance === 'blue' ? ' active' : '';
+    var thead = document.createElement('thead');
+    thead.innerHTML =
+      '<tr>' +
+      '<th>#</th>' +
+      '<th>Time</th>' +
+      '<th class="filterable' + redActiveClass + '" onclick="addFilter(&apos;alliance&apos;,&apos;red&apos;)" title="Filter to Red Alliance">Red Alliance</th>' +
+      '<th class="filterable' + blueActiveClass + '" onclick="addFilter(&apos;alliance&apos;,&apos;blue&apos;)" title="Filter to Blue Alliance">Blue Alliance</th>' +
+      '</tr>';
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+
+    day.entries.forEach(function(entry) {
+      var tr = document.createElement('tr');
+      if (entry.type === 'break') {
+        if (f.teams.length === 0 && f.alliance === null) {
+          tr.className = 'break-row-display';
+          tr.innerHTML = '<td colspan="4">&#9646; ' + entry.name + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.start) + ' &ndash; ' + minToTime(entry.end) + '</td>';
+          tbody.appendChild(tr);
+        }
+      } else {
+        // Inject round boundary marker if this match starts a new round
+        if (matchNumToRound.has(entry.num) && (f.teams.length === 0 && f.alliance === null)) {
+          var roundNum = matchNumToRound.get(entry.num);
+          var surPerRound = window._frcSurrogatesPerRound || 0;
+          var surNote = '';  // round 1 extra slots are second-match plays, not surrogates
+          var boundaryTr = document.createElement('tr');
+          boundaryTr.className = 'round-boundary-row';
+          var strictNote = roundNum === 1 ? ' &mdash; all teams guaranteed a first match' : ' &mdash; approximate boundary';
+          boundaryTr.innerHTML = '<td colspan="4"><div class="round-boundary-label">Round ' + roundNum + strictNote + surNote + '</div></td>';
+          tbody.appendChild(boundaryTr);
+        }
+
+        var filterResult = matchPassesFilter(entry);
+
+        var hasB2B = entry.b2bTeams && entry.b2bTeams.size > 0;
+        if (hasB2B) tr.classList.add('b2b-match');
+
+        var redTeams = entry.red.map(function(t, i) {
+          return renderTeam(t, entry.redSurrogate && entry.redSurrogate[i],
+            !!(entry.b2bTeams && entry.b2bTeams.has(t)), 'teams-red');
+        }).join(' <span style="color:var(--text-muted)">&middot;</span> ');
+
+        var blueTeams = entry.blue.map(function(t, i) {
+          return renderTeam(t, entry.blueSurrogate && entry.blueSurrogate[i],
+            !!(entry.b2bTeams && entry.b2bTeams.has(t)), 'teams-blue');
+        }).join(' <span style="color:var(--text-muted)">&middot;</span> ');
+
+        tr.innerHTML =
+          '<td><span class="match-num">Q' + entry.num + '</span></td>' +
+          '<td><span class="match-time">' + minToTime(entry.startMin) + (window._frcTzAbbr ? '<span style="font-size:0.6rem;color:var(--text-muted);margin-left:3px;">' + window._frcTzAbbr + '</span>' : '') + '</span></td>' +
+          '<td>' + redTeams + '</td>' +
+          '<td>' + blueTeams + '</td>';
+
+        if (filterResult === 'hide') {
+          tr.classList.add('filtered-out');
+        } else if (filterResult === 'highlight') {
+          tr.classList.add('filtered-highlight');
+        }
+
+        tbody.appendChild(tr);
+      }
+    });
+
+    table.appendChild(tbody);
+    block.appendChild(table);
+    output.appendChild(block);
+  });
+}
+
+function exportCSV(scheduled) {
+  const rows = [['Match','Day','Time','Red 1','Red 2','Red 3','Blue 1','Blue 2','Blue 3','Surrogates']];
+  scheduled.forEach(function(day) {
+    day.entries.forEach(function(e) {
+      if (e.type === 'match') {
+        var surrogates = [];
+        e.red.forEach(function(t,i){ if (e.redSurrogate && e.redSurrogate[i]) surrogates.push(t); });
+        e.blue.forEach(function(t,i){ if (e.blueSurrogate && e.blueSurrogate[i]) surrogates.push(t); });
+        rows.push(['Q'+e.num, 'Day '+day.dayNum, minToTime(e.startMin),
+          e.red[0], e.red[1], e.red[2], e.blue[0], e.blue[1], e.blue[2],
+          surrogates.join(';')]);
+      }
+    });
+  });
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'frc_schedule.csv';
+  a.click();
+}
+</script>
+<script type="text/plain" id="workerSrc">
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function generateMatches(numTeams, matchesPerTeam, idealGap) {
+  // Shuffle team order so each iteration explores a different schedule space
+  function shuffledTeams() {
+    const t = Array.from({length: numTeams}, (_, i) => i + 1);
+    for (let i = t.length - 1; i > 0; i--) { const j = Math.floor(Math.random()*(i+1)); [t[i],t[j]]=[t[j],t[i]]; }
+    return t;
+  }
+  // ─────────────────────────────────────────────────────────────────
+  // SCHEDULING CRITERIA (ordered by priority)
+  //
+  // P1  [HARD]   Each match has exactly 6 teams (3 red, 3 blue).
+  // P2  [HARD]   Each team plays exactly matchesPerTeam times as a regular.
+  //              Surrogates play one extra time to fill structural gaps.
+  // P3  [HARD]   Round 1 is strict: all teams must play once before any team plays twice.
+  //              This guarantees no team waits while others get a head start.
+  // P4  [HARD]   Cooldown: penalty of -1000 × (idealGap - gap) if a team replays
+  //              within idealGap matches of their last appearance.
+  // P5  [SOFT]   Match count equity: prefer teams that have played fewer times overall.
+  //              After round 1 the schedule is open — round boundaries are cosmetic.
+  //              Weight: -W_COUNT per match played (default 5).
+  // P6  [SOFT]   Alliance balance: each team plays red and blue equally often.
+  //              All C(6,3)=20 red/blue splits evaluated; best balance wins.
+  //              Weight: -W_BALANCE per unit of imbalance (default 50).
+  // P7  [SOFT]   Gap maximization: prefer teams that have waited longer.
+  //              Weight: +W_GAP per match waited (default 10).
+  // P8  [SOFT]   Opponent diversity: minimize repeat opponents (teams faced across the net).
+  //              Penalty: -W_OPPONENT per prior encounter (default 15).
+  // P9  [SOFT]   Partner diversity: minimize repeat alliance partners.
+  //              Penalty: -W_PARTNER per prior encounter (default 12).
+  // P10 [SOFT]   Surrogate fairness: spread surrogate appearances across as many
+  //              different teams as possible.
+  //              Hard cap: ceil(totalSurSlots / numTeams) + 1 per team.
+  //              Penalty for repeat surrogating: -W_SUR_RPT (default 200).
+  // ─────────────────────────────────────────────────────────────────
+
+  const W_BALANCE  = 50;
+  const W_GAP      = 10;
+  const W_COUNT    = 5;
+  const W_OPPONENT = 15;
+  const W_PARTNER  = 12;
+  const W_SUR_RPT  = 200;
+
+  const teams = shuffledTeams();
+  const matchesPerRound    = Math.ceil(numTeams / 6);
+  const surrogatesPerRound = matchesPerRound * 6 - numTeams;
+  const totalMatches       = matchesPerRound * matchesPerTeam;
+  const totalSurSlots      = surrogatesPerRound * matchesPerTeam;
+  const fairSurCap         = Math.ceil(totalSurSlots / numTeams) + 1;
+
+  const matchCounts    = new Array(numTeams + 1).fill(0);
+  const lastPlayed     = new Array(numTeams + 1).fill(-999);
+  const surrogateCount = new Array(numTeams + 1).fill(0);
+  const redCount       = new Array(numTeams + 1).fill(0);
+  const blueCount      = new Array(numTeams + 1).fill(0);
+  const opponents = Array.from({length: numTeams + 1}, () => new Array(numTeams + 1).fill(0));
+  const partners  = Array.from({length: numTeams + 1}, () => new Array(numTeams + 1).fill(0));
+
+  const matches = [];
+
+  // Round boundaries: round 1 is exact; rounds 2+ are cosmetic markers.
+  const roundBoundaries = new Map();
+  for (let r = 1; r <= matchesPerTeam; r++) {
+    roundBoundaries.set(r, (r - 1) * matchesPerRound);
+  }
+
+  idealGap = Math.max(1, idealGap);
+
+  // Individual team score for regular candidate ranking (P4/P5/P7)
+  function teamScore(t, now) {
+    const gap = now - lastPlayed[t];
+    if (gap < idealGap) return -1000 * (idealGap - gap); // P4 hard cooldown penalty
+    return gap * W_GAP - matchCounts[t] * W_COUNT;       // P7 gap reward + P5 equity
+  }
+
+  // Surrogate candidate score (P10)
+  function surrogateScore(t, now) {
+    return -surrogateCount[t] * W_SUR_RPT + (now - lastPlayed[t]) * 2;
+  }
+
+  // Match-level diversity score for a proposed red/blue split (P8/P9)
+  function diversityScore(red, blue) {
+    let s = 0;
+    for (const r of red)  for (const b of blue)       s -= opponents[r][b] * W_OPPONENT;
+    for (let i = 0; i < red.length;  i++) for (let j = i+1; j < red.length;  j++) s -= partners[red[i]][red[j]]   * W_PARTNER;
+    for (let i = 0; i < blue.length; i++) for (let j = i+1; j < blue.length; j++) s -= partners[blue[i]][blue[j]] * W_PARTNER;
+    return s;
+  }
+
+  // Given exactly 6 teams, enumerate all C(6,3)=20 red/blue splits and pick the one
+  // that best balances alliance counts (P6), with diversity as tiebreak (P8/P9).
+  function assignAlliances(six) {
+    if (!six || six.length !== 6 || six.some(t => !t)) return null; // safety guard
+    let best = null, bestScore = -Infinity;
+    for (let mask = 0; mask < 64; mask++) {
+      if (mask.toString(2).split('').filter(c => c === '1').length !== 3) continue;
+      const r = [], b = [];
+      for (let i = 0; i < 6; i++) ((mask >> i) & 1) ? r.push(six[i]) : b.push(six[i]);
+      const balScore = -W_BALANCE * (
+        r.reduce((a, t) => a + Math.abs((redCount[t]+1) - blueCount[t]), 0) +
+        b.reduce((a, t) => a + Math.abs(redCount[t] - (blueCount[t]+1)), 0)
+      );
+      const total = balScore + diversityScore(r, b);
+      if (total > bestScore) { bestScore = total; best = {r, b}; }
+    }
+    return best;
+  }
+
+  // ── PHASE 1: Round 1 — every team gets their first match ────────────────────
+  // Matches 0 through matchesPerRound-2: pick 6 teams who haven't played yet.
+  // Last match of round 1: only (6 - surrogatesPerRound) first-timers remain, so the
+  // extra slots are filled by teams playing their SECOND match early — NOT surrogates.
+  // This avoids an all-second-match alliance and reduces total surrogate count.
+  // No team in round 1 is ever flagged as a surrogate.
+  // Round 1 is considered complete once every team has played once; the boundary
+  // marker is placed at matchesPerRound regardless of the extra second-match plays.
+  for (let m = 0; m < matchesPerRound; m++) {
+    const now = matches.length;
+    const isLast  = (m === matchesPerRound - 1);
+    // Extra slots in the last match are filled by second-match teams, not surrogates
+    const extraSlots = isLast ? surrogatesPerRound : 0;
+    const firstSlots = 6 - extraSlots;
+
+    // First-timers: teams that haven't played yet
+    let firstTimers = teams.filter(t => matchCounts[t] === 0)
+      .sort((a, b) => {
+        const d = teamScore(b, now) - teamScore(a, now);
+        return d !== 0 ? d : Math.random() - 0.5;
+      });
+
+    // Second-match candidates for the extra slots: prefer teams that scored well
+    // (good gap reward since they played earlier in round 1) and haven't surrogated
+    let secondTimers = extraSlots > 0
+      ? teams.filter(t => matchCounts[t] === 1)
+             .sort((a, b) => teamScore(b, now) - teamScore(a, now))
+      : [];
+
+    const firstPool  = firstTimers.slice(0, Math.max(firstSlots + 6, 12));
+    const secondPool = secondTimers.slice(0, extraSlots + 2);
+
+    // For last match: override assignAlliances to also minimise second-timer imbalance.
+    // We enumerate all C(6,3) splits and pick the one that best balances:
+    //   1. Number of second-timers per alliance (primary in last match)
+    //   2. Alliance balance (red/blue counts) and diversity (normal weights)
+    function assignAlliancesR1(six) {
+      if (!six || six.length !== 6 || six.some(t => !t)) return null;
+      let best = null, bestScore = -Infinity;
+      for (let mask = 0; mask < 64; mask++) {
+        if (mask.toString(2).split('').filter(c => c === '1').length !== 3) continue;
+        const r = [], b = [];
+        for (let i = 0; i < 6; i++) ((mask >> i) & 1) ? r.push(six[i]) : b.push(six[i]);
+        const rSecond = r.filter(t => matchCounts[t] >= 1).length;
+        const bSecond = b.filter(t => matchCounts[t] >= 1).length;
+        // Heavy penalty for second-timer imbalance across alliances (P2 fairness)
+        const balancePenalty = -500 * Math.abs(rSecond - bSecond);
+        const allianceScore = -W_BALANCE * (
+          r.reduce((a, t) => a + Math.abs((redCount[t]+1) - blueCount[t]), 0) +
+          b.reduce((a, t) => a + Math.abs(redCount[t] - (blueCount[t]+1)), 0)
+        );
+        const total = balancePenalty + allianceScore + diversityScore(r, b);
+        if (total > bestScore) { bestScore = total; best = {r, b}; }
+      }
+      return best;
+    }
+
+    const cands = [];
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const six = [...shuffle(firstPool.slice()).slice(0, firstSlots),
+                   ...shuffle(secondPool.slice()).slice(0, extraSlots)];
+      if (six.length === 6 && new Set(six).size === 6) {
+        const res = isLast ? assignAlliancesR1(six) : assignAlliances(six);
+        if (res) cands.push({r: res.r, b: res.b, score: diversityScore(res.r, res.b) + six.reduce((a, t) => a + teamScore(t, now), 0) * 0.5});
+      }
+    }
+    cands.sort((a, b) => b.score - a.score);
+
+    let chosenRed, chosenBlue;
+    if (cands.length > 0) {
+      chosenRed = cands[0].r; chosenBlue = cands[0].b;
+    } else {
+      const six = [...firstTimers.slice(0, firstSlots), ...secondTimers.slice(0, extraSlots)];
+      const res = isLast ? assignAlliancesR1(six) : assignAlliances(six);
+      chosenRed = res ? res.r : six.slice(0, 3);
+      chosenBlue = res ? res.b : six.slice(3, 6);
+    }
+
+    // No one in round 1 is a surrogate — second-match teams are just playing early
+    matches.push({red: chosenRed, blue: chosenBlue,
+                  redSurrogate:  chosenRed.map(() => false),
+                  blueSurrogate: chosenBlue.map(() => false)});
+    commitMatch(chosenRed, chosenBlue, now);
+  }
+
+  // ── PHASE 2: Open scheduling — score-driven, no hard round constraints ────────
+  // After round 1, rounds are cosmetic. Teams are picked by score only.
+  //
+  // At match 'now', a team's "expected" match count is floor(now * 6 / numTeams).
+  // Regular:   matchCounts[t] <= expectedCount  (at or behind schedule)
+  // Surrogate: matchCounts[t] >  expectedCount  (ahead of schedule)
+  //
+  // This guarantees surrogates are always available: round 1 seeds surrogatesPerRound
+  // teams at mc=2 (ahead of the expected mc=1), and Bresenham distributes surrogate
+  // slots to match exactly how many "ahead" teams exist at each point.
+  //
+  // Hard cap: matchCounts[t] < matchesPerTeam + 1 prevents any team from playing
+  // more than matchesPerTeam + 1 times (their regular quota plus one surrogate max).
+  const remainingMatches = totalMatches - matchesPerRound;
+  for (let i = 0; i < remainingMatches; i++) {
+    const now = matches.length;
+
+    // Bresenham: how many surrogate slots this specific match should have
+    const surSlots = Math.floor(totalSurSlots * (now + 1) / totalMatches)
+                   - Math.floor(totalSurSlots * now       / totalMatches);
+    const regSlots = 6 - surSlots;
+
+    // Schedule-position split: "ahead" teams are surrogates
+    const expectedCount = Math.floor(now * 6 / numTeams);
+    const regulars   = teams.filter(t => matchCounts[t] <= expectedCount && matchCounts[t] < matchesPerTeam);
+    const surrogates = teams.filter(t => matchCounts[t] >  expectedCount && matchCounts[t] < matchesPerTeam + 1);
+
+    // Sort regulars by individual score (P4/P5/P7)
+    const sortedReg = regulars.slice().sort((a, b) => {
+      const d = teamScore(b, now) - teamScore(a, now);
+      return d !== 0 ? d : Math.random() - 0.5;
+    });
+
+    // Sort surrogates by fairness score (P10), relaxing cap only if pool is too small
+    let surPool = surrogates.filter(t => surrogateCount[t] < fairSurCap)
+                            .sort((a, b) => surrogateScore(b, now) - surrogateScore(a, now));
+    if (surPool.length < surSlots)
+      surPool = surrogates.slice().sort((a, b) => surrogateScore(b, now) - surrogateScore(a, now));
+    surPool = surPool.slice(0, surSlots + 2);
+
+    const regPool = sortedReg.slice(0, Math.max(regSlots + 6, 12));
+
+    const cands = [];
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const six = [...shuffle(regPool.slice()).slice(0, regSlots),
+                   ...shuffle(surPool.slice()).slice(0, surSlots)];
+      if (six.length === 6 && new Set(six).size === 6) {
+        const {r, b} = assignAlliances(six);
+        if (r && b) cands.push({r, b, score: diversityScore(r, b) + six.reduce((a, t) => a + teamScore(t, now), 0) * 0.5});
+      }
+    }
+    cands.sort((a, b) => b.score - a.score);
+
+    let chosenRed, chosenBlue;
+    if (cands.length > 0) {
+      chosenRed = cands[0].r; chosenBlue = cands[0].b;
+    } else {
+      // Fallback: take best available teams regardless of reg/sur classification,
+      // but still respect the hard per-team quota cap
+      const eligible = teams.filter(t => matchCounts[t] < matchesPerTeam + 1)
+        .sort((a, b) => teamScore(b, now) - teamScore(a, now));
+      const padded = eligible.slice(0, 6);
+      const res = assignAlliances(padded);
+      chosenRed = res ? res.r : padded.slice(0, 3);
+      chosenBlue = res ? res.b : padded.slice(3, 6);
+    }
+
+    // Mark as surrogate: any team that was "ahead" of schedule when picked
+    const redSurrogate  = chosenRed.map(t  => matchCounts[t] > expectedCount);
+    const blueSurrogate = chosenBlue.map(t => matchCounts[t] > expectedCount);
+    matches.push({red: chosenRed, blue: chosenBlue, redSurrogate, blueSurrogate});
+    commitMatch(chosenRed, chosenBlue, now);
+  }
+
+  // ─── shared post-match bookkeeping ───────────────────────────────────────────
+  function commitMatch(red, blue, now) {
+    const allSix = [...red, ...blue];
+    allSix.forEach(t => {
+      if (matchCounts[t] >= matchesPerTeam) surrogateCount[t]++;
+      matchCounts[t]++;
+      lastPlayed[t] = now;
+    });
+    red.forEach(t  => redCount[t]++);
+    blue.forEach(t => blueCount[t]++);
+    for (const r of red)  for (const b of blue) { opponents[r][b]++; opponents[b][r]++; }
+    for (let i = 0; i < red.length;  i++) for (let j = i+1; j < red.length;  j++)  { partners[red[i]][red[j]]++;   partners[red[j]][red[i]]++;   }
+    for (let i = 0; i < blue.length; i++) for (let j = i+1; j < blue.length; j++) { partners[blue[i]][blue[j]]++; partners[blue[j]][blue[i]]++; }
+  }
+
+  return { matches, surrogateCount, roundBoundaries };
+}
+
+function countBackToBacks(matches) {
+  let count = 0;
+  for (let i = 1; i < matches.length; i++) {
+    const prev = new Set([...matches[i-1].red, ...matches[i-1].blue]);
+    const curr = [...matches[i].red, ...matches[i].blue];
+    if (curr.some(t => prev.has(t))) count++;
+  }
+  return count;
+}
+
+function countSurrogates(matches) {
+  return matches.reduce((acc, m) => {
+    return acc + m.redSurrogate.filter(Boolean).length + m.blueSurrogate.filter(Boolean).length;
+  }, 0);
+}
+
+function scoreSchedule(matches, numTeams) {
+  if (!matches || matches.length === 0) return -Infinity;
+  let b2b = 0, surrogates = 0, repeatOpp = 0, repeatPart = 0;
+  const red = new Array(numTeams + 1).fill(0);
+  const blue = new Array(numTeams + 1).fill(0);
+  const opp = Array.from({length: numTeams + 1}, () => new Array(numTeams + 1).fill(0));
+  const par = Array.from({length: numTeams + 1}, () => new Array(numTeams + 1).fill(0));
+
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    // B2B (P4)
+    if (i > 0) {
+      const prev = new Set([...matches[i-1].red, ...matches[i-1].blue]);
+      if ([...m.red, ...m.blue].some(t => prev.has(t))) b2b++;
+    }
+    // Surrogates (P2/P10)
+    surrogates += m.redSurrogate.filter(Boolean).length + m.blueSurrogate.filter(Boolean).length;
+    // Alliance balance (P6)
+    m.red.forEach(t => red[t]++);
+    m.blue.forEach(t => blue[t]++);
+    // Opponent/partner diversity (P8/P9) — count repeats
+    for (const r of m.red) for (const b of m.blue) {
+      if (opp[r][b] > 0) repeatOpp++;
+      opp[r][b]++; opp[b][r]++;
+    }
+    for (let a = 0; a < m.red.length; a++) for (let b = a+1; b < m.red.length; b++) {
+      if (par[m.red[a]][m.red[b]] > 0) repeatPart++;
+      par[m.red[a]][m.red[b]]++; par[m.red[b]][m.red[a]]++;
+    }
+    for (let a = 0; a < m.blue.length; a++) for (let b = a+1; b < m.blue.length; b++) {
+      if (par[m.blue[a]][m.blue[b]] > 0) repeatPart++;
+      par[m.blue[a]][m.blue[b]]++; par[m.blue[b]][m.blue[a]]++;
+    }
+  }
+  const maxImbalance = Math.max(...Array.from({length: numTeams}, (_, i) => Math.abs(red[i+1] - blue[i+1])));
+  // Lower = better (all terms are penalties)
+  return -(b2b * 1000 + surrogates * 100 + maxImbalance * 50 + repeatOpp * 15 + repeatPart * 12);
+}
+
+// ── Worker message handler ────────────────────────────────────────────────────
+self.onmessage = function(e) {
+  const { numTeams, matchesPerTeam, cooldown, iterationsToRun, workerId } = e.data;
+  let bestMatches = null, bestRoundBoundaries = null, bestSurrogateCount = null;
+  let bestScore = -Infinity, bestIter = 0;
+  let lastReported = 0;
+
+  for (let i = 0; i < iterationsToRun; i++) {
+    const result = generateMatches(numTeams, matchesPerTeam, cooldown);
+    const score = scoreSchedule(result.matches, numTeams);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatches = result.matches;
+      bestRoundBoundaries = Array.from(result.roundBoundaries.entries());
+      bestSurrogateCount = Array.from(result.surrogateCount);
+      bestIter = i + 1;
+    }
+    if ((i + 1) % 10 === 0 || i === iterationsToRun - 1) {
+      self.postMessage({ type: 'progress', workerId, done: i + 1, lastReported, bestScore });
+      lastReported = i + 1;
+    }
+  }
+
+  self.postMessage({ type: 'result', workerId, bestScore, bestMatches,
+    bestRoundBoundaries, bestSurrogateCount, bestIter });
+};
+
+</script>
+</body>
+</html>
