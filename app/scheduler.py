@@ -1,3 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# FRC Match Scheduler
+# Copyright (C) 2025 FRC Match Scheduler Contributors
+#
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option)
+# any later version.
+#
+# NOTE: This file was substantially generated with the assistance of Claude,
+# an AI assistant by Anthropic, and reviewed/modified by human contributors.
+# See LICENSE for full terms.
+
 """
 FRC Qualification Match Scheduler
 Pure Python port of the JS algorithm — no I/O, no dependencies beyond stdlib.

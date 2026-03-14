@@ -1,3 +1,23 @@
+<!--
+  FRC Match Scheduler
+  Copyright (C) 2025 FRC Match Scheduler Contributors
+
+  This program is free software: you can redistribute it and/or modify it
+  under the terms of the GNU General Public License as published by the Free
+  Software Foundation, either version 3 of the License, or (at your option)
+  any later version.
+
+  This program is distributed in the hope that it will be useful, but WITHOUT
+  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+  FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License along with
+  this program. If not, see <https://www.gnu.org/licenses/>.
+
+  NOTE: This file was substantially generated with the assistance of Claude,
+  an AI assistant by Anthropic, and reviewed/modified by human contributors.
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -435,7 +455,7 @@
   .tba-result-date { font-size: 0.7rem; color: var(--text-muted); margin-left: auto; }
 
   /* Saved schedules */
-  .saved-schedule-list { display: flex; flex-direction: column; gap: 0.4rem; }
+  .saved-schedule-list { display: flex; flex-direction: column; gap: 0.5rem; }
   .saved-schedule-row {
     display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.7rem;
     background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
@@ -444,6 +464,20 @@
   .saved-schedule-row.active-sched { border-color: var(--accent3); background: rgba(92,184,122,0.06); }
   .saved-sched-name { flex: 1; color: var(--text); font-weight: 500; }
   .saved-sched-meta { font-size: 0.68rem; color: var(--text-muted); }
+  .btn-promote {
+    background: var(--accent); color: #0e1320; border: none; border-radius: 4px;
+    padding: 0.35rem 0.8rem; font-family: 'Barlow Condensed',sans-serif; font-weight: 700;
+    font-size: 0.78rem; letter-spacing: 0.04em; cursor: pointer; white-space: nowrap;
+    text-transform: uppercase;
+  }
+  .btn-promote:hover { background: #93b8f5; }
+  .version-badge {
+    font-size: 0.6rem; font-family: 'Barlow Condensed',sans-serif; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase; padding: 0.1rem 0.4rem;
+    border-radius: 3px; margin-left: 0.4rem; vertical-align: middle;
+  }
+  .version-badge.active { background: rgba(92,184,122,0.18); color: var(--accent3); border: 1px solid var(--accent3); }
+  .version-badge.older  { background: rgba(58,64,96,0.5); color: var(--text-muted); border: 1px solid var(--border); }
 
   #eventCodeInput.loading { opacity: 0.6; }
   #eventCodeInput.valid   { border-color: var(--accent3); }
@@ -548,9 +582,12 @@
 
   <!-- Saved schedules modal -->
   <div class="modal-overlay" id="modalSchedules">
-    <div class="modal">
+    <div class="modal" style="width:min(620px,95vw);">
       <button class="modal-close" onclick="closeModal('modalSchedules')">&#x2715;</button>
-      <div class="modal-title">Saved Schedules</div>
+      <div class="modal-title">Schedule History</div>
+      <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.75rem;">
+        Each assignment run creates a new version. The active schedule is used for display. Load any version to view it, or promote it to active.
+      </div>
       <div class="saved-schedule-list" id="savedScheduleList">
         <div style="color:var(--text-muted);font-size:0.8rem;">No schedules saved yet.</div>
       </div>
@@ -1460,19 +1497,52 @@ async function loadSavedSchedules() {
       list.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;">No schedules saved yet.</div>';
       return;
     }
-    schedules.forEach(s => {
-      const row = document.createElement('div');
-      row.className = 'saved-schedule-row' + (s.is_active ? ' active-sched' : '');
-      const dt = new Date(s.created_at).toLocaleString();
-      row.innerHTML =
-        '<div style="flex:1">' +
-          '<div class="saved-sched-name">' + s.name + (s.is_active ? ' <span style="color:var(--accent3);font-size:0.65rem;">\u25cf ACTIVE</span>' : '') + '</div>' +
-          '<div class="saved-sched-meta">Abstract #' + s.abstract_schedule_id + ' \u00b7 ' + dt + '</div>' +
-        '</div>' +
-        '<button class="btn-sm" onclick="loadSchedule(' + s.id + ')" style="margin-left:0.4rem;">Load</button>' +
-        (!s.is_active ? '<button class="btn-sm" onclick="activateSchedule(' + s.id + ')" style="margin-left:0.3rem;">Set Active</button>' : '') +
-        '<button class="btn-sm btn-danger" onclick="deleteSchedule(' + s.id + ')" style="margin-left:0.3rem;">&#x2715;</button>';
-      list.appendChild(row);
+
+    // Group by abstract_schedule_id to show version chains
+    const groups = new Map();
+    schedules.forEach(function(s) {
+      const key = s.abstract_schedule_id;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(s);
+    });
+
+    groups.forEach(function(versions, abstractId) {
+      // Group header
+      const v0 = versions[0];
+      const header = document.createElement('div');
+      header.style.cssText = 'font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:600;padding:0.25rem 0.4rem;margin-top:0.25rem;';
+      header.textContent = v0.num_teams + ' teams · ' + v0.matches_per_team + ' mpt · cooldown ' + v0.cooldown + '  —  ' + versions.length + ' version' + (versions.length !== 1 ? 's' : '');
+      list.appendChild(header);
+
+      versions.forEach(function(s, idx) {
+        const row = document.createElement('div');
+        row.className = 'saved-schedule-row' + (s.is_active ? ' active-sched' : '');
+        const dt = new Date(s.created_at).toLocaleString();
+        const isLatest = idx === 0;
+
+        let actionBtns = '<button class="btn-sm" onclick="loadSchedule(' + s.id + ')" title="View this schedule">View</button>';
+
+        if (s.is_active) {
+          actionBtns += ' <span class="version-badge active">✓ Active</span>';
+        } else {
+          // Prominent promote button for non-active versions — especially useful for reverting
+          actionBtns += ' <button class="btn-promote" onclick="promoteSchedule(' + s.id + ')" title="Make this the active schedule">⬆ Promote to Active</button>';
+        }
+
+        actionBtns += ' <button class="btn-sm btn-danger" onclick="deleteSchedule(' + s.id + ')" title="Delete this version" style="margin-left:0.2rem;">&#x2715;</button>';
+
+        row.innerHTML =
+          '<div style="flex:1;min-width:0;">' +
+            '<div class="saved-sched-name" style="display:flex;align-items:center;gap:0.4rem;">' +
+              (isLatest ? '<span class="version-badge older" style="background:rgba(122,164,240,0.12);color:var(--accent);border-color:var(--accent);">Latest</span>' : '<span class="version-badge older">v' + (versions.length - idx) + '</span>') +
+              '<span>' + dt + '</span>' +
+              (s.is_active ? '' : '') +
+            '</div>' +
+            '<div class="saved-sched-meta">' + s.name + '</div>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:0.3rem;flex-shrink:0;">' + actionBtns + '</div>';
+        list.appendChild(row);
+      });
     });
   } catch(e) { showApiStatus(e.message, true); }
 }
@@ -1483,9 +1553,17 @@ async function loadSchedule(scheduleId) {
 }
 
 async function activateSchedule(scheduleId) {
+  return promoteSchedule(scheduleId);
+}
+
+async function promoteSchedule(scheduleId) {
   try {
     await apiFetch('/api/assigned-schedules/' + scheduleId + '/activate', { method: 'POST' });
+    _currentAssignedScheduleId = scheduleId;
     await loadSavedSchedules();
+    // Also load and display the promoted schedule
+    await loadAssignedSchedule(scheduleId, collectDayConfig());
+    showApiStatus('Schedule promoted to active');
   } catch(e) { showApiStatus(e.message, true); }
 }
 

@@ -1,3 +1,15 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# FRC Match Scheduler
+# Copyright (C) 2025 FRC Match Scheduler Contributors
+#
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option)
+# any later version.
+#
+# NOTE: This file was substantially generated with the assistance of Claude,
+# an AI assistant by Anthropic, and reviewed/modified by human contributors.
+# See LICENSE for full terms.
 """
 FRC Match Scheduler — FastAPI backend
 
@@ -477,47 +489,24 @@ async def assign_teams(
             yield f"data: {json.dumps({'type':'error','message':'Assignment failed'})}\n\n"
             return
 
-        # Upsert: if an assigned schedule already exists for this abstract+event, update it
-        existing_result = await db.execute(
-            select(AssignedSchedule).where(
-                AssignedSchedule.abstract_schedule_id == abstract_id,
-                AssignedSchedule.event_id == body.event_id,
-            )
+        # Always insert a new record — each assignment is a new version.
+        # History is preserved so the user can revert to any previous assignment.
+        # Deactivate all existing schedules for this event first.
+        await db.execute(
+            update(AssignedSchedule)
+            .where(AssignedSchedule.event_id == body.event_id)
+            .values(is_active=False)
         )
-        existing = existing_result.scalar_one_or_none()
-
-        if existing:
-            # Update in place — delete old match rows, write new ones
-            await db.execute(
-                update(AssignedSchedule)
-                .where(AssignedSchedule.event_id == body.event_id)
-                .values(is_active=False)
-            )
-            existing.slot_map   = best_result["slot_map"]
-            existing.day_config = body.day_config
-            existing.is_active  = True
-            await db.flush()
-            # Delete old match rows
-            from sqlalchemy import delete as sa_delete
-            await db.execute(sa_delete(MatchRow).where(MatchRow.assigned_schedule_id == existing.id))
-            assigned = existing
-        else:
-            # Deactivate other schedules and create new
-            await db.execute(
-                update(AssignedSchedule)
-                .where(AssignedSchedule.event_id == body.event_id)
-                .values(is_active=False)
-            )
-            assigned = AssignedSchedule(
-                abstract_schedule_id=abstract_id,
-                event_id=body.event_id,
-                name=body.name,
-                is_active=True,
-                slot_map=best_result["slot_map"],
-                day_config=body.day_config,
-            )
-            db.add(assigned)
-            await db.flush()
+        assigned = AssignedSchedule(
+            abstract_schedule_id=abstract_id,
+            event_id=body.event_id,
+            name=body.name,
+            is_active=True,
+            slot_map=best_result["slot_map"],
+            day_config=body.day_config,
+        )
+        db.add(assigned)
+        await db.flush()
 
         # Denormalise into MatchRow using slot_map to resolve real team numbers
         slot_map = {int(k): v for k, v in best_result["slot_map"].items()}
@@ -544,13 +533,21 @@ async def assign_teams(
 async def list_assigned_schedules(event_id: int, db: AsyncSession = Depends(get_session)):
     result = await db.execute(
         select(AssignedSchedule)
+        .options(selectinload(AssignedSchedule.abstract_schedule))
         .where(AssignedSchedule.event_id == event_id)
         .order_by(AssignedSchedule.created_at.desc())
     )
     return [
-        {"id": s.id, "name": s.name, "is_active": s.is_active,
-         "abstract_schedule_id": s.abstract_schedule_id,
-         "created_at": s.created_at.isoformat()}
+        {
+            "id":                   s.id,
+            "name":                 s.name,
+            "is_active":            s.is_active,
+            "abstract_schedule_id": s.abstract_schedule_id,
+            "num_teams":            s.abstract_schedule.num_teams,
+            "matches_per_team":     s.abstract_schedule.matches_per_team,
+            "cooldown":             s.abstract_schedule.cooldown,
+            "created_at":           s.created_at.isoformat(),
+        }
         for s in result.scalars()
     ]
 
