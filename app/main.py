@@ -56,7 +56,8 @@ app.add_middleware(
 async def startup():
     await init_db()
     get_pool()  # warm up the process pool
-    log.info("Started with %d CPU workers", CPU_WORKERS)
+    actual = CPU_WORKERS or (os.cpu_count() or 4)
+    log.info("Started with %d CPU workers (CPU_WORKERS=%s)", actual, CPU_WORKERS)
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -192,7 +193,16 @@ async def tba_import_event(event_key: str, db: AsyncSession = Depends(get_sessio
         tba_event = await tba_client.get_event(event_key)
         tba_teams = await tba_client.get_event_teams(event_key)
     except Exception as e:
-        raise HTTPException(502, f"TBA API error: {e}")
+        msg = str(e)
+        if not tba_client.TBA_KEY:
+            detail = "TBA_API_KEY is not set. Add it to your frc-app-secret and redeploy."
+        elif "401" in msg:
+            detail = "TBA API key is invalid or expired. Check frc-app-secret."
+        elif "404" in msg:
+            detail = f"Event '{event_key}' not found on The Blue Alliance. Check the event key and year."
+        else:
+            detail = f"TBA API error: {msg}"
+        raise HTTPException(502, detail)
 
     # Upsert event
     existing = await db.execute(select(Event).where(Event.key == event_key))
