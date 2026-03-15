@@ -2222,6 +2222,7 @@ async function generateSchedule() {
       buf += decoder.decode(value, { stream: true });
       const lines = buf.split('\n'); buf = lines.pop();
       for (const line of lines) {
+        if (line.startsWith(':')) continue; // SSE comment (ping/connected/end)
         if (!line.startsWith('data: ')) continue;
         try {
           const msg = JSON.parse(line.slice(6));
@@ -2252,7 +2253,8 @@ async function generateSchedule() {
     // "Load failed" / "Failed to fetch" usually means the proxy/router dropped the
     // SSE connection (OpenShift HAProxy default timeout). Retry once automatically.
     const isNetworkDrop = err.message === 'Load failed' || err.message === 'Failed to fetch' ||
-                          err.message.includes('network') || err.message.includes('connection');
+                          err.message === 'NetworkError when attempting to fetch resource.' ||
+                          err.message.includes('network connection was lost');
     if (isNetworkDrop && !window._stage1Retried) {
       window._stage1Retried = true;
       showApiStatus('Connection dropped \u2014 retrying\u2026');
@@ -2432,6 +2434,7 @@ async function assignTeams() {
       buf += decoder.decode(value, { stream: true });
       const lines = buf.split('\n'); buf = lines.pop();
       for (const line of lines) {
+        if (line.startsWith(':')) continue; // SSE comment (ping/connected/end)
         if (!line.startsWith('data: ')) continue;
         try {
           const msg = JSON.parse(line.slice(6));
@@ -2468,7 +2471,8 @@ async function assignTeams() {
     document.getElementById('progressWrap2').style.display = 'none';
   } catch(err) {
     const isNetworkDrop = err.message === 'Load failed' || err.message === 'Failed to fetch' ||
-                          err.message.includes('network') || err.message.includes('connection');
+                          err.message === 'NetworkError when attempting to fetch resource.' ||
+                          err.message.includes('network connection was lost');
     if (isNetworkDrop && !window._stage2Retried) {
       window._stage2Retried = true;
       showApiStatus('Connection dropped \u2014 retrying\u2026');

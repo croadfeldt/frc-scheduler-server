@@ -320,6 +320,8 @@ async def generate_abstract(
     iterations = body.iterations
 
     async def stream() -> AsyncGenerator[str, None]:
+        yield ": connected\n\n"
+        await asyncio.sleep(0)
         actual_workers = CPU_WORKERS or (os.cpu_count() or 4)
         n_workers = min(iterations, actual_workers)
         base = iterations // n_workers
@@ -388,6 +390,7 @@ async def generate_abstract(
         await db.refresh(sched)
 
         yield f"data: {json.dumps({'type':'done','abstract_schedule_id':sched.id,'score':best_result['score'],'total':iterations,'pct':100})}\n\n"
+        yield ": end\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","Connection":"keep-alive"})
@@ -473,6 +476,8 @@ async def assign_teams(
     iterations = body.iterations
 
     async def stream() -> AsyncGenerator[str, None]:
+        yield ": connected\n\n"
+        await asyncio.sleep(0)
         actual_workers = CPU_WORKERS or (os.cpu_count() or 4)
         n_workers = min(iterations, actual_workers)
         base = iterations // n_workers
@@ -556,6 +561,7 @@ async def assign_teams(
         await db.commit()
 
         yield f"data: {json.dumps({'type':'done','assigned_schedule_id':assigned.id,'score':best_result['score'],'total':iterations,'pct':100})}\n\n"
+        yield ": end\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","Connection":"keep-alive"})
