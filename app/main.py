@@ -118,7 +118,7 @@ class AbstractGenerateRequest(BaseModel):
     num_teams:        int         = Field(..., ge=6, le=120)
     matches_per_team: int         = Field(6, ge=1, le=20)
     cooldown:         int         = Field(3, ge=1, le=20)
-    iterations:       int         = Field(1, ge=1)   # Stage 1 is single deterministic pass
+    iterations:       int         = Field(1, ge=1)   # Stage 1: single deterministic pass — no iteration needed
     seed:             str | None  = None              # hex seed for reproducibility
     name:             str         = "Abstract Schedule"
     event_id:         int | None  = None              # optional — link to an event
@@ -128,7 +128,7 @@ class AssignRequest(BaseModel):
     """Stage 2: assign real team numbers to an abstract schedule."""
     event_id:             int
     abstract_schedule_id: int
-    iterations:           int         = Field(500, ge=1)
+    iterations:           int         = Field(1000, ge=1)
     assign_seed:          str | None  = None
     name:                 str         = "Schedule"
     day_config:           Any         = None
@@ -514,7 +514,8 @@ async def assign_teams(
                     log.error("Stage 2 worker error: %s", e)
                     total_done += worker_iters[tasks.index(task)]
             pct = min(99, round(total_done / iterations * 100))
-            yield f"data: {json.dumps({'type':'progress','done':total_done,'total':iterations,'pct':pct})}\n\n"
+            best_score = best_result["score"] if best_result else None
+            yield f"data: {json.dumps({'type':'progress','done':total_done,'total':iterations,'pct':pct,'score':best_score})}\n\n"
 
         if not best_result or not best_result.get("slot_map"):
             yield f"data: {json.dumps({'type':'error','message':'Assignment failed'})}\n\n"

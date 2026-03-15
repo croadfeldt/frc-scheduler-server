@@ -694,7 +694,7 @@
             <input type="checkbox" id="autoPopulate" checked style="accent-color:var(--accent);width:14px;height:14px;">
             Auto-generate on parameter change
           </label>
-          <span style="font-size:0.68rem;color:var(--text-muted);">Regenerates Stage 1 automatically when any parameter changes</span>
+          <span style="font-size:0.68rem;color:var(--text-muted);">Regenerates Stage 1 when parameters change</span>
         </div>
         <div id="paramChangedWarning" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.75rem;color:var(--amber);">
           &#9888; Parameters changed — the current schedule structure is stale. Regenerate Stage 1 before assigning teams.
@@ -734,7 +734,7 @@
           <div class="field-row single" style="margin-bottom:0.5rem;">
             <div class="field">
               <label>Assignment Iterations</label>
-              <input type="number" id="assignIterations" value="500" min="1">
+              <input type="number" id="assignIterations" value="1000" min="1">
             </div>
           </div>
           <div class="progress-wrap" id="progressWrap2" style="display:none;">
@@ -2153,7 +2153,7 @@ async function generateSchedule() {
   const numTeams       = parseInt(document.getElementById('numTeams').value) || 0;
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value);
   const cooldown       = parseInt(document.getElementById('cooldown').value) || 3;
-  const iterations     = 1; // Stage 1 is deterministic — no iterations needed
+  const iterations     = 1; // Stage 1 builds the template — one deterministic pass is all that's needed
   const seed = window._pendingSeed || randomSeed();
   _currentSeed = seed;
 
@@ -2383,7 +2383,7 @@ async function assignTeams() {
   btn.disabled = true;
   document.getElementById('progressWrap2').style.display = 'block';
 
-  const iterations  = Math.max(1, parseInt(document.getElementById('assignIterations').value) || 500);
+  const iterations  = Math.max(1, parseInt(document.getElementById('assignIterations').value) || 1000);
   const assignSeed  = randomSeed();
   _currentAssignSeed = assignSeed;
   const startTime   = performance.now();
@@ -2431,8 +2431,10 @@ async function assignTeams() {
             document.getElementById('progressFill2').style.width = pct + '%';
             const elapsed = performance.now() - startTime;
             const eta = msg.done > 1 ? formatETA((elapsed/msg.done)*(msg.total-msg.done)) : '';
+            const scoreStr2 = (msg.score !== undefined && msg.score > -1e17)
+              ? ' \u00b7 score ' + msg.score.toFixed(0) : '';
             document.getElementById('progressLabel2').textContent =
-              msg.done + ' / ' + msg.total + ' assignments' + (eta ? ' \u00b7 ' + eta : '') + '\u2026';
+              msg.done + ' / ' + msg.total + ' iterations' + (eta ? ' \u00b7 ' + eta : '') + scoreStr2 + '\u2026';
           } else if (msg.type === 'done') {
             _currentAssignedScheduleId = msg.assigned_schedule_id;
             const _adResp = await apiFetch('/api/assigned-schedules/' + msg.assigned_schedule_id);
