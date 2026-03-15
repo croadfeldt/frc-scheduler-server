@@ -313,21 +313,20 @@ async def generate_abstract(
     current_user: dict | None = Depends(get_current_user),
 ):
     """
-    Stage 1 — Generate a slot-based abstract schedule (no team numbers).
-    Uses SSE so the connection stays alive during computation (prevents gateway timeouts).
-    Sends keepalive pings every 15s so HAProxy does not close idle connections.
+    Stage 1 — Generate a slot-based abstract schedule.
+    Streams keepalive pings while computing, then sends the done event.
+    All DB work is done after the worker finishes, before the done event is yielded,
+    so the generator never has async DB calls interleaved with stream reads.
     """
     loop = asyncio.get_event_loop()
     pool = get_pool()
+    _seed_int = int(body.seed, 16) if body.seed else None
 
     async def stream() -> AsyncGenerator[str, None]:
+        # Flush headers immediately
         yield ": connected\n\n"
-        await asyncio.sleep(0)
 
-        _seed_int = int(body.seed, 16) if body.seed else None
-
-        # Run worker in executor; send keepalive pings every 5s while waiting
-        # so HAProxy/nginx does not close the idle connection before the result arrives
+        # Run the worker, sending a ping every 5s to keep the connection alive
         worker_task = asyncio.ensure_future(
             loop.run_in_executor(
                 pool, run_iterations_worker,
@@ -340,8 +339,9 @@ async def generate_abstract(
             except asyncio.TimeoutError:
                 yield ": ping\n\n"
             except Exception:
-                break
+                break  # worker finished (success or error)
 
+        # Worker finished — get result
         try:
             result = worker_task.result()
         except Exception as e:
@@ -353,31 +353,39 @@ async def generate_abstract(
             yield f"data: {json.dumps({'type':'error','message':'No schedule generated'})}\n\n"
             return
 
-        sched = AbstractSchedule(
-            event_id=body.event_id,
-            name=body.name,
-            num_teams=body.num_teams,
-            matches_per_team=body.matches_per_team,
-            cooldown=body.cooldown,
-            seed=body.seed,
-            iterations_run=1,
-            best_iteration=0,
-            score=result["score"],
-            created_by=current_user["sub"] if current_user else None,
-            matches=result["matches"],
-            surrogate_count=result["surrogate_count"],
-            round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
-        )
-        db.add(sched)
-        await db.commit()
-        await db.refresh(sched)
+        # Save to DB — this is fast (just a SQL insert) so no ping needed here
+        try:
+            sched = AbstractSchedule(
+                event_id=body.event_id,
+                name=body.name,
+                num_teams=body.num_teams,
+                matches_per_team=body.matches_per_team,
+                cooldown=body.cooldown,
+                seed=body.seed,
+                iterations_run=1,
+                best_iteration=0,
+                score=result["score"],
+                created_by=current_user["sub"] if current_user else None,
+                matches=result["matches"],
+                surrogate_count=result["surrogate_count"],
+                round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
+            )
+            db.add(sched)
+            await db.commit()
+            await db.refresh(sched)
+        except Exception as e:
+            log.error("Stage 1 DB error: %s", e)
+            yield f"data: {json.dumps({'type':'error','message':'Database error: ' + str(e)})}\n\n"
+            return
 
         yield f"data: {json.dumps({'type':'done','abstract_schedule_id':sched.id,'score':result['score'],'pct':100})}\n\n"
         yield ": end\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
-                                      "Connection":"keep-alive"})
+    return StreamingResponse(
+        stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"},
+    )
 
 
 @app.get("/api/abstract-schedules")

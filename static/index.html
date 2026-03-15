@@ -2224,6 +2224,11 @@ async function generateSchedule() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
+    // Animate progress bar 10% → 90% while pings arrive, snap to 100% on done
+    let pct = 10;
+    const animInterval = setInterval(function() {
+      if (pct < 90) { pct += 2; document.getElementById('progressFill').style.width = pct + '%'; }
+    }, 500);
 
     outer: while (true) {
       let chunk;
@@ -2248,6 +2253,7 @@ async function generateSchedule() {
     }
 
     if (doneMsg) {
+      clearInterval(animInterval);
       s1ReceivedDone = true;
       document.getElementById('progressFill').style.width = '100%';
       _currentAbstractScheduleId = doneMsg.abstract_schedule_id;
@@ -2267,6 +2273,7 @@ async function generateSchedule() {
       }
     }
   } catch(err) {
+    clearInterval(animInterval);
     if (doneMsg || s1ReceivedDone) {
       // Done event was received — stream-close error is expected, not a failure
       btn.disabled = false;
