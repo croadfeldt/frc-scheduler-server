@@ -2215,6 +2215,7 @@ async function generateSchedule() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '', bestScore = -1e18, bestIter = 0;
+    let s1ReceivedDone = false; // set when 'done' SSE event arrives
 
     while (true) {
       const { done, value } = await reader.read();
@@ -2229,6 +2230,7 @@ async function generateSchedule() {
           if (msg.type === 'progress') {
             updateProgress(msg.done, msg.total, bestScore > -1e17 ? bestScore : undefined, bestIter);
           } else if (msg.type === 'done') {
+            s1ReceivedDone = true;
             _currentAbstractScheduleId = msg.abstract_schedule_id;
             bestScore = msg.score;
             _abstractParams = { numTeams, matchesPerTeam, cooldown };
@@ -2249,6 +2251,13 @@ async function generateSchedule() {
     btn.disabled = false;
     document.getElementById('progressWrap').style.display = 'none';
   } catch(err) {
+    // If we already received the 'done' event, the schedule completed successfully.
+    // WebKit fires a network error when the server closes the stream — ignore it.
+    if (s1ReceivedDone) {
+      btn.disabled = false;
+      document.getElementById('progressWrap').style.display = 'none';
+      return;
+    }
     console.error('Server Stage 1 error:', err.message);
     // "Load failed" / "Failed to fetch" usually means the proxy/router dropped the
     // SSE connection (OpenShift HAProxy default timeout). Retry once automatically.
@@ -2427,6 +2436,7 @@ async function assignTeams() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
+    let s2ReceivedDone = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -2448,6 +2458,7 @@ async function assignTeams() {
             document.getElementById('progressLabel2').textContent =
               msg.done + ' / ' + msg.total + ' iterations' + (eta ? ' \u00b7 ' + eta : '') + scoreStr2 + '\u2026';
           } else if (msg.type === 'done') {
+            s2ReceivedDone = true;
             _currentAssignedScheduleId = msg.assigned_schedule_id;
             const _adResp = await apiFetch('/api/assigned-schedules/' + msg.assigned_schedule_id);
             _currentSlotMap = _adResp.slot_map || null;
@@ -2470,6 +2481,11 @@ async function assignTeams() {
     btn.disabled = false;
     document.getElementById('progressWrap2').style.display = 'none';
   } catch(err) {
+    if (s2ReceivedDone) {
+      btn.disabled = false;
+      document.getElementById('progressWrap2').style.display = 'none';
+      return;
+    }
     const isNetworkDrop = err.message === 'Load failed' || err.message === 'Failed to fetch' ||
                           err.message === 'NetworkError when attempting to fetch resource.' ||
                           err.message.includes('network connection was lost');
