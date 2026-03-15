@@ -782,9 +782,11 @@ let _currentAbstractScheduleId = null;   // Stage 1 result
 let _currentAssignedScheduleId = null;   // Stage 2 result (assigned)
 let _abstractParams = null;              // params snapshot when Stage 1 last ran
 let _autoPopulateTimeout = null;         // debounce timer
+let _authUser = null;                    // {sub, email, provider, uid} or null
 let _currentSlotMap = null;              // {slot_str: team_number} from Stage 2
 let _currentSeed = null;                 // hex Stage 1 seed
 let _currentAssignSeed = null;           // hex Stage 2 seed
+let _urlAutoTeams = null;                // teams from URL for Stage 2 auto-assign
 
 function timeToMin(t) {
   const [h, m] = t.split(':').map(Number);
@@ -924,7 +926,6 @@ autoRunFromUrl();
 // ══════════════════════════════════════════════════════════════════════════════
 // AUTH STATE
 // ══════════════════════════════════════════════════════════════════════════════
-let _authUser = null;  // {sub, email, provider, uid} or null
 
 
 function getToken() { try { return localStorage.getItem('frc_token'); } catch(e) { return null; } }
@@ -1174,7 +1175,6 @@ async function autoRunFromUrl() {
   }
 }
 
-let _urlAutoTeams = null;
 
 async function generateScheduleWithSeed(seed) {
   // Trigger generateSchedule but with an explicit seed
