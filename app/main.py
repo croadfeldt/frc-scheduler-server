@@ -305,7 +305,8 @@ async def remove_team(event_id: int, team_number: int, db: AsyncSession = Depend
 
 # ── Stage 1: Abstract Schedule Generation ────────────────────────────────────
 
-@app.post("/api/generate-abstract")
+
+@app.post("/api/generate-abstract", status_code=201)
 async def generate_abstract(
     body: AbstractGenerateRequest,
     db: AsyncSession = Depends(get_session),
@@ -313,87 +314,47 @@ async def generate_abstract(
 ):
     """
     Stage 1 — Generate a slot-based abstract schedule (no team numbers).
-    Streams SSE progress. Final event carries abstract_schedule_id.
+    Single deterministic pass; returns JSON directly. No SSE needed.
     """
-    pool = get_pool()
     loop = asyncio.get_event_loop()
-    iterations = body.iterations
+    pool = get_pool()
 
-    async def stream() -> AsyncGenerator[str, None]:
-        yield ": connected\n\n"
-        await asyncio.sleep(0)
-        actual_workers = CPU_WORKERS or (os.cpu_count() or 4)
-        n_workers = min(iterations, actual_workers)
-        base = iterations // n_workers
-        remainder = iterations % n_workers
+    _seed_int = int(body.seed, 16) if body.seed else None
+    result = await loop.run_in_executor(
+        pool, run_iterations_worker,
+        (body.num_teams, body.matches_per_team, body.cooldown, 1, 0, _seed_int)
+    )
 
-        tasks: list[asyncio.Task] = []
-        worker_iters: list[int] = []
-        for w in range(n_workers):
-            w_iters = base + (1 if w < remainder else 0)
-            worker_iters.append(w_iters)
-            _seed_int = int(body.seed, 16) if body.seed else None
-            _w_seed = (_seed_int ^ w) if _seed_int is not None else None
-            task = asyncio.ensure_future(
-                loop.run_in_executor(pool, run_iterations_worker,
-                    (body.num_teams, body.matches_per_team, body.cooldown, w_iters, w, _w_seed))
-            )
-            tasks.append(task)
+    if not result or not result.get("matches"):
+        raise HTTPException(500, "Schedule generation failed")
 
-        total_done = 0
-        best_result = None
-        pending = set(tasks)
+    sched = AbstractSchedule(
+        event_id=body.event_id,
+        name=body.name,
+        num_teams=body.num_teams,
+        matches_per_team=body.matches_per_team,
+        cooldown=body.cooldown,
+        seed=body.seed,
+        iterations_run=1,
+        best_iteration=0,
+        score=result["score"],
+        created_by=current_user["sub"] if current_user else None,
+        matches=result["matches"],
+        surrogate_count=result["surrogate_count"],
+        round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
+    )
+    db.add(sched)
+    await db.commit()
+    await db.refresh(sched)
 
-        _last_ping = asyncio.get_event_loop().time()
-        while pending:
-            done_set, pending = await asyncio.wait(pending, timeout=0.2,
-                                                   return_when=asyncio.FIRST_COMPLETED)
-            # SSE keepalive: proxies (e.g. OpenShift HAProxy, nginx) close idle
-            # connections after ~30s. Send a comment ping every 15s to prevent this.
-            _now = asyncio.get_event_loop().time()
-            if _now - _last_ping >= 15:
-                yield ": ping\n\n"
-                _last_ping = _now
-            for task in done_set:
-                try:
-                    result = task.result()
-                    total_done += worker_iters[tasks.index(task)]
-                    if best_result is None or result["score"] > best_result["score"]:
-                        best_result = result
-                except Exception as e:
-                    log.error("Stage 1 worker error: %s", e)
-                    total_done += worker_iters[tasks.index(task)]
-            pct = min(99, round(total_done / iterations * 100))
-            yield f"data: {json.dumps({'type':'progress','done':total_done,'total':iterations,'pct':pct})}\n\n"
+    return {
+        "type": "done",
+        "abstract_schedule_id": sched.id,
+        "score": result["score"],
+        "total": 1,
+        "pct": 100,
+    }
 
-        if not best_result or not best_result.get("matches"):
-            yield f"data: {json.dumps({'type':'error','message':'No schedule generated'})}\n\n"
-            return
-
-        sched = AbstractSchedule(
-            event_id=body.event_id,
-            name=body.name,
-            num_teams=body.num_teams,
-            matches_per_team=body.matches_per_team,
-            cooldown=body.cooldown,
-            seed=body.seed,
-            iterations_run=iterations,
-            best_iteration=best_result.get("worker_id", 0),
-            score=best_result["score"],
-            created_by=current_user["sub"] if current_user else None,
-            matches=best_result["matches"],
-            surrogate_count=best_result["surrogate_count"],
-            round_boundaries={str(k): v for k, v in best_result["round_boundaries"].items()},
-        )
-        db.add(sched)
-        await db.commit()
-        await db.refresh(sched)
-
-        yield f"data: {json.dumps({'type':'done','abstract_schedule_id':sched.id,'score':best_result['score'],'total':iterations,'pct':100})}\n\n"
-        yield ": end\n\n"
-
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","Connection":"keep-alive"})
 
 
 @app.get("/api/abstract-schedules")

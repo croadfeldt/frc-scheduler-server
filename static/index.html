@@ -2197,9 +2197,12 @@ async function generateSchedule() {
 
   let s1ReceivedDone = false;
   try {
-    const res = await fetch(API + '/api/generate-abstract', {
+    // Stage 1 is a single fast deterministic pass — plain JSON POST, no streaming needed
+    document.getElementById('progressFill').style.width = '60%';
+    document.getElementById('progressLabel').textContent = 'Generating schedule\u2026';
+
+    const msg = await apiFetch('/api/generate-abstract', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         num_teams: numTeams,
         matches_per_team: matchesPerTeam,
@@ -2211,70 +2214,25 @@ async function generateSchedule() {
       }),
     });
 
-    if (!res.ok) throw new Error(await res.text());
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '', bestScore = -1e18, bestIter = 0;
-    let doneMsg = null; // holds the 'done' SSE payload when received
-
-    while (!doneMsg) {
-      let chunk;
-      try { chunk = await reader.read(); } catch(e) { break; } // stream closed
-      if (chunk.done) break;
-      buf += decoder.decode(chunk.value, { stream: true });
-      const lines = buf.split('\n'); buf = lines.pop();
-      for (const line of lines) {
-        if (line.startsWith(':')) continue; // SSE comment (ping/connected/end)
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const msg = JSON.parse(line.slice(6));
-          if (msg.type === 'progress') {
-            updateProgress(msg.done, msg.total, bestScore > -1e17 ? bestScore : undefined, bestIter);
-          } else if (msg.type === 'done') {
-            doneMsg = msg; // store and break out of loop cleanly
-            break;
-          } else if (msg.type === 'error') {
-            throw new Error(msg.message);
-          }
-        } catch(e2) {
-          if (e2.message && !e2.message.startsWith('{')) throw e2; // real error, not parse noise
-          console.warn('SSE parse warning:', e2, line);
-        }
-      }
-    }
-
-    // Process the done event outside the read loop so stream-close errors can't interfere
-    if (doneMsg) {
-      s1ReceivedDone = true;
-      _currentAbstractScheduleId = doneMsg.abstract_schedule_id;
-      bestScore = doneMsg.score;
-      _abstractParams = { numTeams, matchesPerTeam, cooldown };
-      const sched = await apiFetch('/api/abstract-schedules/' + doneMsg.abstract_schedule_id);
-      _currentSeed = sched.seed || seed;
-      updateSeedDisplay(_currentSeed, null);
-      displayAbstractSchedule(sched, dayConfig);
-      showStage2Panel(numTeams);
-      await checkForSavedAssignment(doneMsg.abstract_schedule_id);
-      btn.disabled = false;
-      document.getElementById('progressWrap').style.display = 'none';
-      window._stage1Retried = false;
-      showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
-      if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
-        _urlAutoTeams = null; setTimeout(assignTeams, 200);
-      }
+    s1ReceivedDone = true;
+    document.getElementById('progressFill').style.width = '100%';
+    _currentAbstractScheduleId = msg.abstract_schedule_id;
+    _abstractParams = { numTeams, matchesPerTeam, cooldown };
+    const sched = await apiFetch('/api/abstract-schedules/' + msg.abstract_schedule_id);
+    _currentSeed = sched.seed || seed;
+    updateSeedDisplay(_currentSeed, null);
+    displayAbstractSchedule(sched, dayConfig);
+    showStage2Panel(numTeams);
+    await checkForSavedAssignment(msg.abstract_schedule_id);
+    btn.disabled = false;
+    document.getElementById('progressWrap').style.display = 'none';
+    window._stage1Retried = false;
+    showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
+    if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
+      _urlAutoTeams = null; setTimeout(assignTeams, 200);
     }
   } catch(err) {
-    // If we already received the 'done' event, the schedule completed successfully.
-    // WebKit fires a network error when the server closes the stream — ignore it.
-    if (s1ReceivedDone) {
-      btn.disabled = false;
-      document.getElementById('progressWrap').style.display = 'none';
-      return;
-    }
     console.error('Server Stage 1 error:', err.message);
-    // "Load failed" / "Failed to fetch" usually means the proxy/router dropped the
-    // SSE connection (OpenShift HAProxy default timeout). Retry once automatically.
     const isNetworkDrop = err.message === 'Load failed' || err.message === 'Failed to fetch' ||
                           err.message === 'NetworkError when attempting to fetch resource.' ||
                           err.message.includes('network connection was lost');
@@ -2283,12 +2241,9 @@ async function generateSchedule() {
       showApiStatus('Connection dropped \u2014 retrying\u2026');
       btn.disabled = false;
       document.getElementById('progressWrap').style.display = 'none';
-      // _stage1Retried stays true — if the retry also fails it falls through to
-      // client-side fallback below instead of looping again.
       setTimeout(function() { generateSchedule(); }, 1500);
       return;
     }
-    // Reached here: either not a network drop, or retry already attempted. Reset flag.
     window._stage1Retried = false;
     showApiStatus('Server error: ' + err.message + ' \u2014 falling back to client-side', true);
     runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA,
@@ -2462,27 +2417,30 @@ async function assignTeams() {
       for (const line of lines) {
         if (line.startsWith(':')) continue; // SSE comment (ping/connected/end)
         if (!line.startsWith('data: ')) continue;
-        try {
-          const msg = JSON.parse(line.slice(6));
-          if (msg.type === 'progress') {
-            const pct = Math.round(msg.done / msg.total * 100);
-            document.getElementById('progressFill2').style.width = pct + '%';
-            const elapsed = performance.now() - startTime;
-            const eta = msg.done > 1 ? formatETA((elapsed/msg.done)*(msg.total-msg.done)) : '';
-            const scoreStr2 = (msg.score !== undefined && msg.score > -1e17)
-              ? ' \u00b7 score ' + msg.score.toFixed(0) : '';
-            document.getElementById('progressLabel2').textContent =
-              msg.done + ' / ' + msg.total + ' iterations' + (eta ? ' \u00b7 ' + eta : '') + scoreStr2 + '\u2026';
-          } else if (msg.type === 'done') {
-            doneMsg2 = msg;
-            break;
-          } else if (msg.type === 'error') {
-            throw new Error(msg.message);
-          }
-        } catch(e2) {
-          if (e2.message && !e2.message.startsWith('{')) throw e2;
-          console.warn('SSE parse warning:', e2, line);
+        let msg2;
+        try { msg2 = JSON.parse(line.slice(6)); } catch(e) { continue; }
+        if (msg2.type === 'progress') {
+          const pct = Math.round(msg2.done / msg2.total * 100);
+          document.getElementById('progressFill2').style.width = pct + '%';
+          const elapsed = performance.now() - startTime;
+          const eta = msg2.done > 1 ? formatETA((elapsed/msg2.done)*(msg2.total-msg2.done)) : '';
+          const scoreStr2 = (msg2.score !== undefined && msg2.score > -1e17)
+            ? ' \u00b7 score ' + msg2.score.toFixed(0) : '';
+          document.getElementById('progressLabel2').textContent =
+            msg2.done + ' / ' + msg2.total + ' iterations' + (eta ? ' \u00b7 ' + eta : '') + scoreStr2 + '\u2026';
+        } else if (msg2.type === 'done') {
+          doneMsg2 = msg2;
+          break;
+        } else if (msg2.type === 'error') {
+          throw new Error(msg2.message);
         }
+      }
+    }
+
+    if (!doneMsg2 && buf) {
+      for (const line of buf.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        try { const m = JSON.parse(line.slice(6)); if (m.type === 'done') { doneMsg2 = m; break; } } catch(e) {}
       }
     }
 
@@ -2503,7 +2461,7 @@ async function assignTeams() {
       showApiStatus('Teams assigned and saved');
     }
   } catch(err) {
-    if (s2ReceivedDone) {
+    if (doneMsg2 || s2ReceivedDone) {
       btn.disabled = false;
       document.getElementById('progressWrap2').style.display = 'none';
       return;
