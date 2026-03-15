@@ -2196,13 +2196,18 @@ async function generateSchedule() {
   const dayConfig = collectDayConfig();
 
   let s1ReceivedDone = false;
+  let doneMsg = null;
   try {
-    // Stage 1 is a single fast deterministic pass — plain JSON POST, no streaming needed
-    document.getElementById('progressFill').style.width = '60%';
+    document.getElementById('progressFill').style.width = '10%';
     document.getElementById('progressLabel').textContent = 'Generating schedule\u2026';
 
-    const msg = await apiFetch('/api/generate-abstract', {
+    const res = await fetch(API + '/api/generate-abstract', {
       method: 'POST',
+      headers: (function() {
+        const h = { 'Content-Type': 'application/json' };
+        const tok = getToken(); if (tok) h['Authorization'] = 'Bearer ' + tok;
+        return h;
+      })(),
       body: JSON.stringify({
         num_teams: numTeams,
         matches_per_team: matchesPerTeam,
@@ -2214,24 +2219,60 @@ async function generateSchedule() {
       }),
     });
 
-    s1ReceivedDone = true;
-    document.getElementById('progressFill').style.width = '100%';
-    _currentAbstractScheduleId = msg.abstract_schedule_id;
-    _abstractParams = { numTeams, matchesPerTeam, cooldown };
-    const sched = await apiFetch('/api/abstract-schedules/' + msg.abstract_schedule_id);
-    _currentSeed = sched.seed || seed;
-    updateSeedDisplay(_currentSeed, null);
-    displayAbstractSchedule(sched, dayConfig);
-    showStage2Panel(numTeams);
-    await checkForSavedAssignment(msg.abstract_schedule_id);
-    btn.disabled = false;
-    document.getElementById('progressWrap').style.display = 'none';
-    window._stage1Retried = false;
-    showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
-    if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
-      _urlAutoTeams = null; setTimeout(assignTeams, 200);
+    if (!res.ok) throw new Error(res.statusText || ('HTTP ' + res.status));
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    outer: while (true) {
+      let chunk;
+      try { chunk = await reader.read(); } catch(e) { break; }
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith(':')) continue;
+        if (!line.startsWith('data: ')) continue;
+        let msg; try { msg = JSON.parse(line.slice(6)); } catch(e) { continue; }
+        if (msg.type === 'done')  { doneMsg = msg; break outer; }
+        if (msg.type === 'error') { throw new Error(msg.message); }
+      }
+    }
+    // Flush any remainder (stream may close before final newline)
+    if (!doneMsg) {
+      for (const line of buf.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        try { const m = JSON.parse(line.slice(6)); if (m.type === 'done') { doneMsg = m; break; } } catch(e) {}
+      }
+    }
+
+    if (doneMsg) {
+      s1ReceivedDone = true;
+      document.getElementById('progressFill').style.width = '100%';
+      _currentAbstractScheduleId = doneMsg.abstract_schedule_id;
+      _abstractParams = { numTeams, matchesPerTeam, cooldown };
+      const sched = await apiFetch('/api/abstract-schedules/' + doneMsg.abstract_schedule_id);
+      _currentSeed = sched.seed || seed;
+      updateSeedDisplay(_currentSeed, null);
+      displayAbstractSchedule(sched, dayConfig);
+      showStage2Panel(numTeams);
+      await checkForSavedAssignment(doneMsg.abstract_schedule_id);
+      btn.disabled = false;
+      document.getElementById('progressWrap').style.display = 'none';
+      window._stage1Retried = false;
+      showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
+      if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
+        _urlAutoTeams = null; setTimeout(assignTeams, 200);
+      }
     }
   } catch(err) {
+    if (doneMsg || s1ReceivedDone) {
+      // Done event was received — stream-close error is expected, not a failure
+      btn.disabled = false;
+      document.getElementById('progressWrap').style.display = 'none';
+      return;
+    }
     console.error('Server Stage 1 error:', err.message);
     const isNetworkDrop = err.message === 'Load failed' || err.message === 'Failed to fetch' ||
                           err.message === 'NetworkError when attempting to fetch resource.' ||

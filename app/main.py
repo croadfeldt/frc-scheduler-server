@@ -306,7 +306,7 @@ async def remove_team(event_id: int, team_number: int, db: AsyncSession = Depend
 # ── Stage 1: Abstract Schedule Generation ────────────────────────────────────
 
 
-@app.post("/api/generate-abstract", status_code=201)
+@app.post("/api/generate-abstract")
 async def generate_abstract(
     body: AbstractGenerateRequest,
     db: AsyncSession = Depends(get_session),
@@ -314,47 +314,70 @@ async def generate_abstract(
 ):
     """
     Stage 1 — Generate a slot-based abstract schedule (no team numbers).
-    Single deterministic pass; returns JSON directly. No SSE needed.
+    Uses SSE so the connection stays alive during computation (prevents gateway timeouts).
+    Sends keepalive pings every 15s so HAProxy does not close idle connections.
     """
     loop = asyncio.get_event_loop()
     pool = get_pool()
 
-    _seed_int = int(body.seed, 16) if body.seed else None
-    result = await loop.run_in_executor(
-        pool, run_iterations_worker,
-        (body.num_teams, body.matches_per_team, body.cooldown, 1, 0, _seed_int)
-    )
+    async def stream() -> AsyncGenerator[str, None]:
+        yield ": connected\n\n"
+        await asyncio.sleep(0)
 
-    if not result or not result.get("matches"):
-        raise HTTPException(500, "Schedule generation failed")
+        _seed_int = int(body.seed, 16) if body.seed else None
 
-    sched = AbstractSchedule(
-        event_id=body.event_id,
-        name=body.name,
-        num_teams=body.num_teams,
-        matches_per_team=body.matches_per_team,
-        cooldown=body.cooldown,
-        seed=body.seed,
-        iterations_run=1,
-        best_iteration=0,
-        score=result["score"],
-        created_by=current_user["sub"] if current_user else None,
-        matches=result["matches"],
-        surrogate_count=result["surrogate_count"],
-        round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
-    )
-    db.add(sched)
-    await db.commit()
-    await db.refresh(sched)
+        # Run worker in executor; send keepalive pings every 5s while waiting
+        # so HAProxy/nginx does not close the idle connection before the result arrives
+        worker_task = asyncio.ensure_future(
+            loop.run_in_executor(
+                pool, run_iterations_worker,
+                (body.num_teams, body.matches_per_team, body.cooldown, 1, 0, _seed_int)
+            )
+        )
+        while not worker_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(worker_task), timeout=5.0)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"
+            except Exception:
+                break
 
-    return {
-        "type": "done",
-        "abstract_schedule_id": sched.id,
-        "score": result["score"],
-        "total": 1,
-        "pct": 100,
-    }
+        try:
+            result = worker_task.result()
+        except Exception as e:
+            log.error("Stage 1 worker error: %s", e)
+            yield f"data: {json.dumps({'type':'error','message':str(e)})}\n\n"
+            return
 
+        if not result or not result.get("matches"):
+            yield f"data: {json.dumps({'type':'error','message':'No schedule generated'})}\n\n"
+            return
+
+        sched = AbstractSchedule(
+            event_id=body.event_id,
+            name=body.name,
+            num_teams=body.num_teams,
+            matches_per_team=body.matches_per_team,
+            cooldown=body.cooldown,
+            seed=body.seed,
+            iterations_run=1,
+            best_iteration=0,
+            score=result["score"],
+            created_by=current_user["sub"] if current_user else None,
+            matches=result["matches"],
+            surrogate_count=result["surrogate_count"],
+            round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
+        )
+        db.add(sched)
+        await db.commit()
+        await db.refresh(sched)
+
+        yield f"data: {json.dumps({'type':'done','abstract_schedule_id':sched.id,'score':result['score'],'pct':100})}\n\n"
+        yield ": end\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
+                                      "Connection":"keep-alive"})
 
 
 @app.get("/api/abstract-schedules")

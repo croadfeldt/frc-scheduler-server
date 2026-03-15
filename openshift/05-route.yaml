@@ -7,6 +7,9 @@ metadata:
   labels:
     app: frc-scheduler-server-git
     app.kubernetes.io/part-of: frc-scheduler-server-git-app
+  annotations:
+    # Allow long-running SSE streams and slow schedule generation
+    haproxy.router.openshift.io/timeout: 120s
 spec:
   to:
     kind: Service
