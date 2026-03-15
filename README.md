@@ -63,7 +63,7 @@ git clone https://github.com/croadfeldt/frc-scheduler-server.git
 cd frc-scheduler-server
 
 # 2. Configure
-cp .env.example .env
+cp env.example .env
 # Edit .env — at minimum set TBA_API_KEY (optional) and auth secrets
 
 # 3. Build and start
