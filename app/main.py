@@ -25,7 +25,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any, AsyncGenerator
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
