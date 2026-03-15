@@ -342,9 +342,16 @@ async def generate_abstract(
         best_result = None
         pending = set(tasks)
 
+        _last_ping = asyncio.get_event_loop().time()
         while pending:
             done_set, pending = await asyncio.wait(pending, timeout=0.2,
                                                    return_when=asyncio.FIRST_COMPLETED)
+            # SSE keepalive: proxies (e.g. OpenShift HAProxy, nginx) close idle
+            # connections after ~30s. Send a comment ping every 15s to prevent this.
+            _now = asyncio.get_event_loop().time()
+            if _now - _last_ping >= 15:
+                yield ": ping\n\n"
+                _last_ping = _now
             for task in done_set:
                 try:
                     result = task.result()
@@ -383,7 +390,7 @@ async def generate_abstract(
         yield f"data: {json.dumps({'type':'done','abstract_schedule_id':sched.id,'score':best_result['score'],'total':iterations,'pct':100})}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+                             headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","Connection":"keep-alive"})
 
 
 @app.get("/api/abstract-schedules")
@@ -489,9 +496,14 @@ async def assign_teams(
         best_result = None
         pending = set(tasks)
 
+        _last_ping2 = asyncio.get_event_loop().time()
         while pending:
             done_set, pending = await asyncio.wait(pending, timeout=0.2,
                                                    return_when=asyncio.FIRST_COMPLETED)
+            _now2 = asyncio.get_event_loop().time()
+            if _now2 - _last_ping2 >= 15:
+                yield ": ping\n\n"
+                _last_ping2 = _now2
             for task in done_set:
                 try:
                     result = task.result()
@@ -545,7 +557,7 @@ async def assign_teams(
         yield f"data: {json.dumps({'type':'done','assigned_schedule_id':assigned.id,'score':best_result['score'],'total':iterations,'pct':100})}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+                             headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","Connection":"keep-alive"})
 
 
 # ── Assigned Schedule retrieval ───────────────────────────────────────────────

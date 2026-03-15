@@ -2243,6 +2243,19 @@ async function generateSchedule() {
     document.getElementById('progressWrap').style.display = 'none';
   } catch(err) {
     console.error('Server Stage 1 error:', err.message);
+    // "Load failed" / "Failed to fetch" usually means the proxy/router dropped the
+    // SSE connection (OpenShift HAProxy default timeout). Retry once automatically.
+    const isNetworkDrop = err.message === 'Load failed' || err.message === 'Failed to fetch' ||
+                          err.message.includes('network') || err.message.includes('connection');
+    if (isNetworkDrop && !window._stage1Retried) {
+      window._stage1Retried = true;
+      showApiStatus('Connection dropped \u2014 retrying\u2026');
+      btn.disabled = false;
+      document.getElementById('progressWrap').style.display = 'none';
+      setTimeout(function() { window._stage1Retried = false; generateSchedule(); }, 1500);
+      return;
+    }
+    window._stage1Retried = false;
     showApiStatus('Server error: ' + err.message + ' \u2014 falling back to client-side', true);
     runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA,
       function(done, total, best, bi) { updateProgress(done, total, best, bi); },
@@ -2442,6 +2455,17 @@ async function assignTeams() {
     btn.disabled = false;
     document.getElementById('progressWrap2').style.display = 'none';
   } catch(err) {
+    const isNetworkDrop = err.message === 'Load failed' || err.message === 'Failed to fetch' ||
+                          err.message.includes('network') || err.message.includes('connection');
+    if (isNetworkDrop && !window._stage2Retried) {
+      window._stage2Retried = true;
+      showApiStatus('Connection dropped \u2014 retrying\u2026');
+      btn.disabled = false;
+      document.getElementById('progressWrap2').style.display = 'none';
+      setTimeout(function() { window._stage2Retried = false; assignTeams(); }, 1500);
+      return;
+    }
+    window._stage2Retried = false;
     showApiStatus('Assignment error: ' + err.message, true);
     btn.disabled = false;
     document.getElementById('progressWrap2').style.display = 'none';
