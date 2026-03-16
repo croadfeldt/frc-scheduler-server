@@ -683,7 +683,7 @@
           </div>
           <div class="field">
             <label>Matches per Team</label>
-            <input type="number" id="matchesPerTeam" value="8" min="1" max="20">
+            <input type="number" id="matchesPerTeam" value="8" min="1" max="50">
           </div>
         </div>
         <div style="display:flex;gap:0.4rem;margin-top:-0.25rem;margin-bottom:0.5rem;">
@@ -2740,7 +2740,15 @@ async function fetchTbaDropdown() {
       _tbaDropdownCache[year] = events;
       populateTbaDropdown(events);
     }
-  } catch(e) { /* TBA not configured or no network — silently skip */ }
+  } catch(e) {
+    // Show the error in the dropdown so the user knows why it's empty
+    const list = document.getElementById('tbaDropdownList');
+    if (list) {
+      list.innerHTML = '<div style="padding:0.5rem 0.7rem;font-size:0.75rem;color:var(--danger);">'
+        + (e.message || 'TBA unavailable') + '</div>';
+      document.getElementById('tbaDropdown').style.display = 'block';
+    }
+  }
 }
 
 function populateTbaDropdown(events) {

@@ -144,7 +144,7 @@ class TeamIn(BaseModel):
 class AbstractGenerateRequest(BaseModel):
     """Stage 1: generate slot-based abstract schedule."""
     num_teams:        int         = Field(..., ge=6, le=120)
-    matches_per_team: int         = Field(6, ge=1, le=20)
+    matches_per_team: int         = Field(6, ge=1, le=50)
     cooldown:         int         = Field(3, ge=1, le=20)
     iterations:       int         = Field(1, ge=1)
     seed:             str | None  = None
@@ -230,7 +230,17 @@ async def tba_events(year: int, search: str = Query("", max_length=100)):
     try:
         events = await tba_client.search_events(year, search) if search else await tba_client.get_events(year)
         return [tba_client.normalise_event(e) for e in events]
+    except ValueError as e:
+        # Missing API key — tell the client clearly
+        raise HTTPException(503, str(e))
+    except httpx.TimeoutException:
+        raise HTTPException(504, "TBA API request timed out — try again in a moment")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(502, "TBA API key is invalid or expired. Check TBA_API_KEY in your environment.")
+        raise HTTPException(502, f"TBA API returned {e.response.status_code}")
     except Exception as e:
+        log.error("TBA events error: %s", e)
         raise HTTPException(502, f"TBA API error: {e}")
 
 
@@ -239,17 +249,19 @@ async def tba_import_event(event_key: str, db: AsyncSession = Depends(get_sessio
     try:
         tba_event = await tba_client.get_event(event_key)
         tba_teams = await tba_client.get_event_teams(event_key)
+    except ValueError as e:
+        raise HTTPException(503, str(e))
+    except httpx.TimeoutException:
+        raise HTTPException(504, "TBA API request timed out — try again in a moment")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(502, "TBA API key is invalid or expired. Check TBA_API_KEY in your environment.")
+        if e.response.status_code == 404:
+            raise HTTPException(404, f"Event '{event_key}' not found on The Blue Alliance.")
+        raise HTTPException(502, f"TBA API returned {e.response.status_code}")
     except Exception as e:
-        msg = str(e)
-        if not tba_client.TBA_KEY:
-            detail = "TBA_API_KEY is not set."
-        elif "401" in msg:
-            detail = "TBA API key is invalid or expired."
-        elif "404" in msg:
-            detail = f"Event '{event_key}' not found on The Blue Alliance."
-        else:
-            detail = f"TBA API error: {msg}"
-        raise HTTPException(502, detail)
+        log.error("TBA import error for %s: %s", event_key, e)
+        raise HTTPException(502, f"TBA API error: {e}")
 
     existing = await db.execute(select(Event).where(Event.key == event_key))
     event = existing.scalar_one_or_none()

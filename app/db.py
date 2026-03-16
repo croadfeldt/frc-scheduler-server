@@ -55,9 +55,9 @@ class Event(Base):
 
     id:          Mapped[int]      = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     key:         Mapped[str]      = mapped_column(String(64), unique=True, index=True)
-    name:        Mapped[str]      = mapped_column(String(256))
+    name:        Mapped[str]      = mapped_column(Text)
     year:        Mapped[int]      = mapped_column(Integer)
-    location:    Mapped[str|None] = mapped_column(String(256), nullable=True)
+    location:    Mapped[str|None] = mapped_column(Text, nullable=True)
     start_date:  Mapped[str|None] = mapped_column(String(32),  nullable=True)
     end_date:    Mapped[str|None] = mapped_column(String(32),  nullable=True)
     tba_synced:  Mapped[bool]     = mapped_column(Boolean, default=False)
@@ -75,7 +75,7 @@ class Team(Base):
 
     id:          Mapped[int]      = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     number:      Mapped[int]      = mapped_column(Integer, unique=True, index=True)
-    name:        Mapped[str|None] = mapped_column(String(256), nullable=True)
+    name:        Mapped[str|None] = mapped_column(Text, nullable=True)
     nickname:    Mapped[str|None] = mapped_column(String(128), nullable=True)
     city:        Mapped[str|None] = mapped_column(String(128), nullable=True)
     state:       Mapped[str|None] = mapped_column(String(64),  nullable=True)

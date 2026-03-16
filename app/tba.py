@@ -28,28 +28,28 @@ import httpx
 log = logging.getLogger(__name__)
 
 TBA_BASE = "https://www.thebluealliance.com/api/v3"
-TBA_KEY  = os.getenv("TBA_API_KEY", "")
+TBA_KEY  = os.getenv("TBA_API_KEY", "").strip()
 
-_client: httpx.AsyncClient | None = None
-
-
-def get_client() -> httpx.AsyncClient:
-    global _client
-    if _client is None:
-        _client = httpx.AsyncClient(
-            base_url=TBA_BASE,
-            headers={"X-TBA-Auth-Key": TBA_KEY},
-            timeout=10.0,
-        )
-    return _client
+# Don't create a module-level AsyncClient singleton — async clients must be
+# created inside a running event loop. Create a fresh client per request instead.
+# (The performance cost is negligible; TBA calls are infrequent.)
 
 
 async def _get(path: str) -> Any:
     if not TBA_KEY:
-        raise ValueError("TBA_API_KEY environment variable not set")
-    resp = await get_client().get(path)
-    resp.raise_for_status()
-    return resp.json()
+        raise ValueError(
+            "TBA_API_KEY is not configured on the server. "
+            "Set it in your .env file or OpenShift secret (frc-app-secret → TBA_API_KEY). "
+            "Get a free key at https://www.thebluealliance.com/account"
+        )
+    async with httpx.AsyncClient(
+        base_url=TBA_BASE,
+        headers={"X-TBA-Auth-Key": TBA_KEY},
+        timeout=15.0,
+    ) as client:
+        resp = await client.get(path)
+        resp.raise_for_status()
+        return resp.json()
 
 
 # ── Public API calls ──────────────────────────────────────────────────────────
