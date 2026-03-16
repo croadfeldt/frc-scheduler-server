@@ -1361,6 +1361,8 @@ function buildShareUrl() {
   if (cd)  params.set('cd',  cd);
   if (ct)  params.set('ct',  ct);
   if (nd)  params.set('days', nd);
+  const bb = document.getElementById('breakBuffer').value;
+  if (bb) params.set('bb', bb);
   if (_currentSeed)       params.set('seed',  _currentSeed);
   if (_currentAssignSeed) params.set('aseed', _currentAssignSeed);
 
@@ -1440,6 +1442,7 @@ function parseUrlParams() {
     cc:     p.get('cc')    || null,
     teams:  p.get('teams') ? p.get('teams').split(',').map(Number).filter(Boolean) : null,
     event:  p.get('event') || null,
+    bb:     p.get('bb')    || null,
   };
 }
 
@@ -1448,6 +1451,7 @@ function applyUrlParams(params) {
   if (params.mpt) document.getElementById('matchesPerTeam').value = params.mpt;
   if (params.cd)  document.getElementById('cooldown').value       = params.cd;
   if (params.ct)  document.getElementById('cycleTime').value      = params.ct;
+  if (params.bb)  document.getElementById('breakBuffer').value  = params.bb;
 
   // Restore day count and rebuild UI, then fill in times
   if (params.numDays || (params.days && params.days.length)) {
@@ -1669,9 +1673,9 @@ function calcMaxMatches() {
           if (!b.done && b.start <= cursor) { cursor = Math.max(cursor, b.end); b.done = true; flushed = true; }
         });
       }
-      // Break buffer: only schedule next match if cursor + breakBuffer <= break start
+      // Break buffer: schedule if breakStart - cursor >= breakBuffer (start-based)
       var nextBreak = breaks.find(function(b) { return !b.done && b.start > cursor; });
-      if (nextBreak && breakBuffer > 0 && cursor + breakBuffer > nextBreak.start) {
+      if (nextBreak && breakBuffer > 0 && nextBreak.start - cursor < breakBuffer) {
         cursor = Math.max(cursor, nextBreak.end); nextBreak.done = true; continue;
       }
       // Get effective cycle time for this match using per-day rules
@@ -3820,11 +3824,11 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         }
       }
 
-      // Break buffer: if this match would START within breakBuffer minutes of a break,
-      // flush the break first. i.e. only schedule if cursor + breakBuffer <= break.start.
+      // Break buffer: schedule the match if its START is >= breakBuffer minutes
+      // before the break. Only defer if breakStart - cursor < breakBuffer.
       const nextBreak = breaks.find(b => !b.done && b.start > cursor);
-      if (nextBreak && breakBuffer > 0 && cursor + breakBuffer > nextBreak.start) {
-        // Match would start too close to the break — take the break early
+      if (nextBreak && breakBuffer > 0 && nextBreak.start - cursor < breakBuffer) {
+        // Not enough lead time before the break — take the break now
         entries.push({type:'break', name:nextBreak.name, start:nextBreak.start, end:nextBreak.end});
         cursor = Math.max(cursor, nextBreak.end);
         nextBreak.done = true;

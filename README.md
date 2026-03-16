@@ -468,6 +468,21 @@ for small team counts with long schedules.
 module-level singleton was created outside any running event loop, causing silent hangs and
 502 errors from the OCP router. Per-request clients have negligible overhead for TBA calls.
 
+### Break buffer definition
+
+`breakBuffer` (URL param `bb`, default 5 min) controls when to stop scheduling matches before a break.
+
+**Rule:** Schedule a match if its **start time** is at least `breakBuffer` minutes before the break:
+```
+breakStart - cursor >= breakBuffer
+```
+Only defer (flush break early) if `breakStart - cursor < breakBuffer`.
+
+- `breakBuffer = 5`, lunch at 12:00: a match starting at 11:55 (exactly 5 min gap) — **scheduled** ✓
+- A match starting at 11:56 (only 4 min gap) — **deferred until after the break** ✓
+
+The cycle time does not factor into this check. A match may run into a break if the cycle time exceeds the remaining gap — this is intentional, the buffer only governs whether we *start* the match.
+
 ### 503 under rapid parameter changes
 The auto-generate debounce is 2500ms. The Stage 1 retry counter is reset to 0 at the start
 of every new `generateSchedule()` call so accumulated retries from previous edits don't

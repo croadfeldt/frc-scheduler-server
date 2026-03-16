@@ -597,6 +597,23 @@ The server reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APPLE_CLIENT_ID`, 
 - `window._stage1RetryCount` is reset to `0` at the start of every `generateSchedule()` call, not just on success, so accumulated retries from one burst don't exhaust the budget for the next
 - AbortController cancels any in-flight Stage 1 request before starting a new one
 
+### Break buffer logic
+
+`breakBuffer` (field `#breakBuffer`, URL param `bb`, default 5 min).
+
+**Condition to schedule a match before a break (start-based):**
+```
+breakStart - cursor >= breakBuffer
+```
+Flush the break early if `nextBreak.start - cursor < breakBuffer`.
+
+- The cycle time is **not** part of the check. A match may overlap into a break if its cycle time exceeds the remaining gap — the buffer only governs whether the match is *started*.
+- Equal counts: a match starting exactly `breakBuffer` minutes before a break is scheduled.
+- Example: buffer=5, lunch=12:00, cursor=11:55 → gap=5 ≥ 5 → schedule. cursor=11:56 → gap=4 < 5 → flush.
+
+Applied identically in `_finishGenerationInner` and `calcMaxMatches`.
+`bb` encoded in share URL, restored via `applyUrlParams`.
+
 ### db.py column types
 
 `teams.name`, `events.name`, `events.location` use `Text` (SQLAlchemy `Text`, PostgreSQL `TEXT`, unlimited length). Needed because TBA sponsor names regularly exceed 256 characters. Import `Text` from `sqlalchemy` alongside `String`.
