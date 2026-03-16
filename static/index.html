@@ -3513,6 +3513,7 @@ async function assignTeams() {
   }
 
   let s2ReceivedDone = false;
+  let doneMsg2 = null;
   try {
     const res = await fetch(API + '/api/abstract-schedules/' + _currentAbstractScheduleId + '/assign', {
       method: 'POST',
@@ -3532,7 +3533,6 @@ async function assignTeams() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
-    let doneMsg2 = null;
 
     while (!doneMsg2) {
       let chunk;
