@@ -706,22 +706,14 @@
         </div>
         <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;">
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
-            <input type="checkbox" id="autoPopulate" style="accent-color:var(--accent);width:14px;height:14px;">
-            Auto-regenerate on parameter change (only after first manual Generate)
+            <input type="checkbox" id="autoPopulate" checked style="accent-color:var(--accent);width:14px;height:14px;">
+            Auto-regenerate on parameter change
           </label>
           <span style="font-size:0.68rem;color:var(--text-muted);">Regenerates Stage 1 when parameters change</span>
         </div>
         <div id="paramChangedWarning" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.75rem;color:var(--amber);">
           &#9888; Parameters changed — the current schedule structure is stale. Regenerate Stage 1 before assigning teams.
         </div>
-
-        <div class="section-label">Cycle Time Changes</div>
-        <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.6rem;">
-          Override the default cycle time after a specific match number. Useful when the event speeds up or slows down mid-competition.
-        </div>
-        <div class="cycle-changes-list" id="cycleChangesList"></div>
-        <button class="btn-add-break" onclick="addCycleChange()" style="margin-bottom:0.5rem;">+ Add Cycle Time Change</button>
-
 
         <div class="section-label">Daily Schedule</div>
         <div class="days-container" id="daysContainer"></div>
@@ -861,6 +853,8 @@ function buildDaysUI() {
   const container = document.getElementById('daysContainer');
   const existing = container.querySelectorAll('.day-row');
   for (let i = existing.length; i < n; i++) {
+    // Day 1 ends at 17:00; Day 2+ end at 12:00 (half day)
+    const defaultEnd = (i === 0) ? '17:00' : '12:00';
     const d = document.createElement('div');
     d.className = 'day-row';
     d.dataset.day = i;
@@ -868,18 +862,30 @@ function buildDaysUI() {
       '<div class="day-row-header">Day ' + (i+1) + '</div>' +
       '<div class="day-times">' +
         '<div class="field"><label>Start Time</label><input type="time" class="day-start" value="08:00"></div>' +
-        '<div class="field"><label>End Time</label><input type="time" class="day-end" value="17:00"></div>' +
+        '<div class="field"><label>End Time</label><input type="time" class="day-end" value="' + defaultEnd + '"></div>' +
       '</div>' +
       '<div class="breaks-list"></div>' +
-      '<button class="btn-add-break" onclick="addBreak(this)">+ Add Break</button>';
+      '<button class="btn-add-break" onclick="addBreak(this)">+ Add Break</button>' +
+      '<div class="cc-list"></div>' +
+      '<button class="btn-add-break btn-add-cc-day" style="margin-top:0.25rem;">+ Add Cycle Time Change</button>';
     container.appendChild(d);
-    addBreak(d.querySelector('.btn-add-break'), '12:00', '13:00', 'Lunch');
 
-    // Wire day start/end listeners for validation + auto-recalc
+    // Wire day start/end listeners
     const dayStartEl = d.querySelector('.day-start');
     const dayEndEl   = d.querySelector('.day-end');
     dayStartEl.addEventListener('change', validateTimesAndRecalc);
     dayEndEl.addEventListener('change',   validateTimesAndRecalc);
+
+    // Wire Add Break button
+    addBreak(d.querySelector('.btn-add-break'), '12:00', '13:00', 'Lunch');
+
+    // Wire Add Cycle Time Change button
+    d.querySelector('.btn-add-cc-day').addEventListener('click', function() {
+      addDayCycleChange(d);
+    });
+
+    // Add default cycle time change (start of day)
+    addDayCycleChange(d, null, null, true);
   }
   const rows = container.querySelectorAll('.day-row');
   for (let i = n; i < rows.length; i++) rows[i].remove();
@@ -1307,14 +1313,16 @@ function applyUrlParams(params) {
     }
   }
 
-  // Restore cycle time changes
+  // Restore cycle time changes into per-day rows
   if (params.cc) {
-    var ccList = document.getElementById('cycleChangesList');
-    ccList.innerHTML = '';
     params.cc.split(',').forEach(function(token) {
       var parts = token.split(':');
       if (parts.length >= 3) {
-        addCycleChange(parseFloat(parts[1]), parseFloat(parts[2]));
+        var dayIdx  = parseInt(parts[0]) - 1;
+        var after   = parseFloat(parts[1]);
+        var time    = parseFloat(parts[2]);
+        var dayRows = document.querySelectorAll('.day-row');
+        if (dayRows[dayIdx]) addDayCycleChange(dayRows[dayIdx], after, time, false);
       }
     });
   }
@@ -1451,7 +1459,7 @@ function fullReset() {
     document.getElementById('cooldown').value       = '3';
     document.getElementById('cycleTime').value      = '8';
     document.getElementById('numDays').value        = '2';
-    document.getElementById('cycleChangesList').innerHTML = '';
+    // cycle changes are per-day — cleared when daysContainer is rebuilt
     // Rebuild days UI with defaults
     var daysContainer = document.getElementById('daysContainer');
     daysContainer.innerHTML = '';
@@ -1664,6 +1672,79 @@ function refreshCycleDayLabels() {
   });
 }
 
+// ── Per-day cycle time change rows ───────────────────────────────────────────
+// Each day row has a .cc-list div with zero or more .day-cc-row rows.
+// The first row is always "Start of Day" (isStart=true, no match number needed).
+// Additional rows are "After Match X" with a required match number field.
+
+function addDayCycleChange(dayRow, afterMatch, newTime, isStart) {
+  var ccList = dayRow.querySelector('.cc-list');
+  var isFirst = isStart === true;
+  var defaultTime = parseFloat(document.getElementById('cycleTime').value) || 8;
+  var timeVal = (newTime != null && newTime !== '') ? newTime : defaultTime;
+  var afterVal = (afterMatch != null && afterMatch !== '') ? afterMatch : '';
+
+  var row = document.createElement('div');
+  row.className = 'day-cc-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr auto;gap:0.4rem;align-items:end;margin-top:0.3rem;';
+
+  var matchField = isFirst
+    ? '<div class="field"><label style="font-size:0.65rem;color:var(--text-muted);">Applies From</label>' +
+        '<div style="font-size:0.82rem;padding:0.45rem 0.3rem;color:var(--text-muted);font-style:italic;">Start of Day</div></div>'
+    : '<div class="field"><label style="font-size:0.65rem;">After Match # <span style="color:var(--danger)">*</span></label>' +
+        '<input type="number" class="cc-after input-error" placeholder="Required" min="1" value="' + afterVal + '" required ' +
+        'style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.45rem 0.5rem;font-size:0.85rem;border-radius:4px;width:100%;"></div>';
+
+  var removeBtn = isFirst
+    ? '' // can't remove the start-of-day entry
+    : '<button class="btn-icon btn-remove-cc" title="Remove" style="align-self:flex-end;">&#x2715;</button>';
+
+  row.innerHTML =
+    matchField +
+    '<div class="field"><label style="font-size:0.65rem;">Cycle Time (min)</label>' +
+      '<input type="number" class="cc-time" placeholder="e.g. 7.5" min="0.1" max="60" step="any" value="' + timeVal + '" ' +
+      'style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.45rem 0.5rem;font-size:0.85rem;border-radius:4px;width:100%;"></div>' +
+    removeBtn;
+
+  if (isFirst) {
+    // Insert at top of cc-list
+    ccList.insertBefore(row, ccList.firstChild);
+  } else {
+    ccList.appendChild(row);
+  }
+
+  row.dataset.isStart = isFirst ? '1' : '0';
+
+  var timeInput = row.querySelector('.cc-time');
+
+  // Clear cc-time error once filled
+  function checkCcTime() {
+    var bad = !timeInput.value || parseFloat(timeInput.value) <= 0;
+    timeInput.classList.toggle('input-error', bad);
+    return !bad;
+  }
+  // cc-time starts valid (has default value)
+  checkCcTime();
+
+  timeInput.addEventListener('input',  function() { checkCcTime(); validateCycleChanges(); });
+  timeInput.addEventListener('change', function() { checkCcTime(); validateCycleChanges(); onParamChanged(); });
+
+  if (!isFirst) {
+    var afterInput = row.querySelector('.cc-after');
+    function checkAfter() {
+      var bad = !afterInput.value || parseFloat(afterInput.value) < 1;
+      afterInput.classList.toggle('input-error', bad);
+      return !bad;
+    }
+    afterInput.addEventListener('input',  function() { checkAfter(); refreshCycleDayLabels(); validateCycleChanges(); });
+    afterInput.addEventListener('change', function() { checkAfter(); refreshCycleDayLabels(); validateCycleChanges(); onParamChanged(); });
+
+    row.querySelector('.btn-remove-cc').addEventListener('click', function() {
+      row.remove(); validateCycleChanges(); onParamChanged();
+    });
+  }
+}
+
 function validateCycleChanges() {
   var allFilled = true;
   document.querySelectorAll('.cc-after').forEach(function(inp) {
@@ -1694,9 +1775,9 @@ function addCycleChange(afterMatch, newTime, forDay) {
   var initialDay   = defaultAfter ? getDayForMatch(parseInt(defaultAfter), true) : null;
   var dayText      = initialDay ? 'Day ' + initialDay : '—';
 
-  const list = document.getElementById('cycleChangesList');
-  const row  = document.createElement('div');
-  row.className = 'cycle-change-row';
+  // addCycleChange is deprecated — use addDayCycleChange instead
+  console.warn('addCycleChange called — use addDayCycleChange');
+  const row_dummy = null; // noop
 
   row.innerHTML =
     '<div class="field" style="min-width:3.5rem;">' +
@@ -1745,18 +1826,32 @@ function addCycleChange(afterMatch, newTime, forDay) {
 }
 
 function getCycleTimeChanges() {
-  return Array.from(document.querySelectorAll('.cycle-change-row'))
-    .map(function(row) {
-      var after = parseInt(row.querySelector('.cc-after').value);
-      var time  = parseFloat(row.querySelector('.cc-time').value);
-      return {
-        day:   getDayForMatch(after, true) || 1,
-        after: after,
-        time:  time,
-      };
-    })
-    .filter(function(c) { return !isNaN(c.after) && !isNaN(c.time) && c.after >= 1 && c.time > 0; })
-    .sort(function(a, b) { return a.after - b.after; });
+  // Read "after match X" cycle changes from per-day rows.
+  // Start-of-day rows (isStart=1) are not included here —
+  // they are handled by getDayStartCycleTime() per day.
+  var changes = [];
+  document.querySelectorAll('.day-cc-row').forEach(function(row) {
+    if (row.dataset.isStart === '1') return;
+    var afterInp = row.querySelector('.cc-after');
+    var timeInp  = row.querySelector('.cc-time');
+    if (!afterInp || !timeInp) return;
+    var after = parseInt(afterInp.value);
+    var time  = parseFloat(timeInp.value);
+    if (!isNaN(after) && !isNaN(time) && after >= 1 && time > 0) {
+      changes.push({ after: after, time: time, day: getDayForMatch(after) || 1 });
+    }
+  });
+  return changes.sort(function(a, b) { return a.after - b.after; });
+}
+
+// Get the start-of-day cycle time for a given day row element
+function getDayStartCycleTime(dayRow) {
+  var startRow = dayRow ? dayRow.querySelector('.day-cc-row[data-is-start="1"]') : null;
+  if (startRow) {
+    var t = parseFloat(startRow.querySelector('.cc-time').value);
+    if (t > 0) return t;
+  }
+  return parseFloat(document.getElementById('cycleTime').value) || 8;
 }
 
 // Returns the cycle time that applies at a given match number (1-based)
@@ -2904,15 +2999,28 @@ function updateUrlFromState() {
 
 // Collect day/timing config from UI
 function collectDayConfig() {
+  var defaultCt = parseFloat(document.getElementById('cycleTime').value) || 8;
   return {
-    cycleTime:   parseFloat(document.getElementById('cycleTime').value) || 8,
-    breakBuffer: parseFloat(document.getElementById('breakBuffer').value) ?? 5,
-    numDays: parseInt(document.getElementById('numDays').value),
+    cycleTime:    defaultCt,
+    breakBuffer:  parseFloat(document.getElementById('breakBuffer').value) || 5,
+    numDays:      parseInt(document.getElementById('numDays').value),
     cycleChanges: getCycleTimeChanges(),
     days: Array.from(document.querySelectorAll('.day-row')).map(function(row) {
+      // Collect per-day cycle changes (start-of-day + after-match entries)
+      var dayCycleChanges = Array.from(row.querySelectorAll('.day-cc-row')).map(function(ccRow) {
+        var timeInp  = ccRow.querySelector('.cc-time');
+        var afterInp = ccRow.querySelector('.cc-after');
+        return {
+          isStart:    ccRow.dataset.isStart === '1',
+          afterMatch: afterInp ? parseInt(afterInp.value) : null,
+          time:       timeInp  ? parseFloat(timeInp.value) : defaultCt,
+        };
+      }).filter(function(c) { return c.time > 0 && (c.isStart || (!isNaN(c.afterMatch) && c.afterMatch >= 1)); });
+
       return {
-        start: row.querySelector('.day-start').value,
-        end:   row.querySelector('.day-end').value,
+        start:        row.querySelector('.day-start').value,
+        end:          row.querySelector('.day-end').value,
+        cycleChanges: dayCycleChanges,
         breaks: Array.from(row.querySelectorAll('.break-row')).map(function(br) {
           return {
             name:  br.querySelector('.break-name').value || 'Break',
@@ -3358,13 +3466,35 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   const _dc = dayConfigOverride;
   const defaultCycleTime = _dc ? _dc.cycleTime : (parseFloat(document.getElementById('cycleTime').value) || 8);
   const breakBuffer = _dc && _dc.breakBuffer != null ? _dc.breakBuffer
-    : (parseFloat(document.getElementById('breakBuffer').value) ?? 5);
+    : (parseFloat(document.getElementById('breakBuffer').value) || 5);
   const cycleChanges = _dc ? (_dc.cycleChanges || []) : getCycleTimeChanges();
+
+  // Build days array — each day carries its own cycleChanges list
   const days = (_dc && _dc.days ? _dc.days : Array.from(document.querySelectorAll('.day-row'))).map(row => {
     const isObj = typeof row === 'object' && row.start && !row.querySelector;
+    // Per-day cycle changes: array of {isStart, afterMatch, time}
+    var dayCycleChanges = [];
+    if (isObj) {
+      dayCycleChanges = row.cycleChanges || [];
+    } else {
+      Array.from(row.querySelectorAll('.day-cc-row')).forEach(function(ccRow) {
+        var timeInp  = ccRow.querySelector('.cc-time');
+        var afterInp = ccRow.querySelector('.cc-after');
+        var t = timeInp ? parseFloat(timeInp.value) : defaultCycleTime;
+        if (t > 0) {
+          if (ccRow.dataset.isStart === '1') {
+            dayCycleChanges.push({ isStart: true, afterMatch: null, time: t });
+          } else if (afterInp) {
+            var am = parseInt(afterInp.value);
+            if (!isNaN(am) && am >= 1) dayCycleChanges.push({ isStart: false, afterMatch: am, time: t });
+          }
+        }
+      });
+    }
     return {
       start: isObj ? timeToMin(row.start) : timeToMin(row.querySelector('.day-start').value),
       end:   isObj ? timeToMin(row.end)   : timeToMin(row.querySelector('.day-end').value),
+      cycleChanges: dayCycleChanges,
       breaks: (isObj ? (row.breaks||[]) : Array.from(row.querySelectorAll('.break-row')).map(br => ({
         name: br.querySelector('.break-name').value || 'Break',
         start: br.querySelector('.break-start').value,
@@ -3420,7 +3550,17 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       }
 
       // Check if a break interrupts the next match
-      const matchEnd = cursor + getCycleTime(matchIdx + 1, defaultCycleTime, cycleChanges);
+      // Get effective cycle time: use day's start-of-day ct, then apply after-match changes
+      const dayCt = (function() {
+        var ct = defaultCycleTime;
+        for (var ci = 0; ci < day.cycleChanges.length; ci++) {
+          var cc = day.cycleChanges[ci];
+          if (cc.isStart) { ct = cc.time; }
+          else if (matchIdx + 1 > cc.afterMatch) { ct = cc.time; }
+        }
+        return ct;
+      })();
+      const matchEnd = cursor + dayCt;
       const interrupt = breaks.find(b => !b.done && b.start > cursor && b.start < matchEnd);
       if (interrupt) {
         entries.push({type:'break', name:interrupt.name, start:interrupt.start, end:interrupt.end});
@@ -3462,10 +3602,26 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       // After advancing matchIdx, check if cycle time changes for the next match
       // and inject a cycle-change marker row
       if (matchIdx < totalMatches) {
-        const prevTime = getCycleTime(matchIdx,     defaultCycleTime, cycleChanges);
-        const nextTime = getCycleTime(matchIdx + 1, defaultCycleTime, cycleChanges);
-        if (nextTime !== prevTime) {
-          entries.push({type: 'cycle-change', afterMatch: matchIdx, newTime: nextTime, atMin: cursor});
+        const prevDayCt = (function() {
+          var ct = defaultCycleTime;
+          for (var ci = 0; ci < day.cycleChanges.length; ci++) {
+            var cc = day.cycleChanges[ci];
+            if (cc.isStart) { ct = cc.time; }
+            else if (matchIdx > cc.afterMatch) { ct = cc.time; }
+          }
+          return ct;
+        })();
+        const nextDayCt = (function() {
+          var ct = defaultCycleTime;
+          for (var ci = 0; ci < day.cycleChanges.length; ci++) {
+            var cc = day.cycleChanges[ci];
+            if (cc.isStart) { ct = cc.time; }
+            else if (matchIdx + 1 > cc.afterMatch) { ct = cc.time; }
+          }
+          return ct;
+        })();
+        if (nextDayCt !== prevDayCt) {
+          entries.push({type: 'cycle-change', afterMatch: matchIdx, newTime: nextDayCt, atMin: cursor});
         }
       }
     }
@@ -3717,6 +3873,9 @@ function renderSchedule() {
   if (!scheduled) return;
   if (!window._frcFilters) window._frcFilters = { teams: [], alliance: null, day: null, b2b: false, surrogate: false };
   var f = window._frcFilters;
+  // Read cycle time info from UI for day title display (fixes scope error)
+  var defaultCycleTime = parseFloat(document.getElementById('cycleTime').value) || 8;
+  var cycleChanges = getCycleTimeChanges();
   var rb = window._frcRoundBoundaries || new Map();
   // Build a reverse map: matchNum (1-based) -> round number
   var matchNumToRound = new Map();
