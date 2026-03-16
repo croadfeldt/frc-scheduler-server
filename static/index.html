@@ -977,7 +977,7 @@ function buildDaysUI() {
         '<button class="btn-icon" title="Remove day" style="font-size:0.75rem;opacity:0.6;' + (i === 0 ? 'display:none;' : '') + '" onclick="removeDay(this.closest(\'.day-row\'))">&#x2715;</button>' +
       '</div>' +
       '<div class="day-times">' +
-        '<div class="field"><label>Start Time</label><input type="time" class="day-start" value="08:00"></div>' +
+        '<div class="field"><label>Start Time</label><input type="time" class="day-start" value="' + (i === 0 ? '09:00' : '08:45') + '"></div>' +
         '<div class="field"><label>End Time</label><input type="time" class="day-end" value="18:00"></div>' +
       '</div>' +
       '<div class="breaks-list"></div>' +
@@ -1787,7 +1787,7 @@ function onParamChanged() {
     // since times, breaks, and cycle changes all affect the schedule output.
     if (document.getElementById('autoPopulate').checked) {
       clearTimeout(_autoPopulateTimeout);
-      _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 1500);
+      _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 2500);
     }
   }
 }
@@ -3054,6 +3054,7 @@ async function generateSchedule() {
   // Cancel any pending auto-populate debounce so it can't fire a duplicate run
   clearTimeout(_autoPopulateTimeout);
   _autoPopulateTimeout = null;
+  window._stage1RetryCount = 0; // reset retry counter for each new user-initiated generate
 
   // Abort any in-flight Stage 1 request before starting a new one.
   // Without this, rapid parameter changes fire concurrent SSE streams that

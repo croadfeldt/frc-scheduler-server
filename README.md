@@ -223,7 +223,7 @@ After generating a schedule, the browser URL is updated:
 | `seed` | `a1b2c3d4` | Stage 1 hex seed |
 | `aseed` | `cafebabe` | Stage 2 hex seed |
 | `teams` | `254,1114,...` | Team numbers in slot order |
-| `d1`–`d5` | `08:00-17:00` | Per-day start–end (`HH:MM-HH:MM`) |
+| `d1`–`d5` | `09:00-18:00` | Per-day start–end (`HH:MM-HH:MM`). Day 1 defaults to 09:00 start/18:00 end; Day 2+ default to 08:45 start/18:00 end; last day always defaults to 12:00 end. |
 | `d1b`–`d5b` | `Lunch\|12:00\|13:00,...` | Per-day breaks: `Name\|start\|end`, comma-separated |
 | `cc` | `1:45:7.5,2:90:6` | Cycle time changes: `Day:AfterMatch:NewTime`, comma-separated |
 | `bb` | `5` | Break buffer minutes (minimum time before break/end-of-day to fit one more match) |
@@ -451,7 +451,30 @@ Without `JWT_SECRET`, the server starts but `/auth/google/login` and `/auth/appl
 
 ---
 
+## Known behaviour & recent fixes
+
+### TBA import — team name length
+TBA sponsor names can exceed 256 characters (e.g. WildStang team 111). The `teams.name`,
+`events.name`, and `events.location` columns use SQLAlchemy `Text` (unlimited) rather than
+`VARCHAR(256)` to avoid `StringDataRightTruncationError` on import.
+
+### matches_per_team API cap
+The `AbstractGenerateRequest` model accepts `matches_per_team` up to 50.
+The UI input is also capped at 50. `calcMaxMatches()` can legitimately return values above 20
+for small team counts with long schedules.
+
+### TBA client — no singleton
+`tba.py` creates a fresh `httpx.AsyncClient` per request (using `async with`). The previous
+module-level singleton was created outside any running event loop, causing silent hangs and
+502 errors from the OCP router. Per-request clients have negligible overhead for TBA calls.
+
+### 503 under rapid parameter changes
+The auto-generate debounce is 2500ms. The Stage 1 retry counter is reset to 0 at the start
+of every new `generateSchedule()` call so accumulated retries from previous edits don't
+consume the retry budget for the next attempt.
+
 ## Development
+
 
 ```bash
 # Install dependencies

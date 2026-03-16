@@ -583,3 +583,33 @@ Auth is optional. The "no auth providers configured" message means `GOOGLE_CLIEN
 `JWT_SECRET` must also be set or token issuance will fail with a 500 error. Generate with: `openssl rand -hex 32`
 
 The server reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APPLE_CLIENT_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` from env at startup. The `/auth/providers` endpoint returns `{"google": bool, "apple": bool}` so the frontend only shows configured provider buttons.
+
+### Default day start/end times
+
+`buildDaysUI()` sets defaults based on day index:
+- Day 1 (`i === 0`): start `09:00`, end `18:00` (until `applyDayEndTimes` sets last day to `12:00`)
+- Day 2+ (`i > 0`): start `08:45`, end `18:00`
+- Last day always: end `12:00` (enforced by `applyDayEndTimes()`)
+
+### Auto-generate 503 mitigation
+
+- Debounce delay: 2500ms (increased from 1500ms) to consolidate rapid field edits
+- `window._stage1RetryCount` is reset to `0` at the start of every `generateSchedule()` call, not just on success, so accumulated retries from one burst don't exhaust the budget for the next
+- AbortController cancels any in-flight Stage 1 request before starting a new one
+
+### db.py column types
+
+`teams.name`, `events.name`, `events.location` use `Text` (SQLAlchemy `Text`, PostgreSQL `TEXT`, unlimited length). Needed because TBA sponsor names regularly exceed 256 characters. Import `Text` from `sqlalchemy` alongside `String`.
+
+### matches_per_team limit
+
+API model: `Field(6, ge=1, le=50)`. Frontend input: `max="50"`. Previously capped at 20 which was too low for small team counts with long schedules.
+
+### tba.py — per-request httpx client
+
+```python
+async with httpx.AsyncClient(base_url=TBA_BASE, headers=..., timeout=15.0) as client:
+    resp = await client.get(path)
+```
+
+No module-level singleton. Previous singleton was created at import time (outside async event loop) causing silent hangs → raw OCP 502s.
