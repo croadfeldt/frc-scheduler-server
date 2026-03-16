@@ -706,8 +706,8 @@
         </div>
         <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;">
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
-            <input type="checkbox" id="autoPopulate" checked style="accent-color:var(--accent);width:14px;height:14px;">
-            Auto-generate on parameter change
+            <input type="checkbox" id="autoPopulate" style="accent-color:var(--accent);width:14px;height:14px;">
+            Auto-regenerate on parameter change (only after first manual Generate)
           </label>
           <span style="font-size:0.68rem;color:var(--text-muted);">Regenerates Stage 1 when parameters change</span>
         </div>
@@ -1061,8 +1061,9 @@ loadEvents();
 initAuth();
 autoRunFromUrl();
 
-['numTeams','matchesPerTeam','cooldown'].forEach(function(id) {
-  document.getElementById(id).addEventListener('input', onParamChanged);
+['numTeams','matchesPerTeam','cooldown','cycleTime','breakBuffer'].forEach(function(id) {
+  var el = document.getElementById(id);
+  if (el) el.addEventListener('input', onParamChanged);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1397,7 +1398,7 @@ function fullReset() {
   window._frcAbstractMode     = true;
   window._frcShowFakeTeams    = false;
   window._frcRoundBoundaries  = null;
-  window._frcFilters          = null;
+  window._frcFilters          = { teams: [], alliance: null, day: null, b2b: false, surrogate: false };
   window._stage1RetryCount    = 0;
   window._stage2Retried       = false;
 
@@ -3333,6 +3334,17 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
 
 
 function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride) {
+  try {
+    return _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride);
+  } catch(e) {
+    console.error('finishGeneration error:', e);
+    showApiStatus('Schedule render error: ' + e.message, true);
+    document.getElementById('btnGenerate').disabled = false;
+    document.getElementById('progressWrap').style.display = 'none';
+  }
+}
+
+function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride) {
   if (!matches || matches.length === 0) {
     console.error('finishGeneration called with empty matches');
     document.getElementById('btnGenerate').disabled = false;
@@ -3703,6 +3715,7 @@ function renderTeam(team, isSurrogate, isB2B, colorClass) {
 function renderSchedule() {
   var scheduled = window._frcScheduled;
   if (!scheduled) return;
+  if (!window._frcFilters) window._frcFilters = { teams: [], alliance: null, day: null, b2b: false, surrogate: false };
   var f = window._frcFilters;
   var rb = window._frcRoundBoundaries || new Map();
   // Build a reverse map: matchNum (1-based) -> round number
