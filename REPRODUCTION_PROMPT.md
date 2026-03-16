@@ -292,7 +292,20 @@ Layout: 390px config panel + fluid results panel.
 
 ## CONTAINER / OPENSHIFT
 
-Containerfile (not Dockerfile). `chgrp -R 0 /app && chmod -R g=u /app`. USER 1001.
+Two Containerfiles — use the appropriate one for your build target:
+- `Containerfile` — generic, `python:3.12-slim` (Docker Hub), apt-get.
+  Works with Docker, Podman, and any standard OCI builder.
+- `Containerfile.openshift` — OpenShift builds only, `quay.io/sclorg/python-312-c10s`,
+  dnf/rpm. Avoids Docker Hub rate limits. Referenced by BuildConfig via
+  `dockerfilePath: Containerfile.openshift`. Not for local use.
+
+Both files are rootless-compliant. Runtime env vars (linuxserver.io convention):
+  PUID=1000       — process UID (set to $(id -u) for rootless Podman host mapping)
+  PGID=1000          — process GID (GID 0 enables OpenShift arbitrary-UID compatibility)
+  APP_PORT=8080   — port uvicorn listens on (no capabilities needed for ≥1024)
+Entrypoint script (entrypoint.sh): if running as root, creates user matching
+PUID/PGID and drops privileges via gosu/runuser before exec-ing uvicorn.
+All app files: `chgrp -R 0 /app && chmod -R g=u /app`
 Namespace: `frc-scheduler-server`
 
 ```

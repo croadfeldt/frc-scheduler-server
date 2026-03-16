@@ -2975,9 +2975,11 @@ function renderTeam(team, isSurrogate, isB2B, colorClass) {
   var surBadge = isSurrogate ? '<span class="surrogate-badge">S</span>' : '';
   var b2bBadge = isB2B ? '<span class="b2b-badge">B2B</span>' : '';
   var extraClass = (isSurrogate ? ' team-surrogate' : '') + (isB2B ? ' team-b2b' : '');
-  // In abstract mode show slot labels (S1, S2...) instead of real team numbers
-  var label = window._frcAbstractMode ? ('S' + team) : team;
-  return '<span class="' + colorClass + extraClass + ' team-link" onclick="addFilter(&apos;team&apos;,' + team + ')">' + label + surBadge + b2bBadge + '</span>';
+  // In abstract mode show blank slots — Stage 1 is team-agnostic structure only
+  if (window._frcAbstractMode) {
+    return '<span class="' + colorClass + extraClass + '" style="opacity:0.35;">—</span>';
+  }
+  return '<span class="' + colorClass + extraClass + ' team-link" onclick="addFilter(&apos;team&apos;,' + team + ')">' + team + surBadge + b2bBadge + '</span>';
 }
 
 function renderSchedule() {

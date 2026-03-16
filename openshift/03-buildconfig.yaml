@@ -52,7 +52,7 @@ spec:
   strategy:
     type: Docker
     dockerStrategy:
-      dockerfilePath: Containerfile
+      dockerfilePath: Containerfile.openshift
   output:
     to:
       kind: ImageStreamTag

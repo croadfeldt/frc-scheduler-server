@@ -102,6 +102,46 @@ See `openshift/README.md` for full details.
 
 ---
 
+## Container Builds
+
+Two Containerfiles are provided — use the one appropriate for your build environment:
+
+| File | Build target | Base image | Package manager |
+|------|-------------|-----------|----------------|
+| `Containerfile` | Docker, Podman, any OCI builder | `python:3.12-slim` (Docker Hub) | apt-get |
+| `Containerfile.openshift` | **OpenShift BuildConfig only** | `quay.io/sclorg/python-312-c10s` | dnf |
+
+**`Containerfile.openshift` is not intended for local Docker/Podman use.** It exists solely to avoid Docker Hub rate limits in OpenShift build pods and is referenced by `openshift/03-buildconfig.yaml` via `dockerfilePath: Containerfile.openshift`.
+
+### Rootless container support
+
+Both Containerfiles are rootless-compliant. The following environment variables control runtime identity and port binding:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PUID` | `1001` | User ID the process runs as. Set to `$(id -u)` to match your host user (linuxserver.io convention). |
+| `PGID` | `0` | Group ID the process runs as. GID 0 (root group) enables OpenShift arbitrary-UID compatibility. |
+| `APP_PORT` | `8080` | Port uvicorn listens on. Ports ≥1024 require no special capabilities. |
+
+All app files are `chgrp -R 0 && chmod -R g=u` so any UID in GID 0 can write without privilege escalation.
+
+Standard Docker/Podman builds always use `Containerfile`:
+```bash
+docker compose up --build                        # uses Containerfile, port 8080
+
+# Rootless Podman with host user mapping:
+podman run --rm -e PUID=$(id -u) -e PGID=$(id -g) \
+  -p 8080:8080 frc-scheduler-server
+```
+
+OpenShift builds are triggered via:
+```bash
+bash openshift/rebuild.sh        # full teardown + rebuild
+# or after a git push, the CronJob auto-triggers within 5 minutes
+```
+
+---
+
 ## Architecture
 
 ### Two-stage scheduling

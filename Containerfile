@@ -1,30 +1,39 @@
+# Generic Containerfile — works with Docker, Podman, and any standard OCI builder.
+# For OpenShift builds use: Containerfile.openshift
+#
+# Follows the linuxserver.io PUID/PGID convention for runtime user mapping:
+#   PUID  — user ID the process runs as  (default: 1001)
+#   PGID  — group ID the process runs as (default: 0)
+#   APP_PORT — port uvicorn listens on   (default: 8080)
+#
+# Example (rootless Podman, map to host user):
+#   podman run -e PUID=$(id -u) -e PGID=$(id -g) -p 8080:8080 frc-scheduler-server
+
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps
+# System deps + gosu for privilege dropping (linuxserver pattern)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev \
+    gcc libpq-dev gosu \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# OpenShift runs containers as a random UID in the root group (GID 0).
-# Ensure the app directory is group-writable so that arbitrary UIDs can write
-# log / temp files without requiring a specific numeric UID.
+# Allow any UID in GID 0 to write (OpenShift arbitrary-UID compatibility)
 RUN chgrp -R 0 /app && chmod -R g=u /app
 
-# Use all available cores; override with CPU_WORKERS env var
 ENV CPU_WORKERS=0
 ENV PYTHONUNBUFFERED=1
+ENV APP_PORT=8080
+ENV PUID=1000
+ENV PGID=1000
 
-# Unprivileged port — OpenShift's default SCC blocks ports < 1024
-EXPOSE 8000
+EXPOSE ${APP_PORT}
 
-# Run as non-root (OpenShift will override with a random UID anyway)
-USER 1001
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+ENTRYPOINT ["/entrypoint.sh"]
