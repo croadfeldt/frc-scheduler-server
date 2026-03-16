@@ -603,15 +603,26 @@ The server reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APPLE_CLIENT_ID`, 
 
 **Condition to schedule a match before a break (start-based):**
 ```
-breakStart - cursor >= breakBuffer
+breakStart - cursor >= breakBuffer   →  schedule
+breakStart - cursor <  breakBuffer   →  flush break early
 ```
-Flush the break early if `nextBreak.start - cursor < breakBuffer`.
 
-- The cycle time is **not** part of the check. A match may overlap into a break if its cycle time exceeds the remaining gap — the buffer only governs whether the match is *started*.
-- Equal counts: a match starting exactly `breakBuffer` minutes before a break is scheduled.
-- Example: buffer=5, lunch=12:00, cursor=11:55 → gap=5 ≥ 5 → schedule. cursor=11:56 → gap=4 < 5 → flush.
+- Equal counts: cursor=11:55, buffer=5, lunch=12:00 → gap=5 ≥ 5 → **schedule** (even if cycle=8 means it ends at 12:03)
+- cursor=11:56 → gap=4 < 5 → **flush break early**
+- The cycle time is **not** part of the check.
 
-Applied identically in `_finishGenerationInner` and `calcMaxMatches`.
+**Interrupt suppression:** After the buffer check passes, the interrupt check (which detects a break starting *inside* a match's cycle window) is suppressed. Without this, a match starting at 11:55 with cycle=8 would be cancelled by the interrupt check because lunch at 12:00 falls within 11:55–12:03. The guard:
+```javascript
+const interruptBreak = (!nextBreak || breakBuffer <= 0 || (nextBreak.start - cursor < breakBuffer))
+  ? breaks.find(b => !b.done && b.start > cursor && b.start < matchEnd)
+  : null;
+```
+
+**`_assigningTeams` guard:** `window._assigningTeams = true` is set at the start of Stage 2 completion and cleared after 100ms. `onParamChanged()` returns immediately if this flag is set, preventing the `autoPopulate` debounce from firing a new Stage 1 generate immediately after teams are assigned (which would wipe the assigned schedule).
+
+**`doneMsg2` scope fix:** declared with `let` before the `try {}` block (not inside it) so the `catch` block can reference it to detect successful completion even when the stream close throws.
+
+Applied in `_finishGenerationInner` and `calcMaxMatches`.
 `bb` encoded in share URL, restored via `applyUrlParams`.
 
 ### db.py column types

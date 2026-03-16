@@ -478,10 +478,10 @@ breakStart - cursor >= breakBuffer
 ```
 Only defer (flush break early) if `breakStart - cursor < breakBuffer`.
 
-- `breakBuffer = 5`, lunch at 12:00: a match starting at 11:55 (exactly 5 min gap) — **scheduled** ✓
+- `breakBuffer = 5`, lunch at 12:00: a match starting at 11:55 (exactly 5 min gap) — **scheduled** ✓ (may run 3 min past noon if cycle=8)
 - A match starting at 11:56 (only 4 min gap) — **deferred until after the break** ✓
 
-The cycle time does not factor into this check. A match may run into a break if the cycle time exceeds the remaining gap — this is intentional, the buffer only governs whether we *start* the match.
+The cycle time does **not** factor into this check. A match that clears the buffer is committed to run even if its cycle time overlaps the break start. The interrupt check (which would otherwise cancel mid-match breaks) is suppressed for any match that already passed the buffer test.
 
 ### 503 under rapid parameter changes
 The auto-generate debounce is 2500ms. The Stage 1 retry counter is reset to 0 at the start

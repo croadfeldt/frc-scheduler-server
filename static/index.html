@@ -1773,6 +1773,8 @@ function updateB2BStat() {
 }
 
 function onParamChanged() {
+  // Don't debounce auto-generate during or immediately after Stage 2 assignment
+  if (window._assigningTeams) return;
   if (_abstractParams !== null) {
     // Only mark stale and disable assign if structural params changed.
     // Time/day/break/cycle changes affect the rendered schedule but not the
@@ -3572,6 +3574,7 @@ async function assignTeams() {
 
     if (doneMsg2) {
       s2ReceivedDone = true;
+      window._assigningTeams = true; // suppress auto-generate debounce during assignment load
       _currentAssignedScheduleId = doneMsg2.assigned_schedule_id;
       const _adResp = await apiFetch('/api/assigned-schedules/' + doneMsg2.assigned_schedule_id);
       _currentSlotMap = _adResp.slot_map || null;
@@ -3586,6 +3589,8 @@ async function assignTeams() {
       window._stage2Retried = false;
       document.getElementById('btnCommit').style.display = 'block';
       showApiStatus('Teams assigned — review the schedule then click Commit to activate');
+      // Clear guard after a tick so any synchronous change events settle first
+      setTimeout(function() { window._assigningTeams = false; }, 100);
     }
   } catch(err) {
     if (doneMsg2 || s2ReceivedDone) {
@@ -3847,11 +3852,16 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         return ct;
       })();
       const matchEnd = cursor + dayCt;
-      const interrupt = breaks.find(b => !b.done && b.start > cursor && b.start < matchEnd);
-      if (interrupt) {
-        entries.push({type:'break', name:interrupt.name, start:interrupt.start, end:interrupt.end});
-        cursor = Math.max(cursor, interrupt.end);
-        interrupt.done = true;
+      // Only interrupt for a break if the match start did NOT already clear the buffer.
+      // If breakStart - cursor >= breakBuffer, the match was intentionally committed to
+      // run even if the cycle time overlaps the break start.
+      const interruptBreak = (!nextBreak || breakBuffer <= 0 || (nextBreak.start - cursor < breakBuffer))
+        ? breaks.find(b => !b.done && b.start > cursor && b.start < matchEnd)
+        : null;
+      if (interruptBreak) {
+        entries.push({type:'break', name:interruptBreak.name, start:interruptBreak.start, end:interruptBreak.end});
+        cursor = Math.max(cursor, interruptBreak.end);
+        interruptBreak.done = true;
         continue;
       }
 
