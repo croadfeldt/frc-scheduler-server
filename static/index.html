@@ -744,6 +744,7 @@
             <div class="progress-label" id="progressLabel2">Assigning teams&hellip;</div>
           </div>
           <button class="btn-generate" id="btnAssign" onclick="assignTeams()" style="background:var(--accent3);margin-top:0.5rem;" disabled>&#9654; Assign Teams to Schedule</button>
+          <button class="btn-generate" id="btnCommit" onclick="commitSchedule()" style="background:var(--accent);margin-top:0.4rem;display:none;">&#10003; Commit Schedule as Active</button>
         </div>
       </div>
     </div>
@@ -763,6 +764,7 @@
         <span class="filter-empty" id="filterEmpty">None active &mdash; click column headers or team numbers to filter</span>
         <button class="filter-reset" id="filterReset" onclick="resetFilters()" style="display:none">&#x2715; Reset all</button>
       </div>
+      <div id="scheduleWarning" style="display:none;background:rgba(243,139,168,0.10);border:1px solid rgba(243,139,168,0.35);border-radius:4px;padding:0.5rem 0.9rem;margin-bottom:0.5rem;font-size:0.78rem;color:var(--danger);position:sticky;top:0;z-index:2;"></div>
       <div class="schedule-output" id="scheduleOutput">
         <div class="empty-state">
           <div class="empty-icon">&#127942;</div>
@@ -1199,6 +1201,14 @@ function buildShareUrl() {
     if (breaks.length) params.set('d' + dayNum + 'b', breaks.join(','));
   });
 
+  // Encode cycle time changes: cc=Day:AfterMatch:Time,...
+  var cycleChanges = getCycleTimeChanges();
+  if (cycleChanges.length > 0) {
+    params.set('cc', cycleChanges.map(function(c) {
+      return (c.day || 1) + ':' + c.after + ':' + c.time;
+    }).join(','));
+  }
+
   // Encode team numbers from slot_map if we have an assigned schedule
   if (_currentSlotMap && Object.keys(_currentSlotMap).length > 0) {
     const numTeams = parseInt(n) || 0;
@@ -1248,6 +1258,7 @@ function parseUrlParams() {
     numDays:nd || null,
     seed:   p.get('seed')  || null,
     aseed:  p.get('aseed') || null,
+    cc:     p.get('cc')    || null,
     teams:  p.get('teams') ? p.get('teams').split(',').map(Number).filter(Boolean) : null,
     event:  p.get('event') || null,
   };
@@ -1280,6 +1291,18 @@ function applyUrlParams(params) {
         }
       });
     }
+  }
+
+  // Restore cycle time changes
+  if (params.cc) {
+    var ccList = document.getElementById('cycleChangesList');
+    ccList.innerHTML = '';
+    params.cc.split(',').forEach(function(token) {
+      var parts = token.split(':');
+      if (parts.length >= 3) {
+        addCycleChange(parseFloat(parts[1]), parseFloat(parts[2]), parseInt(parts[0]));
+      }
+    });
   }
 
   if (params.seed) {
@@ -1328,10 +1351,21 @@ async function duplicateSchedule() {
 
 function onParamChanged() {
   if (_abstractParams !== null) {
-    document.getElementById('paramChangedWarning').style.display = 'block';
-    document.getElementById('btnAssign').disabled = true;
-    // Only auto-regenerate if Stage 1 has run at least once this session
-    if (document.getElementById('autoPopulate').checked) {
+    // Only mark stale and disable assign if structural params changed.
+    // Time/day/break/cycle changes affect the rendered schedule but not the
+    // abstract slot structure — Stage 1 doesn't need to re-run for those.
+    var curNumTeams       = parseInt(document.getElementById('numTeams').value) || 0;
+    var curMatchesPerTeam = parseFloat(document.getElementById('matchesPerTeam').value) || 6;
+    var curCooldown       = parseInt(document.getElementById('cooldown').value) || 3;
+    var structuralChange  = (curNumTeams !== _abstractParams.numTeams ||
+                             curMatchesPerTeam !== _abstractParams.matchesPerTeam ||
+                             curCooldown !== _abstractParams.cooldown);
+    if (structuralChange) {
+      document.getElementById('paramChangedWarning').style.display = 'block';
+      document.getElementById('btnAssign').disabled = true;
+    }
+    // Always debounce auto-regenerate for structural changes only
+    if (structuralChange && document.getElementById('autoPopulate').checked) {
       clearTimeout(_autoPopulateTimeout);
       _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 1500);
     }
@@ -1355,6 +1389,29 @@ function estimateFirstMatchOfDay(dayIdx) {
   return dayIdx * matchesPerDay + 1;
 }
 
+function validateCycleChanges() {
+  var allFilled = true;
+  document.querySelectorAll('.cc-after').forEach(function(inp) {
+    if (!inp.value || parseFloat(inp.value) < 1) {
+      inp.classList.add('input-error');
+      allFilled = false;
+    }
+  });
+  // Also update the error message
+  var errMsg = document.getElementById('timeErrorMsg');
+  if (errMsg) {
+    if (!allFilled) {
+      errMsg.textContent = '⚠ Fill in all required cycle change fields before generating';
+      errMsg.classList.add('visible');
+    } else if (!errMsg.textContent.includes('time')) {
+      // Only clear if the message was from cycle changes (not from time validation)
+      errMsg.textContent = '';
+      errMsg.classList.remove('visible');
+    }
+  }
+  return allFilled;
+}
+
 function addCycleChange(afterMatch, newTime, forDay) {
   var numDays = parseInt(document.getElementById('numDays').value) || 1;
   // Default day: first day that has no existing cycle change, or day 1
@@ -1365,8 +1422,9 @@ function addCycleChange(afterMatch, newTime, forDay) {
       if (!usedDays.includes(d)) { defaultDay = d; break; }
     }
   }
-  // Default afterMatch: approx first match of the chosen day - 1
-  var defaultAfter = afterMatch != null ? afterMatch : Math.max(1, estimateFirstMatchOfDay(defaultDay - 1) - 1);
+  // Leave afterMatch blank by default — user must fill it in.
+  // Highlight it as required until filled.
+  var defaultAfter = afterMatch != null ? afterMatch : '';
 
   const list = document.getElementById('cycleChangesList');
   const row = document.createElement('div');
@@ -1383,8 +1441,8 @@ function addCycleChange(afterMatch, newTime, forDay) {
       '<select class="cc-day" style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.45rem 0.5rem;font-size:0.85rem;border-radius:4px;width:100%;">' +
         dayOpts +
       '</select></div>' +
-    '<div class="field"><label>After Match #</label>' +
-      '<input type="number" class="cc-after" placeholder="e.g. 20" min="1" value="' + defaultAfter + '"></div>' +
+    '<div class="field"><label>After Match # <span style="color:var(--danger)">*</span></label>' +
+      '<input type="number" class="cc-after input-error" placeholder="Required" min="1" value="' + defaultAfter + '" required></div>' +
     '<div class="field"><label>New Cycle (min)</label>' +
       '<input type="number" class="cc-time" placeholder="e.g. 7.5" min="0.1" max="60" step="any" value="' + (newTime || '') + '"></div>' +
     '<button class="btn-icon btn-remove-cc" title="Remove">&#x2715;</button>';
@@ -1396,9 +1454,19 @@ function addCycleChange(afterMatch, newTime, forDay) {
   daySelect.addEventListener('change', function() {
     var d = parseInt(daySelect.value);
     afterInput.value = Math.max(1, estimateFirstMatchOfDay(d - 1) - 1);
+    afterInput.classList.remove('input-error');
+    validateCycleChanges();
     onParamChanged();
   });
-  afterInput.addEventListener('change', onParamChanged);
+  afterInput.addEventListener('input', function() {
+    afterInput.classList.toggle('input-error', !afterInput.value || parseFloat(afterInput.value) < 1);
+    validateCycleChanges();
+  });
+  afterInput.addEventListener('change', function() {
+    afterInput.classList.toggle('input-error', !afterInput.value || parseFloat(afterInput.value) < 1);
+    validateCycleChanges();
+    onParamChanged();
+  });
   row.querySelector('.cc-time').addEventListener('change', onParamChanged);
   row.querySelector('.btn-remove-cc').addEventListener('click', function() {
     row.remove(); onParamChanged();
@@ -2354,10 +2422,12 @@ async function generateSchedule() {
   const btn = document.getElementById('btnGenerate');
   if (btn.disabled) return; // already running — ignore duplicate trigger
   if (!validateTimes()) { showApiStatus('Fix invalid times before generating', true); return; }
+  if (!validateCycleChanges()) { showApiStatus('⚠ Fill in all required cycle change fields', true); return; }
   btn.disabled = true;
   document.getElementById('progressWrap').style.display = 'block';
   document.getElementById('stage2Panel').style.display = 'none';
   document.getElementById('btnAssign').disabled = true;
+  document.getElementById('btnCommit').style.display = 'none';
   document.getElementById('paramChangedWarning').style.display = 'none';
 
   const startTime = performance.now();
@@ -2474,6 +2544,7 @@ async function generateSchedule() {
       btn.disabled = false;
       document.getElementById('progressWrap').style.display = 'none';
       window._stage1Retried = false;
+      updateUrlFromState();
       showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
       if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
         _urlAutoTeams = null; setTimeout(assignTeams, 200);
@@ -2514,6 +2585,7 @@ async function generateSchedule() {
       function(matches, roundBoundaries, surrogateCount, bestIteration) {
         _currentAbstractScheduleId = null;
         _abstractParams = { numTeams, matchesPerTeam, cooldown };
+        window._frcAbstractMode = true; // client-side fallback has no real teams
         const pseudoSched = {
           num_teams: numTeams, matches_per_team: matchesPerTeam,
           matches: matches.map(function(m) { return {
@@ -2575,7 +2647,8 @@ function displayAbstractSchedule(sched, dayConfig) {
   );
   window._frcAbstractMode = true;
   finishGeneration(matches, roundBoundaries, sched.surrogate_count, 0, sched.iterations_run || 0, dayConfig);
-  window._frcAbstractMode = false;
+  // Keep _frcAbstractMode = true so filter re-renders also hide teams.
+  // It is cleared in loadAssignedSchedule when real team numbers are available.
 }
 
 // Check if a saved assignment exists for this abstract schedule + event
@@ -2623,6 +2696,97 @@ function showStage2Panel(numTeams) {
   }
 }
 
+// ── Commit: mark the current assigned schedule as active ─────────────────────
+async function commitSchedule() {
+  if (!_currentAssignedScheduleId) {
+    showApiStatus('No assigned schedule to commit', true);
+    return;
+  }
+  const btn = document.getElementById('btnCommit');
+  btn.disabled = true;
+
+  try {
+    // Activate on server
+    await apiFetch('/api/assigned-schedules/' + _currentAssignedScheduleId + '/activate',
+      { method: 'POST' });
+
+    // Fetch full schedule details for the log
+    const sched = await apiFetch('/api/assigned-schedules/' + _currentAssignedScheduleId);
+    const eventData = _currentEventId
+      ? await apiFetch('/api/events/' + _currentEventId).catch(function() { return null; })
+      : null;
+
+    // Build structured completion log
+    const dayConfig = collectDayConfig();
+    const shareUrl  = buildShareUrl();
+
+    const log = {
+      event: 'schedule_committed',
+      timestamp: new Date().toISOString(),
+      url: shareUrl,
+      event_info: eventData ? {
+        id:   eventData.id,
+        key:  eventData.key,
+        name: eventData.name,
+        year: eventData.year,
+      } : null,
+      schedule: {
+        assigned_schedule_id: sched.id,
+        abstract_schedule_id: sched.abstract_schedule_id,
+        name:        sched.name,
+        created_at:  sched.created_at,
+        created_by:  sched.created_by || 'anonymous',
+        is_active:   true,
+      },
+      parameters: {
+        num_teams:        sched.num_teams,
+        matches_per_team: sched.matches_per_team,
+        cooldown:         sched.cooldown,
+        cycle_time_min:   dayConfig.cycleTime,
+        num_days:         dayConfig.numDays,
+        cycle_changes:    dayConfig.cycleChanges,
+        seed:             sched.seed,
+        assign_seed:      sched.assign_seed,
+      },
+      day_config: sched.day_config,
+      teams: (function() {
+        if (!sched.slot_map) return [];
+        var slots = Object.keys(sched.slot_map).map(Number).sort(function(a,b){return a-b;});
+        return slots.map(function(s) { return sched.slot_map[String(s)]; });
+      })(),
+      match_count: sched.matches ? sched.matches.length : null,
+      surrogate_count: sched.surrogate_count,
+      stats: {
+        total_matches: parseInt(document.getElementById('statMatches').textContent) || null,
+        back_to_backs: parseInt(document.getElementById('statB2B').textContent) || 0,
+        surrogates:    parseInt(document.getElementById('statSurrogates').textContent) || 0,
+      },
+    };
+
+    console.log('FRC_SCHEDULE_COMMITTED', JSON.stringify(log, null, 2));
+
+    // Also POST to server so it appears in container stdout / log aggregation
+    apiFetch('/api/log-commit', {
+      method: 'POST',
+      body: JSON.stringify(log),
+    }).catch(function(e) {
+      console.warn('log-commit POST failed (non-fatal):', e.message);
+    });
+
+    await loadSavedSchedules();
+    updateUrlFromState();
+
+    btn.style.background = 'var(--accent3)';
+    btn.textContent = '✓ Committed';
+    btn.disabled = true;
+    showApiStatus('✓ Schedule committed as active — ID ' + sched.id);
+
+  } catch(e) {
+    btn.disabled = false;
+    showApiStatus('Commit failed: ' + e.message, true);
+  }
+}
+
 // ── Stage 2: Assign real team numbers to abstract schedule ────────────────────
 async function assignTeams() {
   if (!_currentEventId) { showApiStatus('Select an event first', true); return; }
@@ -2633,6 +2797,14 @@ async function assignTeams() {
 
   const btn = document.getElementById('btnAssign');
   btn.disabled = true;
+  // Reset commit button for new assignment run
+  const commitBtn = document.getElementById('btnCommit');
+  if (commitBtn) {
+    commitBtn.style.display = 'none';
+    commitBtn.disabled = false;
+    commitBtn.style.background = 'var(--accent)';
+    commitBtn.textContent = '\u2713 Commit Schedule as Active';
+  }
   document.getElementById('progressWrap2').style.display = 'block';
 
   const iterations  = Math.max(1, parseInt(document.getElementById('assignIterations').value) || 1000);
@@ -2721,7 +2893,8 @@ async function assignTeams() {
       document.getElementById('progressWrap2').style.display = 'none';
       document.getElementById('loadFromDbBanner').style.display = 'none';
       window._stage2Retried = false;
-      showApiStatus('Teams assigned and saved');
+      document.getElementById('btnCommit').style.display = 'block';
+      showApiStatus('Teams assigned — review the schedule then click Commit to activate');
     }
   } catch(err) {
     if (doneMsg2 || s2ReceivedDone) {
@@ -2749,6 +2922,7 @@ async function assignTeams() {
 
 // Load and display an assigned schedule (Stage 2 result)
 async function loadAssignedSchedule(scheduleId, dayConfig) {
+  window._frcAbstractMode = false; // real team numbers are now available
   try {
     const sched = await apiFetch('/api/assigned-schedules/' + scheduleId);
     _currentAssignedScheduleId = scheduleId;
@@ -2999,18 +3173,19 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
   const output = document.getElementById('scheduleOutput');
   output.innerHTML = '';
 
+  var schedWarn = document.getElementById('scheduleWarning');
   if (window._frcFinalDayOverflow) {
     const ov = window._frcFinalDayOverflow;
-    showApiStatus(
-      '\u26a0 ' + ov.unscheduled + ' match' + (ov.unscheduled !== 1 ? 'es' : '') +
-      ' could not fit before ' + minToTime(ov.dayEnd) + ' \u2014 extend end time, add a day, or reduce cycle time.',
-      true
-    );
+    var msg = '\u26a0 ' + ov.unscheduled + ' match' + (ov.unscheduled !== 1 ? 'es' : '') +
+      ' could not fit before ' + minToTime(ov.dayEnd) + ' \u2014 extend end time, add a day, or reduce cycle time.';
+    if (schedWarn) { schedWarn.textContent = msg; schedWarn.style.display = 'block'; }
+    showApiStatus(msg, true);
   } else if (matchIdx < totalMatches) {
-    showApiStatus(
-      '\u26a0 Only ' + matchIdx + ' of ' + totalMatches + ' matches could be scheduled \u2014 add more days or extend daily hours.',
-      true
-    );
+    var msg2 = '\u26a0 Only ' + matchIdx + ' of ' + totalMatches + ' matches could be scheduled \u2014 add more days or extend daily hours.';
+    if (schedWarn) { schedWarn.textContent = msg2; schedWarn.style.display = 'block'; }
+    showApiStatus(msg2, true);
+  } else {
+    if (schedWarn) { schedWarn.textContent = ''; schedWarn.style.display = 'none'; }
   }
 
   const exportBtn = document.createElement('button');

@@ -892,3 +892,45 @@ async def duplicate_assigned_schedule(
 
     await db.commit()
     return {"id": new_asgn.id, "abstract_schedule_id": new_abs.id, "name": new_asgn.name}
+
+
+# ── Schedule commit log ───────────────────────────────────────────────────────
+
+class CommitLogEntry(BaseModel):
+    """Structured completion log posted by the browser after committing a schedule."""
+    event:      str                      # always "schedule_committed"
+    timestamp:  str
+    url:        str | None               = None
+    event_info: dict[str, Any] | None    = None
+    schedule:   dict[str, Any]
+    parameters: dict[str, Any]
+    day_config: dict[str, Any] | None    = None
+    teams:      list[int]                = []
+    match_count:      int | None         = None
+    surrogate_count:  dict[str, Any] | None = None
+    stats:      dict[str, Any] | None    = None
+
+
+@app.post("/api/log-commit", status_code=204)
+async def log_commit(
+    body: CommitLogEntry,
+    current_user: dict | None = Depends(get_current_user),
+):
+    """
+    Receives the structured completion payload from the browser after a schedule
+    is committed as active. Logs it server-side at INFO level so it appears in
+    container stdout / log aggregation alongside the rest of the uvicorn logs.
+    """
+    log.info(
+        "SCHEDULE_COMMITTED user=%s event=%s schedule_id=%s teams=%d matches=%s seed=%s assign_seed=%s",
+        (current_user or {}).get("sub", "anonymous"),
+        body.event_info.get("key") if body.event_info else "none",
+        body.schedule.get("assigned_schedule_id"),
+        len(body.teams),
+        body.match_count,
+        body.parameters.get("seed"),
+        body.parameters.get("assign_seed"),
+    )
+    # Full structured payload at DEBUG level for detailed post-event analysis
+    log.debug("SCHEDULE_COMMITTED_DETAIL %s", body.model_dump_json())
+

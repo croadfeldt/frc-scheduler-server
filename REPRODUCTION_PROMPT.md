@@ -388,3 +388,18 @@ AI use disclosed, human review confirmed, license terms unaffected.
 **OpenShift route:** `haproxy.router.openshift.io/timeout: 120s` annotation on `05-route.yaml`.
 
 **`rebuild.sh`:** Full teardown + registry credential refresh (Removed→Managed NooBaa cycle) + wait for registry deployment + secrets + postgres + buildconfig + builder SA wait + image-builder role grant + build (no `--follow`, polls status via `wait_for_build`) + deploy + route + cronjob. `set -euo pipefail`.
+
+### Commit button & server-side logging
+
+**Commit button** (`btnCommit`) appears below Assign Teams after Stage 2 completes. Calls `/api/assigned-schedules/{id}/activate` (POST), then calls `/api/log-commit` (POST) with the full structured payload. Button changes to "✓ Committed" and disables. Resets on Stage 2 re-run or Stage 1 regeneration.
+
+**`/api/log-commit` endpoint** (POST, status 204):
+- Pydantic model `CommitLogEntry` with fields: `event`, `timestamp`, `url`, `event_info`, `schedule`, `parameters`, `day_config`, `teams`, `match_count`, `surrogate_count`, `stats`.
+- Logs `SCHEDULE_COMMITTED` summary at INFO level (user, event key, schedule ID, team count, match count, seeds).
+- Logs `SCHEDULE_COMMITTED_DETAIL` full JSON at DEBUG level.
+- Auth optional — `created_by` captured from JWT if present.
+
+**URL params — complete list:**
+`n`, `mpt`, `cd`, `ct`, `days`, `seed`, `aseed`, `d1`–`d5` (HH:MM-HH:MM), `d1b`–`d5b` (Name|start|end,...), `teams` (slot-ordered comma list), `cc` (Day:AfterMatch:Time,... for cycle changes).
+
+URL updated after Stage 1 completes AND after Stage 2 completes. All params needed to fully reproduce or retrieve any committed schedule are present.

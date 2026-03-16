@@ -216,6 +216,7 @@ After generating a schedule, the browser URL is updated:
 | `teams` | `254,1114,...` | Team numbers in slot order |
 | `d1`–`d5` | `08:00-17:00` | Per-day start–end (`HH:MM-HH:MM`) |
 | `d1b`–`d5b` | `Lunch\|12:00\|13:00,...` | Per-day breaks: `Name\|start\|end`, comma-separated |
+| `cc` | `1:45:7.5,2:90:6` | Cycle time changes: `Day:AfterMatch:NewTime`, comma-separated |
 
 Opening this URL auto-reproduces the full schedule including day/time configuration.
 Without `teams`, the abstract structure renders with slot labels (S1, S2...).
@@ -269,10 +270,35 @@ Without `teams`, the abstract structure renders with slot labels (S1, S2...).
 | GET | /auth/me | Current user info from JWT |
 | GET | /auth/providers | Which providers are configured |
 
-### Health
+### Health & Logging
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | /api/health | Status + CPU worker count |
+| POST | /api/log-commit | Receives structured schedule completion payload from the browser; logs at INFO (summary) and DEBUG (full JSON) to container stdout |
+
+### Commit log payload (`POST /api/log-commit`)
+Posted automatically by the browser when a schedule is committed as active.
+Appears in container logs as `SCHEDULE_COMMITTED` (summary) and `SCHEDULE_COMMITTED_DETAIL` (full JSON at DEBUG level).
+
+```json
+{
+  "event": "schedule_committed",
+  "timestamp": "2026-03-16T12:00:00.000Z",
+  "url": "https://host/?n=51&mpt=11&cd=3&ct=8&days=2&seed=a1b2c3d4&aseed=cafebabe&...",
+  "event_info":  { "id": 3, "key": "2026mnwi", "name": "MN North Star", "year": 2026 },
+  "schedule":    { "assigned_schedule_id": 7, "abstract_schedule_id": 12, "name": "...",
+                   "created_at": "...", "created_by": "user@example.com", "is_active": true },
+  "parameters":  { "num_teams": 51, "matches_per_team": 11, "cooldown": 3,
+                   "cycle_time_min": 8, "num_days": 2,
+                   "cycle_changes": [{"day":2,"after":45,"time":7.5}],
+                   "seed": "a1b2c3d4", "assign_seed": "cafebabe" },
+  "day_config":  { "cycleTime": 8, "numDays": 2, "days": [...], "cycleChanges": [...] },
+  "teams":       [254, 1114, 148, 27, 67, 111],
+  "match_count": 93,
+  "surrogate_count": { "1": 1, "3": 2 },
+  "stats":       { "total_matches": 93, "back_to_backs": 2, "surrogates": 6 }
+}
+```
 
 **Auth notes:**
 - All reads are public — no token required.
