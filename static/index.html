@@ -786,6 +786,7 @@ let _currentAbstractScheduleId = null;   // Stage 1 result
 let _currentAssignedScheduleId = null;   // Stage 2 result (assigned)
 let _abstractParams = null;              // params snapshot when Stage 1 last ran
 let _autoPopulateTimeout = null;         // debounce timer
+let _s1AbortController = null;          // AbortController for in-flight Stage 1 request
 let _authUser = null;                    // {sub, email, provider, uid} or null
 let _currentSlotMap = null;              // {slot_str: team_number} from Stage 2
 let _currentSeed = null;                 // hex Stage 1 seed
@@ -1313,7 +1314,7 @@ function onParamChanged() {
     // Only auto-regenerate if Stage 1 has run at least once this session
     if (document.getElementById('autoPopulate').checked) {
       clearTimeout(_autoPopulateTimeout);
-      _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 800);
+      _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 1500);
     }
   }
 }
@@ -2262,6 +2263,14 @@ async function generateSchedule() {
   clearTimeout(_autoPopulateTimeout);
   _autoPopulateTimeout = null;
 
+  // Abort any in-flight Stage 1 request before starting a new one.
+  // Without this, rapid parameter changes fire concurrent SSE streams that
+  // overwhelm the single uvicorn worker and cause 503s.
+  if (_s1AbortController) {
+    _s1AbortController.abort();
+    _s1AbortController = null;
+  }
+
   const numTeams       = parseInt(document.getElementById('numTeams').value) || 0;
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value) || 6;
   const cooldown       = parseInt(document.getElementById('cooldown').value) || 3;
@@ -2311,8 +2320,10 @@ async function generateSchedule() {
     document.getElementById('progressFill').style.width = '10%';
     document.getElementById('progressLabel').textContent = 'Generating schedule\u2026';
 
+    _s1AbortController = new AbortController();
     const res = await fetch(API + '/api/generate-abstract', {
       method: 'POST',
+      signal: _s1AbortController.signal,
       headers: (function() {
         const h = { 'Content-Type': 'application/json' };
         const tok = getToken(); if (tok) h['Authorization'] = 'Bearer ' + tok;
@@ -2365,6 +2376,7 @@ async function generateSchedule() {
     if (doneMsg) {
       clearInterval(animInterval);
       s1ReceivedDone = true;
+      _s1AbortController = null;
       document.getElementById('progressFill').style.width = '100%';
       _currentAbstractScheduleId = doneMsg.abstract_schedule_id;
       _abstractParams = { numTeams, matchesPerTeam, cooldown };
@@ -2384,8 +2396,16 @@ async function generateSchedule() {
     }
   } catch(err) {
     clearInterval(animInterval);
+    _s1AbortController = null;
     if (doneMsg || s1ReceivedDone) {
       // Done event was received — stream-close error is expected, not a failure
+      btn.disabled = false;
+      document.getElementById('progressWrap').style.display = 'none';
+      return;
+    }
+    // AbortError means we cancelled this request because a newer one was started.
+    // Clean up quietly — the new request is already running.
+    if (err.name === 'AbortError') {
       btn.disabled = false;
       document.getElementById('progressWrap').style.display = 'none';
       return;

@@ -334,14 +334,13 @@ async def remove_team(event_id: int, team_number: int, db: AsyncSession = Depend
 @app.post("/api/generate-abstract")
 async def generate_abstract(
     body: AbstractGenerateRequest,
-    db: AsyncSession = Depends(get_session),
     current_user: dict | None = Depends(get_current_user),
 ):
     """
     Stage 1 — Generate a slot-based abstract schedule.
     Streams keepalive pings while computing, then sends the done event.
-    All DB work is done after the worker finishes, before the done event is yielded,
-    so the generator never has async DB calls interleaved with stream reads.
+    The DB session is opened only for the insert — not held open during the
+    long-running worker — so it doesn't block the connection pool.
     """
     loop = asyncio.get_event_loop()
     pool = get_pool()
@@ -378,26 +377,27 @@ async def generate_abstract(
             yield f"data: {json.dumps({'type':'error','message':'No schedule generated'})}\n\n"
             return
 
-        # Save to DB — this is fast (just a SQL insert) so no ping needed here
+        # Save to DB — open a short-lived session only for this insert
         try:
-            sched = AbstractSchedule(
-                event_id=body.event_id,
-                name=body.name,
-                num_teams=body.num_teams,
-                matches_per_team=body.matches_per_team,
-                cooldown=body.cooldown,
-                seed=body.seed,
-                iterations_run=1,
-                best_iteration=0,
-                score=result["score"],
-                created_by=current_user["sub"] if current_user else None,
-                matches=result["matches"],
-                surrogate_count=result["surrogate_count"],
-                round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
-            )
-            db.add(sched)
-            await db.commit()
-            await db.refresh(sched)
+            async with AsyncSessionLocal() as db:
+                sched = AbstractSchedule(
+                    event_id=body.event_id,
+                    name=body.name,
+                    num_teams=body.num_teams,
+                    matches_per_team=body.matches_per_team,
+                    cooldown=body.cooldown,
+                    seed=body.seed,
+                    iterations_run=1,
+                    best_iteration=0,
+                    score=result["score"],
+                    created_by=current_user["sub"] if current_user else None,
+                    matches=result["matches"],
+                    surrogate_count=result["surrogate_count"],
+                    round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
+                )
+                db.add(sched)
+                await db.commit()
+                await db.refresh(sched)
         except Exception as e:
             log.error("Stage 1 DB error: %s", e)
             yield f"data: {json.dumps({'type':'error','message':'Database error: ' + str(e)})}\n\n"
@@ -463,31 +463,36 @@ async def delete_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(
 async def assign_teams(
     abstract_id: int,
     body: AssignRequest,
-    db: AsyncSession = Depends(get_session),
     current_user: dict | None = Depends(get_current_user),
 ):
     """
     Stage 2 — Assign real team numbers to an abstract schedule.
     Streams SSE progress. Final event carries assigned_schedule_id.
+    The DB session is opened only for reads before the stream and for the
+    final write after workers finish — never held open during computation.
     """
-    abstract = await db.get(AbstractSchedule, abstract_id)
-    if not abstract:
-        raise HTTPException(404, "Abstract schedule not found")
+    # Short-lived read session — closed before the stream starts
+    async with AsyncSessionLocal() as db:
+        abstract = await db.get(AbstractSchedule, abstract_id)
+        if not abstract:
+            raise HTTPException(404, "Abstract schedule not found")
 
-    # Load event teams
-    result = await db.execute(
-        select(EventTeam).options(selectinload(EventTeam.team))
-        .where(EventTeam.event_id == body.event_id)
-    )
-    event_teams = list(result.scalars())
-    if not event_teams:
-        raise HTTPException(400, "Event has no teams")
-    if len(event_teams) != abstract.num_teams:
-        raise HTTPException(400,
-            f"Event has {len(event_teams)} teams but abstract schedule was built for {abstract.num_teams}")
+        result_q = await db.execute(
+            select(EventTeam).options(selectinload(EventTeam.team))
+            .where(EventTeam.event_id == body.event_id)
+        )
+        event_teams = list(result_q.scalars())
+        if not event_teams:
+            raise HTTPException(400, "Event has no teams")
+        if len(event_teams) != abstract.num_teams:
+            raise HTTPException(400,
+                f"Event has {len(event_teams)} teams but abstract schedule was built for {abstract.num_teams}")
 
-    team_numbers = sorted(et.team.number for et in event_teams)
-    abstract_matches = abstract.matches
+        team_numbers    = sorted(et.team.number for et in event_teams)
+        abstract_matches = abstract.matches
+        abstract_cooldown = abstract.cooldown
+        abstract_num_teams = abstract.num_teams
+
     pool = get_pool()
     loop = asyncio.get_event_loop()
     iterations = body.iterations
@@ -509,8 +514,8 @@ async def assign_teams(
             _aw_seed = (_aseed_int ^ w) if _aseed_int is not None else None
             task = asyncio.ensure_future(
                 loop.run_in_executor(pool, run_assignment_worker,
-                    (abstract_matches, abstract.num_teams, team_numbers,
-                     abstract.cooldown, w_iters, w, _aw_seed))
+                    (abstract_matches, abstract_num_teams, team_numbers,
+                     abstract_cooldown, w_iters, w, _aw_seed))
             )
             tasks.append(task)
 
@@ -545,37 +550,38 @@ async def assign_teams(
 
         # Always insert a new record — each assignment is a new version.
         # History is preserved so the user can revert to any previous assignment.
-        # Deactivate all existing schedules for this event first.
-        await db.execute(
-            update(AssignedSchedule)
-            .where(AssignedSchedule.event_id == body.event_id)
-            .values(is_active=False)
-        )
-        assigned = AssignedSchedule(
-            abstract_schedule_id=abstract_id,
-            event_id=body.event_id,
-            name=body.name,
-            is_active=True,
-            slot_map=best_result["slot_map"],
-            day_config=body.day_config,
-            assign_seed=body.assign_seed,
-            created_by=current_user["sub"] if current_user else None,
-        )
-        db.add(assigned)
-        await db.flush()
+        # Open a fresh short-lived session for the write — not held during workers.
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                update(AssignedSchedule)
+                .where(AssignedSchedule.event_id == body.event_id)
+                .values(is_active=False)
+            )
+            assigned = AssignedSchedule(
+                abstract_schedule_id=abstract_id,
+                event_id=body.event_id,
+                name=body.name,
+                is_active=True,
+                slot_map=best_result["slot_map"],
+                day_config=body.day_config,
+                assign_seed=body.assign_seed,
+                created_by=current_user["sub"] if current_user else None,
+            )
+            db.add(assigned)
+            await db.flush()
 
-        # Denormalise into MatchRow using slot_map to resolve real team numbers
-        slot_map = {int(k): v for k, v in best_result["slot_map"].items()}
-        for i, m in enumerate(abstract_matches, start=1):
-            db.add(MatchRow(
-                assigned_schedule_id=assigned.id, match_num=i,
-                red1=slot_map[m["red"][0]], red2=slot_map[m["red"][1]], red3=slot_map[m["red"][2]],
-                blue1=slot_map[m["blue"][0]], blue2=slot_map[m["blue"][1]], blue3=slot_map[m["blue"][2]],
-                red1_surrogate=m["red_surrogate"][0], red2_surrogate=m["red_surrogate"][1],
-                red3_surrogate=m["red_surrogate"][2], blue1_surrogate=m["blue_surrogate"][0],
-                blue2_surrogate=m["blue_surrogate"][1], blue3_surrogate=m["blue_surrogate"][2],
-            ))
-        await db.commit()
+            # Denormalise into MatchRow using slot_map to resolve real team numbers
+            slot_map = {int(k): v for k, v in best_result["slot_map"].items()}
+            for i, m in enumerate(abstract_matches, start=1):
+                db.add(MatchRow(
+                    assigned_schedule_id=assigned.id, match_num=i,
+                    red1=slot_map[m["red"][0]], red2=slot_map[m["red"][1]], red3=slot_map[m["red"][2]],
+                    blue1=slot_map[m["blue"][0]], blue2=slot_map[m["blue"][1]], blue3=slot_map[m["blue"][2]],
+                    red1_surrogate=m["red_surrogate"][0], red2_surrogate=m["red_surrogate"][1],
+                    red3_surrogate=m["red_surrogate"][2], blue1_surrogate=m["blue_surrogate"][0],
+                    blue2_surrogate=m["blue_surrogate"][1], blue3_surrogate=m["blue_surrogate"][2],
+                ))
+            await db.commit()
 
         yield f"data: {json.dumps({'type':'done','assigned_schedule_id':assigned.id,'score':best_result['score'],'total':iterations,'pct':100})}\n\n"
         yield ": end\n\n"

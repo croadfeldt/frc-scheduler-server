@@ -79,6 +79,8 @@ spec:
               value: "1"
             - name: APP_PORT
               value: "8080"
+            - name: WEB_WORKERS
+              value: "2"
             - name: PUID
               value: "1000"
             - name: PGID
