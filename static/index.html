@@ -2263,7 +2263,7 @@ async function generateSchedule() {
   _autoPopulateTimeout = null;
 
   const numTeams       = parseInt(document.getElementById('numTeams').value) || 0;
-  const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value);
+  const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value) || 6;
   const cooldown       = parseInt(document.getElementById('cooldown').value) || 3;
   const iterations     = 1; // Stage 1 builds the template — one deterministic pass is all that's needed
   const seed = window._pendingSeed || randomSeed();
@@ -2306,6 +2306,7 @@ async function generateSchedule() {
 
   let s1ReceivedDone = false;
   let doneMsg = null;
+  let animInterval = null;
   try {
     document.getElementById('progressFill').style.width = '10%';
     document.getElementById('progressLabel').textContent = 'Generating schedule\u2026';
@@ -2335,7 +2336,7 @@ async function generateSchedule() {
     let buf = '';
     // Animate progress bar 10% → 90% while pings arrive, snap to 100% on done
     let pct = 10;
-    const animInterval = setInterval(function() {
+    animInterval = setInterval(function() {
       if (pct < 90) { pct += 2; document.getElementById('progressFill').style.width = pct + '%'; }
     }, 500);
 
@@ -2763,7 +2764,7 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
     return;
   }
   const numTeams = parseInt(document.getElementById('numTeams').value);
-  const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value);
+  const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value) || 6;
   const tzAbbr = getTimezoneAbbr();
   // Use override day config if provided (e.g. from loaded schedule), else read from UI
   const _dc = dayConfigOverride;

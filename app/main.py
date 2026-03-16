@@ -69,6 +69,21 @@ app = FastAPI(title="FRC Match Scheduler", version="2.0.0")
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    body = None
+    try:
+        body = await request.body()
+        body = body.decode()
+    except Exception:
+        pass
+    log.error("422 Validation error on %s %s — body: %s — errors: %s",
+              request.method, request.url.path, body, exc.errors())
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
 @app.on_event("startup")
 async def startup():
     await init_db()
@@ -118,10 +133,20 @@ class AbstractGenerateRequest(BaseModel):
     num_teams:        int         = Field(..., ge=6, le=120)
     matches_per_team: int         = Field(6, ge=1, le=20)
     cooldown:         int         = Field(3, ge=1, le=20)
-    iterations:       int         = Field(1, ge=1)   # Stage 1: single deterministic pass — no iteration needed
-    seed:             str | None  = None              # hex seed for reproducibility
+    iterations:       int         = Field(1, ge=1)
+    seed:             str | None  = None
     name:             str         = "Abstract Schedule"
-    event_id:         int | None  = None              # optional — link to an event
+    event_id:         int | None  = None
+
+    from pydantic import field_validator
+
+    @field_validator('seed', mode='before')
+    @classmethod
+    def coerce_empty_seed(cls, v: object) -> object:
+        """Coerce empty-string seed to None so int(v, 16) never raises."""
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 
 class AssignRequest(BaseModel):
