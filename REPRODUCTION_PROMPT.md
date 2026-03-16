@@ -403,3 +403,58 @@ AI use disclosed, human review confirmed, license terms unaffected.
 `n`, `mpt`, `cd`, `ct`, `days`, `seed`, `aseed`, `d1`–`d5` (HH:MM-HH:MM), `d1b`–`d5b` (Name|start|end,...), `teams` (slot-ordered comma list), `cc` (Day:AfterMatch:Time,... for cycle changes).
 
 URL updated after Stage 1 completes AND after Stage 2 completes. All params needed to fully reproduce or retrieve any committed schedule are present.
+
+### Calc Max Matches button
+
+`calcMaxMatches()` — simulates the exact scheduling loop across all days/breaks/cycle changes, counting how many matches fit. Divides `totalSlotMatches * 6` by `numTeams` to get `mpt = floor(...)`. Verifies `ceil(numTeams * mpt / 6) <= totalSlotMatches`, backs off by 1 if not. Writes result to `#matchesPerTeam`, calls `onParamChanged()`. Reports surrogates needed. Button: `#btnCalcMaxMatches`.
+
+### Show Slot Numbers toggle
+
+`toggleFakeTeams()` — flips `window._frcShowFakeTeams` (bool) and `window._frcAbstractMode` inversely. Calls `renderSchedule()` then `updateB2BStat()`.
+
+- Off (default after S1): `_frcAbstractMode=true` → `—` in team cells, B2B=0
+- On: `_frcAbstractMode=false`, `_frcShowFakeTeams=true` → slot numbers as italic `S1`…`SN`, B2B recalculated with slot indices
+
+Button `#btnShowFakeTeams`: hidden initially, shown after S1 completes, hidden on S1 regen or S2 real-team load. Label toggles "Show Slot Numbers" / "Hide Slot Numbers". Accent outline/color when active.
+
+`updateB2BStat()` — standalone function that recomputes B2B from `_frcScheduled` entries respecting `_frcAbstractMode`. Called by `toggleFakeTeams()` and after schedule renders.
+
+`renderTeam(team, isSurrogate, isB2B, colorClass)` — three modes:
+1. `_frcAbstractMode`: `—` at 35% opacity
+2. `_frcShowFakeTeams && !_currentSlotMap`: italic `S{team}` at 60% opacity with tooltip
+3. Real teams: clickable team number as normal
+
+### B2B stat in finishGeneration
+`const b2b = window._frcAbstractMode ? 0 : b2bRaw` — zero in abstract mode regardless of slot-index coincidences.
+
+### URL params — no change
+`mpt` already encodes matches per team. `calcMaxMatches` writes to the field which is then captured by `buildShareUrl`. Fake teams toggle is transient display state and is not URL-encoded.
+
+### fullReset()
+
+Clears all schedule state back to blank slate. Triggered by ✗ Reset button in share bar.
+
+- Aborts any in-flight Stage 1 SSE request via AbortController
+- Nulls: `_currentAbstractScheduleId`, `_currentAssignedScheduleId`, `_abstractParams`, `_currentSlotMap`, `_currentSeed`, `_currentAssignSeed`, `_urlAutoTeams`
+- Resets: `_frcScheduled`, `_frcAbstractMode=true`, `_frcShowFakeTeams=false`, `_frcRoundBoundaries`, `_frcFilters`, retry counters
+- Hides: stage2Panel, progressWraps, paramChangedWarning, loadFromDbBanner, btnCommit, shareBar, btnShowFakeTeams, btnSavedSchedules (disabled)
+- Restores scheduleOutput to empty-state div
+- Resets all stat bar values to —
+- Calls `window.history.replaceState` to clear URL params
+- Asks confirmation before proceeding
+
+### calcMaxMatches()
+
+Steps through all days/breaks/cycle changes using the same cursor logic as schedule rendering.
+Counts how many matches fit (`totalSlotMatches`). Each match provides 6 player-slots.
+`mpt = floor(totalSlotMatches * 6 / numTeams)`. Verifies `ceil(numTeams * mpt / 6) <= totalSlotMatches`, backs off by 1 if not.
+Writes result to matchesPerTeam input. Shows status with match count, slot count, and surrogate count.
+
+### toggleFakeTeams()
+
+`window._frcShowFakeTeams` boolean. When toggled on:
+- `_frcAbstractMode = false` — slot numbers are rendered
+- `renderTeam()` shows `S{n}` in italic at 60% opacity with tooltip "Slot N (no real team assigned)"
+- B2B stat recalculated with slot indices (may be non-zero)
+When toggled off: `_frcAbstractMode = true`, dashes shown, B2B = 0.
+Button hidden when real teams are assigned (loadAssignedSchedule resets it).

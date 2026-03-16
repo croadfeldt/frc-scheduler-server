@@ -195,6 +195,15 @@ Both stages use deterministic seeded PRNGs:
 Same seed always produces identical output. Seeds are auto-generated, stored in
 the database, and encoded in the share URL so any schedule can be exactly reproduced.
 
+### UI controls
+
+| Button | Where | Description |
+|--------|-------|-------------|
+| ⟳ Calc Max Matches | Config panel | Calculates max matches per team given current time/day/break/cycle parameters; writes result back to Matches per Team field |
+| 👁 Show Slot Numbers | Config panel (after Stage 1) | Toggles abstract slot indices (S1–SN) on/off in the schedule; B2B recalculates with slot indices when visible |
+| ✓ Commit Schedule as Active | Stage 2 panel | Marks the current assigned schedule as active in the DB; posts structured JSON completion log |
+| ✗ Reset | Share bar | Clears all schedule state, resets stats and output to blank slate, clears URL; keeps parameters |
+
 ### URL reproducibility
 After generating a schedule, the browser URL is updated:
 ```
@@ -207,7 +216,7 @@ After generating a schedule, the browser URL is updated:
 | Parameter | Example | Description |
 |-----------|---------|-------------|
 | `n` | `51` | Number of teams |
-| `mpt` | `11` | Matches per team |
+| `mpt` | `11` | Matches per team (auto-filled by Calc Max Matches button) |
 | `cd` | `3` | Cooldown |
 | `ct` | `8` | Cycle time (minutes, any decimal e.g. `7.3`, `6.75`) |
 | `days` | `2` | Number of competition days |
@@ -220,6 +229,40 @@ After generating a schedule, the browser URL is updated:
 
 Opening this URL auto-reproduces the full schedule including day/time configuration.
 Without `teams`, the abstract structure renders with slot labels (S1, S2...).
+
+---
+
+## UI Features
+
+### Calc Max Matches
+The **⟳ Calc Max Matches** button calculates the maximum equal matches each team
+can receive given the current schedule parameters (teams, cycle time, days,
+breaks, cycle changes). It simulates the exact scheduling loop — stepping through
+each day accounting for breaks and per-segment cycle times — then divides total
+6-slot capacity by team count. The result is written back to the Matches per Team
+field. A status message reports total matches, slots available, and any surrogates
+needed.
+
+### Show Slot Numbers toggle
+After Stage 1 generates an abstract schedule, a **👁 Show Slot Numbers** toggle
+appears. This is a UI-only view aid:
+
+| State | Team cells | B2B stat | Notes |
+|-------|-----------|----------|-------|
+| Off (default) | `—` | Always 0 | Slot indices have no team identity |
+| On | `S1`…`SN` italic | Recalculated with slot indices | Makes match structure visible |
+
+The toggle resets automatically when Stage 1 regenerates or real teams are
+assigned. It is not encoded in the share URL (transient display state only).
+
+### B2B stat behaviour
+- **Abstract mode** (Stage 1 complete, no real teams): always 0 — slot indices
+  are structural placeholders, not real teams, so back-to-back analysis is
+  meaningless.
+- **Fake teams visible** (Show Slot Numbers on): B2B recalculated using slot
+  indices — shows the structural back-to-backs inherent in the schedule layout.
+- **Real teams assigned** (Stage 2 complete): B2B calculated with real team
+  numbers as normal.
 
 ---
 

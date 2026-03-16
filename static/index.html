@@ -234,6 +234,8 @@
   /* Break rows */
   .break-row-display { background: rgba(200,153,42,0.07); border-left: 3px solid var(--amber); }
   .break-row-display td { color: #b89040; font-size: 0.78rem; letter-spacing: 0.04em; padding: 0.45rem 0.7rem; }
+  .cycle-change-display { background: rgba(137,180,250,0.05); border-left: 3px solid rgba(137,180,250,0.4); }
+  .cycle-change-display td { color: var(--text-muted); font-size: 0.72rem; letter-spacing: 0.04em; padding: 0.3rem 0.7rem; font-style: italic; }
 
   .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4rem 2rem; color: var(--text-muted); text-align: center; gap: 1rem; }
   .empty-icon { font-size: 3rem; opacity: 0.25; }
@@ -346,7 +348,7 @@
   tr.filtered-highlight td { background: rgba(122,164,240,0.09) !important; }
 
   .cycle-changes-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.5rem; }
-  .cycle-change-row { display: grid; grid-template-columns: 0.7fr 0.8fr 0.8fr auto; gap: 0.4rem; align-items: end; }
+  .cycle-change-row { display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 0.4rem; align-items: end; }
 
   /* Round boundary marker row */
   tr.round-boundary-row td {
@@ -540,6 +542,7 @@
     <div style="margin-left:auto;display:flex;gap:0.5rem;">
       <button class="btn-share" onclick="shareSchedule()" title="Copy shareable URL">&#128279; Share</button>
       <button class="btn-duplicate" id="btnDuplicate" onclick="duplicateSchedule()" style="display:none;" title="Duplicate this schedule as your own">&#10560; Duplicate</button>
+      <button class="btn-share" onclick="fullReset()" title="Clear everything and start fresh" style="border-color:var(--danger);color:var(--danger);">&#10006; Reset</button>
     </div>
   </div>
 
@@ -664,6 +667,10 @@
             <label>Matches per Team</label>
             <input type="number" id="matchesPerTeam" value="8" min="1" max="20">
           </div>
+        </div>
+        <div style="display:flex;gap:0.4rem;margin-top:-0.25rem;margin-bottom:0.5rem;">
+          <button class="btn-sm" id="btnCalcMaxMatches" onclick="calcMaxMatches()" title="Calculate the maximum matches each team can get given the current schedule parameters">&#128260; Calc Max Matches</button>
+          <button class="btn-sm" id="btnShowFakeTeams" onclick="toggleFakeTeams()" style="display:none;" title="Toggle display of slot numbers in abstract schedule">&#128065; Show Slot Numbers</button>
         </div>
         <div class="field-row">
           <div class="field">
@@ -986,16 +993,8 @@ function validateTimesAndRecalc() {
 document.getElementById('numDays').addEventListener('change', function() {
   buildDaysUI();
   validateTimes();
-  // Update day dropdowns in existing cycle change rows
-  var numDays = parseInt(this.value) || 1;
-  document.querySelectorAll('.cycle-change-row .cc-day').forEach(function(sel) {
-    var cur = sel.value;
-    var opts = '';
-    for (var i = 1; i <= numDays; i++) {
-      opts += '<option value="' + i + '"' + (String(i) === cur ? ' selected' : '') + '>Day ' + i + '</option>';
-    }
-    sel.innerHTML = opts;
-  });
+  // Refresh day labels on cycle change rows
+  refreshCycleDayLabels();
   onParamChanged();
 });
 buildDaysUI();
@@ -1301,7 +1300,7 @@ function applyUrlParams(params) {
     params.cc.split(',').forEach(function(token) {
       var parts = token.split(':');
       if (parts.length >= 3) {
-        addCycleChange(parseFloat(parts[1]), parseFloat(parts[2]), parseInt(parts[0]));
+        addCycleChange(parseFloat(parts[1]), parseFloat(parts[2]));
       }
     });
   }
@@ -1350,6 +1349,184 @@ async function duplicateSchedule() {
   } catch(e) { showApiStatus('Duplicate failed: ' + e.message, true); }
 }
 
+
+
+// ── Full reset — clear all state and return to blank slate ───────────────────
+function fullReset() {
+  if (!confirm('Reset everything? This clears the current schedule, seeds, and results. Parameters will be kept.')) return;
+
+  // Cancel any in-flight request
+  if (_s1AbortController) { _s1AbortController.abort(); _s1AbortController = null; }
+  clearTimeout(_autoPopulateTimeout);
+  _autoPopulateTimeout = null;
+
+  // Clear all schedule state
+  _currentAbstractScheduleId = null;
+  _currentAssignedScheduleId = null;
+  _abstractParams             = null;
+  _currentSlotMap             = null;
+  _currentSeed                = null;
+  _currentAssignSeed          = null;
+  _urlAutoTeams               = null;
+  window._frcScheduled        = null;
+  window._frcAbstractMode     = true;
+  window._frcShowFakeTeams    = false;
+  window._frcRoundBoundaries  = null;
+  window._frcFilters          = null;
+  window._stage1RetryCount    = 0;
+  window._stage2Retried       = false;
+
+  // Reset UI panels
+  document.getElementById('stage2Panel').style.display       = 'none';
+  document.getElementById('progressWrap').style.display      = 'none';
+  document.getElementById('progressWrap2').style.display     = 'none';
+  document.getElementById('paramChangedWarning').style.display = 'none';
+  document.getElementById('loadFromDbBanner').style.display  = 'none';
+  document.getElementById('btnCommit').style.display         = 'none';
+  document.getElementById('btnAssign').disabled              = true;
+  document.getElementById('btnGenerate').disabled            = false;
+
+  // Reset fake teams button
+  var fakeBtn = document.getElementById('btnShowFakeTeams');
+  if (fakeBtn) { fakeBtn.style.display = 'none'; fakeBtn.textContent = '\uD83D\uDC41 Show Slot Numbers'; fakeBtn.style.outline = ''; fakeBtn.style.color = ''; }
+
+  // Reset share bar
+  document.getElementById('shareBar').style.display = 'none';
+  updateSeedDisplay(null, null);
+
+  // Reset schedule output to empty state
+  document.getElementById('scheduleOutput').innerHTML =
+    '<div class="empty-state"><div class="empty-icon">&#127942;</div>' +
+    '<p>Configure your competition parameters<br>and click Generate Schedule</p></div>';
+  document.getElementById('scheduleWarning').style.display = 'none';
+  document.getElementById('scheduleWarning').textContent = '';
+
+  // Reset stats bar
+  ['statMatches','statTeams','statPerTeam','statDays','statB2B','statSurrogates'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) { el.textContent = '\u2014'; el.style.color = ''; }
+  });
+  var minEl = document.getElementById('statSurrogatesMin');
+  if (minEl) { minEl.textContent = ''; }
+
+  // Hide filter bar
+  document.getElementById('filterBar').style.display = 'none';
+  resetFilters();
+
+  // Reset saved schedules button
+  document.getElementById('btnSavedSchedules').disabled = true;
+
+  // Clean URL
+  try { window.history.replaceState(null, '', window.location.pathname); } catch(e) {}
+
+  showApiStatus('Reset complete \u2014 ready to build a new schedule');
+}
+
+// ── Calculate maximum matches per team given current schedule parameters ─────
+function calcMaxMatches() {
+  var numTeams  = parseInt(document.getElementById('numTeams').value) || 0;
+  var cycleTime = parseFloat(document.getElementById('cycleTime').value) || 8;
+  if (numTeams < 6) { showApiStatus('Enter at least 6 teams before calculating', true); return; }
+  if (!validateTimes()) { showApiStatus('Fix invalid times before calculating', true); return; }
+  if (!validateCycleChanges()) { showApiStatus('Fix cycle change fields before calculating', true); return; }
+
+  var cycleChanges = getCycleTimeChanges();
+  var dayRows = document.querySelectorAll('.day-row');
+
+  // Count how many matches fit across all days with exact cycle time accounting
+  var totalSlotMatches = 0;
+  dayRows.forEach(function(row) {
+    var cursor = timeStrToMin(row.querySelector('.day-start').value);
+    var dayEnd = timeStrToMin(row.querySelector('.day-end').value);
+    var breaks = Array.from(row.querySelectorAll('.break-row')).map(function(br) {
+      return { start: timeStrToMin(br.querySelector('.break-start').value),
+               end:   timeStrToMin(br.querySelector('.break-end').value), done: false };
+    }).filter(function(b) { return b.end > b.start; });
+
+    while (true) {
+      // Flush any breaks
+      var flushed = true;
+      while (flushed) {
+        flushed = false;
+        breaks.forEach(function(b) {
+          if (!b.done && b.start <= cursor) { cursor = Math.max(cursor, b.end); b.done = true; flushed = true; }
+        });
+      }
+      var ct = getCycleTime(totalSlotMatches + 1, cycleTime, cycleChanges);
+      if (cursor + ct > dayEnd) break;
+      cursor += ct;
+      totalSlotMatches++;
+    }
+  });
+
+  if (totalSlotMatches === 0) { showApiStatus('No matches fit in the current schedule', true); return; }
+
+  // Distribute 6 player-slots per match evenly across teams
+  var totalPlayerSlots = totalSlotMatches * 6;
+  var mpt = Math.floor(totalPlayerSlots / numTeams);
+  if (mpt < 1) mpt = 1;
+
+  // Verify ceil(numTeams*mpt/6) fits; back off if needed
+  if (Math.ceil(numTeams * mpt / 6) > totalSlotMatches) mpt = Math.max(1, mpt - 1);
+
+  var neededMatches = Math.ceil(numTeams * mpt / 6);
+  var surrogates    = neededMatches * 6 - numTeams * mpt;
+
+  document.getElementById('matchesPerTeam').value = mpt;
+
+  var msg = '\u2713 Max ' + mpt + ' matches/team \u2014 ' + neededMatches + ' total matches fit'
+    + (surrogates > 0 ? ', ' + surrogates + ' surrogate' + (surrogates !== 1 ? 's' : '') + ' needed' : ', no surrogates needed');
+  showApiStatus(msg);
+  onParamChanged();
+}
+
+// ── Toggle slot-number display in abstract schedule ──────────────────────────
+// When ON: slot indices (1…N) shown, B2B recalculated with those indices.
+// When OFF: dashes shown, B2B forced to 0 (slot indices are not real teams).
+window._frcShowFakeTeams = false;
+
+function toggleFakeTeams() {
+  window._frcShowFakeTeams = !window._frcShowFakeTeams;
+  window._frcAbstractMode  = !window._frcShowFakeTeams;
+
+  var btn = document.getElementById('btnShowFakeTeams');
+  if (btn) {
+    if (window._frcShowFakeTeams) {
+      btn.textContent = '\uD83D\uDC41 Hide Slot Numbers';
+      btn.style.outline = '1px solid var(--accent)';
+      btn.style.color   = 'var(--accent)';
+    } else {
+      btn.textContent = '\uD83D\uDC41 Show Slot Numbers';
+      btn.style.outline = '';
+      btn.style.color   = '';
+    }
+  }
+
+  // Re-render schedule with updated mode
+  if (window._frcScheduled) {
+    renderSchedule();
+    updateB2BStat();
+  }
+}
+
+// Recompute and display B2B stat respecting abstract mode
+function updateB2BStat() {
+  var el = document.getElementById('statB2B');
+  if (!el) return;
+  var matches = (window._frcScheduled || []).flatMap(function(d) {
+    return d.entries.filter(function(e) { return e.type === 'match'; });
+  });
+  var b2bRaw = 0;
+  if (!window._frcAbstractMode && matches.length > 0) {
+    for (var i = 1; i < matches.length; i++) {
+      var prev = new Set([].concat(matches[i-1].red, matches[i-1].blue));
+      if ([].concat(matches[i].red, matches[i].blue).some(function(t) { return prev.has(t); })) b2bRaw++;
+    }
+  }
+  el.textContent = b2bRaw;
+  el.style.color = b2bRaw === 0 ? 'var(--accent3)' : b2bRaw <= 2 ? 'var(--amber)' : 'var(--danger)';
+}
+
 function onParamChanged() {
   if (_abstractParams !== null) {
     // Only mark stale and disable assign if structural params changed.
@@ -1386,27 +1563,67 @@ function estimateFirstMatchOfDay(dayIdx) {
   var mpt          = parseInt(document.getElementById('matchesPerTeam').value) || 6;
   var numDays      = parseInt(document.getElementById('numDays').value) || 1;
   var totalMatches = Math.ceil(numTeams * mpt / 6);
-  // Distribute matches evenly across days
   var matchesPerDay = Math.ceil(totalMatches / numDays);
   return dayIdx * matchesPerDay + 1;
+}
+
+// Return the day number (1-based) that a given match falls on.
+// Uses actual scheduled data if available, else falls back to estimate.
+function getDayForMatch(matchNum) {
+  if (!matchNum || isNaN(matchNum) || matchNum < 1) return null;
+  // Use actual schedule if rendered
+  var scheduled = window._frcScheduled;
+  if (scheduled && scheduled.length > 0) {
+    for (var d = 0; d < scheduled.length; d++) {
+      var matches = scheduled[d].entries.filter(function(e) { return e.type === 'match'; });
+      if (matches.length === 0) continue;
+      var first = matches[0].num;
+      var last  = matches[matches.length - 1].num;
+      if (matchNum >= first && matchNum <= last) return d + 1;
+      // If after last match of last day, assign to last day
+      if (d === scheduled.length - 1 && matchNum > last) return d + 1;
+    }
+    return 1;
+  }
+  // Fallback: estimate from params
+  var numTeams     = parseInt(document.getElementById('numTeams').value) || 24;
+  var mpt          = parseInt(document.getElementById('matchesPerTeam').value) || 6;
+  var numDays      = parseInt(document.getElementById('numDays').value) || 1;
+  var totalMatches = Math.ceil(numTeams * mpt / 6);
+  var matchesPerDay = Math.ceil(totalMatches / numDays);
+  return Math.min(numDays, Math.ceil(matchNum / matchesPerDay));
+}
+
+// Refresh all cycle change day labels based on current after-match values
+function refreshCycleDayLabels() {
+  document.querySelectorAll('.cycle-change-row').forEach(function(row) {
+    var afterInput = row.querySelector('.cc-after');
+    var dayLabel   = row.querySelector('.cc-day-label');
+    if (!dayLabel) return;
+    var matchNum = parseInt(afterInput.value);
+    var day = getDayForMatch(matchNum);
+    dayLabel.textContent = day ? 'Day ' + day : '—';
+  });
 }
 
 function validateCycleChanges() {
   var allFilled = true;
   document.querySelectorAll('.cc-after').forEach(function(inp) {
-    if (!inp.value || parseFloat(inp.value) < 1) {
-      inp.classList.add('input-error');
-      allFilled = false;
-    }
+    var bad = !inp.value || parseFloat(inp.value) < 1;
+    inp.classList.toggle('input-error', bad);
+    if (bad) allFilled = false;
   });
-  // Also update the error message
+  document.querySelectorAll('.cc-time').forEach(function(inp) {
+    var bad = !inp.value || parseFloat(inp.value) <= 0;
+    inp.classList.toggle('input-error', bad);
+    if (bad) allFilled = false;
+  });
   var errMsg = document.getElementById('timeErrorMsg');
   if (errMsg) {
     if (!allFilled) {
       errMsg.textContent = '⚠ Fill in all required cycle change fields before generating';
       errMsg.classList.add('visible');
-    } else if (!errMsg.textContent.includes('time')) {
-      // Only clear if the message was from cycle changes (not from time validation)
+    } else if (!errMsg.textContent.includes('Fix invalid times')) {
       errMsg.textContent = '';
       errMsg.classList.remove('visible');
     }
@@ -1415,73 +1632,69 @@ function validateCycleChanges() {
 }
 
 function addCycleChange(afterMatch, newTime, forDay) {
-  var numDays = parseInt(document.getElementById('numDays').value) || 1;
-  // Default day: first day that has no existing cycle change, or day 1
-  var usedDays = Array.from(document.querySelectorAll('.cc-day')).map(function(s){ return parseInt(s.value); });
-  var defaultDay = forDay != null ? forDay : 1;
-  if (forDay == null) {
-    for (var d = 1; d <= numDays; d++) {
-      if (!usedDays.includes(d)) { defaultDay = d; break; }
-    }
-  }
-  // Leave afterMatch blank by default — user must fill it in.
-  // Highlight it as required until filled.
-  var defaultAfter = afterMatch != null ? afterMatch : '';
+  var defaultAfter = (afterMatch != null && afterMatch !== '') ? afterMatch : '';
+  var initialDay   = defaultAfter ? getDayForMatch(parseInt(defaultAfter)) : null;
+  var dayText      = initialDay ? 'Day ' + initialDay : '—';
 
   const list = document.getElementById('cycleChangesList');
-  const row = document.createElement('div');
+  const row  = document.createElement('div');
   row.className = 'cycle-change-row';
 
-  // Build day options
-  var dayOpts = '';
-  for (var i = 1; i <= numDays; i++) {
-    dayOpts += '<option value="' + i + '"' + (i === defaultDay ? ' selected' : '') + '>Day ' + i + '</option>';
-  }
-
   row.innerHTML =
-    '<div class="field"><label>Day</label>' +
-      '<select class="cc-day" style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.45rem 0.5rem;font-size:0.85rem;border-radius:4px;width:100%;">' +
-        dayOpts +
-      '</select></div>' +
+    '<div class="field" style="min-width:3.5rem;">' +
+      '<label style="font-size:0.65rem;">Day</label>' +
+      '<div class="cc-day-label" style="font-size:0.82rem;font-weight:600;color:var(--accent);padding:0.45rem 0.3rem;white-space:nowrap;">' + dayText + '</div>' +
+    '</div>' +
     '<div class="field"><label>After Match # <span style="color:var(--danger)">*</span></label>' +
       '<input type="number" class="cc-after input-error" placeholder="Required" min="1" value="' + defaultAfter + '" required></div>' +
-    '<div class="field"><label>New Cycle (min)</label>' +
-      '<input type="number" class="cc-time" placeholder="e.g. 7.5" min="0.1" max="60" step="any" value="' + (newTime || '') + '"></div>' +
+    '<div class="field"><label>New Cycle (min) <span style="color:var(--danger)">*</span></label>' +
+      '<input type="number" class="cc-time input-error" placeholder="Required" min="0.1" max="60" step="any" value="' + (newTime || '') + '" required></div>' +
     '<button class="btn-icon btn-remove-cc" title="Remove">&#x2715;</button>';
   list.appendChild(row);
 
-  // When day changes, update the default match number
-  var daySelect = row.querySelector('.cc-day');
   var afterInput = row.querySelector('.cc-after');
-  daySelect.addEventListener('change', function() {
-    var d = parseInt(daySelect.value);
-    afterInput.value = Math.max(1, estimateFirstMatchOfDay(d - 1) - 1);
-    afterInput.classList.remove('input-error');
-    validateCycleChanges();
-    onParamChanged();
-  });
-  afterInput.addEventListener('input', function() {
-    afterInput.classList.toggle('input-error', !afterInput.value || parseFloat(afterInput.value) < 1);
-    validateCycleChanges();
-  });
-  afterInput.addEventListener('change', function() {
-    afterInput.classList.toggle('input-error', !afterInput.value || parseFloat(afterInput.value) < 1);
-    validateCycleChanges();
-    onParamChanged();
-  });
-  row.querySelector('.cc-time').addEventListener('change', onParamChanged);
+  var timeInput  = row.querySelector('.cc-time');
+  var dayLabel   = row.querySelector('.cc-day-label');
+
+  function updateDayLabel() {
+    var mn = parseInt(afterInput.value);
+    var d  = getDayForMatch(mn);
+    dayLabel.textContent = d ? 'Day ' + d : '—';
+  }
+
+  function checkAfter() {
+    var bad = !afterInput.value || parseFloat(afterInput.value) < 1;
+    afterInput.classList.toggle('input-error', bad);
+    return !bad;
+  }
+  function checkTime() {
+    var bad = !timeInput.value || parseFloat(timeInput.value) <= 0;
+    timeInput.classList.toggle('input-error', bad);
+    return !bad;
+  }
+
+  // Clear input-error on existing values passed in
+  if (defaultAfter !== '') checkAfter();
+  if (newTime) checkTime();
+
+  afterInput.addEventListener('input', function() { checkAfter(); updateDayLabel(); validateCycleChanges(); });
+  afterInput.addEventListener('change', function() { checkAfter(); updateDayLabel(); validateCycleChanges(); onParamChanged(); });
+  timeInput.addEventListener('input',  function() { checkTime(); validateCycleChanges(); });
+  timeInput.addEventListener('change', function() { checkTime(); validateCycleChanges(); onParamChanged(); });
   row.querySelector('.btn-remove-cc').addEventListener('click', function() {
-    row.remove(); onParamChanged();
+    row.remove(); validateCycleChanges(); onParamChanged();
   });
 }
 
 function getCycleTimeChanges() {
   return Array.from(document.querySelectorAll('.cycle-change-row'))
     .map(function(row) {
+      var after = parseInt(row.querySelector('.cc-after').value);
+      var time  = parseFloat(row.querySelector('.cc-time').value);
       return {
-        day:   parseInt(row.querySelector('.cc-day')   ? row.querySelector('.cc-day').value   : '1'),
-        after: parseInt(row.querySelector('.cc-after').value),
-        time:  parseFloat(row.querySelector('.cc-time').value),
+        day:   getDayForMatch(after) || 1,
+        after: after,
+        time:  time,
       };
     })
     .filter(function(c) { return !isNaN(c.after) && !isNaN(c.time) && c.after >= 1 && c.time > 0; })
@@ -2431,6 +2644,11 @@ async function generateSchedule() {
   document.getElementById('btnAssign').disabled = true;
   document.getElementById('btnCommit').style.display = 'none';
   document.getElementById('paramChangedWarning').style.display = 'none';
+  // Hide fake teams button and reset mode while regenerating
+  var fakeBtn2 = document.getElementById('btnShowFakeTeams');
+  if (fakeBtn2) fakeBtn2.style.display = 'none';
+  window._frcShowFakeTeams = false;
+  window._frcAbstractMode  = true;
 
   const startTime = performance.now();
 
@@ -2548,6 +2766,16 @@ async function generateSchedule() {
       document.getElementById('progressWrap').style.display = 'none';
       window._stage1RetryCount = 0;
       updateUrlFromState();
+      // Reset and show fake-teams toggle
+      window._frcShowFakeTeams = false;
+      window._frcAbstractMode  = true;
+      var fakeBtn = document.getElementById('btnShowFakeTeams');
+      if (fakeBtn) {
+        fakeBtn.style.display  = 'inline-block';
+        fakeBtn.textContent    = '\uD83D\uDC41 Show Slot Numbers';
+        fakeBtn.style.outline  = '';
+        fakeBtn.style.color    = '';
+      }
       showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
       if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
         _urlAutoTeams = null; setTimeout(assignTeams, 200);
@@ -2928,7 +3156,12 @@ async function assignTeams() {
 
 // Load and display an assigned schedule (Stage 2 result)
 async function loadAssignedSchedule(scheduleId, dayConfig) {
-  window._frcAbstractMode = false; // real team numbers are now available
+  window._frcAbstractMode  = false; // real team numbers are now available
+  window._frcShowFakeTeams = false;
+  var fakeBtn3 = document.getElementById('btnShowFakeTeams');
+  if (fakeBtn3) {
+    fakeBtn3.style.display = 'none'; // not needed once real teams are shown
+  }
   try {
     const sched = await apiFetch('/api/assigned-schedules/' + scheduleId);
     _currentAssignedScheduleId = scheduleId;
@@ -3137,6 +3370,16 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
       });
       cursor = matchEnd;
       matchIdx++;
+
+      // After advancing matchIdx, check if cycle time changes for the next match
+      // and inject a cycle-change marker row
+      if (matchIdx < totalMatches) {
+        const prevTime = getCycleTime(matchIdx,     defaultCycleTime, cycleChanges);
+        const nextTime = getCycleTime(matchIdx + 1, defaultCycleTime, cycleChanges);
+        if (nextTime !== prevTime) {
+          entries.push({type: 'cycle-change', afterMatch: matchIdx, newTime: nextTime, atMin: cursor});
+        }
+      }
     }
 
     // Add any remaining breaks
@@ -3148,7 +3391,10 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
   }
 
   // Update stats
-  const b2b = countBackToBacks(matches);
+  const b2bRaw = countBackToBacks(matches);
+  // In abstract mode slot indices are not real teams — B2B count is meaningless.
+  // Only show it when real teams are assigned or fake teams are being displayed.
+  const b2b = window._frcAbstractMode ? 0 : b2bRaw;
   const totalSurrogates = countSurrogates(matches);
   document.getElementById('statMatches').textContent = totalMatches;
   document.getElementById('statTeams').textContent = numTeams;
@@ -3203,6 +3449,7 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
   // Store scheduled globally for filter re-application
   window._frcTzAbbr = tzAbbr;
   window._frcScheduled = scheduled;
+  refreshCycleDayLabels(); // update day labels on cycle change rows
   window._frcRoundBoundaries = roundBoundaries;
   window._frcMatchesPerRound = Math.ceil(numTeams / 6);
   window._frcSurrogatesPerRound = window._frcMatchesPerRound * 6 - numTeams;
@@ -3367,9 +3614,14 @@ function renderTeam(team, isSurrogate, isB2B, colorClass) {
   var surBadge = isSurrogate ? '<span class="surrogate-badge">S</span>' : '';
   var b2bBadge = isB2B ? '<span class="b2b-badge">B2B</span>' : '';
   var extraClass = (isSurrogate ? ' team-surrogate' : '') + (isB2B ? ' team-b2b' : '');
-  // In abstract mode show blank slots — Stage 1 is team-agnostic structure only
   if (window._frcAbstractMode) {
+    // Pure abstract — blank slots, no team identity
     return '<span class="' + colorClass + extraClass + '" style="opacity:0.35;">—</span>';
+  }
+  if (window._frcShowFakeTeams && !window._currentSlotMap) {
+    // Fake teams visible — show slot number in muted style to signal not real
+    return '<span class="' + colorClass + extraClass + '" style="opacity:0.6;font-style:italic;" title="Slot ' + team + ' (no real team assigned)">'
+      + 'S' + team + surBadge + b2bBadge + '</span>';
   }
   return '<span class="' + colorClass + extraClass + ' team-link" onclick="addFilter(&apos;team&apos;,' + team + ')">' + team + surBadge + b2bBadge + '</span>';
 }
@@ -3430,6 +3682,12 @@ function renderSchedule() {
         if (f.teams.length === 0 && f.alliance === null) {
           tr.className = 'break-row-display';
           tr.innerHTML = '<td colspan="4">&#9646; ' + entry.name + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.start) + ' &ndash; ' + minToTime(entry.end) + '</td>';
+          tbody.appendChild(tr);
+        }
+      } else if (entry.type === 'cycle-change') {
+        if (f.teams.length === 0 && f.alliance === null) {
+          tr.className = 'cycle-change-display';
+          tr.innerHTML = '<td colspan="4">&#8645; Cycle time changes to <strong>' + entry.newTime + ' min</strong> from match ' + (entry.afterMatch + 1) + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.atMin) + '</td>';
           tbody.appendChild(tr);
         }
       } else {
