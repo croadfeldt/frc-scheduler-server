@@ -996,6 +996,7 @@ document.getElementById('numDays').addEventListener('change', function() {
     }
     sel.innerHTML = opts;
   });
+  onParamChanged();
 });
 buildDaysUI();
 validateTimes();
@@ -1364,8 +1365,9 @@ function onParamChanged() {
       document.getElementById('paramChangedWarning').style.display = 'block';
       document.getElementById('btnAssign').disabled = true;
     }
-    // Always debounce auto-regenerate for structural changes only
-    if (structuralChange && document.getElementById('autoPopulate').checked) {
+    // Auto-generate debounce fires for ALL param changes (structural or not)
+    // since times, breaks, and cycle changes all affect the schedule output.
+    if (document.getElementById('autoPopulate').checked) {
       clearTimeout(_autoPopulateTimeout);
       _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 1500);
     }
@@ -2482,17 +2484,18 @@ async function generateSchedule() {
     });
 
     if (!res.ok) {
-      // 503/502/504 = server temporarily overloaded — retry after a pause
-      // rather than falling back to client-side immediately
-      if ((res.status === 503 || res.status === 502 || res.status === 504)
-          && !window._stage1Retried) {
-        window._stage1Retried = true;
-        btn.disabled = false;
-        clearInterval(animInterval);
-        document.getElementById('progressWrap').style.display = 'none';
-        showApiStatus('\u23f3 Server busy (' + res.status + ') \u2014 retrying in 3s\u2026');
-        setTimeout(function() { generateSchedule(); }, 3000);
-        return;
+      // 503/502/504 = server temporarily overloaded — retry with backoff
+      if (res.status === 503 || res.status === 502 || res.status === 504) {
+        window._stage1RetryCount = (window._stage1RetryCount || 0) + 1;
+        if (window._stage1RetryCount <= 4) {
+          var delay = Math.min(2000 * window._stage1RetryCount, 10000); // 2s, 4s, 6s, 8s
+          btn.disabled = false;
+          clearInterval(animInterval);
+          document.getElementById('progressWrap').style.display = 'none';
+          showApiStatus('\u23f3 Server busy (' + res.status + ') \u2014 retrying in ' + (delay/1000) + 's\u2026 (attempt ' + window._stage1RetryCount + '/4)');
+          setTimeout(function() { generateSchedule(); }, delay);
+          return;
+        }
       }
       throw new Error(res.statusText || ('HTTP ' + res.status));
     }
@@ -2543,7 +2546,7 @@ async function generateSchedule() {
       await checkForSavedAssignment(doneMsg.abstract_schedule_id);
       btn.disabled = false;
       document.getElementById('progressWrap').style.display = 'none';
-      window._stage1Retried = false;
+      window._stage1RetryCount = 0;
       updateUrlFromState();
       showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
       if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
@@ -2570,15 +2573,18 @@ async function generateSchedule() {
     const isNetworkDrop = err.message === 'Load failed' || err.message === 'Failed to fetch' ||
                           err.message === 'NetworkError when attempting to fetch resource.' ||
                           err.message.includes('network connection was lost');
-    if (isNetworkDrop && !window._stage1Retried) {
-      window._stage1Retried = true;
-      showApiStatus('\u23f3 Connection dropped \u2014 retrying in 3s\u2026');
-      btn.disabled = false;
-      document.getElementById('progressWrap').style.display = 'none';
-      setTimeout(function() { generateSchedule(); }, 3000);
-      return;
+    if (isNetworkDrop) {
+      window._stage1RetryCount = (window._stage1RetryCount || 0) + 1;
+      if (window._stage1RetryCount <= 3) {
+        var dropDelay = Math.min(2000 * window._stage1RetryCount, 8000);
+        showApiStatus('\u23f3 Connection dropped \u2014 retrying in ' + (dropDelay/1000) + 's\u2026');
+        btn.disabled = false;
+        document.getElementById('progressWrap').style.display = 'none';
+        setTimeout(function() { generateSchedule(); }, dropDelay);
+        return;
+      }
     }
-    window._stage1Retried = false;
+    window._stage1RetryCount = 0;
     showApiStatus('Server error: ' + err.message + ' \u2014 falling back to client-side', true);
     runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA,
       function(done, total, best, bi) { updateProgress(done, total, best, bi); },
