@@ -248,6 +248,7 @@ Without `teams`, the abstract structure renders with blank slots.
 | 👁 Show / Hide Slot Numbers | Config panel | Toggle showing abstract slot indices (S1…N) vs blank dashes; B2B recalculates accordingly |
 | ✖ Reset | Config panel header & share bar | Two-stage reset: clears results (keeps params), optionally resets params to defaults too. Clears URL. |
 | Share | Share bar | Copies full reproducible URL to clipboard |
+| TBA event dropdown | Event bar (code input) | Automatically fetches TBA events for the selected year. Typing filters the list by key or name. Clicking an entry fills the code input and loads the event. Results are cached per year. |
 | ⬇ CSV | Results panel header | Downloads `frc_schedule.csv` — Match, Day, Time, Red 1-3, Blue 1-3, Surrogates |
 | ⬇ JSON | Results panel header | Downloads `frc_schedule.json` — full structured schedule with parameters, day config, break rows, cycle-change rows, and per-match time in minutes for import into other tools |
 | ✓ Committed | Share bar | After commit, shows confirmation state |
@@ -398,21 +399,55 @@ Users can generate, view, and share schedules anonymously.
 
 ---
 
-## Setting Up OAuth
+## Authentication (Optional)
 
-### Google
+Authentication is **entirely optional** — all schedule generation, viewing, and sharing works without signing in. Auth adds ownership tracking so you can delete your own schedules, and the `created_by` field in the commit log.
+
+The "no auth providers configured" message means the relevant environment variables are empty. You must configure at least one OAuth provider to enable sign-in.
+
+### Setting Up Google OAuth (recommended — easier)
+
 1. Go to [Google Cloud Console → APIs → Credentials](https://console.cloud.google.com/apis/credentials)
-2. Create OAuth 2.0 Client ID → Web application
-3. Add authorized redirect URI: `${BASE_URL}/auth/google/callback`
-4. Copy Client ID and Secret to `.env` or OpenShift secret
+2. Create **OAuth 2.0 Client ID** → Web application
+3. Add authorized redirect URI:
+   ```
+   https://your-host/auth/google/callback
+   ```
+4. Copy the Client ID and Client Secret
+5. Set these in your `.env` or `openshift/01-secrets.yaml`:
+   ```yaml
+   GOOGLE_CLIENT_ID:     "123456789-abc.apps.googleusercontent.com"
+   GOOGLE_CLIENT_SECRET: "GOCSPX-..."
+   JWT_SECRET:           "<run: openssl rand -hex 32>"
+   BASE_URL:             "https://your-host"
+   ```
+6. For OpenShift: `oc apply -f openshift/01-secrets.yaml` then restart the pod, or re-run `bash openshift/rebuild.sh`
 
-### Apple
-1. Go to [Apple Developer → Identifiers](https://developer.apple.com/account/resources/identifiers)
-2. Register a Services ID (for web)
-3. Enable Sign In with Apple, add redirect URI: `${BASE_URL}/auth/apple/callback`
-4. Create a private key under Keys, download the `.p8` file
-5. Set `APPLE_CLIENT_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, and `APPLE_PRIVATE_KEY`
-   (replace newlines in the PEM with literal `\n`)
+### Setting Up Apple OAuth
+
+Requires an active Apple Developer account ($99/year).
+
+1. Go to [Apple Developer → Identifiers](https://developer.apple.com/account/resources/identifiers/serviceId/add)
+2. Register a **Services ID** (not an App ID)
+3. Enable **Sign In with Apple**, add redirect URI: `https://your-host/auth/apple/callback`
+4. Go to [Keys](https://developer.apple.com/account/resources/authkeys/add), create a key with Sign In with Apple enabled, download the `.p8` file
+5. Set in your environment:
+   ```yaml
+   APPLE_CLIENT_ID:    "com.your.services-id"
+   APPLE_TEAM_ID:      "XXXXXXXXXX"
+   APPLE_KEY_ID:       "YYYYYYYYYY"
+   APPLE_PRIVATE_KEY:  "-----BEGIN PRIVATE KEY-----\nMIG...\n-----END PRIVATE KEY-----"
+   ```
+   (replace actual newlines in the PEM with literal `\n`)
+
+### JWT Secret
+
+`JWT_SECRET` must be set for any auth to work — it signs the tokens issued after OAuth completes:
+```bash
+openssl rand -hex 32
+```
+
+Without `JWT_SECRET`, the server starts but `/auth/google/login` and `/auth/apple/login` will fail with a 500 error.
 
 ---
 

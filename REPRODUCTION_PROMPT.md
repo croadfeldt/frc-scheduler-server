@@ -561,3 +561,25 @@ Appear in the Schedule Output panel header after Stage 1 or Stage 2 completes. H
 }
 ```
 Includes break rows and cycle-change rows interleaved with matches. `time_min` is fractional minutes from midnight for precise import.
+
+
+### TBA Event Dropdown
+
+The event code input in the event bar has an inline dropdown overlay (`#tbaDropdown`) that shows TBA-registered events for the selected year.
+
+**Behaviour:**
+- On page load, `fetchTbaDropdown()` is called after 800ms to pre-populate the dropdown for the current year
+- When the year field changes (`onEventYearInput`), a 600ms debounce fires `fetchTbaDropdown()`
+- Results are cached in `_tbaDropdownCache[year]` to avoid repeat API calls
+- Typing in the code input calls `filterTbaDropdown(query)` which shows/hides rows by key or name match
+- Clicking a row calls `selectTbaEvent(key)` which fills the input and immediately calls `loadEventByCode()`
+- Clicking outside the input/dropdown hides it; focusing the input re-shows it if data is loaded
+- If TBA is not configured or the request fails, the dropdown is silently skipped (no error shown)
+
+### Authentication Setup
+
+Auth is optional. The "no auth providers configured" message means `GOOGLE_CLIENT_ID` / `APPLE_CLIENT_ID` env vars are empty strings. Set them in `openshift/01-secrets.yaml` (see README for full steps).
+
+`JWT_SECRET` must also be set or token issuance will fail with a 500 error. Generate with: `openssl rand -hex 32`
+
+The server reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APPLE_CLIENT_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` from env at startup. The `/auth/providers` endpoint returns `{"google": bool, "apple": bool}` so the frontend only shows configured provider buttons.

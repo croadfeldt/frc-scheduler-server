@@ -562,12 +562,21 @@
       <input type="number" id="eventYear" placeholder="Year"
         style="width:68px;flex-shrink:0;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
                padding:0.4rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.88rem;"
-        onkeydown="if(event.key==='Enter')loadEventByCode()" min="2000" max="2099">
-      <input type="text" id="eventCodeInput" placeholder="Event code (e.g. mnwi) or name…"
-        style="flex:1;min-width:100px;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
-               padding:0.4rem 0.7rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.88rem;"
         onkeydown="if(event.key==='Enter')loadEventByCode()"
-        oninput="onEventCodeInput()" autocomplete="off" spellcheck="false">
+        oninput="onEventYearInput()" min="2000" max="2099">
+      <div style="position:relative;flex:1;min-width:0;">
+        <input type="text" id="eventCodeInput" placeholder="Event code or name…"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
+                 padding:0.4rem 0.7rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.88rem;"
+          onkeydown="if(event.key==='Enter')loadEventByCode()"
+          oninput="onEventCodeInput()" autocomplete="off" spellcheck="false">
+        <!-- TBA event dropdown -->
+        <div id="tbaDropdown" style="display:none;position:absolute;top:calc(100% + 2px);left:0;right:0;z-index:200;
+             background:var(--surface);border:1px solid var(--accent);border-radius:4px;
+             max-height:240px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.4);">
+          <div id="tbaDropdownList" style="display:flex;flex-direction:column;"></div>
+        </div>
+      </div>
       <button class="btn-sm btn-accent" onclick="loadEventByCode()" id="btnLoadEvent">Load</button>
       <div id="eventCodeStatus" style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;"></div>
     </div>
@@ -1211,6 +1220,8 @@ buildTimezoneSelect();
 document.getElementById('tbaYear').value = new Date().getFullYear();
 document.getElementById('eventYear').value = new Date().getFullYear();
 loadEvents();
+// Pre-fetch TBA events for the current year so the dropdown is ready
+setTimeout(fetchTbaDropdown, 800);
 initAuth();
 autoRunFromUrl();
 
@@ -1658,13 +1669,10 @@ function calcMaxMatches() {
           if (!b.done && b.start <= cursor) { cursor = Math.max(cursor, b.end); b.done = true; flushed = true; }
         });
       }
-      // Apply break buffer
+      // Break buffer: only schedule next match if cursor + breakBuffer <= break start
       var nextBreak = breaks.find(function(b) { return !b.done && b.start > cursor; });
-      var nextBoundary = nextBreak ? Math.min(nextBreak.start, dayEnd) : dayEnd;
-      if (breakBuffer > 0 && nextBoundary - cursor < breakBuffer && nextBoundary > cursor) {
-        if (nextBreak && nextBreak.start <= dayEnd) {
-          cursor = Math.max(cursor, nextBreak.end); nextBreak.done = true; continue;
-        } else { break; }
+      if (nextBreak && breakBuffer > 0 && cursor + breakBuffer > nextBreak.start) {
+        cursor = Math.max(cursor, nextBreak.end); nextBreak.done = true; continue;
       }
       // Get effective cycle time for this match using per-day rules
       var ct = (function() {
@@ -2702,11 +2710,106 @@ async function loadEventByCode() {
   }
 }
 
+var _tbaDropdownTimeout = null;
+var _tbaDropdownCache = {}; // year -> events array
+
 function onEventCodeInput() {
   const input = document.getElementById('eventCodeInput');
   input.className = '';
   document.getElementById('eventCodeStatus').textContent = '';
+  // Filter existing dropdown entries by what's typed
+  filterTbaDropdown(input.value.trim());
+  showTbaDropdown(true);
 }
+
+function onEventYearInput() {
+  // Debounce TBA fetch when year changes
+  clearTimeout(_tbaDropdownTimeout);
+  _tbaDropdownTimeout = setTimeout(fetchTbaDropdown, 600);
+}
+
+async function fetchTbaDropdown() {
+  const year = parseInt(document.getElementById('eventYear').value) || new Date().getFullYear();
+  if (_tbaDropdownCache[year]) {
+    populateTbaDropdown(_tbaDropdownCache[year]);
+    return;
+  }
+  try {
+    const events = await apiFetch('/api/tba/events/' + year);
+    if (Array.isArray(events)) {
+      _tbaDropdownCache[year] = events;
+      populateTbaDropdown(events);
+    }
+  } catch(e) { /* TBA not configured or no network — silently skip */ }
+}
+
+function populateTbaDropdown(events) {
+  const list = document.getElementById('tbaDropdownList');
+  list.innerHTML = '';
+  events.slice(0, 200).forEach(function(e) {
+    const row = document.createElement('div');
+    row.dataset.key  = e.key;
+    row.dataset.name = (e.name || '').toLowerCase();
+    row.dataset.date = e.start_date || '';
+    row.style.cssText = 'display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.7rem;cursor:pointer;border-bottom:1px solid var(--border);font-size:0.8rem;';
+    row.innerHTML =
+      '<span style="font-family:Barlow Condensed,sans-serif;font-weight:700;color:var(--accent);min-width:5rem;flex-shrink:0;">' + e.key + '</span>' +
+      '<span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (e.name || '') + '</span>' +
+      '<span style="color:var(--text-muted);font-size:0.7rem;flex-shrink:0;">' + (e.start_date || '') + '</span>';
+    row.addEventListener('mouseenter', function() { this.style.background = 'var(--surface2)'; });
+    row.addEventListener('mouseleave', function() { this.style.background = ''; });
+    row.addEventListener('mousedown', function(ev) {
+      ev.preventDefault(); // prevent blur before click
+      selectTbaEvent(e.key);
+    });
+    list.appendChild(row);
+  });
+  filterTbaDropdown(document.getElementById('eventCodeInput').value.trim());
+}
+
+function filterTbaDropdown(query) {
+  const q = query.toLowerCase();
+  Array.from(document.getElementById('tbaDropdownList').children).forEach(function(row) {
+    var match = !q || row.dataset.key.includes(q) || row.dataset.name.includes(q);
+    row.style.display = match ? 'flex' : 'none';
+  });
+}
+
+function showTbaDropdown(show) {
+  const dd = document.getElementById('tbaDropdown');
+  if (!dd) return;
+  // Only show if there are visible entries
+  if (show) {
+    const visible = Array.from(document.getElementById('tbaDropdownList').children)
+      .some(function(r) { return r.style.display !== 'none'; });
+    dd.style.display = visible ? 'block' : 'none';
+  } else {
+    dd.style.display = 'none';
+  }
+}
+
+function selectTbaEvent(key) {
+  document.getElementById('eventCodeInput').value = key;
+  document.getElementById('eventCodeInput').className = '';
+  document.getElementById('eventCodeStatus').textContent = '';
+  showTbaDropdown(false);
+  loadEventByCode();
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  var dd = document.getElementById('tbaDropdown');
+  var input = document.getElementById('eventCodeInput');
+  if (dd && !dd.contains(e.target) && e.target !== input) showTbaDropdown(false);
+});
+
+// Show dropdown when input is focused (if we have data)
+document.addEventListener('DOMContentLoaded', function() {
+  var input = document.getElementById('eventCodeInput');
+  if (input) input.addEventListener('focus', function() {
+    if (document.getElementById('tbaDropdownList').children.length > 0) showTbaDropdown(true);
+  });
+});
 
 // Set the active event in UI state
 async function activateEvent(ev) {
@@ -3708,20 +3811,15 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         }
       }
 
-      // Check if a break or end-of-day is within the break buffer window.
-      // If so, flush the break first rather than starting another match.
+      // Break buffer: if this match would START within breakBuffer minutes of a break,
+      // flush the break first. i.e. only schedule if cursor + breakBuffer <= break.start.
       const nextBreak = breaks.find(b => !b.done && b.start > cursor);
-      const nextBoundary = nextBreak ? Math.min(nextBreak.start, day.end) : day.end;
-      if (nextBoundary - cursor < breakBuffer && nextBoundary > cursor) {
-        // Not enough buffer time — flush next break now or roll to next day
-        if (nextBreak && nextBreak.start <= day.end) {
-          entries.push({type:'break', name:nextBreak.name, start:nextBreak.start, end:nextBreak.end});
-          cursor = Math.max(cursor, nextBreak.end);
-          nextBreak.done = true;
-          continue;
-        } else {
-          break; // roll to next day
-        }
+      if (nextBreak && breakBuffer > 0 && cursor + breakBuffer > nextBreak.start) {
+        // Match would start too close to the break — take the break early
+        entries.push({type:'break', name:nextBreak.name, start:nextBreak.start, end:nextBreak.end});
+        cursor = Math.max(cursor, nextBreak.end);
+        nextBreak.done = true;
+        continue;
       }
 
       // Check if a break interrupts the next match
