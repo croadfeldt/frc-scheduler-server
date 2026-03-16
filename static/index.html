@@ -675,14 +675,22 @@
           <button class="btn-sm" id="btnCalcMaxMatches" onclick="calcMaxMatches()" title="Calculate the maximum matches each team can get given the current schedule parameters">&#128260; Calc Max Matches</button>
           <button class="btn-sm" id="btnShowFakeTeams" onclick="toggleFakeTeams()" style="display:none;" title="Toggle display of slot numbers in abstract schedule">&#128065; Show Slot Numbers</button>
         </div>
-        <!-- cycleTime and numDays kept as hidden inputs for JS compat -->
-        <input type="hidden" id="cycleTime" value="8">
-        <input type="hidden" id="numDays" value="2">
         <div class="field-row">
-          <div class="field" title="Minimum minutes remaining before a break or end of day to still schedule one more match. If remaining time is less than this buffer, the match is deferred to after the break or next day.">
+          <div class="field">
+            <label>Default Cycle Time (min)</label>
+            <input type="number" id="cycleTime" value="8" min="0.1" max="60" step="any" title="Sets the start-of-day cycle time for each day. Secondary cycle time changes are not affected.">
+          </div>
+          <div class="field">
+            <label>Number of Days</label>
+            <input type="number" id="numDays" value="2" min="1" max="5">
+          </div>
+          <div class="field" title="Minimum minutes remaining before a break or end of day to still schedule one more match.">
             <label>Break Buffer (min)</label>
             <input type="number" id="breakBuffer" value="5" min="0" max="60" step="any">
           </div>
+        </div>
+        <div id="cycleTimePushWarning" style="display:none;background:rgba(137,180,250,0.1);border:1px solid rgba(137,180,250,0.3);border-radius:4px;padding:0.4rem 0.7rem;margin-bottom:0.3rem;font-size:0.72rem;color:var(--accent);">
+          &#9432; Start-of-day cycle time updated for all days. Secondary cycle time changes are not affected.
         </div>
         <div class="field-row single">
           <div class="field">
@@ -844,13 +852,78 @@ function randomSeed() {
   return Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart(8, '0');
 }
 
+// Helper: apply correct end times to all day rows.
+// All days except the last end at 18:00; the last day ends at 12:00 (noon).
+// Only updates days that still have a "default" end time (17:00, 18:00, or 12:00);
+// user-customised times are left alone.
+var DEFAULT_END_TIMES = ['17:00','18:00','12:00','12:00','12:00'];
+function applyDayEndTimes() {
+  var rows = Array.from(document.querySelectorAll('.day-row'));
+  rows.forEach(function(row, i) {
+    var endEl = row.querySelector('.day-end');
+    if (!endEl) return;
+    var cur = endEl.value;
+    var isDefault = !cur || cur === '17:00' || cur === '18:00' || cur === '12:00';
+    if (!isDefault) return; // user has set a custom time — leave it
+    var isLast = (i === rows.length - 1);
+    endEl.value = isLast ? '12:00' : '18:00';
+  });
+}
+
+// Prune breaks and cycle-time changes from a day row whose end time has moved earlier.
+// Removes any break whose start is at or after the new endMin,
+// and any after-match cycle change that would start after the last schedulable match.
+function pruneAfterEndTime(row) {
+  var endEl = row.querySelector('.day-end');
+  if (!endEl || !endEl.value) return;
+  var endMin = timeStrToMin(endEl.value);
+  var startMin = timeStrToMin(row.querySelector('.day-start').value || '08:00');
+
+  // Remove breaks that start at or after the day end
+  Array.from(row.querySelectorAll('.break-row')).forEach(function(br) {
+    var bs = br.querySelector('.break-start');
+    if (bs && bs.value && timeStrToMin(bs.value) >= endMin) {
+      br.remove();
+    }
+  });
+
+  // Remove after-match cycle changes (non-start) that would be unreachable
+  // Estimate last schedulable match on this day
+  var ct = getDayStartCycleTime(row);
+  var approxMatches = Math.floor((endMin - startMin) / (ct || 8));
+  Array.from(row.querySelectorAll('.day-cc-row')).forEach(function(ccRow) {
+    if (ccRow.dataset.isStart === '1') return;
+    var afterInp = ccRow.querySelector('.cc-after');
+    if (afterInp && afterInp.value) {
+      var after = parseInt(afterInp.value);
+      if (!isNaN(after) && after >= approxMatches) {
+        ccRow.remove();
+      }
+    }
+  });
+}
+
+// Renumber all day row headers and update dataset.day
+function renumberDays() {
+  document.querySelectorAll('.day-row').forEach(function(row, i) {
+    var header = row.querySelector('.day-row-header span');
+    if (header) header.textContent = 'Day ' + (i + 1);
+    row.dataset.day = i;
+    // Update remove button visibility (day 1 never has one visible)
+    var rmBtn = row.querySelector('.day-row-header .btn-icon');
+    if (rmBtn) rmBtn.style.display = i === 0 ? 'none' : '';
+  });
+}
+
 // Add a new day to the schedule
 function addDay() {
   var numDaysEl = document.getElementById('numDays');
-  var n = parseInt(numDaysEl.value) || 2;
+  var n = parseInt(numDaysEl.value) || 1;
   if (n >= 5) { showApiStatus('Maximum 5 days supported', true); return; }
   numDaysEl.value = n + 1;
-  buildDaysUI();
+  buildDaysUI();         // adds the new day row
+  applyDayEndTimes();    // previous last day → 18:00, new last → 12:00
+  renumberDays();
   validateTimes();
   onParamChanged();
 }
@@ -858,16 +931,15 @@ function addDay() {
 // Remove a day (called from the day row header's remove button)
 function removeDay(dayEl) {
   var numDaysEl = document.getElementById('numDays');
-  var n = parseInt(numDaysEl.value) || 2;
+  var n = parseInt(numDaysEl.value) || 1;
   if (n <= 1) { showApiStatus('At least one day is required', true); return; }
   dayEl.remove();
   numDaysEl.value = document.querySelectorAll('.day-row').length;
-  // Renumber day headers
-  document.querySelectorAll('.day-row').forEach(function(row, i) {
-    var header = row.querySelector('.day-row-header');
-    if (header) header.textContent = 'Day ' + (i + 1);
-    row.dataset.day = i;
-  });
+  renumberDays();
+  applyDayEndTimes();    // new last day → 12:00
+  // Prune items beyond the new last day's end time
+  var rows = document.querySelectorAll('.day-row');
+  if (rows.length > 0) pruneAfterEndTime(rows[rows.length - 1]);
   validateTimes();
   refreshCycleDayLabels();
   onParamChanged();
@@ -878,19 +950,17 @@ function buildDaysUI() {
   const container = document.getElementById('daysContainer');
   const existing = container.querySelectorAll('.day-row');
   for (let i = existing.length; i < n; i++) {
-    // Day 1 ends at 17:00; Day 2+ end at 12:00 (half day by default)
-    const defaultEnd = (i === 0) ? '17:00' : '12:00';
     const d = document.createElement('div');
     d.className = 'day-row';
     d.dataset.day = i;
     d.innerHTML =
       '<div class="day-row-header" style="display:flex;align-items:center;justify-content:space-between;">' +
         '<span>Day ' + (i+1) + '</span>' +
-        (i > 0 ? '<button class="btn-icon" title="Remove day" style="font-size:0.75rem;opacity:0.6;" onclick="removeDay(this.closest(\'.day-row\'))">&#x2715;</button>' : '') +
+        '<button class="btn-icon" title="Remove day" style="font-size:0.75rem;opacity:0.6;' + (i === 0 ? 'display:none;' : '') + '" onclick="removeDay(this.closest(\'.day-row\'))">&#x2715;</button>' +
       '</div>' +
       '<div class="day-times">' +
         '<div class="field"><label>Start Time</label><input type="time" class="day-start" value="08:00"></div>' +
-        '<div class="field"><label>End Time</label><input type="time" class="day-end" value="' + defaultEnd + '"></div>' +
+        '<div class="field"><label>End Time</label><input type="time" class="day-end" value="18:00"></div>' +
       '</div>' +
       '<div class="breaks-list"></div>' +
       '<button class="btn-add-break btn-add-break-day">+ Add Break</button>' +
@@ -904,7 +974,7 @@ function buildDaysUI() {
     dayStartEl.addEventListener('change', validateTimesAndRecalc);
     dayEndEl.addEventListener('change',   validateTimesAndRecalc);
 
-    // Wire Add Break button (can't use onclick="addBreak(this)" since it's now class-only)
+    // Wire Add Break button
     d.querySelector('.btn-add-break-day').addEventListener('click', function() {
       addBreak(this, null, null, null);
     });
@@ -918,8 +988,11 @@ function buildDaysUI() {
     addBreak(d.querySelector('.btn-add-break-day'), '12:00', '13:00', 'Lunch');
     addDayCycleChange(d, null, null, true);
   }
+  // Remove extra rows if numDays decreased
   const rows = container.querySelectorAll('.day-row');
   for (let i = n; i < rows.length; i++) rows[i].remove();
+  // Apply correct end times (last day=noon, others=18:00)
+  applyDayEndTimes();
 }
 
 function addBreak(btn, startVal, endVal, nameVal) {
@@ -1043,8 +1116,42 @@ function validateTimesAndRecalc() {
 // numDays is now managed by addDay/removeDay buttons, not a field
 // Keep a no-op listener in case something still triggers it
 document.getElementById('numDays').addEventListener('change', function() {
+  var n = parseInt(this.value) || 1;
+  if (n < 1) { this.value = 1; n = 1; }
+  if (n > 5) { this.value = 5; n = 5; }
+  // Add or remove day rows to match
+  var current = document.querySelectorAll('.day-row').length;
+  if (n > current) {
+    buildDaysUI(); // adds missing rows
+  } else if (n < current) {
+    var rows = document.querySelectorAll('.day-row');
+    for (var i = n; i < rows.length; i++) rows[i].remove();
+  }
+  renumberDays();
+  applyDayEndTimes();
+  var lastRow = document.querySelectorAll('.day-row');
+  if (lastRow.length) pruneAfterEndTime(lastRow[lastRow.length - 1]);
   validateTimes();
   refreshCycleDayLabels();
+  onParamChanged();
+});
+
+// cycleTime field: push value down to all day start-of-day rows (one-way only)
+document.getElementById('cycleTime').addEventListener('change', function() {
+  var newCt = parseFloat(this.value);
+  if (!newCt || newCt <= 0) return;
+  document.querySelectorAll('.day-cc-row[data-is-start="1"] .cc-time').forEach(function(inp) {
+    inp.value = newCt;
+    inp.classList.toggle('input-error', false);
+  });
+  // Show brief info warning
+  var warn = document.getElementById('cycleTimePushWarning');
+  if (warn) {
+    warn.style.display = 'block';
+    clearTimeout(warn._hideTimer);
+    warn._hideTimer = setTimeout(function() { warn.style.display = 'none'; }, 4000);
+  }
+  validateCycleChanges();
   onParamChanged();
 });
 buildDaysUI();
@@ -1102,6 +1209,7 @@ autoRunFromUrl();
   var el = document.getElementById(id);
   if (el) el.addEventListener('input', onParamChanged);
 });
+// Note: cycleTime and numDays have their own dedicated change listeners
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AUTH STATE
@@ -1492,6 +1600,7 @@ function fullReset() {
     document.getElementById('numDays').value        = '2';
     document.getElementById('daysContainer').innerHTML = '';
     buildDaysUI();
+    applyDayEndTimes();
     validateTimes();
   }
 
@@ -1756,18 +1865,9 @@ function addDayCycleChange(dayRow, afterMatch, newTime, isStart) {
 
   timeInput.addEventListener('input', function() {
     checkCcTime(); validateCycleChanges();
-    // Keep hidden cycleTime input in sync with Day 1 start-of-day value
-    if (isFirst && dayRow === document.querySelectorAll('.day-row')[0]) {
-      var v = parseFloat(timeInput.value);
-      if (v > 0) document.getElementById('cycleTime').value = v;
-    }
   });
   timeInput.addEventListener('change', function() {
     checkCcTime(); validateCycleChanges();
-    if (isFirst && dayRow === document.querySelectorAll('.day-row')[0]) {
-      var v = parseFloat(timeInput.value);
-      if (v > 0) document.getElementById('cycleTime').value = v;
-    }
     onParamChanged();
   });
 

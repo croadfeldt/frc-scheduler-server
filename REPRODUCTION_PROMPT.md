@@ -391,6 +391,22 @@ AI use disclosed, human review confirmed, license terms unaffected.
 
 ### Cycle time and number of days (UI)
 
+`cycleTime` and `numDays` are **visible fields** in the parameters section.
+
+**`cycleTime` (Default Cycle Time):** One-way push — changing the field updates all day start-of-day cycle rows. Secondary after-match cycle time changes are never affected. A blue `#cycleTimePushWarning` div is shown for 4 seconds to confirm the update.
+
+**`numDays` (Number of Days):** Bidirectionally synced with day rows. Changing the field calls `buildDaysUI()` to add rows or removes excess rows. `addDay()` / `removeDay()` also update the `numDays` field.
+
+**End time rules (enforced by `applyDayEndTimes()`):**
+- All days except the last default to `18:00`
+- The last day always defaults to `12:00` (noon)
+- Only "default" end times (`17:00`, `18:00`, `12:00`) are updated — user-customised times are left alone
+- Called on: `buildDaysUI`, `addDay`, `removeDay`, `numDays` field change, `fullReset`
+
+**`pruneAfterEndTime(row)`:** When a day's end time shrinks (e.g. on remove), removes breaks whose start ≥ new end time, and after-match cycle changes beyond the approximate last schedulable match.
+
+**`renumberDays()`:** Updates day header text and `dataset.day` for all rows. Also hides the remove button on Day 1.
+
 `cycleTime` and `numDays` are **hidden inputs** — not visible fields. The visible cycle time is the "Cycle Time (min)" field inside each day's start-of-day cycle change row. Changing Day 1's start-of-day cycle time syncs the hidden `cycleTime` input so downstream JS (calcMaxMatches, estimateFirstMatchOfDay, etc.) stays consistent.
 
 Days are managed via `addDay()` / `removeDay(dayEl)` buttons:
