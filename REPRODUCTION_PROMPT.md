@@ -389,6 +389,40 @@ AI use disclosed, human review confirmed, license terms unaffected.
 
 **`rebuild.sh`:** Full teardown + registry credential refresh (Removed→Managed NooBaa cycle) + wait for registry deployment + secrets + postgres + buildconfig + builder SA wait + image-builder role grant + build (no `--follow`, polls status via `wait_for_build`) + deploy + route + cronjob. `set -euo pipefail`.
 
+### Full Reset button
+
+Two-stage reset available from the ✖ Reset button in both the config panel header (always visible) and the share bar:
+1. First confirm clears results: abstract/assigned schedule IDs, seeds, slot map, rendered schedule, stats, filter bar, URL params. Parameters kept.
+2. Second confirm optionally resets parameters to defaults (numTeams=24, mpt=8, cooldown=3, cycleTime=8, numDays=2, cycleChanges cleared, days rebuilt).
+
+### Break buffer
+
+`breakBuffer` field (default 5 min) in the config panel, stored in `dayConfig.breakBuffer`.
+
+Applied in `finishGeneration` scheduling loop:
+1. Before each match, find the next break or end-of-day boundary.
+2. If `boundary - cursor < breakBuffer`, flush the break (if one exists before day end) or roll to next day.
+3. This prevents scheduling a match that would start with insufficient time before a break.
+
+Also applied identically in `calcMaxMatches()` simulation.
+
+Day title shows effective cycle time: single value `· 8 min/match` or progression `· 8 min → 7.5 min` when cycle changes exist.
+Cycle change row label shows: `⇅ Cycle time → 7.5 min · starts match 46 at 12:00:00 PM`.
+
+### Calc Max Matches button
+
+`calcMaxMatches()` — simulates stepping through all days/breaks/cycle changes with exact cursor logic matching `finishGeneration`. Counts how many matches fit, computes `floor(totalSlots*6 / numTeams)` and writes to the Matches per Team field. Status shows match count, slot count, and surrogate count.
+
+### Show / Hide Slot Numbers toggle (fake teams)
+
+`toggleFakeTeams()` — flips `window._frcShowFakeTeams` and `window._frcAbstractMode`:
+- Off (default after Stage 1): `_frcAbstractMode=true` → `—` in team cells, B2B stat=0
+- On: `_frcAbstractMode=false`, `_frcShowFakeTeams=true` → italic `S1`…`SN` with tooltip, B2B recalculated with slot indices
+
+`updateB2BStat()` — standalone function to recompute and display B2B respecting abstract mode. Called by toggleFakeTeams and finishGeneration.
+
+Button shown after Stage 1 completes, hidden on Stage 1 regeneration and after real teams are assigned.
+
 ### Commit button & server-side logging
 
 **Commit button** (`btnCommit`) appears below Assign Teams after Stage 2 completes. Calls `/api/assigned-schedules/{id}/activate` (POST), then calls `/api/log-commit` (POST) with the full structured payload. Button changes to "✓ Committed" and disables. Resets on Stage 2 re-run or Stage 1 regeneration.
@@ -403,6 +437,20 @@ AI use disclosed, human review confirmed, license terms unaffected.
 `n`, `mpt`, `cd`, `ct`, `days`, `seed`, `aseed`, `d1`–`d5` (HH:MM-HH:MM), `d1b`–`d5b` (Name|start|end,...), `teams` (slot-ordered comma list), `cc` (Day:AfterMatch:Time,... for cycle changes).
 
 URL updated after Stage 1 completes AND after Stage 2 completes. All params needed to fully reproduce or retrieve any committed schedule are present.
+
+### Break buffer
+
+`breakBuffer` field (default 5 min) in the config panel, stored in `dayConfig.breakBuffer`.
+
+Applied in `finishGeneration` scheduling loop:
+1. Before each match, find the next break or end-of-day boundary.
+2. If `boundary - cursor < breakBuffer`, flush the break (if one exists before day end) or roll to next day.
+3. This prevents scheduling a match that would start with insufficient time before a break.
+
+Also applied identically in `calcMaxMatches()` simulation.
+
+Day title shows effective cycle time: single value `· 8 min/match` or progression `· 8 min → 7.5 min` when cycle changes exist.
+Cycle change row label shows: `⇅ Cycle time → 7.5 min · starts match 46 at 12:00:00 PM`.
 
 ### Calc Max Matches button
 
@@ -458,3 +506,33 @@ Writes result to matchesPerTeam input. Shows status with match count, slot count
 - B2B stat recalculated with slot indices (may be non-zero)
 When toggled off: `_frcAbstractMode = true`, dashes shown, B2B = 0.
 Button hidden when real teams are assigned (loadAssignedSchedule resets it).
+
+
+### Download buttons (CSV / JSON)
+
+Appear in the Schedule Output panel header after Stage 1 or Stage 2 completes. Hidden on reset.
+
+**CSV** (`downloadCSV`) — `frc_schedule.csv` columns: Match, Day, Time (H:MM:SS AM/PM), Red 1, Red 2, Red 3, Blue 1, Blue 2, Blue 3, Surrogates (semicolon-separated team numbers).
+
+**JSON** (`downloadJSON`) — `frc_schedule.json` structure:
+```json
+{
+  "generated_at": "...",
+  "abstract_schedule_id": 12,
+  "assigned_schedule_id": 7,
+  "seed": "a1b2c3d4",
+  "assign_seed": "cafebabe",
+  "parameters": { "num_teams":51, "matches_per_team":11, "cooldown":3,
+                  "cycle_time_min":8, "num_days":2, "cycle_changes":[...] },
+  "day_config": { ... },
+  "days": [
+    { "day": 1, "entries": [
+      { "type":"break", "name":"Lunch", "start":"12:00:00 PM", "end":"1:00:00 PM" },
+      { "type":"match", "match":1, "time":"8:00:00 AM", "time_min":480,
+        "red":[254,1114,148], "blue":[27,67,111], "surrogates":[] },
+      { "type":"cycle-change", "after_match":45, "new_cycle_min":7.5, "at":"2:00:00 PM" }
+    ]}
+  ]
+}
+```
+Includes break rows and cycle-change rows interleaved with matches. `time_min` is fractional minutes from midnight for precise import.

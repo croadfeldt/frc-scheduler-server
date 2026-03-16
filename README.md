@@ -226,9 +226,26 @@ After generating a schedule, the browser URL is updated:
 | `d1`–`d5` | `08:00-17:00` | Per-day start–end (`HH:MM-HH:MM`) |
 | `d1b`–`d5b` | `Lunch\|12:00\|13:00,...` | Per-day breaks: `Name\|start\|end`, comma-separated |
 | `cc` | `1:45:7.5,2:90:6` | Cycle time changes: `Day:AfterMatch:NewTime`, comma-separated |
+| `bb` | `5` | Break buffer minutes (minimum time before break/end-of-day to fit one more match) |
 
 Opening this URL auto-reproduces the full schedule including day/time configuration.
-Without `teams`, the abstract structure renders with slot labels (S1, S2...).
+Without `teams`, the abstract structure renders with blank slots.
+
+### UI controls
+
+| Button | Location | Description |
+|--------|----------|-------------|
+| ⚡ Stage 1: Generate Structure | Config panel | Generates abstract slot schedule |
+| ▶ Assign Teams to Schedule | Config panel | Runs Stage 2 team assignment |
+| ✓ Commit Schedule as Active | Config panel | Marks assigned schedule as active, logs to server |
+| ↻ Calc Max Matches | Config panel | Calculates maximum matches/team from schedule parameters and fills the field |
+| Break Buffer (min) | Config panel | Minimum minutes remaining before a break or end-of-day to still schedule a match. Default 5. Applied in both schedule generation and Calc Max Matches. |
+| 👁 Show / Hide Slot Numbers | Config panel | Toggle showing abstract slot indices (S1…N) vs blank dashes; B2B recalculates accordingly |
+| ✖ Reset | Config panel header & share bar | Two-stage reset: clears results (keeps params), optionally resets params to defaults too. Clears URL. |
+| Share | Share bar | Copies full reproducible URL to clipboard |
+| ⬇ CSV | Results panel header | Downloads `frc_schedule.csv` — Match, Day, Time, Red 1-3, Blue 1-3, Surrogates |
+| ⬇ JSON | Results panel header | Downloads `frc_schedule.json` — full structured schedule with parameters, day config, break rows, cycle-change rows, and per-match time in minutes for import into other tools |
+| ✓ Committed | Share bar | After commit, shows confirmation state |
 
 ---
 

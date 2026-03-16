@@ -655,7 +655,10 @@
 
   <div class="layout">
     <div class="panel">
-      <div class="panel-header">Configuration</div>
+      <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Configuration</span>
+        <button onclick="fullReset()" title="Clear schedule results and start fresh" style="background:none;border:1px solid var(--danger);color:var(--danger);border-radius:4px;padding:0.2rem 0.55rem;font-size:0.72rem;cursor:pointer;letter-spacing:0.04em;opacity:0.8;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&#10006; Reset</button>
+      </div>
       <div class="panel-body">
         <div class="section-label">Competition Parameters</div>
         <div class="field-row">
@@ -680,6 +683,10 @@
           <div class="field">
             <label>Number of Days</label>
             <input type="number" id="numDays" value="2" min="1" max="5">
+          </div>
+          <div class="field" title="Minimum minutes remaining before a break or end of day to still schedule one more match. If remaining time is less than this buffer, the match is deferred to after the break or next day.">
+            <label>Break Buffer (min)</label>
+            <input type="number" id="breakBuffer" value="5" min="0" max="60" step="any">
           </div>
         </div>
         <div class="field-row single">
@@ -757,7 +764,13 @@
     </div>
 
     <div class="panel results-panel">
-      <div class="panel-header">Schedule Output</div>
+      <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Schedule Output</span>
+        <div id="downloadBar" style="display:none;gap:0.4rem;display:none;align-items:center;">
+          <button class="btn-export" id="btnDownloadCSV" onclick="downloadCSV()" title="Download schedule as CSV">&#11015; CSV</button>
+          <button class="btn-export" id="btnDownloadJSON" onclick="downloadJSON()" title="Download schedule as JSON">&#11015; JSON</button>
+        </div>
+      </div>
       <div class="stats-bar">
         <div class="stat"><div class="stat-value" id="statMatches">&#8212;</div><div class="stat-label">Total Matches</div></div>
         <div class="stat"><div class="stat-value" id="statTeams">&#8212;</div><div class="stat-label">Teams</div></div>
@@ -1353,7 +1366,19 @@ async function duplicateSchedule() {
 
 // ── Full reset — clear all state and return to blank slate ───────────────────
 function fullReset() {
-  if (!confirm('Reset everything? This clears the current schedule, seeds, and results. Parameters will be kept.')) return;
+  var choice = confirm(
+    'Reset schedule results and start fresh?\n\n' +
+    'Click OK to clear results (keeping your parameters).\n' +
+    'Click Cancel to abort.'
+  );
+  if (!choice) return;
+
+  // Offer to also reset parameters
+  var resetParams = confirm(
+    'Also reset all parameters to defaults?\n\n' +
+    'OK = reset parameters too\n' +
+    'Cancel = keep current parameters'
+  );
 
   // Cancel any in-flight request
   if (_s1AbortController) { _s1AbortController.abort(); _s1AbortController = null; }
@@ -1400,6 +1425,8 @@ function fullReset() {
     '<p>Configure your competition parameters<br>and click Generate Schedule</p></div>';
   document.getElementById('scheduleWarning').style.display = 'none';
   document.getElementById('scheduleWarning').textContent = '';
+  var dlBar = document.getElementById('downloadBar');
+  if (dlBar) dlBar.style.display = 'none';
 
   // Reset stats bar
   ['statMatches','statTeams','statPerTeam','statDays','statB2B','statSurrogates'].forEach(function(id) {
@@ -1416,6 +1443,21 @@ function fullReset() {
   // Reset saved schedules button
   document.getElementById('btnSavedSchedules').disabled = true;
 
+  // Optionally reset parameters to defaults
+  if (resetParams) {
+    document.getElementById('numTeams').value       = '24';
+    document.getElementById('matchesPerTeam').value = '8';
+    document.getElementById('cooldown').value       = '3';
+    document.getElementById('cycleTime').value      = '8';
+    document.getElementById('numDays').value        = '2';
+    document.getElementById('cycleChangesList').innerHTML = '';
+    // Rebuild days UI with defaults
+    var daysContainer = document.getElementById('daysContainer');
+    daysContainer.innerHTML = '';
+    buildDaysUI();
+    validateTimes();
+  }
+
   // Clean URL
   try { window.history.replaceState(null, '', window.location.pathname); } catch(e) {}
 
@@ -1424,8 +1466,9 @@ function fullReset() {
 
 // ── Calculate maximum matches per team given current schedule parameters ─────
 function calcMaxMatches() {
-  var numTeams  = parseInt(document.getElementById('numTeams').value) || 0;
-  var cycleTime = parseFloat(document.getElementById('cycleTime').value) || 8;
+  var numTeams    = parseInt(document.getElementById('numTeams').value) || 0;
+  var cycleTime   = parseFloat(document.getElementById('cycleTime').value) || 8;
+  var breakBuffer = parseFloat(document.getElementById('breakBuffer').value) || 0;
   if (numTeams < 6) { showApiStatus('Enter at least 6 teams before calculating', true); return; }
   if (!validateTimes()) { showApiStatus('Fix invalid times before calculating', true); return; }
   if (!validateCycleChanges()) { showApiStatus('Fix cycle change fields before calculating', true); return; }
@@ -1433,7 +1476,7 @@ function calcMaxMatches() {
   var cycleChanges = getCycleTimeChanges();
   var dayRows = document.querySelectorAll('.day-row');
 
-  // Count how many matches fit across all days with exact cycle time accounting
+  // Count how many matches fit across all days with exact cycle time and break buffer
   var totalSlotMatches = 0;
   dayRows.forEach(function(row) {
     var cursor = timeStrToMin(row.querySelector('.day-start').value);
@@ -1444,13 +1487,25 @@ function calcMaxMatches() {
     }).filter(function(b) { return b.end > b.start; });
 
     while (true) {
-      // Flush any breaks
+      // Flush any breaks whose start has passed
       var flushed = true;
       while (flushed) {
         flushed = false;
         breaks.forEach(function(b) {
           if (!b.done && b.start <= cursor) { cursor = Math.max(cursor, b.end); b.done = true; flushed = true; }
         });
+      }
+      // Apply break buffer: if a break or end-of-day is within buffer, flush break or stop
+      var nextBreak = breaks.find(function(b) { return !b.done && b.start > cursor; });
+      var nextBoundary = nextBreak ? Math.min(nextBreak.start, dayEnd) : dayEnd;
+      if (breakBuffer > 0 && nextBoundary - cursor < breakBuffer && nextBoundary > cursor) {
+        if (nextBreak && nextBreak.start <= dayEnd) {
+          cursor = Math.max(cursor, nextBreak.end);
+          nextBreak.done = true;
+          continue;
+        } else {
+          break;
+        }
       }
       var ct = getCycleTime(totalSlotMatches + 1, cycleTime, cycleChanges);
       if (cursor + ct > dayEnd) break;
@@ -1569,9 +1624,12 @@ function estimateFirstMatchOfDay(dayIdx) {
 
 // Return the day number (1-based) that a given match falls on.
 // Uses actual scheduled data if available, else falls back to estimate.
-function getDayForMatch(matchNum) {
+// For cycle change labels, pass the match AFTER which the change occurs —
+// we return the day of match+1 (where the change takes effect).
+function getDayForMatch(matchNum, useNextMatch) {
   if (!matchNum || isNaN(matchNum) || matchNum < 1) return null;
-  // Use actual schedule if rendered
+  // When finding which day a cycle change takes effect, use the next match
+  var lookupNum = useNextMatch ? matchNum + 1 : matchNum;
   var scheduled = window._frcScheduled;
   if (scheduled && scheduled.length > 0) {
     for (var d = 0; d < scheduled.length; d++) {
@@ -1579,9 +1637,8 @@ function getDayForMatch(matchNum) {
       if (matches.length === 0) continue;
       var first = matches[0].num;
       var last  = matches[matches.length - 1].num;
-      if (matchNum >= first && matchNum <= last) return d + 1;
-      // If after last match of last day, assign to last day
-      if (d === scheduled.length - 1 && matchNum > last) return d + 1;
+      if (lookupNum >= first && lookupNum <= last) return d + 1;
+      if (d === scheduled.length - 1 && lookupNum > last) return d + 1;
     }
     return 1;
   }
@@ -1591,7 +1648,7 @@ function getDayForMatch(matchNum) {
   var numDays      = parseInt(document.getElementById('numDays').value) || 1;
   var totalMatches = Math.ceil(numTeams * mpt / 6);
   var matchesPerDay = Math.ceil(totalMatches / numDays);
-  return Math.min(numDays, Math.ceil(matchNum / matchesPerDay));
+  return Math.min(numDays, Math.ceil(lookupNum / matchesPerDay));
 }
 
 // Refresh all cycle change day labels based on current after-match values
@@ -1601,7 +1658,7 @@ function refreshCycleDayLabels() {
     var dayLabel   = row.querySelector('.cc-day-label');
     if (!dayLabel) return;
     var matchNum = parseInt(afterInput.value);
-    var day = getDayForMatch(matchNum);
+    var day = getDayForMatch(matchNum, true); // next match start determines effective day
     dayLabel.textContent = day ? 'Day ' + day : '—';
   });
 }
@@ -1633,7 +1690,7 @@ function validateCycleChanges() {
 
 function addCycleChange(afterMatch, newTime, forDay) {
   var defaultAfter = (afterMatch != null && afterMatch !== '') ? afterMatch : '';
-  var initialDay   = defaultAfter ? getDayForMatch(parseInt(defaultAfter)) : null;
+  var initialDay   = defaultAfter ? getDayForMatch(parseInt(defaultAfter), true) : null;
   var dayText      = initialDay ? 'Day ' + initialDay : '—';
 
   const list = document.getElementById('cycleChangesList');
@@ -1658,7 +1715,7 @@ function addCycleChange(afterMatch, newTime, forDay) {
 
   function updateDayLabel() {
     var mn = parseInt(afterInput.value);
-    var d  = getDayForMatch(mn);
+    var d  = getDayForMatch(mn, true); // day where change takes effect (next match)
     dayLabel.textContent = d ? 'Day ' + d : '—';
   }
 
@@ -1692,7 +1749,7 @@ function getCycleTimeChanges() {
       var after = parseInt(row.querySelector('.cc-after').value);
       var time  = parseFloat(row.querySelector('.cc-time').value);
       return {
-        day:   getDayForMatch(after) || 1,
+        day:   getDayForMatch(after, true) || 1,
         after: after,
         time:  time,
       };
@@ -2847,7 +2904,8 @@ function updateUrlFromState() {
 // Collect day/timing config from UI
 function collectDayConfig() {
   return {
-    cycleTime: parseFloat(document.getElementById('cycleTime').value) || 8,
+    cycleTime:   parseFloat(document.getElementById('cycleTime').value) || 8,
+    breakBuffer: parseFloat(document.getElementById('breakBuffer').value) ?? 5,
     numDays: parseInt(document.getElementById('numDays').value),
     cycleChanges: getCycleTimeChanges(),
     days: Array.from(document.querySelectorAll('.day-row')).map(function(row) {
@@ -3287,6 +3345,8 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
   // Use override day config if provided (e.g. from loaded schedule), else read from UI
   const _dc = dayConfigOverride;
   const defaultCycleTime = _dc ? _dc.cycleTime : (parseFloat(document.getElementById('cycleTime').value) || 8);
+  const breakBuffer = _dc && _dc.breakBuffer != null ? _dc.breakBuffer
+    : (parseFloat(document.getElementById('breakBuffer').value) ?? 5);
   const cycleChanges = _dc ? (_dc.cycleChanges || []) : getCycleTimeChanges();
   const days = (_dc && _dc.days ? _dc.days : Array.from(document.querySelectorAll('.day-row'))).map(row => {
     const isObj = typeof row === 'object' && row.start && !row.querySelector;
@@ -3328,6 +3388,22 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
             brk.done = true;
             flushed = true;
           }
+        }
+      }
+
+      // Check if a break or end-of-day is within the break buffer window.
+      // If so, flush the break first rather than starting another match.
+      const nextBreak = breaks.find(b => !b.done && b.start > cursor);
+      const nextBoundary = nextBreak ? Math.min(nextBreak.start, day.end) : day.end;
+      if (nextBoundary - cursor < breakBuffer && nextBoundary > cursor) {
+        // Not enough buffer time — flush next break now or roll to next day
+        if (nextBreak && nextBreak.start <= day.end) {
+          entries.push({type:'break', name:nextBreak.name, start:nextBreak.start, end:nextBreak.end});
+          cursor = Math.max(cursor, nextBreak.end);
+          nextBreak.done = true;
+          continue;
+        } else {
+          break; // roll to next day
         }
       }
 
@@ -3440,11 +3516,9 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
     if (schedWarn) { schedWarn.textContent = ''; schedWarn.style.display = 'none'; }
   }
 
-  const exportBtn = document.createElement('button');
-  exportBtn.className = 'btn-export';
-  exportBtn.textContent = 'Export CSV';
-  exportBtn.onclick = function() { exportCSV(scheduled); };
-  output.appendChild(exportBtn);
+  // Show download buttons in results panel header
+  var dlBar = document.getElementById('downloadBar');
+  if (dlBar) dlBar.style.display = 'flex';
 
   // Store scheduled globally for filter re-application
   window._frcTzAbbr = tzAbbr;
@@ -3650,13 +3724,29 @@ function renderSchedule() {
     block.className = 'day-block';
 
     var matchCount = day.entries.filter(function(e) { return e.type === 'match'; }).length;
+    var dayMatches = day.entries.filter(function(e) { return e.type === 'match'; });
+    // Collect distinct cycle times used on this day from cycle-change markers
+    var dayCycleChanges = day.entries.filter(function(e) { return e.type === 'cycle-change'; });
+    var cycleTimeInfo = '';
+    if (dayCycleChanges.length > 0) {
+      // Show initial cycle time and each change
+      var firstMatchNum = dayMatches.length > 0 ? dayMatches[0].num : 1;
+      var initCt = getCycleTime(firstMatchNum, defaultCycleTime, cycleChanges);
+      var ctParts = [initCt + ' min'];
+      dayCycleChanges.forEach(function(cc) { ctParts.push(cc.newTime + ' min'); });
+      cycleTimeInfo = ' \u00b7 cycle: ' + ctParts.join(' \u2192 ');
+    } else {
+      var firstMatchNum2 = dayMatches.length > 0 ? dayMatches[0].num : 1;
+      var ct = getCycleTime(firstMatchNum2, defaultCycleTime, cycleChanges);
+      cycleTimeInfo = ' \u00b7 ' + ct + ' min/match';
+    }
     var title = document.createElement('div');
     title.className = 'day-title';
     title.innerHTML =
       '<span class="filterable' + (f.day === day.dayNum ? ' active' : '') + '" ' +
       'onclick="addFilter(&apos;day&apos;,' + day.dayNum + ')" title="Filter to Day ' + day.dayNum + '">' +
       'Day ' + day.dayNum + '</span>' +
-      ' <span style="font-size:0.75rem;color:var(--text-muted);font-weight:400">' + matchCount + ' matches</span>';
+      ' <span style="font-size:0.75rem;color:var(--text-muted);font-weight:400">' + matchCount + ' matches' + cycleTimeInfo + '</span>';
     block.appendChild(title);
 
     var table = document.createElement('table');
@@ -3687,7 +3777,7 @@ function renderSchedule() {
       } else if (entry.type === 'cycle-change') {
         if (f.teams.length === 0 && f.alliance === null) {
           tr.className = 'cycle-change-display';
-          tr.innerHTML = '<td colspan="4">&#8645; Cycle time changes to <strong>' + entry.newTime + ' min</strong> from match ' + (entry.afterMatch + 1) + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.atMin) + '</td>';
+          tr.innerHTML = '<td colspan="4">&#8645; Cycle time \u2192 <strong>' + entry.newTime + ' min</strong> starting match ' + (entry.afterMatch + 1) + ' &nbsp;&middot;&nbsp; effective ' + minToTime(entry.atMin) + '</td>';
           tbody.appendChild(tr);
         }
       } else {
@@ -3740,8 +3830,10 @@ function renderSchedule() {
   });
 }
 
-function exportCSV(scheduled) {
-  const rows = [['Match','Day','Time','Red 1','Red 2','Red 3','Blue 1','Blue 2','Blue 3','Surrogates']];
+function downloadCSV() {
+  var scheduled = window._frcScheduled;
+  if (!scheduled) { showApiStatus('No schedule to download', true); return; }
+  var rows = [['Match','Day','Time','Red 1','Red 2','Red 3','Blue 1','Blue 2','Blue 3','Surrogates']];
   scheduled.forEach(function(day) {
     day.entries.forEach(function(e) {
       if (e.type === 'match') {
@@ -3754,11 +3846,67 @@ function exportCSV(scheduled) {
       }
     });
   });
-  const csv = rows.map(r => r.join(',')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  var csv  = rows.map(function(r) { return r.join(','); }).join('\n');
+  var blob = new Blob([csv], {type:'text/csv'});
+  var a    = document.createElement('a');
+  a.href   = URL.createObjectURL(blob);
   a.download = 'frc_schedule.csv';
+  a.click();
+}
+
+// Keep exportCSV as alias for backward compat
+function exportCSV(scheduled) { downloadCSV(); }
+
+function downloadJSON() {
+  var scheduled = window._frcScheduled;
+  if (!scheduled) { showApiStatus('No schedule to download', true); return; }
+  var dayConfig = collectDayConfig();
+  var payload = {
+    generated_at:          new Date().toISOString(),
+    abstract_schedule_id:  _currentAbstractScheduleId,
+    assigned_schedule_id:  _currentAssignedScheduleId,
+    seed:                  _currentSeed,
+    assign_seed:           _currentAssignSeed,
+    parameters: {
+      num_teams:        parseInt(document.getElementById('numTeams').value) || 0,
+      matches_per_team: parseFloat(document.getElementById('matchesPerTeam').value) || 0,
+      cooldown:         parseInt(document.getElementById('cooldown').value) || 3,
+      cycle_time_min:   parseFloat(document.getElementById('cycleTime').value) || 8,
+      num_days:         parseInt(document.getElementById('numDays').value) || 1,
+      cycle_changes:    dayConfig.cycleChanges,
+    },
+    day_config: dayConfig,
+    days: scheduled.map(function(day) {
+      return {
+        day: day.dayNum,
+        entries: day.entries.filter(function(e) { return e.type === 'match' || e.type === 'break' || e.type === 'cycle-change'; }).map(function(e) {
+          if (e.type === 'match') {
+            var surrogates = [];
+            e.red.forEach(function(t,i){ if (e.redSurrogate && e.redSurrogate[i]) surrogates.push({alliance:'red',team:t}); });
+            e.blue.forEach(function(t,i){ if (e.blueSurrogate && e.blueSurrogate[i]) surrogates.push({alliance:'blue',team:t}); });
+            return {
+              type:       'match',
+              match:      e.num,
+              time:       minToTime(e.startMin),
+              time_min:   e.startMin,
+              red:        e.red,
+              blue:       e.blue,
+              surrogates: surrogates,
+            };
+          } else if (e.type === 'break') {
+            return { type:'break', name:e.name, start:minToTime(e.start), end:minToTime(e.end) };
+          } else {
+            return { type:'cycle-change', after_match:e.afterMatch, new_cycle_min:e.newTime, at:minToTime(e.atMin) };
+          }
+        }),
+      };
+    }),
+  };
+  var json = JSON.stringify(payload, null, 2);
+  var blob = new Blob([json], {type:'application/json'});
+  var a    = document.createElement('a');
+  a.href   = URL.createObjectURL(blob);
+  a.download = 'frc_schedule.json';
   a.click();
 }
 </script>
