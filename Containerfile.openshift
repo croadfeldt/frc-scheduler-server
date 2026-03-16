@@ -1,0 +1,39 @@
+# OpenShift-specific build file. Uses quay.io/sclorg to avoid Docker Hub rate limits
+# in OpenShift build pods. Referenced by openshift/03-buildconfig.yaml.
+#
+# NOT intended for local Docker/Podman use — use Containerfile instead.
+#
+# Follows the linuxserver.io PUID/PGID convention for runtime user mapping:
+#   PUID  — user ID the process runs as  (default: 1001)
+#   PGID  — group ID the process runs as (default: 0)
+#   APP_PORT — port uvicorn listens on   (default: 8080)
+
+FROM quay.io/sclorg/python-312-c10s:latest
+
+# Switch to root for installs
+USER 0
+
+WORKDIR /app
+
+# CentOS Stream 10 — dnf/rpm based; shadow-utils provides adduser/groupadd
+RUN dnf install -y --nodocs gcc libpq-devel shadow-utils && dnf clean all
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Allow any UID in GID 0 to write (OpenShift arbitrary-UID compatibility)
+RUN chgrp -R 0 /app && chmod -R g=u /app
+
+ENV CPU_WORKERS=0
+ENV PYTHONUNBUFFERED=1
+ENV APP_PORT=8080
+ENV PUID=1000
+ENV PGID=1000
+
+EXPOSE ${APP_PORT}
+
+ENTRYPOINT ["/entrypoint.sh"]
