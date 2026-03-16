@@ -206,12 +206,18 @@
   .schedule-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
   .day-block { margin-bottom: 2rem; }
+  .day-block[id] { scroll-margin-top: 0.5rem; }
   .day-title {
-    font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 1rem;
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 1.15rem;
     letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-strong);
     margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.75rem;
   }
   .day-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .day-title .day-jump {
+    cursor: pointer; transition: color 0.15s;
+    font-size: 1.35rem; letter-spacing: 0.1em;
+  }
+  .day-title .day-jump:hover { color: var(--accent); }
 
   .match-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
   .match-table th {
@@ -906,10 +912,13 @@ function pruneAfterEndTime(row) {
 // Renumber all day row headers and update dataset.day
 function renumberDays() {
   document.querySelectorAll('.day-row').forEach(function(row, i) {
-    var header = row.querySelector('.day-row-header span');
-    if (header) header.textContent = 'Day ' + (i + 1);
+    var label = row.querySelector('.day-row-header .day-label-link');
+    if (label) {
+      label.textContent = 'Day ' + (i + 1);
+      label.title = 'Scroll schedule to Day ' + (i + 1);
+      label.onclick = (function(dn) { return function() { scrollToDay(dn); }; })(i + 1);
+    }
     row.dataset.day = i;
-    // Update remove button visibility (day 1 never has one visible)
     var rmBtn = row.querySelector('.day-row-header .btn-icon');
     if (rmBtn) rmBtn.style.display = i === 0 ? 'none' : '';
   });
@@ -955,7 +964,7 @@ function buildDaysUI() {
     d.dataset.day = i;
     d.innerHTML =
       '<div class="day-row-header" style="display:flex;align-items:center;justify-content:space-between;">' +
-        '<span>Day ' + (i+1) + '</span>' +
+        '<span class="day-label-link" onclick="scrollToDay(' + (i+1) + ')" title="Scroll schedule to Day ' + (i+1) + '" style="font-size:1rem;font-weight:700;letter-spacing:0.05em;cursor:pointer;transition:color 0.15s;" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'\'">Day ' + (i+1) + '</span>' +
         '<button class="btn-icon" title="Remove day" style="font-size:0.75rem;opacity:0.6;' + (i === 0 ? 'display:none;' : '') + '" onclick="removeDay(this.closest(\'.day-row\'))">&#x2715;</button>' +
       '</div>' +
       '<div class="day-times">' +
@@ -1613,27 +1622,35 @@ function fullReset() {
 // ── Calculate maximum matches per team given current schedule parameters ─────
 function calcMaxMatches() {
   var numTeams    = parseInt(document.getElementById('numTeams').value) || 0;
-  var cycleTime   = parseFloat(document.getElementById('cycleTime').value) || 8;
   var breakBuffer = parseFloat(document.getElementById('breakBuffer').value) || 0;
   if (numTeams < 6) { showApiStatus('Enter at least 6 teams before calculating', true); return; }
   if (!validateTimes()) { showApiStatus('Fix invalid times before calculating', true); return; }
   if (!validateCycleChanges()) { showApiStatus('Fix cycle change fields before calculating', true); return; }
 
-  var cycleChanges = getCycleTimeChanges();
   var dayRows = document.querySelectorAll('.day-row');
-
-  // Count how many matches fit across all days with exact cycle time and break buffer
   var totalSlotMatches = 0;
+
   dayRows.forEach(function(row) {
     var cursor = timeStrToMin(row.querySelector('.day-start').value);
     var dayEnd = timeStrToMin(row.querySelector('.day-end').value);
     var breaks = Array.from(row.querySelectorAll('.break-row')).map(function(br) {
       return { start: timeStrToMin(br.querySelector('.break-start').value),
                end:   timeStrToMin(br.querySelector('.break-end').value), done: false };
-    }).filter(function(b) { return b.end > b.start; });
+    }).filter(function(b) { return b.end > b.start && b.start < dayEnd; }).sort(function(a,b){return a.start-b.start;});
+
+    // Build per-day cycle change list (same as _finishGenerationInner)
+    var dayCycleChanges = Array.from(row.querySelectorAll('.day-cc-row')).map(function(ccRow) {
+      var t = parseFloat(ccRow.querySelector('.cc-time').value);
+      var afterInp = ccRow.querySelector('.cc-after');
+      return { isStart: ccRow.dataset.isStart === '1',
+               afterMatch: afterInp ? parseInt(afterInp.value) : null, time: t };
+    }).filter(function(c) { return c.time > 0; });
+
+    // Local match counter for this day (for cycle time lookup)
+    var dayMatchCount = 0;
 
     while (true) {
-      // Flush any breaks whose start has passed
+      // Flush breaks at or before cursor
       var flushed = true;
       while (flushed) {
         flushed = false;
@@ -1641,33 +1658,36 @@ function calcMaxMatches() {
           if (!b.done && b.start <= cursor) { cursor = Math.max(cursor, b.end); b.done = true; flushed = true; }
         });
       }
-      // Apply break buffer: if a break or end-of-day is within buffer, flush break or stop
+      // Apply break buffer
       var nextBreak = breaks.find(function(b) { return !b.done && b.start > cursor; });
       var nextBoundary = nextBreak ? Math.min(nextBreak.start, dayEnd) : dayEnd;
       if (breakBuffer > 0 && nextBoundary - cursor < breakBuffer && nextBoundary > cursor) {
         if (nextBreak && nextBreak.start <= dayEnd) {
-          cursor = Math.max(cursor, nextBreak.end);
-          nextBreak.done = true;
-          continue;
-        } else {
-          break;
-        }
+          cursor = Math.max(cursor, nextBreak.end); nextBreak.done = true; continue;
+        } else { break; }
       }
-      var ct = getCycleTime(totalSlotMatches + 1, cycleTime, cycleChanges);
+      // Get effective cycle time for this match using per-day rules
+      var ct = (function() {
+        var t = dayCycleChanges.length > 0 ? dayCycleChanges[0].time : (parseFloat(document.getElementById('cycleTime').value) || 8);
+        dayCycleChanges.forEach(function(cc) {
+          if (cc.isStart) { t = cc.time; }
+          else if (!isNaN(cc.afterMatch) && dayMatchCount + 1 > cc.afterMatch) { t = cc.time; }
+        });
+        return t;
+      })();
       if (cursor + ct > dayEnd) break;
       cursor += ct;
+      dayMatchCount++;
       totalSlotMatches++;
     }
   });
 
   if (totalSlotMatches === 0) { showApiStatus('No matches fit in the current schedule', true); return; }
 
-  // Distribute 6 player-slots per match evenly across teams
-  var totalPlayerSlots = totalSlotMatches * 6;
-  var mpt = Math.floor(totalPlayerSlots / numTeams);
+  // Distribute player slots evenly: floor(totalSlots*6 / numTeams) matches per team
+  var mpt = Math.floor(totalSlotMatches * 6 / numTeams);
   if (mpt < 1) mpt = 1;
-
-  // Verify ceil(numTeams*mpt/6) fits; back off if needed
+  // Back off if needed to fit within slot count
   if (Math.ceil(numTeams * mpt / 6) > totalSlotMatches) mpt = Math.max(1, mpt - 1);
 
   var neededMatches = Math.ceil(numTeams * mpt / 6);
@@ -1675,10 +1695,13 @@ function calcMaxMatches() {
 
   document.getElementById('matchesPerTeam').value = mpt;
 
-  var msg = '\u2713 Max ' + mpt + ' matches/team \u2014 ' + neededMatches + ' total matches fit'
+  var msg = '\u2713 Max ' + mpt + ' matches/team \u2014 ' + neededMatches + ' of ' + totalSlotMatches + ' slots used'
     + (surrogates > 0 ? ', ' + surrogates + ' surrogate' + (surrogates !== 1 ? 's' : '') + ' needed' : ', no surrogates needed');
   showApiStatus(msg);
-  onParamChanged();
+  // Auto-generate schedule with the new mpt value
+  if (_abstractParams !== null || document.getElementById('autoPopulate').checked) {
+    generateSchedule();
+  }
 }
 
 // ── Toggle slot-number display in abstract schedule ──────────────────────────
@@ -1711,6 +1734,15 @@ function toggleFakeTeams() {
 }
 
 // Recompute and display B2B stat respecting abstract mode
+// Scroll the schedule output panel to a specific day block
+function scrollToDay(dayNum) {
+  var block = document.getElementById('schedule-day-' + dayNum);
+  if (!block) return;
+  var output = document.getElementById('scheduleOutput');
+  // Scroll within the scrollable schedule-output container
+  output.scrollTo({ top: block.offsetTop - output.offsetTop, behavior: 'smooth' });
+}
+
 function updateB2BStat() {
   var el = document.getElementById('statB2B');
   if (!el) return;
@@ -3646,7 +3678,8 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         start: timeToMin(b.start), end: timeToMin(b.end), done: false,
       })).filter(b => b.end > b.start).sort((a,b) => a.start - b.start),
     };
-  });
+  // Strip breaks that start at or after the day end (e.g. lunch on a noon-end final day)
+  }).map(day => { day.breaks = day.breaks.filter(b => b.start < day.end); return day; });
 
   window._frcFinalDayOverflow = null;
   const totalMatches = matches.length;
@@ -4036,6 +4069,7 @@ function renderSchedule() {
 
     var block = document.createElement('div');
     block.className = 'day-block';
+    block.id = 'schedule-day-' + day.dayNum;
 
     var matchCount = day.entries.filter(function(e) { return e.type === 'match'; }).length;
     var dayMatches = day.entries.filter(function(e) { return e.type === 'match'; });
@@ -4057,10 +4091,10 @@ function renderSchedule() {
     var title = document.createElement('div');
     title.className = 'day-title';
     title.innerHTML =
-      '<span class="filterable' + (f.day === day.dayNum ? ' active' : '') + '" ' +
-      'onclick="addFilter(&apos;day&apos;,' + day.dayNum + ')" title="Filter to Day ' + day.dayNum + '">' +
+      '<span class="filterable day-jump' + (f.day === day.dayNum ? ' active' : '') + '" ' +
+      'onclick="scrollToDay(' + day.dayNum + ')" title="Click to scroll here · Shift+click to filter">' +
       'Day ' + day.dayNum + '</span>' +
-      ' <span style="font-size:0.75rem;color:var(--text-muted);font-weight:400">' + matchCount + ' matches' + cycleTimeInfo + '</span>';
+      ' <span style="font-size:0.78rem;color:var(--text-muted);font-weight:400">' + matchCount + ' matches' + cycleTimeInfo + '</span>';
     block.appendChild(title);
 
     var table = document.createElement('table');
