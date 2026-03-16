@@ -218,7 +218,7 @@ After generating a schedule, the browser URL is updated:
 | `n` | `51` | Number of teams |
 | `mpt` | `11` | Matches per team (auto-filled by Calc Max Matches button) |
 | `cd` | `3` | Cooldown |
-| `ct` | `8` | Cycle time (minutes, any decimal e.g. `7.3`, `6.75`) |
+| `ct` | `8` | Default cycle time (minutes, any decimal). Synced from Day 1 start-of-day cycle time. |
 | `days` | `2` | Number of competition days |
 | `seed` | `a1b2c3d4` | Stage 1 hex seed |
 | `aseed` | `cafebabe` | Stage 2 hex seed |
@@ -239,6 +239,8 @@ Without `teams`, the abstract structure renders with blank slots.
 | ▶ Assign Teams to Schedule | Config panel | Runs Stage 2 team assignment |
 | ✓ Commit Schedule as Active | Config panel | Marks assigned schedule as active, logs to server |
 | ↻ Calc Max Matches | Config panel | Calculates maximum matches/team from schedule parameters and fills the field |
+| + Add Day | Daily Schedule section | Appends a new competition day (max 5). Day 1 defaults to 17:00 end; Day 2+ default to 12:00 (noon). Each day has its own start-of-day cycle time, breaks, and cycle time changes. |
+| ✕ (day header) | Each day row | Removes that day from the schedule (Day 1 cannot be removed) |
 | Break Buffer (min) | Config panel | Minimum minutes remaining before a break or end-of-day to still schedule a match. Default 5. Applied in both schedule generation and Calc Max Matches. |
 | 👁 Show / Hide Slot Numbers | Config panel | Toggle showing abstract slot indices (S1…N) vs blank dashes; B2B recalculates accordingly |
 | ✖ Reset | Config panel header & share bar | Two-stage reset: clears results (keeps params), optionally resets params to defaults too. Clears URL. |

@@ -389,6 +389,15 @@ AI use disclosed, human review confirmed, license terms unaffected.
 
 **`rebuild.sh`:** Full teardown + registry credential refresh (Removed→Managed NooBaa cycle) + wait for registry deployment + secrets + postgres + buildconfig + builder SA wait + image-builder role grant + build (no `--follow`, polls status via `wait_for_build`) + deploy + route + cronjob. `set -euo pipefail`.
 
+### Cycle time and number of days (UI)
+
+`cycleTime` and `numDays` are **hidden inputs** — not visible fields. The visible cycle time is the "Cycle Time (min)" field inside each day's start-of-day cycle change row. Changing Day 1's start-of-day cycle time syncs the hidden `cycleTime` input so downstream JS (calcMaxMatches, estimateFirstMatchOfDay, etc.) stays consistent.
+
+Days are managed via `addDay()` / `removeDay(dayEl)` buttons:
+- `+ Add Day` button below the last day row. Max 5 days. Default end time: Day 1 = 17:00, Day 2+ = 12:00 (noon).
+- Each day row header has a ✕ remove button (Day 1 has none).
+- `buildDaysUI()` reads the hidden `numDays` input and adds missing rows up to that count.
+
 ### Full Reset button
 
 Two-stage reset available from the ✖ Reset button in both the config panel header (always visible) and the share bar:
