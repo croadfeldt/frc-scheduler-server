@@ -25,7 +25,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger, Boolean, DateTime, Float, ForeignKey,
-    Integer, JSON, String, UniqueConstraint,
+    Integer, JSON, String, Text, UniqueConstraint,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
