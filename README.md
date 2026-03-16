@@ -69,7 +69,7 @@ cp env.example .env
 # 3. Build and start
 docker compose up --build
 
-# App is at http://localhost:8000
+# App is at http://localhost:8080
 ```
 
 ---
@@ -119,8 +119,8 @@ Both Containerfiles are rootless-compliant. The following environment variables 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PUID` | `1001` | User ID the process runs as. Set to `$(id -u)` to match your host user (linuxserver.io convention). |
-| `PGID` | `0` | Group ID the process runs as. GID 0 (root group) enables OpenShift arbitrary-UID compatibility. |
+| `PUID` | `1000` | User ID the process runs as. Set to `$(id -u)` to match your host user (linuxserver.io convention). |
+| `PGID` | `1000` | Group ID the process runs as. Set to `$(id -g)` to match your host group. |
 | `APP_PORT` | `8080` | Port uvicorn listens on. Ports ≥1024 require no special capabilities. |
 
 All app files are `chgrp -R 0 && chmod -R g=u` so any UID in GID 0 can write without privilege escalation.
@@ -164,7 +164,7 @@ Stage 2 — Team Assignment
 Browser (static/index.html)
     │  REST + SSE  +  Authorization: Bearer <jwt>
     ▼
-FastAPI (app/main.py)              port 8000
+FastAPI (app/main.py)              port 8080
     │
     ├─ /auth/*          OAuth2 (Google, Apple) → JWT
     ├─ /api/events/*    Event + team management + TBA import
@@ -209,7 +209,7 @@ After generating a schedule, the browser URL is updated:
 | `n` | `51` | Number of teams |
 | `mpt` | `11` | Matches per team |
 | `cd` | `3` | Cooldown |
-| `ct` | `8` | Cycle time (minutes) |
+| `ct` | `8` | Cycle time (minutes, any decimal e.g. `7.3`, `6.75`) |
 | `days` | `2` | Number of competition days |
 | `seed` | `a1b2c3d4` | Stage 1 hex seed |
 | `aseed` | `cafebabe` | Stage 2 hex seed |
@@ -281,7 +281,7 @@ Without `teams`, the abstract structure renders with slot labels (S1, S2...).
 - Anonymous schedules (`created_by = NULL`) are publicly readable but not deletable.
 - Anyone can duplicate a schedule; the copy is owned by the caller.
 
-Interactive docs: http://localhost:8000/docs (Swagger UI)
+Interactive docs: http://localhost:8080/docs (Swagger UI)
 
 ---
 
@@ -292,8 +292,9 @@ Interactive docs: http://localhost:8000/docs (Swagger UI)
 | `DATABASE_URL` | `postgresql+asyncpg://frc:frc@localhost:5432/frc_scheduler` | Postgres DSN |
 | `TBA_API_KEY` | (empty) | The Blue Alliance read key — [get one free](https://www.thebluealliance.com/account) |
 | `CPU_WORKERS` | `0` (auto) | Scheduler worker processes; 0 = `os.cpu_count()` |
+| `WEB_WORKERS` | `1` | Uvicorn process count. 1 = single user, 2–4 = multi-user. Each worker has its own ProcessPoolExecutor. |
 | `JWT_SECRET` | (required for auth) | Long random string — `openssl rand -hex 32` |
-| `BASE_URL` | `http://localhost:8000` | Public URL — used for OAuth redirect URIs |
+| `BASE_URL` | `http://localhost:8080` | Public URL — used for OAuth redirect URIs |
 | `GOOGLE_CLIENT_ID` | (empty) | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | (empty) | Google OAuth client secret |
 | `APPLE_CLIENT_ID` | (empty) | Apple Service ID (web) |
@@ -360,8 +361,9 @@ print('Post-gen sweep rules OK')
 
 | Concern | Approach |
 |---------|----------|
-| More iterations | Increase Assignment Iterations in UI (default 500) |
+| More iterations | Increase Assignment Iterations in UI (default 1000) |
 | More cores | Set `CPU_WORKERS` to physical core count |
 | Memory | Each worker ≈ 50 MB; 16 workers ≈ 800 MB |
 | Multiple replicas | Each replica has its own worker pool; note — more small pods beats one big pod for scheduling throughput only if each pod has enough cores |
+| Concurrent users | Set `WEB_WORKERS=2–4`. A generation semaphore (CPU_WORKERS÷2, min 2) prevents pool saturation. The client AbortController cancels in-flight requests on param changes. |
 | DB migrations | `create_all` is used (dev-friendly). Add Alembic for production schema migrations. |

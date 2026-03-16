@@ -8,8 +8,8 @@
 # Podman with --user), user creation is skipped and uvicorn runs directly.
 #
 # Environment variables:
-#   PUID     — UID to run as          (default: 1001)
-#   PGID     — GID to run as          (default: 0)
+#   PUID     — UID to run as          (default: 1000)
+#   PGID     — GID to run as          (default: 1000)
 #   APP_PORT — port uvicorn listens on (default: 8080)
 
 set -e

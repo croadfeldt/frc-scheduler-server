@@ -4,8 +4,8 @@
 # NOT intended for local Docker/Podman use — use Containerfile instead.
 #
 # Follows the linuxserver.io PUID/PGID convention for runtime user mapping:
-#   PUID  — user ID the process runs as  (default: 1001)
-#   PGID  — group ID the process runs as (default: 0)
+#   PUID  — user ID the process runs as  (default: 1000)
+#   PGID  — group ID the process runs as (default: 1000)
 #   APP_PORT — port uvicorn listens on   (default: 8080)
 
 FROM quay.io/sclorg/python-312-c10s:latest

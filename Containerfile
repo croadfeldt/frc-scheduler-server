@@ -2,8 +2,8 @@
 # For OpenShift builds use: Containerfile.openshift
 #
 # Follows the linuxserver.io PUID/PGID convention for runtime user mapping:
-#   PUID  — user ID the process runs as  (default: 1001)
-#   PGID  — group ID the process runs as (default: 0)
+#   PUID  — user ID the process runs as  (default: 1000)
+#   PGID  — group ID the process runs as (default: 1000)
 #   APP_PORT — port uvicorn listens on   (default: 8080)
 #
 # Example (rootless Podman, map to host user):

@@ -326,3 +326,65 @@ Namespace: `frc-scheduler-server`
 GNU GPL v3. SPDX-License-Identifier: GPL-3.0-or-later in all source files.
 LICENSE includes full GPL v3 text + AI-generation disclosure.
 AI use disclosed, human review confirmed, license terms unaffected.
+
+---
+
+## RECENT CHANGES (post initial implementation)
+
+### Frontend — UI / UX
+
+**Time display:** `minToTime(m)` always outputs `H:MM:SS AM/PM` (seconds always shown for consistency with import tools). Converts fractional minutes to total seconds via `Math.round(m * 60)`.
+
+**Cycle time fractions:** Both the main cycle time input and cycle change rows use `type="number" step="any" min="0.1" max="60"`. Any positive decimal is accepted (e.g. `7.3`, `6.75`, `8.25`). All parsing uses `parseFloat` not `parseInt`. Filter allows `c.time > 0`.
+
+**Cycle change rows** now have 4 columns: Day selector + After Match # + New Cycle (min) + Remove. `estimateFirstMatchOfDay(dayIdx)` computes the default match number. Day dropdown rebuilds when numDays changes.
+
+**Break improvements:**
+- Every day gets a default 12:00–13:00 Lunch break (not just Day 1)
+- Break name `input`/`change` events trigger auto-recalc
+- `addBreak()` defaults to noon–1pm (first break) or 1hr after last break end (subsequent)
+- Break remove button wired via `addEventListener` not inline onclick
+
+**Validation:** `validateTimes()` checks day start/end and break start/end. Invalid inputs get `.input-error` class (red border). Error message shown below days config. Generate button blocked with status message.
+
+**Auto-populate gate:** `onParamChanged` only schedules auto-generate debounce if `_abstractParams !== null` (Stage 1 has run at least once). No auto-calc on fresh page load.
+
+**AbortController:** `_s1AbortController` cancels any in-flight Stage 1 SSE fetch before starting a new one on param change. `AbortError` in catch is silently ignored.
+
+**Debounce:** 1500ms (increased from 800ms).
+
+**503/502/504 retry:** Client detects these status codes before throwing, shows "Server busy" status, retries once after 3s. Network drops also retry once after 3s.
+
+**Stage 1 display:** Abstract mode shows `—` (dimmed, opacity 0.35) instead of slot labels (S1, S2…). Stage 1 is team-agnostic structure only.
+
+**Round boundaries:** Reduced visual weight — dashed border, muted color, 0.55 opacity, 3px dot.
+
+**Overflow warnings:** Moved from inline `warning-box` divs in the schedule output to `showApiStatus(…, true)` in the status bar.
+
+**Color scheme:** Catppuccin-inspired — `--accent: #89b4fa`, `--accent2: #f38ba8`, `--accent3: #a6e3a1`, `--text: #cdd6f4`, `--amber: #f9e2af`, `--danger: #f38ba8`, `--bg: #13151f`, `--surface: #1e2235`.
+
+### Backend — Server
+
+**DB session lifecycle:** `generate_abstract` and `assign_teams` no longer hold a DB session open during CPU-bound worker execution. Each opens `async with AsyncSessionLocal() as db:` only for the actual read or write — prevents connection pool exhaustion under load.
+
+**Generation semaphore:** `asyncio.Semaphore(max(2, cpu_count // 2))` limits concurrent Stage 1+2 generations. If fully acquired, stream immediately returns `{type: error, message: "Server busy"}` so the client retries rather than the request hanging.
+
+**`WEB_WORKERS` env var:** Controls uvicorn process count (default 1, OpenShift deployment sets 2). Each worker has its own ProcessPoolExecutor and semaphore.
+
+**422 logging:** `RequestValidationError` handler logs full request body and Pydantic errors at ERROR level.
+
+**Seed validation:** `AbstractGenerateRequest` has `@field_validator('seed', mode='before')` that coerces empty string to `None`.
+
+**`matchesPerTeam` fallback:** `|| 6` default prevents NaN being sent to API.
+
+**`animInterval` scope:** Declared outside `try` block so `catch` can call `clearInterval`.
+
+### Container / Deployment
+
+**`entrypoint.sh`:** linuxserver.io PUID/PGID convention. When running as root, creates user matching PUID:PGID and drops privileges via `gosu` (Debian) or `runuser` (RHEL). Non-root (OpenShift arbitrary UID) runs directly.
+
+**Defaults:** `PUID=1000`, `PGID=1000`, `APP_PORT=8080`, `WEB_WORKERS=1`.
+
+**OpenShift route:** `haproxy.router.openshift.io/timeout: 120s` annotation on `05-route.yaml`.
+
+**`rebuild.sh`:** Full teardown + registry credential refresh (Removed→Managed NooBaa cycle) + wait for registry deployment + secrets + postgres + buildconfig + builder SA wait + image-builder role grant + build (no `--follow`, polls status via `wait_for_build`) + deploy + route + cronjob. `set -euo pipefail`.

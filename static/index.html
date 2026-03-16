@@ -668,7 +668,7 @@
         <div class="field-row">
           <div class="field">
             <label>Cycle Time (min)</label>
-            <input type="number" id="cycleTime" value="8" min="1" max="60">
+            <input type="number" id="cycleTime" value="8" min="0.1" max="60" step="any">
           </div>
           <div class="field">
             <label>Number of Days</label>
@@ -797,12 +797,13 @@ function timeToMin(t) {
 }
 
 function minToTime(m) {
-  const totalMin = ((m % 1440) + 1440) % 1440; // wrap to 0-1439
-  const h24 = Math.floor(totalMin / 60);
-  const min = totalMin % 60;
+  const totalSec = Math.round(((m % 1440) + 1440) % 1440 * 60); // total seconds, wrapped
+  const h24 = Math.floor(totalSec / 3600);
+  const min  = Math.floor((totalSec % 3600) / 60);
+  const sec  = totalSec % 60;
   const ampm = h24 < 12 ? 'AM' : 'PM';
-  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
-  return h12 + ':' + String(min).padStart(2,'0') + ' ' + ampm;
+  const h12  = h24 % 12 === 0 ? 12 : h24 % 12;
+  return h12 + ':' + String(min).padStart(2,'0') + ':' + String(sec).padStart(2,'0') + ' ' + ampm;
 }
 
 // ── Seeded PRNG (mulberry32) ──────────────────────────────────────────────────
@@ -1385,7 +1386,7 @@ function addCycleChange(afterMatch, newTime, forDay) {
     '<div class="field"><label>After Match #</label>' +
       '<input type="number" class="cc-after" placeholder="e.g. 20" min="1" value="' + defaultAfter + '"></div>' +
     '<div class="field"><label>New Cycle (min)</label>' +
-      '<input type="number" class="cc-time" placeholder="e.g. 7" min="1" max="60" value="' + (newTime || '') + '"></div>' +
+      '<input type="number" class="cc-time" placeholder="e.g. 7.5" min="0.1" max="60" step="any" value="' + (newTime || '') + '"></div>' +
     '<button class="btn-icon btn-remove-cc" title="Remove">&#x2715;</button>';
   list.appendChild(row);
 
@@ -1410,10 +1411,10 @@ function getCycleTimeChanges() {
       return {
         day:   parseInt(row.querySelector('.cc-day')   ? row.querySelector('.cc-day').value   : '1'),
         after: parseInt(row.querySelector('.cc-after').value),
-        time:  parseInt(row.querySelector('.cc-time').value),
+        time:  parseFloat(row.querySelector('.cc-time').value),
       };
     })
-    .filter(function(c) { return !isNaN(c.after) && !isNaN(c.time) && c.after >= 1 && c.time >= 1; })
+    .filter(function(c) { return !isNaN(c.after) && !isNaN(c.time) && c.after >= 1 && c.time > 0; })
     .sort(function(a, b) { return a.after - b.after; });
 }
 
@@ -2540,7 +2541,7 @@ function updateUrlFromState() {
 // Collect day/timing config from UI
 function collectDayConfig() {
   return {
-    cycleTime: parseInt(document.getElementById('cycleTime').value),
+    cycleTime: parseFloat(document.getElementById('cycleTime').value) || 8,
     numDays: parseInt(document.getElementById('numDays').value),
     cycleChanges: getCycleTimeChanges(),
     days: Array.from(document.querySelectorAll('.day-row')).map(function(row) {
@@ -2872,7 +2873,7 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
   const tzAbbr = getTimezoneAbbr();
   // Use override day config if provided (e.g. from loaded schedule), else read from UI
   const _dc = dayConfigOverride;
-  const defaultCycleTime = _dc ? _dc.cycleTime : parseInt(document.getElementById('cycleTime').value);
+  const defaultCycleTime = _dc ? _dc.cycleTime : (parseFloat(document.getElementById('cycleTime').value) || 8);
   const cycleChanges = _dc ? (_dc.cycleChanges || []) : getCycleTimeChanges();
   const days = (_dc && _dc.days ? _dc.days : Array.from(document.querySelectorAll('.day-row'))).map(row => {
     const isObj = typeof row === 'object' && row.start && !row.querySelector;
