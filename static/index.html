@@ -27,20 +27,20 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #1a1d27;
-    --surface: #22263a;
-    --surface2: #2a2f46;
-    --border: #3a4060;
-    --accent: #7aa4f0;       /* soft blue — readable on dark */
-    --accent2: #e07b50;      /* warm orange — distinct, not harsh */
-    --accent3: #5cb87a;      /* muted green */
-    --text: #dde2f0;         /* off-white, easy on eyes */
-    --text-muted: #929cb6;   /* visible but secondary — passes 4.5:1 on all surfaces */
-    --text-strong: #f2f5ff;  /* headings & important values */
-    --red-team: #e87878;     /* alliance red — clear, not neon */
-    --blue-team: #6fa8e8;    /* alliance blue — clear, distinct from red */
-    --amber: #c8992a;        /* surrogate / break color */
-    --danger: #cc5555;
+    --bg: #13151f;
+    --surface: #1e2235;
+    --surface2: #252b42;
+    --border: #45475a;
+    --accent: #89b4fa;       /* bright blue — high contrast on dark */
+    --accent2: #f38ba8;      /* soft red-pink — distinct, readable */
+    --accent3: #a6e3a1;      /* bright green — clear pass/ok indicator */
+    --text: #cdd6f4;         /* catppuccin text — proven readable */
+    --text-muted: #7f849c;   /* dimmed but legible */
+    --text-strong: #e6e9ef;  /* near-white headings */
+    --red-team: #f38ba8;     /* alliance red — bright, accessible */
+    --blue-team: #89b4fa;    /* alliance blue — clear, distinct from red */
+    --amber: #f9e2af;        /* surrogate / break — warm yellow */
+    --danger: #f38ba8;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -488,6 +488,9 @@
   }
   .api-status.ok  { background: rgba(92,184,122,0.12); color: var(--accent3); border: 1px solid rgba(92,184,122,0.3); }
   .api-status.err { background: rgba(204,85,85,0.10); color: var(--danger);   border: 1px solid rgba(204,85,85,0.3); }
+  input.input-error { border-color: var(--danger) !important; background: rgba(243,139,168,0.07) !important; }
+  .time-error-msg { font-size: 0.7rem; color: var(--danger); margin-top: 0.25rem; display: none; }
+  .time-error-msg.visible { display: block; }
 
   /* Auth */
   .auth-bar { display:flex; align-items:center; gap:0.5rem; margin-left:auto; }
@@ -710,6 +713,7 @@
 
         <div class="section-label">Daily Schedule</div>
         <div class="days-container" id="daysContainer"></div>
+        <div id="timeErrorMsg" class="time-error-msg"></div>
 
         <div class="progress-wrap" id="progressWrap">
           <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill"></div></div>
@@ -848,28 +852,131 @@ function buildDaysUI() {
       '<button class="btn-add-break" onclick="addBreak(this)">+ Add Break</button>';
     container.appendChild(d);
     if (i === 0) addBreak(d.querySelector('.btn-add-break'), '12:00', '13:00', 'Lunch');
+
+    // Wire day start/end listeners for validation + auto-recalc
+    const dayStartEl = d.querySelector('.day-start');
+    const dayEndEl   = d.querySelector('.day-end');
+    dayStartEl.addEventListener('change', validateTimesAndRecalc);
+    dayEndEl.addEventListener('change',   validateTimesAndRecalc);
   }
   const rows = container.querySelectorAll('.day-row');
   for (let i = n; i < rows.length; i++) rows[i].remove();
 }
 
 function addBreak(btn, startVal, endVal, nameVal) {
-  startVal = startVal || '';
-  endVal = endVal || '';
+  // If no times provided, pick sensible defaults based on existing breaks or day times
+  if (!startVal || !endVal) {
+    const dayRow = btn.closest('.day-row');
+    const existing = Array.from(dayRow.querySelectorAll('.break-row'));
+    if (existing.length > 0) {
+      // After last break
+      const lastEnd = existing[existing.length - 1].querySelector('.break-end').value;
+      if (lastEnd) {
+        const [h, m] = lastEnd.split(':').map(Number);
+        const newStart = String(h + 1).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+        const newEnd   = String(h + 2).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+        startVal = startVal || newStart;
+        endVal   = endVal   || newEnd;
+      }
+    } else {
+      // Default: noon to 1pm
+      startVal = startVal || '12:00';
+      endVal   = endVal   || '13:00';
+    }
+  }
   nameVal = nameVal || '';
   const list = btn.closest('.day-row').querySelector('.breaks-list');
   const row = document.createElement('div');
   row.className = 'break-row';
   row.innerHTML =
-    '<div class="field"><label>Name</label><input type="text" class="break-name" placeholder="Lunch" value="' + nameVal + '"></div>' +
+    '<div class="field"><label>Name</label><input type="text" class="break-name" placeholder="Break" value="' + nameVal + '"></div>' +
     '<div class="field"><label>Start</label><input type="time" class="break-start" value="' + startVal + '"></div>' +
     '<div class="field"><label>End</label><input type="time" class="break-end" value="' + endVal + '"></div>' +
-    '<button class="btn-icon" onclick="this.closest(\'.break-row\').remove()" title="Remove">&#x2715;</button>';
+    '<button class="btn-icon btn-remove-break" title="Remove">&#x2715;</button>';
   list.appendChild(row);
+  row.querySelector('.btn-remove-break').addEventListener('click', function() {
+    row.remove();
+    validateTimesAndRecalc();
+  });
+
+  // Wire up time change listeners
+  const startInput = row.querySelector('.break-start');
+  const endInput   = row.querySelector('.break-end');
+
+  startInput.addEventListener('change', function() {
+    // Shift end time to preserve the original duration
+    const oldStart = endInput.dataset.lastStart;
+    if (oldStart && endInput.value) {
+      const oldStartMin = timeStrToMin(oldStart);
+      const oldEndMin   = timeStrToMin(endInput.value);
+      const duration    = oldEndMin - oldStartMin;
+      if (duration > 0) {
+        const newEndMin = timeStrToMin(startInput.value) + duration;
+        endInput.value  = minToTimeStr(newEndMin);
+      }
+    }
+    endInput.dataset.lastStart = startInput.value;
+    validateTimesAndRecalc();
+  });
+  endInput.dataset.lastStart = startInput.value;
+  endInput.addEventListener('change', validateTimesAndRecalc);
 }
 
-document.getElementById('numDays').addEventListener('change', buildDaysUI);
+// Convert "HH:MM" to minutes
+function timeStrToMin(t) {
+  if (!t) return 0;
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+// Convert minutes to "HH:MM"
+function minToTimeStr(mins) {
+  mins = Math.max(0, Math.min(1439, mins));
+  return String(Math.floor(mins / 60)).padStart(2,'0') + ':' + String(mins % 60).padStart(2,'0');
+}
+
+// ── Validation: check all day start/end and break times, flag invalid ─────────
+function validateTimes() {
+  let valid = true;
+  document.querySelectorAll('.day-row').forEach(function(row) {
+    const startEl = row.querySelector('.day-start');
+    const endEl   = row.querySelector('.day-end');
+    const dayStart = timeStrToMin(startEl.value);
+    const dayEnd   = timeStrToMin(endEl.value);
+    const dayInvalid = dayEnd <= dayStart;
+    startEl.classList.toggle('input-error', dayInvalid);
+    endEl.classList.toggle('input-error', dayInvalid);
+    if (dayInvalid) valid = false;
+
+    row.querySelectorAll('.break-row').forEach(function(br) {
+      const bs = br.querySelector('.break-start');
+      const be = br.querySelector('.break-end');
+      const bInvalid = !bs.value || !be.value || timeStrToMin(be.value) <= timeStrToMin(bs.value);
+      bs.classList.toggle('input-error', bInvalid);
+      be.classList.toggle('input-error', bInvalid);
+      if (bInvalid && bs.value && be.value) valid = false;
+    });
+  });
+  const errMsg = document.getElementById('timeErrorMsg');
+  if (errMsg) {
+    errMsg.textContent = valid ? '' : '⚠ Fix invalid times — end must be after start';
+    errMsg.classList.toggle('visible', !valid);
+  }
+  return valid;
+}
+
+function validateTimesAndRecalc() {
+  const valid = validateTimes();
+  if (!valid) return;
+  onParamChanged(); // triggers auto-populate debounce if enabled
+}
+
+document.getElementById('numDays').addEventListener('change', function() {
+  buildDaysUI();
+  validateTimes();
+});
 buildDaysUI();
+validateTimes();
 
 function buildTimezoneSelect() {
   const sel = document.getElementById('tzSelect');
@@ -1203,10 +1310,11 @@ function onParamChanged() {
   if (_abstractParams !== null) {
     document.getElementById('paramChangedWarning').style.display = 'block';
     document.getElementById('btnAssign').disabled = true;
-  }
-  if (document.getElementById('autoPopulate').checked) {
-    clearTimeout(_autoPopulateTimeout);
-    _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 800);
+    // Only auto-regenerate if Stage 1 has run at least once this session
+    if (document.getElementById('autoPopulate').checked) {
+      clearTimeout(_autoPopulateTimeout);
+      _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 800);
+    }
   }
 }
 // Allow ?event=mnwi in the URL to auto-load an event
@@ -2165,6 +2273,7 @@ async function generateSchedule() {
 
   const btn = document.getElementById('btnGenerate');
   if (btn.disabled) return; // already running — ignore duplicate trigger
+  if (!validateTimes()) { showApiStatus('Fix invalid times before generating', true); return; }
   btn.disabled = true;
   document.getElementById('progressWrap').style.display = 'block';
   document.getElementById('stage2Panel').style.display = 'none';
