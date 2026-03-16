@@ -36,6 +36,22 @@ oc rollout status deployment/frc-postgres -n "$NS" --timeout=120s
 echo ""
 echo "==> [3/6] Applying BuildConfig and starting build..."
 oc apply -f openshift/03-buildconfig.yaml
+
+# Wait for the builder service account and its registry secret to be provisioned.
+# Deleting all SAs in step 1 removes the 'builder' SA; OpenShift recreates it but
+# the dockercfg secret it uses to push to the internal registry takes a moment.
+echo "    Waiting for builder service account registry secret..."
+for i in $(seq 1 24); do
+  SECRET=$(oc get sa builder -n "$NS" -o jsonpath='{.secrets[*].name}' 2>/dev/null \
+           | tr ' ' '\n' | grep dockercfg | head -1)
+  if [ -n "$SECRET" ]; then
+    echo "    builder SA ready (secret: $SECRET)"
+    break
+  fi
+  echo "    attempt $i/24 — waiting 5s..."
+  sleep 5
+done
+
 oc start-build frc-scheduler-server-git --follow -n "$NS"
 
 echo ""
