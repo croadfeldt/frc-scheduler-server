@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # openshift/rebuild.sh — Full teardown and rebuild of the frc-scheduler-server namespace.
 # Usage: bash openshift/rebuild.sh
-# Run from the repo root directory.
+# Run from the repo root directory. Commit and push all changes to GitHub first.
 
 set -euo pipefail
 
@@ -17,8 +17,7 @@ refresh_registry() {
   oc patch configs.imageregistry.operator.openshift.io cluster \
     --type merge --patch '{"spec":{"managementState":"Managed"}}' 2>/dev/null || true
 
-  # The Removed→Managed cycle deletes and recreates the registry deployment.
-  # Wait for it to exist before watching the rollout.
+  # Removed→Managed deletes and recreates the registry deployment — wait for it to exist
   echo "    Waiting for registry deployment to be available..."
   for i in $(seq 1 24); do
     if oc get deployment image-registry -n openshift-image-registry \
@@ -35,6 +34,33 @@ refresh_registry() {
   oc rollout status deployment/image-registry \
     -n openshift-image-registry --timeout=120s 2>/dev/null || true
   echo "    Registry ready."
+}
+
+# Helper: wait for a build to complete (success or failure)
+# Usage: wait_for_build <build-name>
+wait_for_build() {
+  local BUILD="$1"
+  echo "    Waiting for build $BUILD to complete..."
+  while true; do
+    PHASE=$(oc get build "$BUILD" -n "$NS" \
+      -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+    case "$PHASE" in
+      Complete)
+        echo "    Build $BUILD completed successfully."
+        return 0
+        ;;
+      Failed|Error|Cancelled)
+        echo "    Build $BUILD failed (phase: $PHASE)."
+        echo "    Logs:"
+        oc logs "build/$BUILD" -n "$NS" --tail=40 2>/dev/null || true
+        return 1
+        ;;
+      *)
+        echo "    Build phase: $PHASE — waiting 10s..."
+        sleep 10
+        ;;
+    esac
+  done
 }
 
 # ── 1. Tear down everything ───────────────────────────────────────────────────
@@ -56,8 +82,6 @@ echo "==> Remaining resources (should be empty):"
 oc get all -n "$NS" 2>/dev/null || echo "  (none)"
 
 # ── 2. Refresh registry AFTER teardown ───────────────────────────────────────
-# The teardown can leave the registry's NooBaa S3 credentials stale.
-# Refresh here so the build pod gets a valid token.
 echo ""
 echo "==> [pre-build] Refreshing image registry credentials..."
 refresh_registry
@@ -78,7 +102,7 @@ echo ""
 echo "==> [3/6] Applying BuildConfig..."
 oc apply -f openshift/03-buildconfig.yaml
 
-# Wait for the builder SA and its registry dockercfg secret to be provisioned.
+# Wait for builder SA and its registry dockercfg secret
 echo "    Waiting for builder service account registry secret..."
 for i in $(seq 1 24); do
   SECRET=$(oc get sa builder -n "$NS" -o jsonpath='{.secrets[*].name}' 2>/dev/null \
@@ -98,19 +122,27 @@ oc policy add-role-to-user \
   system:serviceaccount:"$NS":builder \
   -n "$NS"
 
+# Start build without --follow (streaming can time out on slow builds).
+# Poll build status instead so we always know when it truly finishes.
 echo ""
 echo "==> Starting build..."
-oc start-build frc-scheduler-server-git --follow -n "$NS"
+BUILD_NAME=$(oc start-build frc-scheduler-server-git -n "$NS" \
+  -o name 2>/dev/null | sed 's|build.build.openshift.io/||')
+echo "    Build started: $BUILD_NAME"
+echo "    Live logs (Ctrl-C safe — status polling continues):"
+oc logs -f "build/$BUILD_NAME" -n "$NS" 2>/dev/null || true
+echo ""
+wait_for_build "$BUILD_NAME"
 
 # ── 6. Deploy app ─────────────────────────────────────────────────────────────
 echo ""
 echo "==> [4/6] Deploying application..."
 oc apply -f openshift/04-deployment.yaml
-oc rollout status deployment/frc-scheduler-server -n "$NS" --timeout=120s
+oc rollout status deployment/frc-scheduler-server -n "$NS" --timeout=300s
 
 # ── 7. Route ──────────────────────────────────────────────────────────────────
 echo ""
-echo "==> [5/6] Applying route (120s timeout)..."
+echo "==> [5/6] Applying route (120s HAProxy timeout)..."
 oc apply -f openshift/05-route.yaml
 
 # ── 8. CronJob + RBAC ─────────────────────────────────────────────────────────
