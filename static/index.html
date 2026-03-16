@@ -346,7 +346,7 @@
   tr.filtered-highlight td { background: rgba(122,164,240,0.09) !important; }
 
   .cycle-changes-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.5rem; }
-  .cycle-change-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.4rem; align-items: end; }
+  .cycle-change-row { display: grid; grid-template-columns: 0.7fr 0.8fr 0.8fr auto; gap: 0.4rem; align-items: end; }
 
   /* Round boundary marker row */
   tr.round-boundary-row td {
@@ -356,30 +356,28 @@
   .round-boundary-label {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.55rem 0.7rem 0.3rem;
-    font-family: 'Barlow Condensed', sans-serif;
-    font-weight: 700;
-    font-size: 0.65rem;
-    letter-spacing: 0.14em;
+    gap: 0.5rem;
+    padding: 0.25rem 0.7rem 0.15rem;
+    font-size: 0.58rem;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--accent);
-    border-top: 1px solid rgba(122,164,240,0.3);
-    margin-top: 0.15rem;
+    color: var(--text-muted);
+    border-top: 1px dashed rgba(127,132,156,0.2);
+    margin-top: 0.1rem;
+    opacity: 0.55;
   }
   .round-boundary-label::before {
     content: '';
-    width: 8px; height: 8px;
-    background: var(--accent);
+    width: 3px; height: 3px;
+    background: var(--text-muted);
     border-radius: 50%;
     flex-shrink: 0;
-    opacity: 0.8;
   }
   .round-boundary-label::after {
     content: '';
     flex: 1;
     height: 1px;
-    background: rgba(122,164,240,0.2);
+    background: rgba(127,132,156,0.1);
   }
 
   /* ── Event management panel ── */
@@ -852,7 +850,7 @@ function buildDaysUI() {
       '<div class="breaks-list"></div>' +
       '<button class="btn-add-break" onclick="addBreak(this)">+ Add Break</button>';
     container.appendChild(d);
-    if (i === 0) addBreak(d.querySelector('.btn-add-break'), '12:00', '13:00', 'Lunch');
+    addBreak(d.querySelector('.btn-add-break'), '12:00', '13:00', 'Lunch');
 
     // Wire day start/end listeners for validation + auto-recalc
     const dayStartEl = d.querySelector('.day-start');
@@ -903,6 +901,16 @@ function addBreak(btn, startVal, endVal, nameVal) {
   // Wire up time change listeners
   const startInput = row.querySelector('.break-start');
   const endInput   = row.querySelector('.break-end');
+
+  // Name changes also trigger recalculation
+  const nameInput = row.querySelector('.break-name');
+  nameInput.addEventListener('change', validateTimesAndRecalc);
+  nameInput.addEventListener('input', function() {
+    clearTimeout(_autoPopulateTimeout);
+    if (_abstractParams !== null && document.getElementById('autoPopulate').checked) {
+      _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 1500);
+    }
+  });
 
   startInput.addEventListener('change', function() {
     // Shift end time to preserve the original duration
@@ -975,6 +983,16 @@ function validateTimesAndRecalc() {
 document.getElementById('numDays').addEventListener('change', function() {
   buildDaysUI();
   validateTimes();
+  // Update day dropdowns in existing cycle change rows
+  var numDays = parseInt(this.value) || 1;
+  document.querySelectorAll('.cycle-change-row .cc-day').forEach(function(sel) {
+    var cur = sel.value;
+    var opts = '';
+    for (var i = 1; i <= numDays; i++) {
+      opts += '<option value="' + i + '"' + (String(i) === cur ? ' selected' : '') + '>Day ' + i + '</option>';
+    }
+    sel.innerHTML = opts;
+  });
 });
 buildDaysUI();
 validateTimes();
@@ -1324,27 +1342,79 @@ function onParamChanged() {
   if (p) { document.getElementById('eventCodeInput').value = p; setTimeout(loadEventByCode, 600); }
 })();
 
-function addCycleChange(afterMatch, newTime) {
-  afterMatch = afterMatch || '';
-  newTime = newTime || '';
+// Estimate the first match number of a given day (1-based day index)
+// using the current team count and matches per team.
+function estimateFirstMatchOfDay(dayIdx) {
+  var numTeams     = parseInt(document.getElementById('numTeams').value) || 24;
+  var mpt          = parseInt(document.getElementById('matchesPerTeam').value) || 6;
+  var numDays      = parseInt(document.getElementById('numDays').value) || 1;
+  var totalMatches = Math.ceil(numTeams * mpt / 6);
+  // Distribute matches evenly across days
+  var matchesPerDay = Math.ceil(totalMatches / numDays);
+  return dayIdx * matchesPerDay + 1;
+}
+
+function addCycleChange(afterMatch, newTime, forDay) {
+  var numDays = parseInt(document.getElementById('numDays').value) || 1;
+  // Default day: first day that has no existing cycle change, or day 1
+  var usedDays = Array.from(document.querySelectorAll('.cc-day')).map(function(s){ return parseInt(s.value); });
+  var defaultDay = forDay != null ? forDay : 1;
+  if (forDay == null) {
+    for (var d = 1; d <= numDays; d++) {
+      if (!usedDays.includes(d)) { defaultDay = d; break; }
+    }
+  }
+  // Default afterMatch: approx first match of the chosen day - 1
+  var defaultAfter = afterMatch != null ? afterMatch : Math.max(1, estimateFirstMatchOfDay(defaultDay - 1) - 1);
+
   const list = document.getElementById('cycleChangesList');
   const row = document.createElement('div');
   row.className = 'cycle-change-row';
+
+  // Build day options
+  var dayOpts = '';
+  for (var i = 1; i <= numDays; i++) {
+    dayOpts += '<option value="' + i + '"' + (i === defaultDay ? ' selected' : '') + '>Day ' + i + '</option>';
+  }
+
   row.innerHTML =
-    '<div class="field"><label>After Match #</label><input type="number" class="cc-after" placeholder="e.g. 20" min="1" value="' + afterMatch + '"></div>' +
-    '<div class="field"><label>New Cycle Time (min)</label><input type="number" class="cc-time" placeholder="e.g. 7" min="1" max="60" value="' + newTime + '"></div>' +
-    '<button class="btn-icon" onclick="this.closest(&apos;.cycle-change-row&apos;).remove()" title="Remove">&#x2715;</button>';
+    '<div class="field"><label>Day</label>' +
+      '<select class="cc-day" style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.45rem 0.5rem;font-size:0.85rem;border-radius:4px;width:100%;">' +
+        dayOpts +
+      '</select></div>' +
+    '<div class="field"><label>After Match #</label>' +
+      '<input type="number" class="cc-after" placeholder="e.g. 20" min="1" value="' + defaultAfter + '"></div>' +
+    '<div class="field"><label>New Cycle (min)</label>' +
+      '<input type="number" class="cc-time" placeholder="e.g. 7" min="1" max="60" value="' + (newTime || '') + '"></div>' +
+    '<button class="btn-icon btn-remove-cc" title="Remove">&#x2715;</button>';
   list.appendChild(row);
+
+  // When day changes, update the default match number
+  var daySelect = row.querySelector('.cc-day');
+  var afterInput = row.querySelector('.cc-after');
+  daySelect.addEventListener('change', function() {
+    var d = parseInt(daySelect.value);
+    afterInput.value = Math.max(1, estimateFirstMatchOfDay(d - 1) - 1);
+    onParamChanged();
+  });
+  afterInput.addEventListener('change', onParamChanged);
+  row.querySelector('.cc-time').addEventListener('change', onParamChanged);
+  row.querySelector('.btn-remove-cc').addEventListener('click', function() {
+    row.remove(); onParamChanged();
+  });
 }
 
 function getCycleTimeChanges() {
   return Array.from(document.querySelectorAll('.cycle-change-row'))
-    .map(row => ({
-      after: parseInt(row.querySelector('.cc-after').value),
-      time: parseInt(row.querySelector('.cc-time').value),
-    }))
-    .filter(c => !isNaN(c.after) && !isNaN(c.time) && c.after >= 1 && c.time >= 1)
-    .sort((a, b) => a.after - b.after);
+    .map(function(row) {
+      return {
+        day:   parseInt(row.querySelector('.cc-day')   ? row.querySelector('.cc-day').value   : '1'),
+        after: parseInt(row.querySelector('.cc-after').value),
+        time:  parseInt(row.querySelector('.cc-time').value),
+      };
+    })
+    .filter(function(c) { return !isNaN(c.after) && !isNaN(c.time) && c.after >= 1 && c.time >= 1; })
+    .sort(function(a, b) { return a.after - b.after; });
 }
 
 // Returns the cycle time that applies at a given match number (1-based)
@@ -2340,7 +2410,21 @@ async function generateSchedule() {
       }),
     });
 
-    if (!res.ok) throw new Error(res.statusText || ('HTTP ' + res.status));
+    if (!res.ok) {
+      // 503/502/504 = server temporarily overloaded — retry after a pause
+      // rather than falling back to client-side immediately
+      if ((res.status === 503 || res.status === 502 || res.status === 504)
+          && !window._stage1Retried) {
+        window._stage1Retried = true;
+        btn.disabled = false;
+        clearInterval(animInterval);
+        document.getElementById('progressWrap').style.display = 'none';
+        showApiStatus('\u23f3 Server busy (' + res.status + ') \u2014 retrying in 3s\u2026');
+        setTimeout(function() { generateSchedule(); }, 3000);
+        return;
+      }
+      throw new Error(res.statusText || ('HTTP ' + res.status));
+    }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -2416,10 +2500,10 @@ async function generateSchedule() {
                           err.message.includes('network connection was lost');
     if (isNetworkDrop && !window._stage1Retried) {
       window._stage1Retried = true;
-      showApiStatus('Connection dropped \u2014 retrying\u2026');
+      showApiStatus('\u23f3 Connection dropped \u2014 retrying in 3s\u2026');
       btn.disabled = false;
       document.getElementById('progressWrap').style.display = 'none';
-      setTimeout(function() { generateSchedule(); }, 1500);
+      setTimeout(function() { generateSchedule(); }, 3000);
       return;
     }
     window._stage1Retried = false;
@@ -2916,20 +3000,16 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
 
   if (window._frcFinalDayOverflow) {
     const ov = window._frcFinalDayOverflow;
-    const w = document.createElement('div');
-    w.className = 'warning-box warning-box-final';
-    w.innerHTML = '&#9888; <strong>' + ov.unscheduled + ' match' + (ov.unscheduled !== 1 ? 'es' : '') +
-      ' could not fit within the final day\u2019s scheduled end time of ' + minToTime(ov.dayEnd) + '.</strong>' +
-      ' Extend the final day end time, add another day, or reduce the cycle time.';
-    output.appendChild(w);
-  }
-
-  if (matchIdx < totalMatches) {
-    const w = document.createElement('div');
-    w.className = 'warning-box';
-    w.style.color = '#ff6b6b';
-    w.textContent = 'Only ' + matchIdx + ' of ' + totalMatches + ' matches could be scheduled. Add more days or extend daily hours.';
-    output.appendChild(w);
+    showApiStatus(
+      '\u26a0 ' + ov.unscheduled + ' match' + (ov.unscheduled !== 1 ? 'es' : '') +
+      ' could not fit before ' + minToTime(ov.dayEnd) + ' \u2014 extend end time, add a day, or reduce cycle time.',
+      true
+    );
+  } else if (matchIdx < totalMatches) {
+    showApiStatus(
+      '\u26a0 Only ' + matchIdx + ' of ' + totalMatches + ' matches could be scheduled \u2014 add more days or extend daily hours.',
+      true
+    );
   }
 
   const exportBtn = document.createElement('button');

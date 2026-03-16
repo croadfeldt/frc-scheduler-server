@@ -63,6 +63,19 @@ def get_pool() -> ProcessPoolExecutor:
         _pool = ProcessPoolExecutor(max_workers=CPU_WORKERS)
     return _pool
 
+# Semaphore limits concurrent schedule generations so the ProcessPoolExecutor
+# is never completely saturated by a single user, preventing 503s for others.
+# Value: number of simultaneous Stage 1+2 generation requests allowed.
+# Defaults to CPU count // 2, minimum 2 so at least two users can generate at once.
+_gen_concurrency = max(2, (CPU_WORKERS or os.cpu_count() or 4) // 2)
+_generation_semaphore: asyncio.Semaphore | None = None
+
+def get_generation_semaphore() -> asyncio.Semaphore:
+    global _generation_semaphore
+    if _generation_semaphore is None:
+        _generation_semaphore = asyncio.Semaphore(_gen_concurrency)
+    return _generation_semaphore
+
 
 # ── App setup ─────────────────────────────────────────────────────────────────
 app = FastAPI(title="FRC Match Scheduler", version="2.0.0")
@@ -350,20 +363,27 @@ async def generate_abstract(
         # Flush headers immediately
         yield ": connected\n\n"
 
-        # Run the worker, sending a ping every 5s to keep the connection alive
-        worker_task = asyncio.ensure_future(
-            loop.run_in_executor(
-                pool, run_iterations_worker,
-                (body.num_teams, body.matches_per_team, body.cooldown, 1, 0, _seed_int)
+        # Run the worker, sending a ping every 5s to keep the connection alive.
+        # Acquire the generation semaphore to prevent overloading the process pool.
+        sem = get_generation_semaphore()
+        if sem.locked() and sem._value == 0:  # type: ignore[attr-defined]
+            yield f"data: {json.dumps({'type':'error','message':'Server busy — please retry in a moment'})}\n\n"
+            return
+
+        async with sem:
+            worker_task = asyncio.ensure_future(
+                loop.run_in_executor(
+                    pool, run_iterations_worker,
+                    (body.num_teams, body.matches_per_team, body.cooldown, 1, 0, _seed_int)
+                )
             )
-        )
-        while not worker_task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(worker_task), timeout=5.0)
-            except asyncio.TimeoutError:
-                yield ": ping\n\n"
-            except Exception:
-                break  # worker finished (success or error)
+            while not worker_task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(worker_task), timeout=5.0)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                except Exception:
+                    break  # worker finished (success or error)
 
         # Worker finished — get result
         try:
@@ -500,6 +520,12 @@ async def assign_teams(
     async def stream() -> AsyncGenerator[str, None]:
         yield ": connected\n\n"
         await asyncio.sleep(0)
+
+        sem = get_generation_semaphore()
+        if sem.locked() and sem._value == 0:  # type: ignore[attr-defined]
+            yield f"data: {json.dumps({'type':'error','message':'Server busy — please retry in a moment'})}\n\n"
+            return
+
         actual_workers = CPU_WORKERS or (os.cpu_count() or 4)
         n_workers = min(iterations, actual_workers)
         base = iterations // n_workers
@@ -523,26 +549,27 @@ async def assign_teams(
         best_result = None
         pending = set(tasks)
 
-        _last_ping2 = asyncio.get_event_loop().time()
-        while pending:
-            done_set, pending = await asyncio.wait(pending, timeout=0.2,
-                                                   return_when=asyncio.FIRST_COMPLETED)
-            _now2 = asyncio.get_event_loop().time()
-            if _now2 - _last_ping2 >= 15:
-                yield ": ping\n\n"
-                _last_ping2 = _now2
-            for task in done_set:
-                try:
-                    result = task.result()
-                    total_done += worker_iters[tasks.index(task)]
-                    if best_result is None or result["score"] > best_result["score"]:
-                        best_result = result
-                except Exception as e:
-                    log.error("Stage 2 worker error: %s", e)
-                    total_done += worker_iters[tasks.index(task)]
-            pct = min(99, round(total_done / iterations * 100))
-            best_score = best_result["score"] if best_result else None
-            yield f"data: {json.dumps({'type':'progress','done':total_done,'total':iterations,'pct':pct,'score':best_score})}\n\n"
+        async with sem:
+            _last_ping2 = asyncio.get_event_loop().time()
+            while pending:
+                done_set, pending = await asyncio.wait(pending, timeout=0.2,
+                                                       return_when=asyncio.FIRST_COMPLETED)
+                _now2 = asyncio.get_event_loop().time()
+                if _now2 - _last_ping2 >= 15:
+                    yield ": ping\n\n"
+                    _last_ping2 = _now2
+                for task in done_set:
+                    try:
+                        result = task.result()
+                        total_done += worker_iters[tasks.index(task)]
+                        if best_result is None or result["score"] > best_result["score"]:
+                            best_result = result
+                    except Exception as e:
+                        log.error("Stage 2 worker error: %s", e)
+                        total_done += worker_iters[tasks.index(task)]
+                pct = min(99, round(total_done / iterations * 100))
+                best_score = best_result["score"] if best_result else None
+                yield f"data: {json.dumps({'type':'progress','done':total_done,'total':iterations,'pct':pct,'score':best_score})}\n\n"
 
         if not best_result or not best_result.get("slot_map"):
             yield f"data: {json.dumps({'type':'error','message':'Assignment failed'})}\n\n"
