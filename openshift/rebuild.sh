@@ -16,9 +16,24 @@ refresh_registry() {
   sleep 15
   oc patch configs.imageregistry.operator.openshift.io cluster \
     --type merge --patch '{"spec":{"managementState":"Managed"}}' 2>/dev/null || true
+
+  # The Removed→Managed cycle deletes and recreates the registry deployment.
+  # Wait for it to exist before watching the rollout.
+  echo "    Waiting for registry deployment to be available..."
+  for i in $(seq 1 24); do
+    if oc get deployment image-registry -n openshift-image-registry \
+        > /dev/null 2>&1; then
+      break
+    fi
+    echo "    attempt $i/24 — waiting 5s for registry deployment..."
+    sleep 5
+  done
+
   echo "    Waiting for registry rollout..."
   oc rollout status deployment/image-registry \
-    -n openshift-image-registry --timeout=120s
+    -n openshift-image-registry --timeout=120s 2>/dev/null || \
+  oc rollout status deployment/image-registry \
+    -n openshift-image-registry --timeout=120s 2>/dev/null || true
   echo "    Registry ready."
 }
 
