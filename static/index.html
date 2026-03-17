@@ -105,8 +105,8 @@
   }
 
   h1 {
-    font-family: 'Barlow Condensed', sans-serif; font-weight: 900;
-    font-size: 2.8rem; letter-spacing: 0.02em; line-height: 1;
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
+    font-size: 2.5rem; letter-spacing: 0.02em; line-height: 1;
     text-transform: uppercase; color: var(--text-strong);
   }
   h1 span { color: var(--accent); }
@@ -119,8 +119,8 @@
 
   .panel-header {
     background: var(--surface2); padding: 0.75rem 1.25rem;
-    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.8rem;
-    letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-strong);
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 0.8rem;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-strong);
     border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.5rem;
   }
   .panel-header::before {
@@ -132,8 +132,8 @@
   .panel-body { padding: 1.25rem; }
 
   .section-label {
-    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.7rem;
-    letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-muted);
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 0.7rem;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted);
     margin-bottom: 0.75rem; margin-top: 1.25rem; padding-top: 1.25rem;
     border-top: 1px solid var(--border);
   }
@@ -214,7 +214,7 @@
   .stats-bar { display: grid; grid-template-columns: repeat(6, 1fr); border-bottom: 1px solid var(--border); }
   .stat { padding: 1rem; text-align: center; border-right: 1px solid var(--border); }
   .stat:last-child { border-right: none; }
-  .stat-value { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-size: 1.8rem; color: var(--text-strong); line-height: 1; }
+  .stat-value { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 1.5rem; color: var(--text-strong); line-height: 1; }
   .stat-label { font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 0.3rem; }
 
   .schedule-output { padding: 1.25rem; max-height: 70vh; overflow-y: auto; }
@@ -225,7 +225,7 @@
   .day-block { margin-bottom: 2rem; }
   .day-block[id] { scroll-margin-top: 0.5rem; }
   .day-title {
-    font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 1.15rem;
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 1.1rem;
     letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-strong);
     margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.75rem;
   }
@@ -238,26 +238,26 @@
 
   .match-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
   .match-table th {
-    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.68rem;
-    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted);
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 0.68rem;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);
     padding: 0.45rem 0.7rem; text-align: left; border-bottom: 2px solid var(--border);
     background: var(--surface2);
   }
-  .match-table td { padding: 0.45rem 0.7rem; border-bottom: 1px solid rgba(58,64,96,0.5); vertical-align: middle; }
+  .match-table td { padding: 0.45rem 0.7rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
   .match-table tr:last-child td { border-bottom: none; }
-  .match-table tbody tr:hover td { background: rgba(122,164,240,0.06); }
+  .match-table tbody tr:hover td { background: rgba(122,164,240,0.08); }
 
-  .match-num { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; color: var(--text-muted); font-size: 0.9rem; }
+  .match-num { font-family: 'Barlow Condensed', sans-serif; font-weight: 500; color: var(--text-muted); font-size: 0.85rem; }
   .match-time { color: var(--text-muted); font-size: 0.82rem; white-space: nowrap; }
 
   /* Alliance team colors — high contrast, clearly distinct */
-  .teams-red  { color: var(--red-team);  font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.95rem; }
-  .teams-blue { color: var(--blue-team); font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.95rem; }
+  .teams-red  { color: var(--red-team);  font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 0.88rem; }
+  .teams-blue { color: var(--blue-team); font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 0.88rem; }
 
   /* Break rows */
   .break-row-display { background: rgba(200,153,42,0.07); border-left: 3px solid var(--amber); }
-  .break-row-display td { color: #b89040; font-size: 0.78rem; letter-spacing: 0.04em; padding: 0.45rem 0.7rem; }
-  .cycle-change-display { background: rgba(137,180,250,0.05); border-left: 3px solid rgba(137,180,250,0.4); }
+  .break-row-display td { color: var(--amber); font-size: 0.78rem; letter-spacing: 0.04em; padding: 0.45rem 0.7rem; }
+  .cycle-change-display { background: rgba(122,164,240,0.04); border-left: 3px solid rgba(122,164,240,0.35); }
   .cycle-change-display td { color: var(--text-muted); font-size: 0.72rem; letter-spacing: 0.04em; padding: 0.3rem 0.7rem; font-style: italic; }
 
   .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4rem 2rem; color: var(--text-muted); text-align: center; gap: 1rem; }
@@ -500,7 +500,7 @@
     border-radius: 3px; margin-left: 0.4rem; vertical-align: middle;
   }
   .version-badge.active { background: rgba(92,184,122,0.18); color: var(--accent3); border: 1px solid var(--accent3); }
-  .version-badge.older  { background: rgba(58,64,96,0.5); color: var(--text-muted); border: 1px solid var(--border); }
+  .version-badge.older  { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
 
   #eventCodeInput.loading { opacity: 0.6; }
   #eventCodeInput.valid   { border-color: var(--accent3); }
@@ -619,7 +619,7 @@
     /* Stats bar — 2-col on mobile */
     .stats-bar { grid-template-columns: repeat(2, 1fr); gap: 0.4rem; }
     .stat { padding: 0.6rem 0.5rem; }
-    .stat-value { font-size: 1.6rem; }
+    .stat-value { font-size: 1.3rem; }
 
     /* Schedule table — horizontal scroll */
     .results-panel .panel-body { padding: 0; }
