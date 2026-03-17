@@ -622,3 +622,17 @@ def run_assignment_worker(args: tuple) -> dict:
     result = assign_teams(abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, seed)
     result['worker_id'] = worker_id
     return result
+
+
+def run_assignment_chunk(args: tuple) -> dict:
+    """
+    Like run_assignment_worker but runs a small chunk of iterations.
+    Used for incremental progress reporting in Stage 2.
+    args: (abstract_matches, num_teams, team_numbers, ideal_gap, chunk_size, worker_id, seed)
+    Returns best slot_map, score, and iterations_done for this chunk.
+    """
+    abstract_matches, num_teams, team_numbers, ideal_gap, chunk_size, worker_id, seed = args
+    result = assign_teams(abstract_matches, num_teams, team_numbers, ideal_gap, chunk_size, seed)
+    result['worker_id'] = worker_id
+    result['iterations_done'] = chunk_size
+    return result

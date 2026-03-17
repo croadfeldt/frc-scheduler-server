@@ -39,7 +39,7 @@ from app.db import (
     Event, EventTeam, MatchRow, Team, User,
     get_session, init_db,
 )
-from app.scheduler import run_iterations_worker, run_assignment_worker
+from app.scheduler import run_iterations_worker, run_assignment_worker, run_assignment_chunk
 from app import tba as tba_client
 from app.auth import (
     get_current_user, require_auth,
@@ -540,31 +540,50 @@ async def assign_teams(
 
         actual_workers = CPU_WORKERS or (os.cpu_count() or 4)
         n_workers = min(iterations, actual_workers)
+        _aseed_int = int(body.assign_seed, 16) if body.assign_seed else None
+
+        # Split iterations into chunks per worker so progress fires incrementally.
+        # Target ~20 progress updates total: chunk_size = total / (workers * 20).
+        # Minimum chunk size of 10 to avoid excessive task overhead.
+        chunk_size = max(10, iterations // (n_workers * 20))
+
+        # Build list of (worker_id, seed, chunk_iters) for all chunks across all workers
+        # Each worker gets ceil(its_share / chunk_size) chunks
         base = iterations // n_workers
         remainder = iterations % n_workers
-
-        tasks: list[asyncio.Task] = []
-        worker_iters: list[int] = []
+        all_chunks: list[tuple[int, int | None, int]] = []  # (worker_id, seed, iters)
         for w in range(n_workers):
-            w_iters = base + (1 if w < remainder else 0)
-            worker_iters.append(w_iters)
-            _aseed_int = int(body.assign_seed, 16) if body.assign_seed else None
+            w_total = base + (1 if w < remainder else 0)
             _aw_seed = (_aseed_int ^ w) if _aseed_int is not None else None
-            task = asyncio.ensure_future(
-                loop.run_in_executor(pool, run_assignment_worker,
-                    (abstract_matches, abstract_num_teams, team_numbers,
-                     abstract_cooldown, w_iters, w, _aw_seed))
-            )
-            tasks.append(task)
+            remaining = w_total
+            chunk_idx = 0
+            while remaining > 0:
+                c_iters = min(chunk_size, remaining)
+                # Vary seed per chunk so each chunk explores different permutations
+                c_seed = (_aw_seed ^ (chunk_idx << 16)) if _aw_seed is not None else None
+                all_chunks.append((w, c_seed, c_iters))
+                remaining -= c_iters
+                chunk_idx += 1
 
         total_done = 0
         best_result = None
-        pending = set(tasks)
 
         async with sem:
+            # Submit all chunks as separate executor tasks
+            pending: set[asyncio.Task] = set()
+            chunk_iters_map: dict[asyncio.Task, int] = {}
+            for (w, c_seed, c_iters) in all_chunks:
+                task = asyncio.ensure_future(
+                    loop.run_in_executor(pool, run_assignment_chunk,
+                        (abstract_matches, abstract_num_teams, team_numbers,
+                         abstract_cooldown, c_iters, w, c_seed))
+                )
+                chunk_iters_map[task] = c_iters
+                pending.add(task)
+
             _last_ping2 = asyncio.get_event_loop().time()
             while pending:
-                done_set, pending = await asyncio.wait(pending, timeout=0.2,
+                done_set, pending = await asyncio.wait(pending, timeout=0.5,
                                                        return_when=asyncio.FIRST_COMPLETED)
                 _now2 = asyncio.get_event_loop().time()
                 if _now2 - _last_ping2 >= 15:
@@ -573,12 +592,12 @@ async def assign_teams(
                 for task in done_set:
                     try:
                         result = task.result()
-                        total_done += worker_iters[tasks.index(task)]
+                        total_done += chunk_iters_map[task]
                         if best_result is None or result["score"] > best_result["score"]:
                             best_result = result
                     except Exception as e:
-                        log.error("Stage 2 worker error: %s", e)
-                        total_done += worker_iters[tasks.index(task)]
+                        log.error("Stage 2 chunk error: %s", e)
+                        total_done += chunk_iters_map[task]
                 pct = min(99, round(total_done / iterations * 100))
                 best_score = best_result["score"] if best_result else None
                 yield f"data: {json.dumps({'type':'progress','done':total_done,'total':iterations,'pct':pct,'score':best_score})}\n\n"
