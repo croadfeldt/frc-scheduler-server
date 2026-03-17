@@ -864,12 +864,22 @@
           Minimum matches that must pass before a team can play again. Higher = fewer back-to-backs but harder to satisfy with small team counts.
         </div>
 
-        <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;">
+        <div style="display:flex;flex-direction:column;gap:0.35rem;margin-top:0.5rem;margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;">
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
             <input type="checkbox" id="autoPopulate" checked style="accent-color:var(--accent);width:14px;height:14px;">
             Auto-regenerate on parameter change
+            <span style="font-size:0.68rem;color:var(--text-muted);margin-left:0.25rem;">Regenerates Stage 1 when parameters change</span>
           </label>
-          <span style="font-size:0.68rem;color:var(--text-muted);">Regenerates Stage 1 when parameters change</span>
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
+            <input type="checkbox" id="autoApplyAgenda" checked style="accent-color:var(--accent);width:14px;height:14px;">
+            Auto-apply PDF agenda to day config
+            <span style="font-size:0.68rem;color:var(--text-muted);margin-left:0.25rem;">Fills day times and breaks from FIRST agenda when an event is loaded</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
+            <input type="checkbox" id="autoMaxCycles" style="accent-color:var(--accent);width:14px;height:14px;">
+            Auto-calculate max matches/team
+            <span style="font-size:0.68rem;color:var(--text-muted);margin-left:0.25rem;">Recalculates matches/team to fill available time after day config is set</span>
+          </label>
         </div>
         <div id="paramChangedWarning" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.75rem;color:var(--amber);">
           &#9888; Parameters changed — the current schedule structure is stale. Regenerate Stage 1 before assigning teams.
@@ -2125,6 +2135,18 @@ async function fetchAndRenderAgendaFit(eventKey) {
     if (applyRow) applyRow.style.display = 'block';
     renderAgendaBlocks();
     updateAgendaFit();
+
+    // Auto-apply flags
+    var autoApply   = document.getElementById('autoApplyAgenda');
+    var autoMaxCyc  = document.getElementById('autoMaxCycles');
+    if (autoApply && autoApply.checked) {
+      applyAgendaToSchedule();
+      if (autoMaxCyc && autoMaxCyc.checked) {
+        calcMaxMatches();
+      }
+    } else if (autoMaxCyc && autoMaxCyc.checked) {
+      calcMaxMatches();
+    }
   } catch(e) {
     _agendaBlocks = null;
     loading.textContent = '';
@@ -2316,6 +2338,11 @@ function applyAgendaToSchedule() {
   applyDayEndTimes();
   validateTimesAndRecalc();
   showApiStatus('\u2713 Day config updated from agenda — ' + numDays + ' day' + (numDays!==1?'s':'') + ', ' + _agendaBlocks.length + ' qual blocks');
+  // If auto-max-cycles is on, recalculate matches/team immediately after applying day config
+  var autoMaxCyc = document.getElementById('autoMaxCycles');
+  if (autoMaxCyc && autoMaxCyc.checked) {
+    calcMaxMatches();
+  }
 }
 
 // ── Day/Night mode ────────────────────────────────────────────────────────────

@@ -1,157 +1,44 @@
-# FRC Match Scheduler — Team Placement Priorities
+# FRC Match Scheduler — Placement Priorities & Technical Reference
 
-## Overview: Two-Stage Scheduling
+## Match Placement Priorities (P1–P10)
 
-- **Stage 1** produces an abstract slot-based schedule (slot indices 1..N, no real
-  team numbers). Deterministic given a seed — same seed always produces same structure.
-- **Stage 2** assigns real team numbers to those slots by trying many random permutations
-  and picking the one that best satisfies the placement criteria.
+These rules govern how teams are placed into match slots during abstract schedule generation (Stage 1). Rules are applied in priority order — higher priority rules are never violated to satisfy lower priority ones.
 
----
-
-## Stage 1: Abstract Schedule Generation
-
-### Step 1 — Match Count (pure math, no criteria)
-
-```
-totalMatches    = ceil(N × MPT / 6)
-matchesPerRound = ceil(N / 6)          ← Phase 1 size; cosmetic marker after
-totalSurSlots   = totalMatches × 6 − N × MPT
-phase1Surplus   = matchesPerRound × 6 − N
-fairSurCap      = ceil(totalSurSlots / N) + 1
-```
-
-The match count is a mathematical fact. No placement criteria affect it.
-
-### Step 2 — Team Placement
-
-#### Phase 1 — Round 1 (matchesPerRound matches)
-
-- Every slot plays exactly once before any slot plays twice.
-- Last match fills `phase1Surplus` extra slots with early second-plays (NOT surrogates).
-- Alliance assignment enumerates all C(6,3)=20 splits; last match penalises
-  unequal second-play distribution across alliances (−500 per imbalance unit).
-- No slot in Phase 1 is ever flagged as a surrogate.
-
-#### Phase 2 — Open Scheduling (remaining matches)
-
-```
-underQuota = slots with mc[s] < MPT
-atQuota    = slots with mc[s] == MPT  (drafted only when surNeeded > 0)
-surNeeded  = max(0, 6 − len(underQuota))
-```
-
-60 random candidate sets per match; highest-scoring chosen.
-A slot is flagged surrogate only when mc[s] >= MPT at selection time.
+| Priority | Rule | Description |
+|----------|------|-------------|
+| P1 | No surrogate in last match | A surrogate team must not appear in the final match of the schedule |
+| P2 | No surrogate in first match | A surrogate team must not appear in the first match of the schedule |
+| P3 | Cooldown enforcement | A team must not play again within `cooldown` matches of their last appearance |
+| P4 | Alliance balance | Each match must have exactly 3 red and 3 blue teams |
+| P5 | No repeat opponents | Teams should not face the same opponent more than necessary |
+| P6 | No repeat partners | Teams should not partner with the same team more than necessary |
+| P7 | Surrogate placement | Surrogates must be clearly identified and placed in early-middle matches |
+| P8 | Back-to-back minimisation | Minimise matches where a team plays consecutive matches |
+| P9 | Imbalance minimisation | Minimise the difference between a team's red and blue appearances |
+| P10 | Repeat minimisation | Minimise total repeat opponents and partners across the schedule |
 
 ---
 
-### Placement Priorities
+## Surrogate Rules
 
-| #   | Priority           | Type     | Weight          | Description |
-|-----|--------------------|----------|-----------------|-------------|
-| P1  | Match composition  | **Hard** | —               | Exactly 6 teams/match, 3 red / 3 blue |
-| P2  | Play quota         | **Hard** | —               | Each slot plays exactly MPT times. Surrogates fill structural surplus. Cap: fairSurCap |
-| P3  | Round 1 guarantee  | **Hard** | —               | All slots play once before any plays twice |
-| P4  | Cooldown           | **Hard** | −1000 × deficit | Slot cannot replay within cooldown matches of last appearance |
-| P5  | Match equity       | Soft     | W_COUNT = 5     | Prefer slots with fewer appearances |
-| P6  | Alliance balance   | Soft     | W_BALANCE = 50  | Minimise |redCount − blueCount|. All C(6,3)=20 splits evaluated |
-| P7  | Gap maximisation   | Soft     | W_GAP = 10      | Reward slots that have waited longer |
-| P8  | Opponent diversity | Soft     | W_OPPONENT = 15 | Penalise repeat cross-alliance opponents |
-| P9  | Partner diversity  | Soft     | W_PARTNER = 12  | Penalise repeat same-alliance partners |
-| P10 | Surrogate fairness | Soft     | W_SUR_RPT = 200 | Spread surrogates evenly. Hard cap: fairSurCap |
+When `numTeams × matchesPerTeam` is not evenly divisible by 6 (teams per match), some teams play one extra match as a "surrogate". Surrogate teams are identified during abstract schedule generation.
+
+Post-generation sweep rules (applied after Stage 1 completes):
+- **R1:** No surrogate in first or last match — surrogates are moved to an early-middle position by swapping with a regular team
+- **R2:** Surrogate swap preserves alliance balance — the swap must not create an imbalanced match
 
 ---
 
-### Post-Generation Sweeps (deterministic, after greedy scheduling)
+## Break Buffer
 
-| Rule | Constraint | Method |
-|---|---|---|
-| R1 | No surrogate in **last match** | Swap surrogate S in last match with non-surrogate R in same match, via earlier match M where S appears and R is absent. Flag moves to M. |
-| R2 | No surrogate as **first appearance** | Guard inside R1: skip match M if M ≤ first_appearance[S]. |
-| R3 | No surrogate as **last appearance** | Move flag from slot's last appearance to any earlier non-first appearance. No teams change matches. Up to 3 passes. |
+`breakBuffer` (default 5 min, URL param `bb`) controls when to stop scheduling matches before a break or end of day.
 
----
-
-### Iteration Scoring
-
+**Rule:** Schedule a match if its start time is at least `breakBuffer` minutes before the break:
 ```
-score = −(B2B×1000 + maxAllianceImbalance×500 + surrogates×200 + repeatOpponents×15 + repeatPartners×12)
+breakStart - cursor >= breakBuffer
 ```
 
-Stage 1 runs as a single deterministic pass (iterations=1).
-
-### Seeding
-
-`generateMatches(numTeams, matchesPerTeam, cooldown, seed)` — hex string seed.
-Mulberry32 PRNG (JS) / `random.Random(seed)` (Python). Same seed → identical output.
-Auto-generated per run, stored in DB and URL.
-
----
-
-## Stage 2: Team Assignment
-
-**Input:** abstract schedule + N real team numbers + `assign_seed`
-
-**Method:** N iterations with seeded RNG. Each shuffles team numbers into slots,
-scores against P5–P10 with real numbers, returns best `slot_map {slot: team_number}`.
-
-Default iterations: 500.
-
----
-
-## URL Reproducibility
-
-After generating, the browser URL is updated with all parameters needed to exactly
-reproduce the schedule. Opening the URL auto-runs Stage 1 and optionally Stage 2.
-
-### URL Parameter Reference
-
-| Parameter | Example | Description |
-|-----------|---------|-------------|
-| `n` | `51` | Number of teams |
-| `mpt` | `11` | Matches per team |
-| `cd` | `3` | Cooldown (matches between appearances) |
-| `ct` | `8` | Default cycle time in minutes |
-| `days` | `2` | Number of competition days |
-| `seed` | `a1b2c3d4` | Stage 1 hex seed |
-| `aseed` | `cafebabe` | Stage 2 assignment hex seed |
-| `teams` | `254,1114,...` | Team numbers in slot order (slot 1 first) |
-| `d1` | `08:00-17:00` | Day 1 start and end time (`HH:MM-HH:MM`) |
-| `d2` | `08:00-15:30` | Day 2 start and end time |
-| `d1b` | `Lunch\|12:00\|13:00,...` | Day 1 breaks: `Name\|HH:MM\|HH:MM`, comma-separated |
-| `d2b` | `Break\|14:30\|14:45` | Day 2 breaks |
-
-Up to 5 days supported (`d1`–`d5`, `d1b`–`d5b`).
-
-### Example URL
-
-```
-?n=51&mpt=11&cd=3&ct=8&days=2&seed=a1b2c3d4&aseed=cafebabe
-  &d1=08:00-17:00&d1b=Lunch|12:00|13:00
-  &d2=08:00-15:00
-  &teams=254,1114,2052,...
-```
-
-**Without `teams`:** abstract schedule renders with S1/S2 slot labels.
-**Without `aseed`:** Stage 2 skipped; abstract schedule shown only.
-**Without `seed`:** params applied to UI but auto-run not triggered.
-
----
-
-## Access Control
-
-| Operation | Anonymous | Authenticated |
-|---|---|---|
-| View any schedule | ✓ read-only | ✓ |
-| Generate abstract schedule | ✓ | ✓ (becomes owner) |
-| Assign teams | ✓ | ✓ (becomes owner) |
-| Delete schedule | ✗ | ✓ if created_by matches |
-| Duplicate any schedule | ✓ (unowned copy) | ✓ (owned copy) |
-| Share URL | ✓ always | ✓ |
-
-`created_by` = OAuth subject (`google:<sub>` or `apple:<sub>`).
-NULL `created_by` = anonymous schedule; readable by all, deletable by none.
+The cycle time does **not** factor into this check. A match that clears the buffer is committed to run even if its cycle time overlaps the break start.
 
 ---
 
@@ -159,46 +46,96 @@ NULL `created_by` = anonymous schedule; readable by all, deletable by none.
 
 Integrated from [github.com/phil-lopreiato/frc-schedule-builder](https://github.com/phil-lopreiato/frc-schedule-builder).
 
-### What it does
-When an event is activated, the scheduler automatically fetches the official FIRST agenda PDF and extracts the "Qualification Match" time blocks. It then computes a fit analysis:
+### PDF.js
+Loaded lazily via injected `<script type="module">` (`loadPdfJs()`). CDN: `cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379`. Deduped via `_pdfjsLoading` promise.
+
+### PDF source
+```
+https://info.firstinspires.org/hubfs/web/event/frc/{year}/{YEAR}_{EVENTCODE}_Agenda.pdf
+```
+
+Times in FIRST agenda PDFs are local event time — no timezone information is present or needed.
+
+### Fit metrics
 
 | Metric | Formula |
-|---|---|
+|--------|---------|
 | Total matches needed | `ceil(teams × mpt / 6)` |
 | Surrogates | `totalMatches × 6 − teams × mpt` |
 | Time needed | `totalMatches × cycleTime` |
 | Time available | Sum of parsed qual block durations |
 | Buffer / Overflow | `available − needed` |
 | Capacity % | `needed / available × 100` |
+| Matches / Hour | `60 / cycleTime` |
 | Max cycle to fit | `available / totalMatches` |
-| Matches per hour | `60 / cycleTime` |
 
-**Fit status:** Comfortable (≤85%), Tight (≤100%), Over Capacity (>100%)
+**Status thresholds:** ✓ Comfortable (≤85%) / ⚠ Tight (≤100%) / ✗ Over Capacity (>100%)
 
-### Agenda PDF URL pattern
-```
-https://info.firstinspires.org/hubfs/web/event/frc/{year}/{year}_{EVENTCODE}_Agenda.pdf
-```
-e.g. `2026_WASNO_Agenda.pdf` for event key `2026wasno`.
+### Auto flags
 
-### Fallback
-If the PDF is unavailable (not yet published, CORS blocked, or no "Qualification Match" blocks found), the panel shows a manual "total available minutes" input instead.
+| Flag | ID | Default | Trigger |
+|------|----|---------|---------|
+| Auto-apply PDF agenda | `autoPopulate` | ✅ On | Debounced Stage 1 regeneration on param change (1.5s debounce) |
+| `autoApplyAgenda` | ✅ On | Calls `applyAgendaToSchedule()` automatically after successful PDF parse |
+| Auto-calculate max matches/team | `autoMaxCycles` | ☐ Off | Calls `calcMaxMatches()` after day config is applied (auto or manual) |
 
-### UI behaviour
-- Panel appears at the top of the results column when an event is loaded
-- Collapsible (click header to toggle)
-- Badge shows fit status: ✓ Comfortable / ⚠ Tight / ✗ Over Capacity
-- Per-block timeline bars update in real time as numTeams, mpt, or cycleTime change
-- Resets when event changes or full reset is triggered
+### Apply to Day Configuration
 
-## UI Features
+`applyAgendaToSchedule()` algorithm:
+1. Group `_agendaBlocks` by `b.day` label → `dayMap` / `dayOrder`
+2. Set `numDays` and call `buildDaysUI()`
+3. Per day: `.day-start` = `min(block.start)`, `.day-end` = `max(block.end)`
+4. Gaps between consecutive blocks → `addBreak()` calls (label = "Lunch" if ≥30 min, "Break" otherwise)
+5. Call `applyDayEndTimes()` then `validateTimesAndRecalc()`
+6. If `autoMaxCycles` on → call `calcMaxMatches()`
 
-### Day/Night Mode
-Toggle between dark (default, Catppuccin Mocha) and light theme via 🌙/☀️ button in the header. Persisted in localStorage.
+---
 
-### Agenda Fit — Apply to Schedule
-After FIRST agenda PDF is parsed, "↓ Apply to Day Configuration" auto-fills the day config from real qual time windows, including breaks between sessions.
+## Day/Night Mode
 
-### TBA Cross-Year Search
-Typing in the event field falls back to TBA's global search index when year-specific results are sparse, enabling event discovery across all seasons.
+`[data-theme="light"]` attribute on `<html>` overrides all CSS custom properties to light palette values. `toggleTheme()` sets/clears the attribute and updates the 🌙/☀️ button. `initTheme()` IIFE reads `localStorage.getItem('frc_theme')` on load and applies preference before first render. Default: dark (Catppuccin Mocha).
 
+---
+
+## TBA Event Dropdown
+
+- Year-specific fetch: `GET /api/tba/events/{year}` — events sorted by `start_date` ascending in `tba.py`; no row cap
+- Cross-year fallback: when `visibleCount < 3 && query.length >= 2`, augments dropdown from `_tbaSearchIndex` (TBA global search index, all years) under "Other years" separator
+- Search index pre-fetched 2s after page load via `ensureTbaSearchIndex()`
+- Source badges: `TBA` (blue `var(--accent)`) / `FRC` (green `var(--accent3)`)
+- FRC Events credential errors surfaced immediately in `showApiStatus` (not hidden in dropdown)
+
+---
+
+## Stage 2 Simulated Annealing
+
+`assign_teams()` in `scheduler.py`:
+- Budget: `num_teams × 2` steps per iteration (matches old hill-climber)
+- `T0 = 500`, linear cooling
+- 2-swap moves; accept worse when `exp(Δ/T)` and `Δ/T > -10`
+- Score: `-(b2b×1000 + imbalance×500 + surrogates×200 + repeat_opp×15 + repeat_part×12)`
+- ~90ms/iter per worker; best result across all workers kept
+
+---
+
+## URL Parameters
+
+| Param | Example | Description |
+|-------|---------|-------------|
+| `n` | `51` | Number of teams |
+| `mpt` | `11` | Matches per team |
+| `cd` | `3` | Cooldown |
+| `ct` | `8` | Default cycle time (min) |
+| `days` | `2` | Competition days |
+| `seed` | `a1b2c3d4` | Stage 1 hex seed |
+| `aseed` | `cafebabe` | Stage 2 hex seed |
+| `teams` | `254,1114` | Team numbers in slot order |
+| `d1`–`d5` | `09:00-18:00` | Per-day start–end |
+| `d1b`–`d5b` | `Lunch\|12:00\|13:00` | Per-day breaks |
+| `cc` | `1:45:7.5` | Cycle changes: Day:AfterMatch:Time |
+| `bb` | `5` | Break buffer minutes |
+| `sid` | `16` | Restore abstract schedule from DB |
+| `aid` | `7` | Restore assigned schedule from DB |
+| `event` | `2026wasno` | Event key to auto-load |
+
+**Restore priority:** `?aid=` → `?sid=` → `?seed=`
