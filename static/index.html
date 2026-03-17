@@ -2212,6 +2212,7 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     var autoMaxCyc = document.getElementById('autoMaxCycles');
     var autoGen    = document.getElementById('autoPopulate');
     if (autoApply && autoApply.checked) {
+      showApiStatus('⏳ Applying agenda to day config…');
       applyAgendaToSchedule();
     }
     if (autoMaxCyc && autoMaxCyc.checked) {
@@ -2530,6 +2531,7 @@ function calcMaxMatches() {
   if (numTeams < 6) { showApiStatus('Enter at least 6 teams before calculating', true); return; }
   if (!validateTimes()) { showApiStatus('Fix invalid times before calculating', true); return; }
   if (!validateCycleChanges()) { showApiStatus('Fix cycle change fields before calculating', true); return; }
+  showApiStatus('⏳ Calculating max matches…');
 
   var dayRows = document.querySelectorAll('.day-row');
   var totalSlotMatches = 0;
@@ -4017,6 +4019,7 @@ async function importFromTBA(eventKey) {
 async function loadRoster() {
   if (!_currentEventId) return;
   try {
+    showApiStatus('⏳ Loading team roster…');
     const teams = await apiFetch('/api/events/' + _currentEventId + '/teams');
     // Sync numTeams with roster count — but keep input editable
     document.getElementById('numTeams').value = teams.length;
@@ -4031,6 +4034,7 @@ async function loadRoster() {
         '<button class="team-remove" onclick="removeTeam(' + t.number + ')" title="Remove">&#x2715;</button>';
       roster.appendChild(row);
     });
+    showApiStatus('✓ Roster loaded — ' + teams.length + ' team' + (teams.length !== 1 ? 's' : ''));
     // Notify param changed so auto-generate can fire after roster loads.
     // Suppressed when an agenda PDF fetch is about to start — that fetch will
     // call onParamChanged itself once day config has been applied.
@@ -4326,6 +4330,7 @@ async function generateSchedule() {
       } else {
         var autoAssignEl = document.getElementById('autoAssign');
         if (autoAssignEl && autoAssignEl.checked && _currentEventId) {
+          showApiStatus('⏳ Auto-assigning teams…');
           setTimeout(assignTeams, 200);
         }
       }
