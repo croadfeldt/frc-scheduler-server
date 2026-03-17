@@ -522,6 +522,100 @@
     .results-panel { position: static; }
     .stats-bar { grid-template-columns: repeat(3, 1fr); }
   }
+
+  /* ── Mobile ── */
+  @media (max-width: 640px) {
+    /* Prevent iOS input zoom — all inputs must be ≥16px on mobile */
+    input[type="number"], input[type="time"], input[type="text"], select, textarea {
+      font-size: 16px !important;
+    }
+
+    .container { padding: 1rem 0.75rem; }
+
+    /* Header */
+    header {
+      gap: 0.75rem; margin-bottom: 1.5rem; padding-bottom: 1rem;
+      flex-wrap: wrap; align-items: center;
+    }
+    .logo-mark { width: 40px; height: 40px; font-size: 0.85rem; }
+    h1 { font-size: 1.8rem; }
+    .subtitle { font-size: 0.72rem; }
+    .auth-bar { margin-left: 0; width: 100%; justify-content: flex-end; }
+
+    /* Share bar */
+    #shareBar { padding: 0.5rem 0.75rem; gap: 0.4rem; }
+    .seed-row { flex-wrap: wrap; gap: 0.25rem; font-size: 0.65rem; }
+    #assignSeedDisplay { display: none !important; } /* too dense on small screens — hide assign seed row, keep ID */
+
+    /* Event bar — stack into two rows */
+    .event-bar {
+      flex-direction: column; align-items: stretch; gap: 0.5rem;
+      padding: 0.6rem 0.75rem;
+    }
+    .event-bar-label { display: none; } /* save vertical space */
+    .event-bar > div:first-of-type { flex-direction: column; gap: 0.4rem; }
+    #eventYear { width: 100% !important; }
+    #eventCodeStatus { white-space: normal; }
+    /* Action buttons row */
+    .event-bar-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .event-select { min-width: 0; max-width: 100% !important; width: 100%; }
+    #btnManageTeams, #btnSavedSchedules, #btnDeleteEvent { flex: 1; text-align: center; }
+
+    /* Layout already 1-col at 900px; tighten gaps */
+    .layout { gap: 1rem; }
+
+    /* Panel */
+    .panel-body { padding: 0.875rem; }
+
+    /* Field rows — single column on mobile */
+    .field-row { grid-template-columns: 1fr; gap: 0.5rem; }
+    .field-row.single { grid-template-columns: 1fr; }
+
+    /* Day times — keep 2-col (start/end), still fits */
+    .day-times { grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+
+    /* Break rows — stack name on top, times side by side */
+    .break-row {
+      grid-template-columns: 1fr 1fr auto;
+      grid-template-rows: auto auto;
+    }
+    .break-row .break-name { grid-column: 1 / -1; }
+
+    /* Cycle change rows — stack vertically */
+    .cycle-change-row { grid-template-columns: 1fr 1fr auto; }
+
+    /* Stats bar — 2-col on mobile */
+    .stats-bar { grid-template-columns: repeat(2, 1fr); gap: 0.4rem; }
+    .stat { padding: 0.6rem 0.5rem; }
+    .stat-value { font-size: 1.6rem; }
+
+    /* Schedule table — horizontal scroll */
+    .results-panel .panel-body { padding: 0; }
+    #scheduleOutput { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    #scheduleOutput table { min-width: 480px; font-size: 0.75rem; }
+
+    /* Filter bar */
+    #filterBar { flex-wrap: wrap; gap: 0.4rem; padding: 0.5rem 0.75rem; }
+
+    /* Buttons */
+    .btn-generate { padding: 0.75rem 1rem; font-size: 0.9rem; }
+    .btn-sm { padding: 0.45rem 0.6rem; font-size: 0.7rem; }
+
+    /* Modal */
+    .modal { padding: 1rem; width: 95vw; max-height: 90vh; }
+    .modal-section > div[style*="flex"] { flex-direction: column !important; }
+    .modal-section > div[style*="flex"] input { width: 100% !important; }
+
+    /* Hide vertical divider in event bar on mobile */
+    .event-bar-divider { display: none; }
+
+    /* TBA dropdown — full width, larger touch targets */
+    #tbaDropdown { max-height: 200px; }
+    #tbaDropdown > div > div { padding: 0.6rem 0.75rem; min-height: 44px; }
+
+    /* Progress bars */
+    .progress-label { font-size: 0.65rem; }
+  }
 </style>
 </head>
 <body>
@@ -571,13 +665,13 @@
     <div style="display:flex;align-items:center;gap:0.4rem;flex:1;min-width:0;">
       <input type="number" id="eventYear" placeholder="Year"
         style="width:68px;flex-shrink:0;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
-               padding:0.4rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.88rem;"
+               padding:0.4rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;"
         onkeydown="if(event.key==='Enter')loadEventByCode()"
         oninput="onEventYearInput()" min="2000" max="2099">
       <div style="position:relative;flex:1;min-width:0;">
         <input type="text" id="eventCodeInput" placeholder="Event code or name…"
           style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
-                 padding:0.4rem 0.7rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.88rem;"
+                 padding:0.4rem 0.7rem;border-radius:4px;font-family:'Barlow',sans-serif;"
           onkeydown="if(event.key==='Enter')loadEventByCode()"
           oninput="onEventCodeInput()" autocomplete="off" spellcheck="false">
         <!-- TBA event dropdown -->
@@ -590,14 +684,16 @@
       <button class="btn-sm btn-accent" onclick="loadEventByCode()" id="btnLoadEvent">Load</button>
       <div id="eventCodeStatus" style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;"></div>
     </div>
-    <div style="height:1.5rem;width:1px;background:var(--border);margin:0 0.25rem;flex-shrink:0;"></div>
-    <select class="event-select" id="eventSelect" onchange="onEventSelectChange()"
-      title="Recent events" style="max-width:200px;">
-      <option value="">Recent events…</option>
-    </select>
-    <button class="btn-sm" id="btnManageTeams" onclick="openModal('modalTeams')" disabled>&#9707; Teams</button>
-    <button class="btn-sm" id="btnSavedSchedules" onclick="openModal('modalSchedules')" disabled>&#9776; Schedules</button>
-    <button class="btn-sm btn-danger" id="btnDeleteEvent" onclick="deleteEvent()" disabled style="margin-left:auto;">&#x2715;</button>
+    <div class="event-bar-actions" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+      <div style="height:1.5rem;width:1px;background:var(--border);flex-shrink:0;" class="event-bar-divider"></div>
+      <select class="event-select" id="eventSelect" onchange="onEventSelectChange()"
+        title="Recent events" style="max-width:200px;">
+        <option value="">Recent events…</option>
+      </select>
+      <button class="btn-sm" id="btnManageTeams" onclick="openModal('modalTeams')" disabled>&#9707; Teams</button>
+      <button class="btn-sm" id="btnSavedSchedules" onclick="openModal('modalSchedules')" disabled>&#9776; Schedules</button>
+      <button class="btn-sm btn-danger" id="btnDeleteEvent" onclick="deleteEvent()" disabled style="margin-left:auto;">&#x2715;</button>
+    </div>
   </div>
 
   <!-- New Event modal -->
@@ -1413,9 +1509,9 @@ function updateIterationEstimate() {
   var iters = parseInt(document.getElementById('assignIterations').value) || 0;
   if (iters < 1) { el.textContent = ''; return; }
 
-  var workers = Math.max(1, navigator.hardwareConcurrency || 4);
-  var msPerIter = window._msPerIteration || 0.035; // calibrated or rough default
-  var estimatedMs = (iters / workers) * msPerIter;
+  // _msPerIteration = wall-clock ms per iteration (already accounts for parallelism)
+  var msPerIter = window._msPerIteration || 0.005; // ~0.005ms/iter wall-time default with 8 workers
+  var estimatedMs = iters * msPerIter;
 
   var label;
   if (estimatedMs < 1000)       label = 'Est. < 1s';
@@ -3850,11 +3946,10 @@ async function assignTeams() {
       window._stage2Retried = false;
       document.getElementById('btnCommit').style.display = 'block';
       showApiStatus('Teams assigned — review the schedule then click Commit to activate');
-      // Calibrate iteration time estimate from actual elapsed time
+      // Calibrate: store wall-clock ms per iteration (elapsed already reflects parallelism)
       var elapsed2 = performance.now() - startTime;
       if (iterations > 0 && elapsed2 > 100) {
-        var workers2 = Math.max(1, navigator.hardwareConcurrency || 4);
-        window._msPerIteration = (elapsed2 * workers2) / iterations;
+        window._msPerIteration = elapsed2 / iterations;
         updateIterationEstimate();
       }
       // Clear guard after a tick so any synchronous change events settle first
