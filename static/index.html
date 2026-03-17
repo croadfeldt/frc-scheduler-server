@@ -662,7 +662,15 @@
   <!-- Event bar -->
   <div class="event-bar">
     <span class="event-bar-label">Event</span>
-    <div style="display:flex;align-items:center;gap:0.4rem;flex:1;min-width:0;">
+    <div style="display:flex;align-items:center;gap:0.4rem;flex:1;min-width:0;flex-wrap:wrap;">
+      <!-- Source selector -->
+      <select id="eventSource" onchange="onEventSourceChange()"
+        style="flex-shrink:0;background:var(--bg);border:1px solid var(--border);color:var(--text-muted);
+               padding:0.35rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.78rem;
+               letter-spacing:0.04em;cursor:pointer;">
+        <option value="tba">TBA</option>
+        <option value="frc">FRC Events</option>
+      </select>
       <input type="number" id="eventYear" placeholder="Year"
         style="width:68px;flex-shrink:0;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
                padding:0.4rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;"
@@ -674,7 +682,7 @@
                  padding:0.4rem 0.7rem;border-radius:4px;font-family:'Barlow',sans-serif;"
           onkeydown="if(event.key==='Enter')loadEventByCode()"
           oninput="onEventCodeInput()" autocomplete="off" spellcheck="false">
-        <!-- TBA event dropdown -->
+        <!-- Event dropdown (shared between TBA and FRC Events) -->
         <div id="tbaDropdown" style="display:none;position:absolute;top:calc(100% + 2px);left:0;right:0;z-index:200;
              background:var(--surface);border:1px solid var(--accent);border-radius:4px;
              max-height:240px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.4);">
@@ -1509,17 +1517,17 @@ function updateIterationEstimate() {
   var iters = parseInt(document.getElementById('assignIterations').value) || 0;
   if (iters < 1) { el.textContent = ''; return; }
 
-  // _msPerIteration = wall-clock ms per iteration (already accounts for parallelism)
-  var msPerIter = window._msPerIteration || 0.005; // ~0.005ms/iter wall-time default with 8 workers
+  // _msPerIteration = wall-clock ms per iteration (calibrated from actual runs).
+  // Default: ~90ms/iter per worker / 8 workers ≈ 11ms wall-time per iteration.
+  var msPerIter = window._msPerIteration !== null ? window._msPerIteration : 11;
   var estimatedMs = iters * msPerIter;
 
   var label;
-  if (estimatedMs < 1000)       label = 'Est. < 1s';
-  else if (estimatedMs < 5000)  label = 'Est. ~' + (estimatedMs / 1000).toFixed(1) + 's';
+  if (estimatedMs < 2000)       label = 'Est. ~' + Math.round(estimatedMs / 100) / 10 + 's';
   else if (estimatedMs < 60000) label = 'Est. ~' + Math.round(estimatedMs / 1000) + 's';
   else                          label = 'Est. ~' + Math.round(estimatedMs / 60000) + 'm ' + Math.round((estimatedMs % 60000) / 1000) + 's';
 
-  var calibrated = window._msPerIteration ? ' (calibrated)' : ' (rough estimate)';
+  var calibrated = window._msPerIteration !== null ? ' (calibrated)' : ' (estimated)';
   el.textContent = label + calibrated;
 }
 // Estimate is shown when stage2Panel opens via showStage2Panel → updateIterationEstimate()
@@ -2961,7 +2969,11 @@ function showApiStatus(msg, isErr = false) {
   el.textContent = msg;
   el.className = 'api-status ' + (isErr ? 'err' : 'ok');
   el.style.display = 'inline-block';
-  if (!isErr) setTimeout(() => { el.style.display = 'none'; }, 3000);
+  clearTimeout(window._apiStatusTimer);
+  if (!isErr) {
+    window._apiStatusTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
+  }
+  // Errors stay visible — cleared when the next showApiStatus call fires
 }
 
 // ── Modal helpers ─────────────────────────────────────────────────────────────
@@ -3024,19 +3036,52 @@ async function loadEventByCode() {
       return;
     }
 
-    // Not local — try TBA import
-    status.textContent = 'Importing from TBA…';
-    const result = await apiFetch('/api/tba/import/' + code, { method: 'POST' });
-    const ev = await apiFetch('/api/events/' + result.id);
-    activateEvent(ev);
-    await loadEvents();
-    input.className = 'valid';
-    status.textContent = '✓ ' + result.name + ' (' + result.teams_imported + ' teams)';
-    showApiStatus('Imported from TBA: ' + result.name);
+    // Not local — try importing from selected source
+    const src2 = getEventSource();
+    if (src2 === 'frc') {
+      // FRC Events: year + code (strip year prefix if user typed it, e.g. "2025MNMI" → "MNMI")
+      status.textContent = 'Importing from FRC Events…';
+      var frcCode = raw.toUpperCase().replace(/^\d{4}/, '');
+      const result = await apiFetch('/api/frc/import/' + year + '/' + frcCode, { method: 'POST' });
+      const ev = await apiFetch('/api/events/' + result.id);
+      activateEvent(ev);
+      await loadEvents();
+      input.className = 'valid';
+      status.textContent = '✓ ' + result.name + ' (' + result.teams_imported + ' teams)';
+      showApiStatus('Imported from FRC Events: ' + result.name);
+    } else {
+      status.textContent = 'Importing from TBA…';
+      const result = await apiFetch('/api/tba/import/' + code, { method: 'POST' });
+      const ev = await apiFetch('/api/events/' + result.id);
+      activateEvent(ev);
+      await loadEvents();
+      input.className = 'valid';
+      status.textContent = '✓ ' + result.name + ' (' + result.teams_imported + ' teams)';
+      showApiStatus('Imported from TBA: ' + result.name);
+    }
   } catch(e) {
     input.className = 'invalid';
-    status.textContent = '✗ Not found';
-    showApiStatus('Event "' + raw + '" not found in TBA or local DB', true);
+    const msg = e.message || '';
+    const src3 = getEventSource();
+    var userMsg, statusMsg;
+    if (msg.includes('not found on') || msg.includes('404') || msg.includes('Not Found')) {
+      statusMsg = '\u2717 Not found';
+      userMsg   = '\u26a0 Event \u201c' + raw + '\u201d was not found on ' + (src3 === 'frc' ? 'FRC Events' : 'The Blue Alliance') + '. Check the event code and year.';
+    } else if (msg.includes('not configured') || msg.includes('503') || msg.includes('credentials')) {
+      statusMsg = '\u2717 Not configured';
+      userMsg   = '\u26a0 ' + (src3 === 'frc' ? 'FRC Events credentials (FRC_EVENTS_USERNAME / FRC_EVENTS_TOKEN)' : 'TBA API key (TBA_API_KEY)') + ' are not configured on the server.';
+    } else if (msg.includes('timed out') || msg.includes('504')) {
+      statusMsg = '\u2717 Timeout';
+      userMsg   = '\u26a0 ' + (src3 === 'frc' ? 'FRC Events' : 'The Blue Alliance') + ' did not respond in time. Try again in a moment.';
+    } else if (msg.includes('invalid') || msg.includes('502')) {
+      statusMsg = '\u2717 API error';
+      userMsg   = '\u26a0 API error: ' + msg;
+    } else {
+      statusMsg = '\u2717 Not found';
+      userMsg   = '\u26a0 Could not load event \u201c' + raw + '\u201d \u2014 ' + (msg || 'not found');
+    }
+    status.textContent = statusMsg;
+    showApiStatus(userMsg, true);
   }
 }
 
@@ -3052,18 +3097,64 @@ function onEventCodeInput() {
   showTbaDropdown(true);
 }
 
+function getEventSource() {
+  var sel = document.getElementById('eventSource');
+  return sel ? sel.value : 'tba';
+}
+
+function onEventSourceChange() {
+  // Clear cached dropdown and refetch for new source
+  var year = parseInt(document.getElementById('eventYear').value) || new Date().getFullYear();
+  var src = getEventSource();
+  // Clear the dropdown
+  var list = document.getElementById('tbaDropdownList');
+  if (list) list.innerHTML = '';
+  showTbaDropdown(false);
+  document.getElementById('eventCodeInput').value = '';
+  document.getElementById('eventCodeInput').className = '';
+  document.getElementById('eventCodeStatus').textContent = '';
+  // Update placeholder
+  var inp = document.getElementById('eventCodeInput');
+  if (inp) inp.placeholder = src === 'frc' ? 'Event code (e.g. MNMI) or name…' : 'Event code or name…';
+  // Fetch events for new source
+  clearTimeout(_tbaDropdownTimeout);
+  _tbaDropdownTimeout = setTimeout(fetchTbaDropdown, 100);
+}
+
 function onEventYearInput() {
-  // Debounce TBA fetch when year changes
+  // Debounce event fetch when year changes
   clearTimeout(_tbaDropdownTimeout);
   _tbaDropdownTimeout = setTimeout(fetchTbaDropdown, 600);
 }
 
+var _frcDropdownCache = {}; // year -> frc events array
+
 async function fetchTbaDropdown() {
   const year = parseInt(document.getElementById('eventYear').value) || new Date().getFullYear();
-  if (_tbaDropdownCache[year]) {
-    populateTbaDropdown(_tbaDropdownCache[year]);
+  const src  = getEventSource();
+  const cacheKey = src + '_' + year;
+
+  if (src === 'frc') {
+    if (_frcDropdownCache[cacheKey]) { populateTbaDropdown(_frcDropdownCache[cacheKey]); return; }
+    try {
+      const events = await apiFetch('/api/frc/events/' + year);
+      if (Array.isArray(events)) {
+        _frcDropdownCache[cacheKey] = events;
+        populateTbaDropdown(events);
+      }
+    } catch(e) {
+      const list = document.getElementById('tbaDropdownList');
+      if (list) {
+        list.innerHTML = '<div style="padding:0.5rem 0.7rem;font-size:0.75rem;color:var(--danger);">'
+          + (e.message || 'FRC Events unavailable') + '</div>';
+        document.getElementById('tbaDropdown').style.display = 'block';
+      }
+    }
     return;
   }
+
+  // TBA path
+  if (_tbaDropdownCache[year]) { populateTbaDropdown(_tbaDropdownCache[year]); return; }
   try {
     const events = await apiFetch('/api/tba/events/' + year);
     if (Array.isArray(events)) {
@@ -3071,7 +3162,6 @@ async function fetchTbaDropdown() {
       populateTbaDropdown(events);
     }
   } catch(e) {
-    // Show the error in the dropdown so the user knows why it's empty
     const list = document.getElementById('tbaDropdownList');
     if (list) {
       list.innerHTML = '<div style="padding:0.5rem 0.7rem;font-size:0.75rem;color:var(--danger);">'

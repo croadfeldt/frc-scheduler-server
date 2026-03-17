@@ -597,6 +597,11 @@ def assign_teams(
     slots = list(range(1, num_teams + 1))
     _rng = random.Random(seed)
 
+    # Budget: num_teams swap attempts per iteration (same as old hill-climber count).
+    # SA acceptance lets us escape local optima without needing a larger budget.
+    budget = num_teams * 2
+    T0 = 500.0  # initial temperature — wide enough to accept ~1 B2B penalty early on
+
     for i in range(n_iterations):
         # Start each iteration from a fresh random shuffle
         shuffled = team_numbers[:]
@@ -604,35 +609,29 @@ def assign_teams(
         slot_map = {slot: team for slot, team in zip(slots, shuffled)}
         score = score_assignment(slot_map)
 
-        # Simulated annealing local search
-        # Temperature decays from T0 → 0 over the iteration's budget.
-        # Accepts worse moves with probability exp(Δ/T), escaping local optima.
-        budget = num_teams * 6  # swap attempts per iteration
-        T0 = 200.0              # initial temperature (score units)
+        # Simulated annealing local search with linear cooling
         for step in range(budget):
-            T = T0 * (1.0 - step / budget)  # linear cooling
+            T = T0 * (1.0 - step / budget)
 
-            # Alternate between 2-swap (common) and 3-way rotation (escape local optima)
-            if _rng.random() < 0.15 and num_teams >= 3:
-                a, b, c = _rng.sample(slots, 3)
-                # Rotate: a→b→c→a
-                slot_map[a], slot_map[b], slot_map[c] = slot_map[c], slot_map[a], slot_map[b]
-                new_score = score_assignment(slot_map)
-                delta = new_score - score
-                if delta >= 0 or (T > 0 and _rng.random() < (delta / T if delta / T > -20 else 0)):
-                    score = new_score
-                else:
-                    # Revert rotation
-                    slot_map[a], slot_map[b], slot_map[c] = slot_map[b], slot_map[c], slot_map[a]
-            else:
-                a, b = _rng.sample(slots, 2)
-                slot_map[a], slot_map[b] = slot_map[b], slot_map[a]
-                new_score = score_assignment(slot_map)
-                delta = new_score - score
-                if delta >= 0 or (T > 0 and _rng.random() < (delta / T if delta / T > -20 else 0)):
+            # 2-swap only (3-way rotation too expensive vs benefit)
+            a, b = _rng.sample(slots, 2)
+            slot_map[a], slot_map[b] = slot_map[b], slot_map[a]
+            new_score = score_assignment(slot_map)
+            delta = new_score - score
+
+            if delta >= 0:
+                # Always accept improvements
+                score = new_score
+            elif T > 0:
+                # Accept worse move with probability exp(delta/T)
+                # Skip exp() for very negative delta (prob ≈ 0)
+                ratio = delta / T
+                if ratio > -10 and _rng.random() < (2.718281828 ** ratio):
                     score = new_score
                 else:
                     slot_map[a], slot_map[b] = slot_map[b], slot_map[a]
+            else:
+                slot_map[a], slot_map[b] = slot_map[b], slot_map[a]
 
         if score > best_score:
             best_score = score

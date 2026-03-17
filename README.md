@@ -490,6 +490,19 @@ oc exec -n frc-scheduler-server $(oc get pod -l app=frc-postgres -o name) \
 
 Or use the included `migrate_abstract_day_config.sql`. Fresh databases are unaffected (`create_all` builds the correct schema).
 
+### TBA event load — error handling
+
+`loadEventByCode()` distinguishes four failure modes from the server's HTTP status and `detail` message:
+
+| Condition | Status field | User message |
+|---|---|---|
+| Event key not on TBA (404) | `✗ Not found on TBA` | Check the event key and year |
+| No `TBA_API_KEY` on server (503) | `✗ TBA not configured` | Add key or contact admin |
+| TBA request timed out (504) | `✗ TBA timeout` | Try again in a moment |
+| Other TBA error (502) | `✗ TBA error` | Shows raw server message |
+
+Error messages from `showApiStatus()` now **persist** until the next action — they no longer auto-hide after 3 seconds. Success messages still auto-hide after 3s.
+
 ### TBA import — team name length
 TBA sponsor names can exceed 256 characters (e.g. WildStang team 111). The `teams.name`,
 `events.name`, and `events.location` columns use SQLAlchemy `Text` (unlimited) rather than
@@ -530,29 +543,50 @@ The cycle time does **not** factor into this check. A match that clears the buff
 
 ### Stage 2 search algorithm (simulated annealing)
 
-`assign_teams()` in `scheduler.py` uses **simulated annealing** with a mixed neighbourhood:
+`assign_teams()` in `scheduler.py` uses **simulated annealing**:
 
 - Each iteration starts from a fresh random shuffle of team numbers onto abstract slots.
-- A local search runs for `num_teams × 6` steps with a linearly-cooling temperature (`T0=200`):
-  - **85% of moves:** 2-swap — pick two random slots and swap their teams.
-  - **15% of moves:** 3-way rotation — pick three slots and rotate (a→b→c→a). Breaks symmetries that 2-swaps can't escape.
-  - A worse move is accepted with probability `exp(Δ/T)`, allowing early escape from local optima.
+- A local search runs for `num_teams × 2` steps (same budget as old hill-climber) with linearly-cooling temperature (`T0=500`):
+  - 2-swap moves only (3-way rotation removed — too expensive per call vs benefit).
+  - A worse move is accepted with probability `exp(Δ/T)` when `Δ/T > -10`, allowing escape from local optima.
 - Best result across all iterations and all parallel workers is kept.
+
+**Performance:** ~90ms/iter per worker. At 1000 iterations across 8 workers: ~11s wall time.
 
 **Score formula:** `-(b2b×1000 + imbalance×500 + surrogates×200 + repeat_opp×15 + repeat_part×12)`
 
 The progress bar shows a human-readable breakdown: `2 B2B, 1 imbal` or `✓ optimal` (score=0).
 
-For some team counts and schedule structures, a small number of back-to-back matches is mathematically unavoidable regardless of iteration count — the floor is set by the abstract schedule geometry.
+For some team counts and schedule structures, a small number of back-to-back matches is mathematically unavoidable — the floor is set by the abstract schedule geometry.
 
 ### Iteration time estimate
 
-`updateIterationEstimate()` reads `assignIterations`, estimates wall time using `window._msPerIteration` (default `0.035ms/iter`, calibrated from actual elapsed time after each run), and updates `#iterationEstimate` in the UI. Called on page load and after every completed assignment run.
+`updateIterationEstimate()` displays estimated wall time in `#iterationEstimate` inside `stage2Panel`. Called from `showStage2Panel()` (fires when panel opens) and after every completed assignment run (recalibration).
+
+- **Default:** `11ms/iter` wall-clock (based on benchmark: ~90ms/iter per worker ÷ 8 workers)
+- **Calibrated:** after first real run, stores `elapsed / iterations` in `window._msPerIteration`
+- Uses `window._msPerIteration !== null` check so `0` is a valid calibrated value
+- Shows `(estimated)` until calibrated, then `(calibrated)`
 
 ### 503 under rapid parameter changes
 The auto-generate debounce is 2500ms. The Stage 1 retry counter is reset to 0 at the start
 of every new `generateSchedule()` call so accumulated retries from previous edits don't
 consume the retry budget for the next attempt.
+
+## Mobile support
+
+A `@media (max-width: 640px)` block handles small screens:
+
+- **iOS zoom prevention** — all inputs forced to `font-size: 16px`
+- **Event bar** — stacks vertically: year + code + Load button on top row; select + Teams + Schedules + Delete on second row
+- **Field rows** — collapse to single column
+- **Break rows** — name spans full width, start/end side by side below
+- **Stats bar** — drops from 3-col to 2-col
+- **Schedule table** — horizontal scroll with `min-width: 480px`
+- **Touch targets** — TBA dropdown rows get `min-height: 44px`
+- **Container** — padding reduces to `0.75rem 0.75rem`
+
+The `event-bar-actions` class wraps the second row of event bar buttons. The vertical divider (`.event-bar-divider`) is hidden on mobile.
 
 ## Development
 

@@ -41,6 +41,7 @@ from app.db import (
 )
 from app.scheduler import run_iterations_worker, run_assignment_worker, run_assignment_chunk
 from app import tba as tba_client
+from app import frc_events as frc_client
 from app.auth import (
     get_current_user, require_auth,
     google_login_url, google_exchange_code,
@@ -300,7 +301,190 @@ async def tba_import_event(event_key: str, db: AsyncSession = Depends(get_sessio
             "teams_imported": len(tba_teams)}
 
 
+# ── FRC Events API ────────────────────────────────────────────────────────────
+
+@app.get("/api/frc/events/{year}")
+async def frc_events_list(year: int, search: str = Query("", max_length=100)):
+    """List/search events from the FRC Events API for a given year."""
+    try:
+        events = await frc_client.search_events(year, search) if search else await frc_client.get_events(year)
+        return [frc_client.normalise_event(e, year) for e in events]
+    except ValueError as e:
+        raise HTTPException(503, str(e))
+    except httpx.TimeoutException:
+        raise HTTPException(504, "FRC Events API request timed out — try again in a moment")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(502, "FRC Events credentials are invalid. Check FRC_EVENTS_USERNAME and FRC_EVENTS_TOKEN.")
+        raise HTTPException(502, f"FRC Events API returned {e.response.status_code}")
+    except Exception as e:
+        log.error("FRC Events list error: %s", e)
+        raise HTTPException(502, f"FRC Events API error: {e}")
+
+
+@app.post("/api/frc/import/{year}/{event_code}", status_code=201)
+async def frc_import_event(year: int, event_code: str, db: AsyncSession = Depends(get_session)):
+    """Import an event and its teams from the FRC Events API."""
+    try:
+        frc_event = await frc_client.get_event(year, event_code)
+        if not frc_event:
+            raise HTTPException(404, f"Event '{year}{event_code.lower()}' not found on FRC Events.")
+        frc_teams = await frc_client.get_event_teams(year, event_code)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(503, str(e))
+    except httpx.TimeoutException:
+        raise HTTPException(504, "FRC Events API request timed out — try again in a moment")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(502, "FRC Events credentials are invalid. Check FRC_EVENTS_USERNAME and FRC_EVENTS_TOKEN.")
+        if e.response.status_code == 404:
+            raise HTTPException(404, f"Event '{year}{event_code.lower()}' not found on FRC Events.")
+        raise HTTPException(502, f"FRC Events API returned {e.response.status_code}")
+    except Exception as e:
+        log.error("FRC Events import error for %s/%s: %s", year, event_code, e)
+        raise HTTPException(502, f"FRC Events API error: {e}")
+
+    event_data = frc_client.normalise_event(frc_event, year)
+    key = event_data["key"]
+    # Strip internal _frc_code before writing to DB
+    event_data.pop("_frc_code", None)
+
+    existing = await db.execute(select(Event).where(Event.key == key))
+    event = existing.scalar_one_or_none()
+    if event:
+        for k, v in event_data.items():
+            setattr(event, k, v)
+    else:
+        event = Event(**event_data)
+        db.add(event)
+    await db.flush()
+
+    for raw in frc_teams:
+        td = frc_client.normalise_team(raw)
+        if not td["number"]:
+            continue
+        t_result = await db.execute(select(Team).where(Team.number == td["number"]))
+        team = t_result.scalar_one_or_none()
+        if team:
+            for k, v in td.items():
+                setattr(team, k, v)
+        else:
+            team = Team(**td)
+            db.add(team)
+        await db.flush()
+        et_result = await db.execute(
+            select(EventTeam).where(EventTeam.event_id == event.id, EventTeam.team_id == team.id)
+        )
+        if not et_result.scalar_one_or_none():
+            db.add(EventTeam(event_id=event.id, team_id=team.id))
+
+    await db.commit()
+    await db.refresh(event)
+    return {"id": event.id, "key": event.key, "name": event.name,
+            "teams_imported": len(frc_teams)}
+
+
+@app.get("/api/frc/configured")
+async def frc_configured():
+    """Returns whether FRC Events API credentials are set."""
+    return {"configured": frc_client.is_configured()}
+
+
 # ── Teams ─────────────────────────────────────────────────────────────────────
+
+# ── FRC Events API ────────────────────────────────────────────────────────────
+
+@app.get("/api/frc/status")
+async def frc_events_status():
+    """Return whether FRC Events API credentials are configured."""
+    return {"configured": frc_client.is_configured()}
+
+
+@app.get("/api/frc/events/{year}")
+async def frc_events_list(year: int, search: str = Query("", max_length=100)):
+    try:
+        events = await frc_client.search_events(year, search) if search else await frc_client.get_events(year)
+        return [frc_client.normalise_event(e, year) for e in events]
+    except ValueError as e:
+        raise HTTPException(503, str(e))
+    except httpx.TimeoutException:
+        raise HTTPException(504, "FRC Events API request timed out — try again in a moment")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(502, "FRC Events API credentials are invalid. Check FRC_EVENTS_USERNAME and FRC_EVENTS_TOKEN.")
+        raise HTTPException(502, f"FRC Events API returned {e.response.status_code}")
+    except Exception as e:
+        log.error("FRC events list error: %s", e)
+        raise HTTPException(502, f"FRC Events API error: {e}")
+
+
+@app.post("/api/frc/import/{year}/{event_code}", status_code=201)
+async def frc_import_event(year: int, event_code: str, db: AsyncSession = Depends(get_session)):
+    """Import an event and its teams from the FRC Events API."""
+    try:
+        frc_event = await frc_client.get_event(year, event_code)
+        if not frc_event:
+            raise HTTPException(404, f"Event '{event_code}' ({year}) not found on FRC Events API.")
+        frc_teams = await frc_client.get_event_teams(year, event_code)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(503, str(e))
+    except httpx.TimeoutException:
+        raise HTTPException(504, "FRC Events API request timed out — try again in a moment")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(502, "FRC Events API credentials are invalid. Check FRC_EVENTS_USERNAME and FRC_EVENTS_TOKEN.")
+        if e.response.status_code == 404:
+            raise HTTPException(404, f"Event '{event_code}' ({year}) not found on FRC Events API.")
+        raise HTTPException(502, f"FRC Events API returned {e.response.status_code}")
+    except Exception as e:
+        log.error("FRC import error for %s/%s: %s", year, event_code, e)
+        raise HTTPException(502, f"FRC Events API error: {e}")
+
+    event_data = frc_client.normalise_event(frc_event, year)
+    key = event_data["key"]
+    # Remove internal-only field before storing
+    event_data.pop("_frc_code", None)
+
+    existing = await db.execute(select(Event).where(Event.key == key))
+    event = existing.scalar_one_or_none()
+    if event:
+        for k, v in event_data.items():
+            setattr(event, k, v)
+    else:
+        event = Event(**event_data)
+        db.add(event)
+    await db.flush()
+
+    for raw in frc_teams:
+        td = frc_client.normalise_team(raw)
+        if not td["number"]:
+            continue
+        t_result = await db.execute(select(Team).where(Team.number == td["number"]))
+        team = t_result.scalar_one_or_none()
+        if team:
+            for k, v in td.items():
+                if v is not None:
+                    setattr(team, k, v)
+        else:
+            team = Team(**td)
+            db.add(team)
+        await db.flush()
+        et_result = await db.execute(
+            select(EventTeam).where(EventTeam.event_id == event.id, EventTeam.team_id == team.id)
+        )
+        if not et_result.scalar_one_or_none():
+            db.add(EventTeam(event_id=event.id, team_id=team.id))
+
+    await db.commit()
+    await db.refresh(event)
+    return {"id": event.id, "key": key, "name": event.name,
+            "teams_imported": len(frc_teams)}
+
+
 
 @app.get("/api/events/{event_id}/teams")
 async def list_event_teams(event_id: int, db: AsyncSession = Depends(get_session)):

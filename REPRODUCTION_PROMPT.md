@@ -627,20 +627,38 @@ Applied in `_finishGenerationInner` and `calcMaxMatches`.
 
 ### Stage 2 search: simulated annealing (`scheduler.py: assign_teams`)
 
-Replaced hill-climbing with simulated annealing:
 ```python
-budget = num_teams * 6   # steps per iteration
-T0 = 200.0               # initial temperature (score units)
+budget = num_teams * 2   # steps per iteration (matches old hill-climber count)
+T0 = 500.0               # initial temperature
 for step in range(budget):
     T = T0 * (1.0 - step / budget)   # linear cooling
-    # 15% chance: 3-way rotation (a,b,c → c,a,b)
-    # 85% chance: 2-swap
-    # Accept if delta >= 0, or with prob exp(delta/T)
+    a, b = _rng.sample(slots, 2)
+    # swap, score, compute delta
+    if delta >= 0: accept
+    elif T > 0 and delta/T > -10 and random() < exp(delta/T): accept
+    else: revert
 ```
 
-**Why:** pure hill-climbing gets trapped in local optima quickly. SA with 3-way rotations explores wider neighbourhoods and accepts worse moves early to escape, converging to lower B2B/imbalance scores especially with high iteration counts.
+**Budget kept at `num_teams × 2`** to match original hill-climber performance (~90ms/iter per worker). 3-way rotation removed — calling `score_assignment` on every step is already expensive; 3-way didn't improve score enough to justify 3× overhead.
 
-**Score display in progress bar:** raw score decoded into `N B2B, N imbal, N sur, rep` or `✓ optimal`.
+**Score display in progress bar:** decoded into `N B2B, N imbal, N sur, rep` or `✓ optimal`.
+
+### Iteration estimate (`updateIterationEstimate`)
+
+- Default `window._msPerIteration = null` → uses `11ms` fallback (benchmark: 90ms/worker ÷ 8 workers)
+- After run: `window._msPerIteration = elapsed / iterations` (wall-clock, parallelism already included)
+- Guard: `!== null` not `||` so a calibrated value of `0` (impossibly fast) wouldn't revert to default
+- Called from: `showStage2Panel()`, post-calibration in `assignTeams()`, `oninput`/`onchange` on `#assignIterations`
+
+### TBA error handling (`loadEventByCode`)
+
+Four distinct error messages based on `e.message` content matching server's `detail` field:
+- `includes('not found on The Blue Alliance')` → event key wrong/missing
+- `includes('No TBA_API_KEY') || includes('503')` → server not configured  
+- `includes('timed out') || includes('504')` → retry
+- fallback → shows raw message
+
+`showApiStatus(msg, isErr)`: errors no longer auto-hide (only success messages do, after 3s). Uses `clearTimeout(window._apiStatusTimer)` to prevent stale hides.
 
 ### Break/cycle-change row Tab navigation
 
