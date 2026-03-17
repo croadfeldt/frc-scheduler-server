@@ -212,10 +212,10 @@
   .results-panel { position: sticky; top: 2rem; }
 
   .stats-bar { display: grid; grid-template-columns: repeat(6, 1fr); border-bottom: 1px solid var(--border); }
-  .stat { padding: 1rem; text-align: center; border-right: 1px solid var(--border); }
+  .stat { padding: 0.5rem 0.4rem; text-align: center; border-right: 1px solid var(--border); }
   .stat:last-child { border-right: none; }
-  .stat-value { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 1.5rem; color: var(--text-strong); line-height: 1; }
-  .stat-label { font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 0.3rem; }
+  .stat-value { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 1.25rem; color: var(--text-strong); line-height: 1; }
+  .stat-label { font-size: 0.6rem; color: var(--text-muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 0.2rem; }
 
   .schedule-output { padding: 1.25rem; max-height: 70vh; overflow-y: auto; }
   .schedule-output::-webkit-scrollbar { width: 5px; }
@@ -864,26 +864,23 @@
           Minimum matches that must pass before a team can play again. Higher = fewer back-to-backs but harder to satisfy with small team counts.
         </div>
 
-        <div style="display:flex;flex-direction:column;gap:0.35rem;margin-top:0.5rem;margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;">
-          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
-            <input type="checkbox" id="autoPopulate" checked style="accent-color:var(--accent);width:14px;height:14px;">
-            Auto-regenerate on parameter change
-            <span style="font-size:0.68rem;color:var(--text-muted);margin-left:0.25rem;">Regenerates Stage 1 when parameters change</span>
+        <div style="display:flex;flex-direction:column;gap:0.2rem;margin-top:0.5rem;margin-bottom:0.75rem;padding:0.4rem 0.6rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;">
+          <div style="font-size:0.62rem;color:var(--text-muted);letter-spacing:0.07em;text-transform:uppercase;margin-bottom:0.15rem;">Auto Actions</div>
+          <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;font-size:0.75rem;color:var(--text);user-select:none;" title="Regenerates Stage 1 whenever a parameter changes (2.5s debounce)">
+            <input type="checkbox" id="autoPopulate" checked style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
+            Regenerate on change
           </label>
-          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
-            <input type="checkbox" id="autoApplyAgenda" checked style="accent-color:var(--accent);width:14px;height:14px;">
-            Auto-apply PDF agenda to day config
-            <span style="font-size:0.68rem;color:var(--text-muted);margin-left:0.25rem;">Fills day times and breaks from FIRST agenda when an event is loaded</span>
+          <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;font-size:0.75rem;color:var(--text);user-select:none;" title="Fills day start/end times and breaks from the FIRST agenda PDF when an event is loaded">
+            <input type="checkbox" id="autoApplyAgenda" checked style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
+            Apply PDF agenda to day config
           </label>
-          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
-            <input type="checkbox" id="autoMaxCycles" checked style="accent-color:var(--accent);width:14px;height:14px;">
-            Auto-calculate max matches/team
-            <span style="font-size:0.68rem;color:var(--text-muted);margin-left:0.25rem;">Recalculates matches/team to fill available time after day config is set</span>
+          <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;font-size:0.75rem;color:var(--text);user-select:none;" title="Recalculates matches/team to maximise use of available schedule time">
+            <input type="checkbox" id="autoMaxCycles" checked style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
+            Calculate max matches/team
           </label>
-          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
-            <input type="checkbox" id="autoAssign" style="accent-color:var(--accent);width:14px;height:14px;">
-            Auto-assign teams after schedule generation
-            <span style="font-size:0.68rem;color:var(--text-muted);margin-left:0.25rem;">Automatically runs Stage 2 team assignment after Stage 1 completes</span>
+          <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;font-size:0.75rem;color:var(--text);user-select:none;" title="Automatically runs Stage 2 team assignment after Stage 1 completes">
+            <input type="checkbox" id="autoAssign" style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
+            Assign teams after generation
           </label>
         </div>
         <div id="paramChangedWarning" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.75rem;color:var(--amber);">
@@ -2137,13 +2134,31 @@ function parseQualBlocks(text) {
 }
 
 function distributeMatchesToBlocks(totalMatches, blocks, cycleTime) {
-  const totalDur = blocks.reduce((s, b) => s + b.duration, 0);
-  const assignments = blocks.map(b => Math.floor(b.duration / totalDur * totalMatches));
-  let assigned = assignments.reduce((a, b) => a + b, 0);
-  const fracs = blocks.map((b, i) => [i, b.duration / totalDur * totalMatches - assignments[i]]);
-  fracs.sort((a, b) => b[1] - a[1]);
-  for (let i = 0; assigned < totalMatches; i++, assigned++) assignments[fracs[i][0]]++;
-  return assignments;
+  // Legacy: single cycle time — wrap to per-ct version
+  return distributeMatchesToBlocksPerCt(totalMatches, blocks, blocks.map(function(){return cycleTime;}));
+}
+
+function distributeMatchesToBlocksPerCt(totalMatches, blocks, blockCts) {
+  // Each block's capacity is duration / its own cycle time.
+  // Distribute proportionally by capacity, then pour overflow into later blocks.
+  var capacities = blocks.map(function(b, i) { return b.duration / blockCts[i]; });
+  var totalCap = capacities.reduce(function(s,c){return s+c;}, 0);
+
+  if (totalMatches <= totalCap) {
+    // Fits: proportional floor + fractional remainder sort
+    var assignments = capacities.map(function(c) { return Math.floor(c / totalCap * totalMatches); });
+    var assigned = assignments.reduce(function(a,b){return a+b;}, 0);
+    var fracs = capacities.map(function(c, i) { return [i, c / totalCap * totalMatches - assignments[i]]; });
+    fracs.sort(function(a, b) { return b[1] - a[1]; });
+    for (var fi = 0; assigned < totalMatches; fi++, assigned++) assignments[fracs[fi][0]]++;
+    return assignments;
+  } else {
+    // Over capacity: fill each block to its floor capacity, overflow into last block
+    var overAssign = capacities.map(function(c) { return Math.floor(c); });
+    var overAssigned = overAssign.reduce(function(a,b){return a+b;}, 0);
+    overAssign[blocks.length - 1] += totalMatches - overAssigned;
+    return overAssign;
+  }
 }
 
 async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
@@ -2191,24 +2206,20 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
       }
     }
 
-    // Auto-apply flags
-    var autoApply   = document.getElementById('autoApplyAgenda');
-    var autoMaxCyc  = document.getElementById('autoMaxCycles');
-    var autoGen     = document.getElementById('autoPopulate');
+    // Enforce precedence: apply day config → calc max → generate → assign
+    // Each step only runs if its flag is on; later steps depend on earlier ones.
+    var autoApply  = document.getElementById('autoApplyAgenda');
+    var autoMaxCyc = document.getElementById('autoMaxCycles');
+    var autoGen    = document.getElementById('autoPopulate');
     if (autoApply && autoApply.checked) {
       applyAgendaToSchedule();
-      if (autoMaxCyc && autoMaxCyc.checked) {
-        // calcMaxMatches calls generateSchedule() directly when autoPopulate is on
-        calcMaxMatches();
-      } else if (autoGen && autoGen.checked) {
-        // Day config applied — generate directly, no need for debounce
-        generateSchedule();
-      }
-    } else if (autoMaxCyc && autoMaxCyc.checked) {
-      calcMaxMatches();
+    }
+    if (autoMaxCyc && autoMaxCyc.checked) {
+      calcMaxMatches();  // calls generateSchedule() if autoPopulate on
     } else if (autoGen && autoGen.checked) {
       generateSchedule();
     }
+    // autoAssign is handled inside generateSchedule's Stage 1 completion hook
   } catch(e) {
     _agendaBlocks = null;
     loading.textContent = '';
@@ -2254,9 +2265,12 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     badge.style.cssText = 'font-size:0.68rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:3px;background:rgba(127,132,156,0.15);color:var(--text-muted);';
     statsEl.style.display = 'grid';
     updateAgendaFit();
-    // PDF unavailable — still trigger auto-generate since numTeams was set by loadRoster
+    // PDF unavailable — run auto-max then auto-generate with existing day config
+    var autoMaxFail = document.getElementById('autoMaxCycles');
     var autoGenFail = document.getElementById('autoPopulate');
-    if (autoGenFail && autoGenFail.checked) {
+    if (autoMaxFail && autoMaxFail.checked) {
+      calcMaxMatches();  // calls generateSchedule() if autoPopulate on
+    } else if (autoGenFail && autoGenFail.checked) {
       var nt = parseInt(document.getElementById('numTeams').value) || 0;
       if (nt >= 6) generateSchedule();
     }
@@ -2276,6 +2290,18 @@ function renderAgendaBlocks() {
       '<div id="agendaBar_' + b.start + '" class="agenda-timeline-bar"><div class="agenda-timeline-fill" style="width:0%;background:var(--accent3);"></div></div>' +
     '</div>';
   }).join('');
+}
+
+function getBlockCycleTime(blockIndex) {
+  // Get the start-of-day cycle time for a given block index from the day rows.
+  // Falls back to the global cycleTime if the row or cc-time is not found.
+  var dayRows = document.querySelectorAll('.day-row');
+  var row = dayRows[blockIndex];
+  if (row) {
+    var startCt = row.querySelector('.day-cc-row[data-is-start="1"] .cc-time');
+    if (startCt && parseFloat(startCt.value) > 0) return parseFloat(startCt.value);
+  }
+  return parseFloat(document.getElementById('cycleTime').value) || 8;
 }
 
 function updateAgendaFit() {
@@ -2301,7 +2327,6 @@ function updateAgendaFit() {
   var pct      = availableMin > 0 ? (timeNeeded / availableMin * 100) : 100;
   var mpr      = ct > 0 ? (60 / ct) : 0;
   var reqCycle = totalMatches > 0 ? (availableMin / totalMatches) : 0;
-  var mpr      = ct > 0 ? (60 / ct) : 0;
 
   var fitClass, fitLabel;
   if (pct <= 85)       { fitClass = 'agenda-fit-ok';    fitLabel = '\u2713 Comfortable'; }
@@ -2336,13 +2361,9 @@ function updateAgendaFit() {
 
   // Per-block timeline bars
   if (_agendaBlocks && _agendaBlocks.length) {
-    var assignments = surplus >= 0
-      ? distributeMatchesToBlocks(totalMatches, _agendaBlocks, ct)
-      : _agendaBlocks.map(function(b) { return Math.floor(b.duration / ct); });
-    if (surplus < 0) {
-      var assigned = assignments.reduce(function(a,b){return a+b;},0);
-      assignments[Math.min(1, _agendaBlocks.length-1)] += totalMatches - assigned;
-    }
+    // Use per-block cycle times so the timeline reflects actual schedule params
+    var blockCts = _agendaBlocks.map(function(b, bi) { return getBlockCycleTime(bi); });
+    var assignments = distributeMatchesToBlocksPerCt(totalMatches, _agendaBlocks, blockCts);
     _agendaBlocks.forEach(function(b, bi) {
       var bar = document.getElementById('agendaBar_' + b.start);
       if (!bar) return;
@@ -2585,6 +2606,11 @@ function calcMaxMatches() {
   var msg = '\u2713 Max ' + mpt + ' matches/team \u2014 ' + neededMatches + ' of ' + totalSlotMatches + ' slots used'
     + (surrogates > 0 ? ', ' + surrogates + ' surrogate' + (surrogates !== 1 ? 's' : '') + ' needed' : ', no surrogates needed');
   showApiStatus(msg);
+  // Sync agenda fit with new mpt before generating
+  if (document.getElementById('agendaFitPanel') &&
+      document.getElementById('agendaFitPanel').style.display !== 'none') {
+    updateAgendaFit();
+  }
   // Auto-generate schedule with the new mpt value
   if (_abstractParams !== null || document.getElementById('autoPopulate').checked) {
     generateSchedule();
@@ -5128,6 +5154,11 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
 
   renderSchedule();
   document.getElementById('filterBar').style.display = 'flex';
+  // Sync agenda fit panel with the freshly rendered schedule
+  if (document.getElementById('agendaFitPanel') &&
+      document.getElementById('agendaFitPanel').style.display !== 'none') {
+    updateAgendaFit();
+  }
 }
 
 // ── Filter state ─────────────────────────────────────────────────────────────

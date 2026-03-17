@@ -120,6 +120,8 @@ activateEvent(ev)
 
 `applyAgendaToSchedule()` also calls `calcMaxMatches()` at its end if `autoMaxCycles` is checked (covers the manual Apply button case).
 
+**Duplicate `mpr` variable** — `updateAgendaFit` had `var mpr` declared twice (once after `reqCycle`, once after). Second declaration removed.
+
 **`generateSchedule()`** — shows `⏳ Generating schedule…` in `showApiStatus()` immediately when called, before the SSE stream begins.
 
 ---
@@ -415,14 +417,26 @@ All `onParamChanged()` calls go through the 2.5s debounce — rapid typing reset
 
 **`fetchAndRenderAgendaFit` calls `generateSchedule()` directly** (not via debounce) after the PDF work completes. This avoids a 2500ms delay and eliminates a race condition where the debounce could fire before `generateSchedule` was ready. `applyAgendaToSchedule()` uses `validateTimes()` instead of `validateTimesAndRecalc()` so it does not queue a spurious debounce — generation is entirely the caller's responsibility.
 
-**Trigger matrix in `fetchAndRenderAgendaFit` success path:**
-```
-autoApplyAgenda ON  + autoMaxCycles ON  → applyAgendaToSchedule() → calcMaxMatches() → generateSchedule()
-autoApplyAgenda ON  + autoMaxCycles OFF → applyAgendaToSchedule() → generateSchedule() [direct]
-autoApplyAgenda OFF + autoMaxCycles ON  → calcMaxMatches() → generateSchedule()
-autoApplyAgenda OFF + autoMaxCycles OFF → generateSchedule() [direct, if autoPopulate ON]
+**Precedence chain in `fetchAndRenderAgendaFit`** (simplified — always runs steps in order, each gated by its own flag):
+```javascript
+if (autoApplyAgenda.checked) applyAgendaToSchedule();
+if (autoMaxCycles.checked)   calcMaxMatches();   // → generateSchedule() if autoPopulate on
+else if (autoPopulate.checked) generateSchedule();
+// autoAssign fires inside Stage 1 completion hook
 ```
 
-**PDF fail path:** calls `generateSchedule()` directly (guarded by `autoPopulate.checked && numTeams >= 6`).
+**PDF fail path:** same chain starting at `calcMaxMatches` / `generateSchedule`.
+
+**`getBlockCycleTime(blockIndex)`** — reads `.day-cc-row[data-is-start="1"] .cc-time` from the nth day row. Falls back to global `#cycleTime` if not found.
+
+**`distributeMatchesToBlocksPerCt(totalMatches, blocks, blockCts)`** — replaces single-ct `distributeMatchesToBlocks`. Uses each block's own capacity (`duration / blockCts[i]`) for proportional distribution. When over capacity, fills each block to floor capacity and puts overflow in the last block. `distributeMatchesToBlocks` is kept as a legacy wrapper.
+
+**`updateAgendaFit()`** now called from:
+- `finishGeneration` end (after `renderSchedule()`) — syncs timeline with rendered schedule
+- `calcMaxMatches` before triggering `generateSchedule` — syncs after mpt update
+- `onScheduleParamsChanged` — on numTeams/matchesPerTeam/cycleTime input events
+- `fetchAndRenderAgendaFit` success and fail paths
+
+**Duplicate `mpr` variable** — `updateAgendaFit` had `var mpr` declared twice (once after `reqCycle`, once after). Second declaration removed.
 
 **`generateSchedule()`** — shows `⏳ Generating schedule…` in `showApiStatus()` immediately on entry, before the SSE stream begins.
