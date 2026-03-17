@@ -715,11 +715,11 @@
 </head>
 <body>
 <!-- Processing overlay — shown during multi-step auto operations -->
-<div class="processing-overlay" id="processingOverlay" onclick="if(event.target===this)_overlay.hide(); console.log('[overlay] hide called');">
+<div class="processing-overlay" id="processingOverlay" onclick="if(event.target===this)_overlay.hide();">
   <div class="processing-card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
       <div class="processing-title" id="processingTitle" style="margin-bottom:0;">Processing&hellip;</div>
-      <button onclick="_overlay.hide(); console.log('[overlay] hide called');" style="background:none;border:none;color:var(--text-muted);font-size:1rem;cursor:pointer;padding:0.1rem 0.3rem;line-height:1;" title="Dismiss">&times;</button>
+      <button onclick="_overlay.hide();" style="background:none;border:none;color:var(--text-muted);font-size:1rem;cursor:pointer;padding:0.1rem 0.3rem;line-height:1;" title="Dismiss">&times;</button>
     </div>
     <div class="processing-steps" id="processingSteps"></div>
     <div class="processing-detail" id="processingDetail"></div>
@@ -1120,7 +1120,7 @@ var _overlay = (function() {
       if (p) p.style.width = '0%';
       _render();
       var ov = document.getElementById('processingOverlay');
-      if (ov) ov.classList.add('active');
+      if (ov) { ov.style.opacity = ''; ov.style.pointerEvents = ''; ov.classList.add('active'); }
     },
     step: function(id, detail) {
       // Mark previous active as done, set this one active
@@ -1162,9 +1162,7 @@ var _overlay = (function() {
       if (p) p.style.width = Math.min(100, pct) + '%';
     },
     hide: function() {
-      console.log('[overlay] hide() executing, steps='+JSON.stringify(_steps.map(function(s){return s.id+':'+s.state;})));
       _visible = false;
-      // Mark any remaining active steps as done
       _steps.forEach(function(s) { if (s.state === 'active') s.state = 'done'; });
       _render();
       var p = document.getElementById('processingProgressFill');
@@ -1172,7 +1170,7 @@ var _overlay = (function() {
       var d = document.getElementById('processingDetail');
       if (d) d.textContent = '';
       var ov = document.getElementById('processingOverlay');
-      if (ov) ov.classList.remove('active');
+      if (ov) { ov.classList.remove('active'); ov.style.opacity = '0'; ov.style.pointerEvents = 'none'; }
     },
     isVisible: function() { return _visible; },
   };
@@ -2456,7 +2454,7 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
       var nt = parseInt(document.getElementById('numTeams').value) || 0;
       if (nt >= 6) { generateSchedule(); }
     } else {
-      _overlay.hide(); console.log('[overlay] hide called');
+      _overlay.hide();
     }
   }
 }
@@ -2481,93 +2479,133 @@ function renderAgendaBlocks() {
 // Build schedule-based section bars.
 // A "section" is a contiguous run of matches separated only by short breaks (<= BREAK_THRESHOLD).
 // Large breaks (> BREAK_THRESHOLD) split the session into separate bars.
-var AGENDA_BREAK_THRESHOLD = 5; // minutes — breaks <= this are shown as markers in the bar
+var AGENDA_BREAK_THRESHOLD = 5; // minutes — breaks <= this are shown as ticks inside the bar
 
 function renderScheduleBars() {
   var container = document.getElementById('agendaFitBlocks');
   if (!container) return;
 
   if (!window._frcScheduled || !window._frcScheduled.length) {
-    // No schedule yet — just show the PDF block list
     renderAgendaBlocks();
     return;
   }
 
-  var html = '';
   var ct = parseFloat(document.getElementById('cycleTime').value) || 8;
+
+  // ── Build sections from schedule ────────────────────────────────────────────
+  // A section = contiguous match play separated from neighbours by a break > threshold.
+  // windowDur = section's available time slot (slot start→end, from day config).
+  // committed = matchCount × ct.
+  var allSections = [];
 
   window._frcScheduled.forEach(function(day) {
     if (!day.entries || !day.entries.length) return;
 
-    // Split entries into sections at breaks > AGENDA_BREAK_THRESHOLD minutes
-    var sections = [];
-    var current = null;
+    // Day label: use day.dayNum if available
+    var dayLabel = day.dayNum ? 'Day ' + day.dayNum : '';
+
+    // Walk entries, splitting at large breaks
+    var currentMatches = [];
+    var currentShortBreaks = [];
+    var slotStart = day.start != null ? day.start : null;  // start of current slot
+    var prevBreakEnd = slotStart;                          // after last large break
+
+    function flushSection() {
+      if (!currentMatches.length) return;
+      // Slot end = start of the next large break (or day end)
+      var slotEnd = day.end != null ? day.end : currentMatches[currentMatches.length - 1].endMin;
+      allSections.push({
+        dayLabel:    dayLabel,
+        slotStart:   prevBreakEnd != null ? prevBreakEnd : currentMatches[0].startMin,
+        slotEnd:     slotEnd,
+        matchCount:  currentMatches.length,
+        shortBreaks: currentShortBreaks.slice(),
+        firstMatchStart: currentMatches[0].startMin,
+        lastMatchEnd:    currentMatches[currentMatches.length - 1].endMin,
+      });
+      currentMatches = [];
+      currentShortBreaks = [];
+    }
 
     day.entries.forEach(function(entry) {
       if (entry.type === 'match') {
-        if (!current) current = { matches: [], shortBreaks: [], startMin: entry.startMin, endMin: entry.endMin };
-        current.matches.push(entry);
-        current.endMin = entry.endMin || (entry.startMin + ct);
+        currentMatches.push(entry);
       } else if (entry.type === 'break') {
-        var dur = entry.end - entry.start;
-        if (dur <= AGENDA_BREAK_THRESHOLD) {
-          // Short break — marker within current section
-          if (current) current.shortBreaks.push(entry);
+        var dur = (entry.end || 0) - (entry.start || 0);
+        if (dur > AGENDA_BREAK_THRESHOLD) {
+          // Large break — close section, update slot start for next section
+          flushSection();
+          prevBreakEnd = entry.end;
+          slotStart    = entry.end;
         } else {
-          // Long break — close current section, start new one after break
-          if (current && current.matches.length) sections.push(current);
-          current = null;
+          // Short break — tick mark inside current section
+          if (currentMatches.length) currentShortBreaks.push(entry);
         }
       }
     });
-    if (current && current.matches.length) sections.push(current);
-
-    sections.forEach(function(sec) {
-      // Total time window from first match start to last match end
-      var windowStart = sec.startMin;
-      var windowEnd   = sec.endMin;
-      var windowDur   = windowEnd - windowStart;
-
-      // Time committed = number of matches × cycle time
-      var matchCount  = sec.matches.length;
-      var committed   = matchCount * ct;
-      var fillPct     = windowDur > 0 ? Math.min(committed / windowDur * 100, 100) : 0;
-      var overage     = Math.round(committed - windowDur);
-
-      var color = overage > 0 ? 'var(--amber)'
-                : fillPct > 90 ? 'var(--amber)'
-                : 'var(--accent3)';
-
-      var label = matchCount + ' match' + (matchCount !== 1 ? 'es' : '')
-                + ' \u00b7 ' + Math.round(committed) + ' / ' + Math.round(windowDur) + ' min';
-      if (overage > 0) label += ' (+' + overage + ' over)';
-
-      // Short break markers as absolute-positioned tick marks
-      var ticksHtml = sec.shortBreaks.map(function(brk) {
-        var pos = windowDur > 0 ? ((brk.start - windowStart) / windowDur * 100) : 0;
-        return '<div style="position:absolute;top:0;bottom:0;left:' + pos.toFixed(1) + '%;' +
-          'width:2px;background:var(--bg);opacity:0.7;" title="' +
-          brk.name + ' (' + (brk.end - brk.start) + ' min)"></div>';
-      }).join('');
-
-      html += '<div class="agenda-block-row">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.2rem;">' +
-          '<span style="font-weight:600;font-size:0.72rem;color:var(--text-muted);">' +
-            fmtTime12(windowStart) + '\u2013' + fmtTime12(windowEnd) +
-          '</span>' +
-          '<span style="font-size:0.68rem;color:var(--text-muted);">' + matchCount + ' matches</span>' +
-        '</div>' +
-        '<div class="agenda-timeline-bar" style="position:relative;">' +
-          '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + color + ';">' +
-            label +
-          '</div>' +
-          ticksHtml +
-        '</div>' +
-      '</div>';
-    });
+    flushSection();
   });
 
-  container.innerHTML = html || '<div style="padding:0.5rem;font-size:0.75rem;color:var(--text-muted);">No matches scheduled yet.</div>';
+  if (!allSections.length) {
+    container.innerHTML = '<div style="padding:0.5rem;font-size:0.75rem;color:var(--text-muted);">No matches scheduled yet.</div>';
+    return;
+  }
+
+  // ── Proportional bar widths ──────────────────────────────────────────────────
+  // Largest slot fills 100% of container; others scale proportionally.
+  var maxSlotDur = 0;
+  allSections.forEach(function(s) {
+    var dur = s.slotEnd - s.slotStart;
+    if (dur > maxSlotDur) maxSlotDur = dur;
+  });
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+  var html = '';
+  allSections.forEach(function(s) {
+    var slotDur    = s.slotEnd - s.slotStart;
+    var barWidthPct = maxSlotDur > 0 ? (slotDur / maxSlotDur * 100) : 100;
+    var committed  = s.matchCount * ct;
+    var fillPct    = slotDur > 0 ? Math.min(committed / slotDur * 100, 100) : 0;
+    var overage    = Math.round(committed - slotDur);
+    var color      = overage > 0   ? 'var(--amber)'
+                   : fillPct > 90  ? 'var(--amber)'
+                   : 'var(--accent3)';
+
+    var label = s.matchCount + ' match' + (s.matchCount !== 1 ? 'es' : '')
+              + ' \u00b7 ' + Math.round(committed) + '\u202fmin committed';
+    if (overage > 0)  label += ' (+' + overage + ' over)';
+    else              label += ' / ' + Math.round(slotDur) + '\u202fmin slot';
+
+    // Short-break tick marks — positioned relative to slot window
+    var ticksHtml = s.shortBreaks.map(function(brk) {
+      var pos = slotDur > 0 ? ((brk.start - s.slotStart) / slotDur * 100) : 0;
+      return '<div title="' + (brk.name || 'Break') + ' (' + Math.round((brk.end||0)-(brk.start||0)) + '\u202fmin)" '
+           + 'style="position:absolute;top:0;bottom:0;left:' + pos.toFixed(1) + '%;'
+           + 'width:2px;background:rgba(255,255,255,0.35);pointer-events:auto;"></div>';
+    }).join('');
+
+    html += '<div class="agenda-block-row">'
+          // Header row: day label + time range + slot duration
+          + '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.2rem;">'
+          +   '<span style="font-size:0.7rem;font-weight:700;color:var(--accent2);letter-spacing:0.04em;">' + s.dayLabel + '</span>'
+          +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
+          +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
+          +   '</span>'
+          +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(slotDur) + '\u202fmin</span>'
+          + '</div>'
+          // Bar — width proportional to largest slot
+          + '<div style="width:' + barWidthPct.toFixed(1) + '%;min-width:60px;">'
+          +   '<div class="agenda-timeline-bar" style="position:relative;">'
+          +     '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + color + ';">'
+          +       label
+          +     '</div>'
+          +     ticksHtml
+          +   '</div>'
+          + '</div>'
+          + '</div>';
+  });
+
+  container.innerHTML = html;
 }
 
 function getBlockCycleTime(blockIndex) {
@@ -4620,7 +4658,7 @@ async function generateSchedule() {
         fakeBtn.style.color    = '';
       }
       showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
-      _overlay.done('generate'); console.log('[overlay] done:generate, visible='+_overlay.isVisible());
+      _overlay.done('generate');
       // Auto-assign: url-auto-teams takes priority, then autoAssign flag
       if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
         _urlAutoTeams = null;
@@ -4633,7 +4671,7 @@ async function generateSchedule() {
           _overlay.step('assign', 'Assigning teams (Stage 2)\u2026');
           setTimeout(assignTeams, 200);
         } else {
-          _overlay.hide(); console.log('[overlay] hide called');  console.log('[overlay] hide called: no-assign path'); // no assign step — chain complete
+          _overlay.hide();
         }
       }
     }
@@ -4644,6 +4682,8 @@ async function generateSchedule() {
       // Done event was received — stream-close error is expected, not a failure
       btn.disabled = false;
       document.getElementById('progressWrap').style.display = 'none';
+      // overlay should already be hidden by doneMsg block; force-hide as safety net
+      if (_overlay.isVisible()) _overlay.hide();
       return;
     }
     // AbortError means we cancelled this request because a newer one was started.
@@ -4690,6 +4730,8 @@ async function generateSchedule() {
         showStage2Panel(numTeams);
         btn.disabled = false;
         document.getElementById('progressWrap').style.display = 'none';
+        _overlay.done('generate');
+        _overlay.hide();
       }
     );
   }
@@ -5037,7 +5079,7 @@ async function assignTeams() {
       window._stage2Retried = false;
       document.getElementById('btnCommit').style.display = 'block';
       showApiStatus('Teams assigned — review the schedule then click Commit to activate');
-      _overlay.hide(); console.log('[overlay] hide called');
+      _overlay.hide();
       // Calibrate: store wall-clock ms per iteration (elapsed already reflects parallelism)
       var elapsed2 = performance.now() - startTime;
       if (iterations > 0 && elapsed2 > 100) {
