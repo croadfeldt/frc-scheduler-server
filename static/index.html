@@ -2851,6 +2851,10 @@ async function activateEvent(ev) {
   // numTeams is always editable
   await loadRoster();
   await loadSavedSchedules();
+  // Re-evaluate btnAssign if a schedule is already displayed (e.g. restored from URL)
+  if (_abstractParams !== null) {
+    showStage2Panel(_abstractParams.numTeams);
+  }
 }
 
 async function createEvent() {
@@ -3497,6 +3501,7 @@ async function assignTeams() {
 
   const btn = document.getElementById('btnAssign');
   btn.disabled = true;
+  window._stage2RetryCount = 0; // reset per attempt
   // Reset commit button for new assignment run
   const commitBtn = document.getElementById('btnCommit');
   if (commitBtn) {
@@ -3537,7 +3542,20 @@ async function assignTeams() {
       }),
     });
 
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      if (res.status === 503 || res.status === 502 || res.status === 504) {
+        window._stage2RetryCount = (window._stage2RetryCount || 0) + 1;
+        if (window._stage2RetryCount <= 4) {
+          var s2delay = Math.min(2000 * window._stage2RetryCount, 10000);
+          btn.disabled = false;
+          document.getElementById('progressWrap2').style.display = 'none';
+          showApiStatus('\u23f3 Server busy (' + res.status + ') \u2014 retrying in ' + (s2delay/1000) + 's\u2026 (attempt ' + window._stage2RetryCount + '/4)');
+          setTimeout(function() { assignTeams(); }, s2delay);
+          return;
+        }
+      }
+      throw new Error(await res.text());
+    }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
