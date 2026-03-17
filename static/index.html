@@ -1108,7 +1108,6 @@ var _overlay = (function() {
 
   return {
     show: function(title, steps) {
-      console.log('[OV] show() called: ' + title + ' steps=' + steps.map(function(s){return s.id;}).join(','));
       _steps = steps.map(function(s) { return {id: s.id, label: s.label, state: ''}; });
       _visible = true;
       var t = document.getElementById('processingTitle');
@@ -2771,11 +2770,9 @@ function applyAgendaToSchedule() {
   applyDayEndTimes();
   validateTimes();  // validate only — caller handles triggering generation
   showApiStatus('\u2713 Day config updated from agenda — ' + numDays + ' day' + (numDays!==1?'s':'') + ', ' + _agendaBlocks.length + ' qual blocks');
-  // If auto-max-cycles is on, recalculate matches/team immediately after applying day config
-  var autoMaxCyc = document.getElementById('autoMaxCycles');
-  if (autoMaxCyc && autoMaxCyc.checked) {
-    calcMaxMatches();
-  }
+  // NOTE: calcMaxMatches / generateSchedule are intentionally NOT called here.
+  // The auto-chain in fetchAndRenderAgendaFit is the sole orchestrator — it calls
+  // calcMaxMatches (and then generateSchedule) after applyAgendaToSchedule returns.
 }
 
 // ── Day/Night mode ────────────────────────────────────────────────────────────
@@ -2921,12 +2918,10 @@ function calcMaxMatches() {
     updateAgendaFit();
   }
   // Auto-generate schedule with the new mpt value
-  console.log('[OV] calcMaxMatches: calling generateSchedule? abstractParams=' + (_abstractParams !== null) + ' autoPopulate=' + document.getElementById('autoPopulate').checked);
   if (_abstractParams !== null || document.getElementById('autoPopulate').checked) {
     generateSchedule();
   } else {
-    console.log('[OV] calcMaxMatches: generateSchedule NOT called — hiding overlay');
-    _overlay.hide();
+      _overlay.hide();
   }
 }
 
@@ -2989,6 +2984,9 @@ function updateB2BStat() {
 function onParamChanged() {
   // Don't debounce auto-generate during or immediately after Stage 2 assignment
   if (window._assigningTeams) return;
+  // Don't queue a debounced generate while the agenda chain is running —
+  // the chain calls generateSchedule() directly when ready
+  if (window._agendaFetchPending) return;
   if (_abstractParams !== null) {
     // Only mark stale and disable assign if structural params changed.
     // Time/day/break/cycle changes affect the rendered schedule but not the
@@ -4514,8 +4512,7 @@ async function generateSchedule() {
   if (numTeams < 6) { showApiStatus('Enter at least 6 teams', true); return; }
 
   const btn = document.getElementById('btnGenerate');
-  console.log('[OV] generateSchedule entered, btn.disabled=' + btn.disabled + ' numTeams=' + document.getElementById('numTeams').value);
-  if (btn.disabled) { console.log('[OV] generateSchedule ABORTED — btn disabled'); return; } // already running
+  if (btn.disabled) return; // already running — ignore duplicate trigger
   if (!validateTimes()) { showApiStatus('Fix invalid times before generating', true); return; }
   if (!validateCycleChanges()) { showApiStatus('⚠ Fill in all required cycle change fields', true); return; }
   btn.disabled = true;
@@ -4565,8 +4562,7 @@ async function generateSchedule() {
     document.getElementById('progressFill').style.width = '10%';
     document.getElementById('progressLabel').textContent = 'Generating schedule\u2026';
 
-    console.log('[OV] generateSchedule: fetching from server');
-    _s1AbortController = new AbortController();
+      _s1AbortController = new AbortController();
     const res = await fetch(API + '/api/generate-abstract', {
       method: 'POST',
       signal: _s1AbortController.signal,
@@ -4671,7 +4667,6 @@ async function generateSchedule() {
         setTimeout(assignTeams, 200);
       } else {
         var autoAssignEl = document.getElementById('autoAssign');
-        console.log('[OV] s1done visible=' + _overlay.isVisible() + ' autoAssign=' + (autoAssignEl && autoAssignEl.checked) + ' eventId=' + _currentEventId);
         if (autoAssignEl && autoAssignEl.checked && _currentEventId) {
           showApiStatus('\u23f3 Auto-assigning teams\u2026');
           _overlay.step('assign', 'Assigning teams (Stage 2)\u2026');
@@ -4684,7 +4679,6 @@ async function generateSchedule() {
   } catch(err) {
     clearInterval(animInterval);
     _s1AbortController = null;
-    console.log('[OV] generateSchedule catch: err=' + err.message + ' doneMsg=' + (!!doneMsg) + ' s1ReceivedDone=' + s1ReceivedDone);
     if (doneMsg || s1ReceivedDone) {
       // Done event was received — stream-close error is expected, not a failure
       btn.disabled = false;
