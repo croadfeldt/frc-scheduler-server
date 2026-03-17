@@ -2461,18 +2461,112 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
 }
 
 function renderAgendaBlocks() {
-  const el = document.getElementById('agendaFitBlocks');
+  // PDF qual blocks are listed in the agenda panel header area only.
+  // The visual bars are now generated from the actual schedule by renderScheduleBars().
+  var el = document.getElementById('agendaFitBlocks');
   if (!_agendaBlocks || !_agendaBlocks.length) { el.innerHTML = ''; return; }
   el.innerHTML = _agendaBlocks.map(function(b) {
     return '<div class="agenda-block-row">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;">' +
         '<span style="font-weight:600;font-size:0.78rem;color:var(--accent2);">' + b.day + '</span>' +
-        '<span style="color:var(--text-muted);font-size:0.72rem;">' + b.duration + ' min available</span>' +
+        '<span style="color:var(--text-muted);font-size:0.72rem;">' +
+          fmtTime12(b.start) + '\u2013' + fmtTime12(b.end) + ' \u00b7 ' + b.duration + ' min' +
+        '</span>' +
       '</div>' +
-      '<div style="font-size:0.78rem;color:var(--text);">' + fmtTime12(b.start) + ' \u2013 ' + fmtTime12(b.end) + '</div>' +
-      '<div id="agendaBar_' + b.start + '" class="agenda-timeline-bar"><div class="agenda-timeline-fill" style="width:0%;background:var(--accent3);"></div></div>' +
     '</div>';
   }).join('');
+}
+
+// Build schedule-based section bars.
+// A "section" is a contiguous run of matches separated only by short breaks (<= BREAK_THRESHOLD).
+// Large breaks (> BREAK_THRESHOLD) split the session into separate bars.
+var AGENDA_BREAK_THRESHOLD = 5; // minutes — breaks <= this are shown as markers in the bar
+
+function renderScheduleBars() {
+  var container = document.getElementById('agendaFitBlocks');
+  if (!container) return;
+
+  if (!window._frcScheduled || !window._frcScheduled.length) {
+    // No schedule yet — just show the PDF block list
+    renderAgendaBlocks();
+    return;
+  }
+
+  var html = '';
+  var ct = parseFloat(document.getElementById('cycleTime').value) || 8;
+
+  window._frcScheduled.forEach(function(day) {
+    if (!day.entries || !day.entries.length) return;
+
+    // Split entries into sections at breaks > AGENDA_BREAK_THRESHOLD minutes
+    var sections = [];
+    var current = null;
+
+    day.entries.forEach(function(entry) {
+      if (entry.type === 'match') {
+        if (!current) current = { matches: [], shortBreaks: [], startMin: entry.startMin, endMin: entry.endMin };
+        current.matches.push(entry);
+        current.endMin = entry.endMin || (entry.startMin + ct);
+      } else if (entry.type === 'break') {
+        var dur = entry.end - entry.start;
+        if (dur <= AGENDA_BREAK_THRESHOLD) {
+          // Short break — marker within current section
+          if (current) current.shortBreaks.push(entry);
+        } else {
+          // Long break — close current section, start new one after break
+          if (current && current.matches.length) sections.push(current);
+          current = null;
+        }
+      }
+    });
+    if (current && current.matches.length) sections.push(current);
+
+    sections.forEach(function(sec) {
+      // Total time window from first match start to last match end
+      var windowStart = sec.startMin;
+      var windowEnd   = sec.endMin;
+      var windowDur   = windowEnd - windowStart;
+
+      // Time committed = number of matches × cycle time
+      var matchCount  = sec.matches.length;
+      var committed   = matchCount * ct;
+      var fillPct     = windowDur > 0 ? Math.min(committed / windowDur * 100, 100) : 0;
+      var overage     = Math.round(committed - windowDur);
+
+      var color = overage > 0 ? 'var(--amber)'
+                : fillPct > 90 ? 'var(--amber)'
+                : 'var(--accent3)';
+
+      var label = matchCount + ' match' + (matchCount !== 1 ? 'es' : '')
+                + ' \u00b7 ' + Math.round(committed) + ' / ' + Math.round(windowDur) + ' min';
+      if (overage > 0) label += ' (+' + overage + ' over)';
+
+      // Short break markers as absolute-positioned tick marks
+      var ticksHtml = sec.shortBreaks.map(function(brk) {
+        var pos = windowDur > 0 ? ((brk.start - windowStart) / windowDur * 100) : 0;
+        return '<div style="position:absolute;top:0;bottom:0;left:' + pos.toFixed(1) + '%;' +
+          'width:2px;background:var(--bg);opacity:0.7;" title="' +
+          brk.name + ' (' + (brk.end - brk.start) + ' min)"></div>';
+      }).join('');
+
+      html += '<div class="agenda-block-row">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.2rem;">' +
+          '<span style="font-weight:600;font-size:0.72rem;color:var(--text-muted);">' +
+            fmtTime12(windowStart) + '\u2013' + fmtTime12(windowEnd) +
+          '</span>' +
+          '<span style="font-size:0.68rem;color:var(--text-muted);">' + matchCount + ' matches</span>' +
+        '</div>' +
+        '<div class="agenda-timeline-bar" style="position:relative;">' +
+          '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + color + ';">' +
+            label +
+          '</div>' +
+          ticksHtml +
+        '</div>' +
+      '</div>';
+    });
+  });
+
+  container.innerHTML = html || '<div style="padding:0.5rem;font-size:0.75rem;color:var(--text-muted);">No matches scheduled yet.</div>';
 }
 
 function getBlockCycleTime(blockIndex) {
@@ -2554,50 +2648,8 @@ function updateAgendaFit() {
       agendaStat(reqCycle.toFixed(1) + ' min', 'Max Cycle to Fit');
   }
 
-  // Per-block timeline bars
-  if (_agendaBlocks && _agendaBlocks.length) {
-    var assignments;
-    var blockCts = _agendaBlocks.map(function(b, bi) { return getBlockCycleTime(bi); });
-
-    if (window._frcScheduled && window._frcScheduled.length) {
-      // Use actual scheduled match times — count matches whose startMin falls
-      // within each PDF qual block's [start, end) window.
-      // PDF blocks are in minutes-since-midnight; scheduled entries use the same units.
-      assignments = _agendaBlocks.map(function(block) {
-        var count = 0;
-        window._frcScheduled.forEach(function(day) {
-          (day.entries || []).forEach(function(entry) {
-            if (entry.type === 'match' &&
-                entry.startMin >= block.start &&
-                entry.startMin < block.end) {
-              count++;
-            }
-          });
-        });
-        return count;
-      });
-    } else {
-      // No schedule yet — estimate via simulation
-      assignments = distributeMatchesToBlocksPerCt(totalMatches, _agendaBlocks, blockCts);
-    }
-    _agendaBlocks.forEach(function(b, bi) {
-      var bar = document.getElementById('agendaBar_' + b.start);
-      if (!bar) return;
-      var used = assignments[bi];
-      var bCt  = blockCts[bi];
-      var usedTime = used * bCt;
-      var fillPct = b.duration > 0 ? Math.min(usedTime / b.duration * 100, 100) : 0;
-      var overage = Math.round(usedTime - b.duration);
-      var color = overage > 0 ? 'var(--amber)' : fillPct > 85 ? 'var(--amber)' : 'var(--accent3)';
-      var label = used + ' match' + (used !== 1 ? 'es' : '') + ' \u00b7 ' + Math.round(usedTime) + ' min';
-      if (overage > 0) label += ' (+' + overage + ' min over)';
-      else if (overage < 0) label += ' (' + Math.abs(overage) + ' min buffer)';
-      var fill = bar.querySelector('.agenda-timeline-fill');
-      fill.style.width = fillPct + '%';
-      fill.style.background = color;
-      fill.textContent = label;
-    });
-  }
+  // Render schedule-based section bars (segments by large breaks)
+  renderScheduleBars();
 }
 
 function toggleAgendaPanel() {
@@ -4136,35 +4188,39 @@ async function activateEvent(ev) {
   document.getElementById('btnManageTeams').disabled    = false;
   document.getElementById('btnSavedSchedules').disabled = false;
   document.getElementById('btnDeleteEvent').disabled    = false;
-  // numTeams is always editable
+
+  // Build overlay step list based on which auto flags are on — BEFORE any async work
+  if (ev.key) {
+    var hasAgenda = !!(document.getElementById('autoApplyAgenda') && document.getElementById('autoApplyAgenda').checked);
+    var hasMax    = !!(document.getElementById('autoMaxCycles')   && document.getElementById('autoMaxCycles').checked);
+    var hasGen    = !!(document.getElementById('autoPopulate')    && document.getElementById('autoPopulate').checked);
+    var hasAssign = !!(document.getElementById('autoAssign')      && document.getElementById('autoAssign').checked);
+
+    if (hasAgenda || hasMax || hasGen) {
+      var chainSteps = [{ id: 'roster',    label: 'Load team roster' },
+                        { id: 'pdf',       label: 'Fetch agenda PDF' }];
+      if (hasAgenda) chainSteps.push({ id: 'apply',     label: 'Apply day configuration' });
+      if (hasMax)    chainSteps.push({ id: 'maxcycles', label: 'Calculate max matches/team' });
+      if (hasGen)    chainSteps.push({ id: 'generate',  label: 'Generate schedule (Stage 1)' });
+      if (hasAssign) chainSteps.push({ id: 'assign',    label: 'Assign teams (Stage 2)' });
+      _overlay.show('Loading Event', chainSteps);
+      _overlay.step('roster', 'Fetching team roster\u2026');
+    }
+
+    window._agendaFetchPending = true;
+    resetAgendaPanel();
+  }
+
   await loadRoster();
   await loadSavedSchedules();
+
   // Re-evaluate btnAssign if a schedule is already displayed (e.g. restored from URL)
   if (_abstractParams !== null) {
     showStage2Panel(_abstractParams.numTeams);
   }
+
   // Fetch FIRST agenda PDF and render fit analysis (non-blocking)
   if (ev.key) {
-    window._agendaFetchPending = true;
-    resetAgendaPanel();
-
-    // Determine which steps to show based on flags
-    var chainSteps = [{ id: 'roster', label: 'Load team roster' }];
-    var hasAgenda  = document.getElementById('autoApplyAgenda') && document.getElementById('autoApplyAgenda').checked;
-    var hasMax     = document.getElementById('autoMaxCycles')   && document.getElementById('autoMaxCycles').checked;
-    var hasGen     = document.getElementById('autoPopulate')    && document.getElementById('autoPopulate').checked;
-    var hasAssign  = document.getElementById('autoAssign')      && document.getElementById('autoAssign').checked;
-    chainSteps.push({ id: 'pdf',    label: 'Fetch agenda PDF' });
-    if (hasAgenda) chainSteps.push({ id: 'apply',    label: 'Apply day configuration' });
-    if (hasMax)    chainSteps.push({ id: 'maxcycles',label: 'Calculate max matches/team' });
-    if (hasGen)    chainSteps.push({ id: 'generate', label: 'Generate schedule (Stage 1)' });
-    if (hasAssign) chainSteps.push({ id: 'assign',   label: 'Assign teams (Stage 2)' });
-
-    if (hasGen || hasMax || hasAgenda) {
-      _overlay.show('Loading Event', chainSteps);
-      _overlay.step('roster');
-    }
-
     fetchAndRenderAgendaFit(ev.key, ev.start_date, ev.end_date).catch(function() {}).finally(function() {
       window._agendaFetchPending = false;
     });
@@ -4255,7 +4311,6 @@ async function loadRoster() {
   if (!_currentEventId) return;
   try {
     showApiStatus('⏳ Loading team roster…');
-    if (_overlay.isVisible()) _overlay.step('roster', 'Fetching team roster…');
     const teams = await apiFetch('/api/events/' + _currentEventId + '/teams');
     // Sync numTeams with roster count — but keep input editable
     document.getElementById('numTeams').value = teams.length;
