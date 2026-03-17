@@ -863,12 +863,7 @@
         <div style="font-size:0.7rem;color:var(--text-muted);margin-top:-0.25rem;margin-bottom:0.5rem;">
           Minimum matches that must pass before a team can play again. Higher = fewer back-to-backs but harder to satisfy with small team counts.
         </div>
-        <div class="field-row single" style="margin-top:0.5rem;">
-          <div class="field">
-            <label>Timezone</label>
-            <select id="tzSelect" style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.5rem 0.75rem;font-family:'Barlow',sans-serif;font-size:0.9rem;border-radius:4px;width:100%;"></select>
-          </div>
-        </div>
+
         <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;">
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
             <input type="checkbox" id="autoPopulate" checked style="accent-color:var(--accent);width:14px;height:14px;">
@@ -983,7 +978,6 @@
       </div>
     </div>
   </div>
-
 
 
 <script>
@@ -1386,48 +1380,6 @@ document.getElementById('cycleTime').addEventListener('change', function() {
 buildDaysUI();
 validateTimes();
 
-function buildTimezoneSelect() {
-  const sel = document.getElementById('tzSelect');
-  // Get all supported IANA timezone names via Intl
-  const allZones = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : [];
-  const sysTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  // If Intl.supportedValuesOf not available (older browsers), fall back to common list
-  const zones = allZones.length > 0 ? allZones : [
-    'Pacific/Honolulu','America/Anchorage','America/Los_Angeles','America/Denver',
-    'America/Chicago','America/New_York','America/Halifax','America/St_Johns',
-    'America/Sao_Paulo','UTC','Europe/London','Europe/Paris','Europe/Helsinki',
-    'Asia/Dubai','Asia/Kolkata','Asia/Bangkok','Asia/Shanghai','Asia/Tokyo',
-    'Australia/Sydney','Pacific/Auckland'
-  ];
-  sel.innerHTML = '';
-  zones.forEach(tz => {
-    const opt = document.createElement('option');
-    opt.value = tz;
-    // Show UTC offset alongside name
-    try {
-      const now = new Date();
-      const fmt = new Intl.DateTimeFormat('en', {timeZone: tz, timeZoneName: 'shortOffset'});
-      const parts = fmt.formatToParts(now);
-      const offset = (parts.find(p => p.type === 'timeZoneName') || {}).value || '';
-      opt.textContent = tz.replace(/_/g,' ') + '   ' + offset;
-    } catch(e) {
-      opt.textContent = tz;
-    }
-    if (tz === sysTz) opt.selected = true;
-    sel.appendChild(opt);
-  });
-}
-
-function getTimezoneAbbr() {
-  const tz = document.getElementById('tzSelect').value;
-  if (!tz) return '';
-  try {
-    const parts = new Intl.DateTimeFormat('en', {timeZone: tz, timeZoneName: 'short'}).formatToParts(new Date());
-    return (parts.find(p => p.type === 'timeZoneName') || {}).value || '';
-  } catch(e) { return ''; }
-}
-
-buildTimezoneSelect();
 document.getElementById('tbaYear').value = new Date().getFullYear();
 document.getElementById('eventYear').value = new Date().getFullYear();
 loadEvents();
@@ -1906,7 +1858,6 @@ async function duplicateSchedule() {
     document.getElementById('btnDuplicate').style.display = 'none';
   } catch(e) { showApiStatus('Duplicate failed: ' + e.message, true); }
 }
-
 
 
 // ── Full reset — clear all state and return to blank slate ───────────────────
@@ -4762,7 +4713,6 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   }
   const numTeams = parseInt(document.getElementById('numTeams').value);
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value) || 6;
-  const tzAbbr = getTimezoneAbbr();
   // Use override day config if provided (e.g. from loaded schedule), else read from UI
   const _dc = dayConfigOverride;
   const defaultCycleTime = _dc ? _dc.cycleTime : (parseFloat(document.getElementById('cycleTime').value) || 8);
@@ -4991,7 +4941,6 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   if (dlBar) dlBar.style.display = 'flex';
 
   // Store scheduled globally for filter re-application
-  window._frcTzAbbr = tzAbbr;
   window._frcScheduled = scheduled;
   refreshCycleDayLabels(); // update day labels on cycle change rows
   window._frcRoundBoundaries = roundBoundaries;
@@ -5285,7 +5234,7 @@ function renderSchedule() {
 
         tr.innerHTML =
           '<td><span class="match-num">Q' + entry.num + '</span></td>' +
-          '<td><span class="match-time">' + minToTime(entry.startMin) + (window._frcTzAbbr ? '<span style="font-size:0.6rem;color:var(--text-muted);margin-left:3px;">' + window._frcTzAbbr + '</span>' : '') + '</span></td>' +
+          '<td><span class="match-time">' + minToTime(entry.startMin) + '</span></td>' +
           '<td>' + redTeams + '</td>' +
           '<td>' + blueTeams + '</td>';
 
