@@ -1110,6 +1110,7 @@ var _overlay = (function() {
 
   return {
     show: function(title, steps) {
+      console.log('[OV] show() called: ' + title + ' steps=' + steps.map(function(s){return s.id;}).join(','));
       _steps = steps.map(function(s) { return {id: s.id, label: s.label, state: ''}; });
       _visible = true;
       var t = document.getElementById('processingTitle');
@@ -1162,6 +1163,7 @@ var _overlay = (function() {
       if (p) p.style.width = Math.min(100, pct) + '%';
     },
     hide: function() {
+      console.log('[OV] hide() called, _visible=' + _visible);
       _visible = false;
       _steps.forEach(function(s) { if (s.state === 'active') s.state = 'done'; });
       _render();
@@ -4666,6 +4668,7 @@ async function generateSchedule() {
         setTimeout(assignTeams, 200);
       } else {
         var autoAssignEl = document.getElementById('autoAssign');
+        console.log('[OV] s1done visible=' + _overlay.isVisible() + ' autoAssign=' + (autoAssignEl && autoAssignEl.checked) + ' eventId=' + _currentEventId);
         if (autoAssignEl && autoAssignEl.checked && _currentEventId) {
           showApiStatus('\u23f3 Auto-assigning teams\u2026');
           _overlay.step('assign', 'Assigning teams (Stage 2)\u2026');
