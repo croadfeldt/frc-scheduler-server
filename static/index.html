@@ -757,7 +757,6 @@
         <!-- Stage 2: shown after Stage 1 completes -->
         <div id="stage2Panel" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
           <div class="section-label" style="margin-top:0;">Stage 2: Assign Teams</div>
-          <!-- Load from DB option -->
           <div id="loadFromDbBanner" style="display:none;background:rgba(122,164,240,0.1);border:1px solid var(--accent);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.6rem;font-size:0.75rem;">
             <div style="color:var(--accent);font-weight:600;margin-bottom:0.25rem;">&#128190; Saved schedule found</div>
             <div id="loadFromDbInfo" style="color:var(--text-muted);margin-bottom:0.4rem;"></div>
@@ -768,12 +767,14 @@
             Abstract schedule ready. Select an event with a matching team count to assign real team numbers.
           </div>
           <div id="stage2Status" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
-          <div class="field-row single" style="margin-bottom:0.5rem;">
+          <div class="field-row single" style="margin-bottom:0.25rem;">
             <div class="field">
               <label>Assignment Iterations</label>
-              <input type="number" id="assignIterations" value="1000" min="1">
+              <input type="number" id="assignIterations" value="1000" min="1"
+                oninput="updateIterationEstimate()" onchange="updateIterationEstimate()">
             </div>
           </div>
+          <div id="iterationEstimate" style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
           <div class="progress-wrap" id="progressWrap2" style="display:none;">
             <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill2"></div></div>
             <div class="progress-label" id="progressLabel2">Assigning teams&hellip;</div>
@@ -1058,6 +1059,36 @@ function addBreak(btn, startVal, endVal, nameVal) {
     row.remove();
     validateTimesAndRecalc();
   });
+  // Auto-focus the name field when user adds a new break (not during restore)
+  if (!nameVal) {
+    setTimeout(function() {
+      var nameInp = row.querySelector('.break-name');
+      nameInp.focus();
+      nameInp.select();
+      // Tab: name → start → end, then natural browser tab out
+      nameInp.addEventListener('keydown', function(e) {
+        if (e.key === 'Tab' && !e.shiftKey) {
+          e.preventDefault();
+          row.querySelector('.break-start').focus();
+        }
+      });
+      row.querySelector('.break-start').addEventListener('keydown', function(e) {
+        if (e.key === 'Tab' && !e.shiftKey) {
+          e.preventDefault();
+          row.querySelector('.break-end').focus();
+        } else if (e.key === 'Tab' && e.shiftKey) {
+          e.preventDefault();
+          nameInp.focus();
+        }
+      });
+      row.querySelector('.break-end').addEventListener('keydown', function(e) {
+        if (e.key === 'Tab' && e.shiftKey) {
+          e.preventDefault();
+          row.querySelector('.break-start').focus();
+        }
+      });
+    }, 0);
+  }
 
   // Wire up time change listeners
   const startInput = row.querySelector('.break-start');
@@ -1065,6 +1096,7 @@ function addBreak(btn, startVal, endVal, nameVal) {
 
   // Name changes also trigger recalculation
   const nameInput = row.querySelector('.break-name');
+  nameInput.addEventListener('focus', function() { this.select(); });
   nameInput.addEventListener('change', validateTimesAndRecalc);
   nameInput.addEventListener('input', function() {
     clearTimeout(_autoPopulateTimeout);
@@ -1369,6 +1401,32 @@ function refreshIdBadges() {
   var asgIdEl = document.getElementById('displayAssignedId');
   if (asgIdEl) asgIdEl.textContent = _currentAssignedScheduleId ? '#' + _currentAssignedScheduleId : '';
 }
+
+// ── Iteration time estimator ─────────────────────────────────────────────────
+// _msPerIteration is calibrated from the most recent completed assignment.
+// Falls back to a rough estimate (0.03ms/iter/worker on modern hardware).
+window._msPerIteration = null; // ms per iteration (single-threaded equivalent)
+
+function updateIterationEstimate() {
+  var el = document.getElementById('iterationEstimate');
+  if (!el) return;
+  var iters = parseInt(document.getElementById('assignIterations').value) || 0;
+  if (iters < 1) { el.textContent = ''; return; }
+
+  var workers = Math.max(1, navigator.hardwareConcurrency || 4);
+  var msPerIter = window._msPerIteration || 0.035; // calibrated or rough default
+  var estimatedMs = (iters / workers) * msPerIter;
+
+  var label;
+  if (estimatedMs < 1000)       label = 'Est. < 1s';
+  else if (estimatedMs < 5000)  label = 'Est. ~' + (estimatedMs / 1000).toFixed(1) + 's';
+  else if (estimatedMs < 60000) label = 'Est. ~' + Math.round(estimatedMs / 1000) + 's';
+  else                          label = 'Est. ~' + Math.round(estimatedMs / 60000) + 'm ' + Math.round((estimatedMs % 60000) / 1000) + 's';
+
+  var calibrated = window._msPerIteration ? ' (calibrated)' : ' (rough estimate)';
+  el.textContent = label + calibrated;
+}
+// Estimate is shown when stage2Panel opens via showStage2Panel → updateIterationEstimate()
 
 function updateDuplicateButton() {
   const btn = document.getElementById('btnDuplicate');
@@ -2039,6 +2097,31 @@ function addDayCycleChange(dayRow, afterMatch, newTime, isStart) {
     ccList.insertBefore(row, ccList.firstChild);
   } else {
     ccList.appendChild(row);
+    // Auto-focus the "After Match #" input when user adds a new cycle change row
+    if (afterMatch == null || afterMatch === '') {
+      setTimeout(function() {
+        var inp = row.querySelector('.cc-after');
+        if (!inp) return;
+        inp.focus();
+        inp.select();
+        var timeInp2 = row.querySelector('.cc-time');
+        // Tab: after → time, Shift+Tab: time → after
+        inp.addEventListener('keydown', function(e) {
+          if (e.key === 'Tab' && !e.shiftKey) {
+            e.preventDefault();
+            if (timeInp2) { timeInp2.focus(); timeInp2.select(); }
+          }
+        });
+        if (timeInp2) {
+          timeInp2.addEventListener('keydown', function(e) {
+            if (e.key === 'Tab' && e.shiftKey) {
+              e.preventDefault();
+              inp.focus(); inp.select();
+            }
+          });
+        }
+      }, 0);
+    }
   }
 
   row.dataset.isStart = isFirst ? '1' : '0';
@@ -3537,6 +3620,8 @@ function showStage2Panel(numTeams) {
     status.style.color = 'var(--text-muted)';
     btnAssign.disabled = true;
   }
+  // Show iteration time estimate now that the panel is visible
+  updateIterationEstimate();
 }
 
 // ── Commit: mark the current assigned schedule as active ─────────────────────
@@ -3716,8 +3801,20 @@ async function assignTeams() {
           document.getElementById('progressFill2').style.width = pct + '%';
           const elapsed = performance.now() - startTime;
           const eta = msg2.done > 1 ? formatETA((elapsed/msg2.done)*(msg2.total-msg2.done)) : '';
-          const scoreStr2 = (msg2.score !== undefined && msg2.score !== null && msg2.score > -1e17)
-            ? ' \u00b7 score ' + msg2.score.toFixed(0) : '';
+          var scoreStr2 = '';
+          if (msg2.score !== undefined && msg2.score !== null && msg2.score > -1e17) {
+            // Decode score components: -(b2b*1000 + imbalance*500 + surrogates*200 + repeat_opp*15 + repeat_part*12)
+            var s = -msg2.score;
+            var b2b2     = Math.floor(s / 1000); s -= b2b2 * 1000;
+            var imbal2   = Math.floor(s / 500);  s -= imbal2 * 500;
+            var sur2     = Math.floor(s / 200);  s -= sur2 * 200;
+            var parts2 = [];
+            if (b2b2 > 0)  parts2.push(b2b2 + ' B2B');
+            if (imbal2 > 0) parts2.push(imbal2 + ' imbal');
+            if (sur2 > 0)  parts2.push(sur2 + ' sur');
+            if (s > 0)     parts2.push('rep');
+            scoreStr2 = parts2.length ? ' \u00b7 ' + parts2.join(', ') : ' \u00b7 \u2713 optimal';
+          }
           document.getElementById('progressLabel2').textContent =
             msg2.done + ' / ' + msg2.total + ' iterations' + (eta ? ' \u00b7 ' + eta : '') + scoreStr2 + '\u2026';
         } else if (msg2.type === 'done') {
@@ -3753,6 +3850,13 @@ async function assignTeams() {
       window._stage2Retried = false;
       document.getElementById('btnCommit').style.display = 'block';
       showApiStatus('Teams assigned — review the schedule then click Commit to activate');
+      // Calibrate iteration time estimate from actual elapsed time
+      var elapsed2 = performance.now() - startTime;
+      if (iterations > 0 && elapsed2 > 100) {
+        var workers2 = Math.max(1, navigator.hardwareConcurrency || 4);
+        window._msPerIteration = (elapsed2 * workers2) / iterations;
+        updateIterationEstimate();
+      }
       // Clear guard after a tick so any synchronous change events settle first
       setTimeout(function() { window._assigningTeams = false; }, 100);
     }

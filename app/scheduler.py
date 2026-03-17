@@ -598,13 +598,45 @@ def assign_teams(
     _rng = random.Random(seed)
 
     for i in range(n_iterations):
+        # Start each iteration from a fresh random shuffle
         shuffled = team_numbers[:]
         _rng.shuffle(shuffled)
         slot_map = {slot: team for slot, team in zip(slots, shuffled)}
         score = score_assignment(slot_map)
+
+        # Simulated annealing local search
+        # Temperature decays from T0 → 0 over the iteration's budget.
+        # Accepts worse moves with probability exp(Δ/T), escaping local optima.
+        budget = num_teams * 6  # swap attempts per iteration
+        T0 = 200.0              # initial temperature (score units)
+        for step in range(budget):
+            T = T0 * (1.0 - step / budget)  # linear cooling
+
+            # Alternate between 2-swap (common) and 3-way rotation (escape local optima)
+            if _rng.random() < 0.15 and num_teams >= 3:
+                a, b, c = _rng.sample(slots, 3)
+                # Rotate: a→b→c→a
+                slot_map[a], slot_map[b], slot_map[c] = slot_map[c], slot_map[a], slot_map[b]
+                new_score = score_assignment(slot_map)
+                delta = new_score - score
+                if delta >= 0 or (T > 0 and _rng.random() < (delta / T if delta / T > -20 else 0)):
+                    score = new_score
+                else:
+                    # Revert rotation
+                    slot_map[a], slot_map[b], slot_map[c] = slot_map[b], slot_map[c], slot_map[a]
+            else:
+                a, b = _rng.sample(slots, 2)
+                slot_map[a], slot_map[b] = slot_map[b], slot_map[a]
+                new_score = score_assignment(slot_map)
+                delta = new_score - score
+                if delta >= 0 or (T > 0 and _rng.random() < (delta / T if delta / T > -20 else 0)):
+                    score = new_score
+                else:
+                    slot_map[a], slot_map[b] = slot_map[b], slot_map[a]
+
         if score > best_score:
             best_score = score
-            best_slot_map = slot_map
+            best_slot_map = dict(slot_map)
 
     return {
         'slot_map': {str(k): v for k, v in best_slot_map.items()},

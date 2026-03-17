@@ -505,6 +505,14 @@ for small team counts with long schedules.
 module-level singleton was created outside any running event loop, causing silent hangs and
 502 errors from the OCP router. Per-request clients have negligible overhead for TBA calls.
 
+### Break/cycle-change row focus and Tab navigation
+
+When a new break row is added, focus automatically goes to the **Name** field with the text selected. Tab moves: Name → Start → End. Shift+Tab reverses.
+
+When a new cycle change row is added, focus goes to the **After Match #** field. Tab moves: After Match → Cycle Time. Shift+Tab reverses.
+
+Fields added during URL/DB restore (with pre-filled values) do not steal focus.
+
 ### Break buffer definition
 
 `breakBuffer` (URL param `bb`, default 5 min) controls when to stop scheduling matches before a break.
@@ -519,6 +527,27 @@ Only defer (flush break early) if `breakStart - cursor < breakBuffer`.
 - A match starting at 11:56 (only 4 min gap) — **deferred until after the break** ✓
 
 The cycle time does **not** factor into this check. A match that clears the buffer is committed to run even if its cycle time overlaps the break start. The interrupt check (which would otherwise cancel mid-match breaks) is suppressed for any match that already passed the buffer test.
+
+### Stage 2 search algorithm (simulated annealing)
+
+`assign_teams()` in `scheduler.py` uses **simulated annealing** with a mixed neighbourhood:
+
+- Each iteration starts from a fresh random shuffle of team numbers onto abstract slots.
+- A local search runs for `num_teams × 6` steps with a linearly-cooling temperature (`T0=200`):
+  - **85% of moves:** 2-swap — pick two random slots and swap their teams.
+  - **15% of moves:** 3-way rotation — pick three slots and rotate (a→b→c→a). Breaks symmetries that 2-swaps can't escape.
+  - A worse move is accepted with probability `exp(Δ/T)`, allowing early escape from local optima.
+- Best result across all iterations and all parallel workers is kept.
+
+**Score formula:** `-(b2b×1000 + imbalance×500 + surrogates×200 + repeat_opp×15 + repeat_part×12)`
+
+The progress bar shows a human-readable breakdown: `2 B2B, 1 imbal` or `✓ optimal` (score=0).
+
+For some team counts and schedule structures, a small number of back-to-back matches is mathematically unavoidable regardless of iteration count — the floor is set by the abstract schedule geometry.
+
+### Iteration time estimate
+
+`updateIterationEstimate()` reads `assignIterations`, estimates wall time using `window._msPerIteration` (default `0.035ms/iter`, calibrated from actual elapsed time after each run), and updates `#iterationEstimate` in the UI. Called on page load and after every completed assignment run.
 
 ### 503 under rapid parameter changes
 The auto-generate debounce is 2500ms. The Stage 1 retry counter is reset to 0 at the start

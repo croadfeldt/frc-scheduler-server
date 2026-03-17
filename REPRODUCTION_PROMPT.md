@@ -625,6 +625,35 @@ const interruptBreak = (!nextBreak || breakBuffer <= 0 || (nextBreak.start - cur
 Applied in `_finishGenerationInner` and `calcMaxMatches`.
 `bb` encoded in share URL, restored via `applyUrlParams`.
 
+### Stage 2 search: simulated annealing (`scheduler.py: assign_teams`)
+
+Replaced hill-climbing with simulated annealing:
+```python
+budget = num_teams * 6   # steps per iteration
+T0 = 200.0               # initial temperature (score units)
+for step in range(budget):
+    T = T0 * (1.0 - step / budget)   # linear cooling
+    # 15% chance: 3-way rotation (a,b,c → c,a,b)
+    # 85% chance: 2-swap
+    # Accept if delta >= 0, or with prob exp(delta/T)
+```
+
+**Why:** pure hill-climbing gets trapped in local optima quickly. SA with 3-way rotations explores wider neighbourhoods and accepts worse moves early to escape, converging to lower B2B/imbalance scores especially with high iteration counts.
+
+**Score display in progress bar:** raw score decoded into `N B2B, N imbal, N sur, rep` or `✓ optimal`.
+
+### Break/cycle-change row Tab navigation
+
+`addBreak()`: on new row (no pre-filled nameVal), focuses break-name with `.select()`. Tab handlers:
+- name `Tab` → break-start
+- break-start `Tab` → break-end, `Shift+Tab` → break-name
+- break-end `Shift+Tab` → break-start
+
+`addDayCycleChange()`: on new row (no afterMatch), focuses cc-after with `.select()`. Tab handlers:
+- cc-after `Tab` → cc-time, cc-time `Shift+Tab` → cc-after
+
+Fields added during restore (nameVal or afterMatch pre-filled) skip auto-focus entirely.
+
 ### `applyDayConfigToUI(dc)`
 
 Restores a `day_config` object (from `AbstractSchedule.day_config` or `AssignedSchedule.day_config`) back into the UI fields. Called during `?sid=` restore so the UI reflects the exact timing config used when the schedule was generated.
