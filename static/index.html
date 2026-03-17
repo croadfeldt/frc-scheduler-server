@@ -2921,8 +2921,12 @@ function calcMaxMatches() {
     updateAgendaFit();
   }
   // Auto-generate schedule with the new mpt value
+  console.log('[OV] calcMaxMatches: calling generateSchedule? abstractParams=' + (_abstractParams !== null) + ' autoPopulate=' + document.getElementById('autoPopulate').checked);
   if (_abstractParams !== null || document.getElementById('autoPopulate').checked) {
     generateSchedule();
+  } else {
+    console.log('[OV] calcMaxMatches: generateSchedule NOT called — hiding overlay');
+    _overlay.hide();
   }
 }
 
@@ -4510,7 +4514,8 @@ async function generateSchedule() {
   if (numTeams < 6) { showApiStatus('Enter at least 6 teams', true); return; }
 
   const btn = document.getElementById('btnGenerate');
-  if (btn.disabled) return; // already running — ignore duplicate trigger
+  console.log('[OV] generateSchedule entered, btn.disabled=' + btn.disabled + ' numTeams=' + document.getElementById('numTeams').value);
+  if (btn.disabled) { console.log('[OV] generateSchedule ABORTED — btn disabled'); return; } // already running
   if (!validateTimes()) { showApiStatus('Fix invalid times before generating', true); return; }
   if (!validateCycleChanges()) { showApiStatus('⚠ Fill in all required cycle change fields', true); return; }
   btn.disabled = true;
@@ -4560,6 +4565,7 @@ async function generateSchedule() {
     document.getElementById('progressFill').style.width = '10%';
     document.getElementById('progressLabel').textContent = 'Generating schedule\u2026';
 
+    console.log('[OV] generateSchedule: fetching from server');
     _s1AbortController = new AbortController();
     const res = await fetch(API + '/api/generate-abstract', {
       method: 'POST',
@@ -4678,6 +4684,7 @@ async function generateSchedule() {
   } catch(err) {
     clearInterval(animInterval);
     _s1AbortController = null;
+    console.log('[OV] generateSchedule catch: err=' + err.message + ' doneMsg=' + (!!doneMsg) + ' s1ReceivedDone=' + s1ReceivedDone);
     if (doneMsg || s1ReceivedDone) {
       // Done event was received — stream-close error is expected, not a failure
       btn.disabled = false;
