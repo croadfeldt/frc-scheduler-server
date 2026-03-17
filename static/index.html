@@ -648,9 +648,79 @@
     /* Progress bars */
     .progress-label { font-size: 0.65rem; }
   }
+  /* ── Processing overlay ── */
+  .processing-overlay {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);
+    align-items: center; justify-content: center;
+  }
+  .processing-overlay.active { display: flex; }
+  .processing-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1.5rem 2rem; min-width: 320px; max-width: 480px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .processing-title {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 600;
+    font-size: 1rem; letter-spacing: 0.06em; color: var(--text-strong);
+    margin-bottom: 1rem;
+  }
+  .processing-steps { display: flex; flex-direction: column; gap: 0.5rem; }
+  .processing-step {
+    display: flex; align-items: center; gap: 0.6rem;
+    font-size: 0.82rem; color: var(--text-muted);
+    transition: color 0.2s;
+  }
+  .processing-step.active { color: var(--text-strong); }
+  .processing-step.done   { color: var(--accent3); }
+  .processing-step.error  { color: var(--danger); }
+  .processing-step-icon {
+    width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.7rem; flex-shrink: 0;
+    background: var(--surface2); border: 1px solid var(--border);
+    transition: all 0.2s;
+  }
+  .processing-step.active .processing-step-icon {
+    background: rgba(137,180,250,0.15); border-color: var(--accent);
+    color: var(--accent);
+    animation: spin-pulse 1s linear infinite;
+  }
+  .processing-step.done .processing-step-icon {
+    background: rgba(166,227,161,0.15); border-color: var(--accent3);
+    color: var(--accent3);
+  }
+  .processing-step.error .processing-step-icon {
+    background: rgba(243,139,168,0.15); border-color: var(--danger);
+    color: var(--danger);
+  }
+  @keyframes spin-pulse {
+    0%,100% { opacity: 1; } 50% { opacity: 0.5; }
+  }
+  .processing-detail {
+    font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem;
+    min-height: 1rem;
+  }
+  .processing-progress {
+    margin-top: 0.75rem; height: 3px; background: var(--surface2);
+    border-radius: 2px; overflow: hidden;
+  }
+  .processing-progress-fill {
+    height: 100%; background: var(--accent);
+    border-radius: 2px; transition: width 0.3s ease; width: 0%;
+  }
 </style>
 </head>
 <body>
+<!-- Processing overlay — shown during multi-step auto operations -->
+<div class="processing-overlay" id="processingOverlay">
+  <div class="processing-card">
+    <div class="processing-title" id="processingTitle">Processing&hellip;</div>
+    <div class="processing-steps" id="processingSteps"></div>
+    <div class="processing-detail" id="processingDetail"></div>
+    <div class="processing-progress"><div class="processing-progress-fill" id="processingProgressFill"></div></div>
+  </div>
+</div>
 <div class="container">
   <header>
     <div class="logo-mark">FRC</div>
@@ -1009,6 +1079,99 @@ let _currentSeed = null;                 // hex Stage 1 seed
 let _currentAssignSeed = null;           // hex Stage 2 seed
 let _urlAutoTeams = null;                // teams from URL for Stage 2 auto-assign
 let _agendaBlocks = null;                // parsed qual time blocks from FIRST agenda PDF
+
+// ── Processing Overlay ────────────────────────────────────────────────────────
+// Shows a modal overlay with step-by-step status during multi-step auto operations.
+// Steps: array of {id, label}. Call overlay.step(id) to activate, overlay.done(id),
+// overlay.error(id, msg), overlay.detail(msg), overlay.progress(pct), overlay.hide().
+var _overlay = (function() {
+  var _steps = [];
+  var _visible = false;
+
+  function _render() {
+    var el = document.getElementById('processingSteps');
+    if (!el) return;
+    el.innerHTML = _steps.map(function(s) {
+      var icon = s.state === 'active' ? '\u25cf'   // ●
+               : s.state === 'done'  ? '\u2713'   // ✓
+               : s.state === 'error' ? '\u2717'   // ✗
+               : '';
+      return '<div class="processing-step ' + (s.state||'') + '" id="pstep_' + s.id + '">' +
+        '<div class="processing-step-icon">' + icon + '</div>' +
+        '<span>' + s.label + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  return {
+    show: function(title, steps) {
+      _steps = steps.map(function(s) { return {id: s.id, label: s.label, state: ''}; });
+      _visible = true;
+      var t = document.getElementById('processingTitle');
+      if (t) t.textContent = title;
+      var d = document.getElementById('processingDetail');
+      if (d) d.textContent = '';
+      var p = document.getElementById('processingProgressFill');
+      if (p) p.style.width = '0%';
+      _render();
+      var ov = document.getElementById('processingOverlay');
+      if (ov) ov.classList.add('active');
+    },
+    step: function(id, detail) {
+      // Mark previous active as done, set this one active
+      _steps.forEach(function(s) {
+        if (s.state === 'active') s.state = 'done';
+      });
+      var s = _steps.find(function(s) { return s.id === id; });
+      if (s) s.state = 'active';
+      _render();
+      if (detail) {
+        var d = document.getElementById('processingDetail');
+        if (d) d.textContent = detail;
+      }
+      // Auto-progress bar based on step index
+      var idx = _steps.findIndex(function(s) { return s.id === id; });
+      if (idx >= 0) {
+        var pct = Math.round((idx / _steps.length) * 90); // leave 10% for final
+        var p = document.getElementById('processingProgressFill');
+        if (p) p.style.width = pct + '%';
+      }
+    },
+    done: function(id) {
+      var s = _steps.find(function(s) { return s.id === id; });
+      if (s) s.state = 'done';
+      _render();
+    },
+    error: function(id, msg) {
+      var s = _steps.find(function(s) { return s.id === id; });
+      if (s) s.state = 'error';
+      _render();
+      var d = document.getElementById('processingDetail');
+      if (d) d.textContent = msg || '';
+    },
+    detail: function(msg) {
+      var d = document.getElementById('processingDetail');
+      if (d) d.textContent = msg || '';
+    },
+    progress: function(pct) {
+      var p = document.getElementById('processingProgressFill');
+      if (p) p.style.width = Math.min(100, pct) + '%';
+    },
+    hide: function() {
+      _visible = false;
+      // Mark any remaining active steps as done
+      _steps.forEach(function(s) { if (s.state === 'active') s.state = 'done'; });
+      _render();
+      var p = document.getElementById('processingProgressFill');
+      if (p) p.style.width = '100%';
+      setTimeout(function() {
+        var ov = document.getElementById('processingOverlay');
+        if (ov) ov.classList.remove('active');
+      }, 400);
+    },
+    isVisible: function() { return _visible; },
+  };
+})();
 
 function timeToMin(t) {
   const [h, m] = t.split(':').map(Number);
@@ -1399,6 +1562,13 @@ initAuth();
 autoRunFromUrl();
 // Pre-fetch TBA search index in background for cross-year event search
 setTimeout(ensureTbaSearchIndex, 2000);
+// Check CPU worker count for overlay detail
+(async function() {
+  try {
+    var h = await apiFetch('/api/health');
+    window._cpuWorkers = h.cpu_workers || 1;
+  } catch(e) { window._cpuWorkers = 1; }
+})();
 
 ['numTeams','matchesPerTeam','cooldown','breakBuffer'].forEach(function(id) {
   var el = document.getElementById(id);
@@ -2178,10 +2348,12 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
   loading.style.fontSize = '';
   badge.textContent = '';
   badge.style.background = '';
+  _overlay.step('pdf', 'Fetching PDF from FIRST\u2026');
 
   try {
     const buf = await fetchAgendaPDF(eventKey);
     loading.textContent = 'Parsing PDF\u2026';
+    _overlay.detail('Parsing PDF\u2026');
     const blocks = await parsePDFBlocks(buf);
     if (blocks.length === 0) throw new Error('No "Qualification Match" blocks found in PDF');
     _agendaBlocks = blocks;
@@ -2212,12 +2384,15 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     var autoMaxCyc = document.getElementById('autoMaxCycles');
     var autoGen    = document.getElementById('autoPopulate');
     if (autoApply && autoApply.checked) {
+      _overlay.step('apply', 'Applying agenda to day configuration…');
       showApiStatus('⏳ Applying agenda to day config…');
       applyAgendaToSchedule();
     }
     if (autoMaxCyc && autoMaxCyc.checked) {
+      _overlay.step('maxcycles', 'Calculating max matches/team…');
       calcMaxMatches();  // calls generateSchedule() if autoPopulate on
     } else if (autoGen && autoGen.checked) {
+      _overlay.step('generate', 'Generating schedule…');
       generateSchedule();
     }
     // autoAssign is handled inside generateSchedule's Stage 1 completion hook
@@ -2269,11 +2444,15 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     // PDF unavailable — run auto-max then auto-generate with existing day config
     var autoMaxFail = document.getElementById('autoMaxCycles');
     var autoGenFail = document.getElementById('autoPopulate');
+    _overlay.done('pdf');
     if (autoMaxFail && autoMaxFail.checked) {
+      _overlay.step('maxcycles', 'Calculating max matches/team…');
       calcMaxMatches();  // calls generateSchedule() if autoPopulate on
     } else if (autoGenFail && autoGenFail.checked) {
       var nt = parseInt(document.getElementById('numTeams').value) || 0;
-      if (nt >= 6) generateSchedule();
+      if (nt >= 6) { _overlay.step('generate', 'Generating schedule…'); generateSchedule(); }
+    } else {
+      _overlay.hide();
     }
   }
 }
@@ -2314,19 +2493,31 @@ function updateAgendaFit() {
   var totalSlots   = numTeams * mpt;
   var totalMatches = Math.ceil(totalSlots / 6);
   var surrogates   = totalMatches * 6 - totalSlots;
-  var timeNeeded   = totalMatches * ct;
 
+  // Compute available time and weighted-average cycle time across blocks
   var availableMin = 0;
+  var effectiveCt = ct; // fallback to global if no blocks
   if (_agendaBlocks && _agendaBlocks.length) {
     availableMin = _agendaBlocks.reduce(function(s, b) { return s + b.duration; }, 0);
+    // Weighted average: each block's cycle time weighted by its capacity share
+    var totalCap = 0;
+    var weightedCt = 0;
+    _agendaBlocks.forEach(function(b, bi) {
+      var bCt = getBlockCycleTime(bi);
+      var cap = b.duration / bCt;
+      totalCap  += cap;
+      weightedCt += bCt * cap;
+    });
+    if (totalCap > 0) effectiveCt = weightedCt / totalCap;
   } else {
     var manEl = document.getElementById('agendaManualMin');
     availableMin = manEl ? (parseInt(manEl.value) || 360) : 360;
   }
+  var timeNeeded = totalMatches * effectiveCt;
 
   var surplus  = availableMin - timeNeeded;
   var pct      = availableMin > 0 ? (timeNeeded / availableMin * 100) : 100;
-  var mpr      = ct > 0 ? (60 / ct) : 0;
+  var mpr      = effectiveCt > 0 ? (60 / effectiveCt) : 0;
   var reqCycle = totalMatches > 0 ? (availableMin / totalMatches) : 0;
 
   var fitClass, fitLabel;
@@ -2362,18 +2553,40 @@ function updateAgendaFit() {
 
   // Per-block timeline bars
   if (_agendaBlocks && _agendaBlocks.length) {
-    // Use per-block cycle times so the timeline reflects actual schedule params
+    var assignments;
     var blockCts = _agendaBlocks.map(function(b, bi) { return getBlockCycleTime(bi); });
-    var assignments = distributeMatchesToBlocksPerCt(totalMatches, _agendaBlocks, blockCts);
+
+    if (window._frcScheduled && window._frcScheduled.length) {
+      // Use actual scheduled match times — count matches whose startMin falls
+      // within each PDF qual block's [start, end) window.
+      // PDF blocks are in minutes-since-midnight; scheduled entries use the same units.
+      assignments = _agendaBlocks.map(function(block) {
+        var count = 0;
+        window._frcScheduled.forEach(function(day) {
+          (day.entries || []).forEach(function(entry) {
+            if (entry.type === 'match' &&
+                entry.startMin >= block.start &&
+                entry.startMin < block.end) {
+              count++;
+            }
+          });
+        });
+        return count;
+      });
+    } else {
+      // No schedule yet — estimate via simulation
+      assignments = distributeMatchesToBlocksPerCt(totalMatches, _agendaBlocks, blockCts);
+    }
     _agendaBlocks.forEach(function(b, bi) {
       var bar = document.getElementById('agendaBar_' + b.start);
       if (!bar) return;
       var used = assignments[bi];
-      var usedTime = used * ct;
-      var fillPct = Math.min(usedTime / b.duration * 100, 100);
+      var bCt  = blockCts[bi];
+      var usedTime = used * bCt;
+      var fillPct = b.duration > 0 ? Math.min(usedTime / b.duration * 100, 100) : 0;
       var overage = Math.round(usedTime - b.duration);
       var color = overage > 0 ? 'var(--amber)' : fillPct > 85 ? 'var(--amber)' : 'var(--accent3)';
-      var label = used + ' matches \u00b7 ' + Math.round(usedTime) + ' min';
+      var label = used + ' match' + (used !== 1 ? 'es' : '') + ' \u00b7 ' + Math.round(usedTime) + ' min';
       if (overage > 0) label += ' (+' + overage + ' min over)';
       else if (overage < 0) label += ' (' + Math.abs(overage) + ' min buffer)';
       var fill = bar.querySelector('.agenda-timeline-fill');
@@ -2608,6 +2821,7 @@ function calcMaxMatches() {
   var msg = '\u2713 Max ' + mpt + ' matches/team \u2014 ' + neededMatches + ' of ' + totalSlotMatches + ' slots used'
     + (surrogates > 0 ? ', ' + surrogates + ' surrogate' + (surrogates !== 1 ? 's' : '') + ' needed' : ', no surrogates needed');
   showApiStatus(msg);
+  _overlay.done('maxcycles');
   // Sync agenda fit with new mpt before generating
   if (document.getElementById('agendaFitPanel') &&
       document.getElementById('agendaFitPanel').style.display !== 'none') {
@@ -3930,6 +4144,24 @@ async function activateEvent(ev) {
   if (ev.key) {
     window._agendaFetchPending = true;
     resetAgendaPanel();
+
+    // Determine which steps to show based on flags
+    var chainSteps = [{ id: 'roster', label: 'Load team roster' }];
+    var hasAgenda  = document.getElementById('autoApplyAgenda') && document.getElementById('autoApplyAgenda').checked;
+    var hasMax     = document.getElementById('autoMaxCycles')   && document.getElementById('autoMaxCycles').checked;
+    var hasGen     = document.getElementById('autoPopulate')    && document.getElementById('autoPopulate').checked;
+    var hasAssign  = document.getElementById('autoAssign')      && document.getElementById('autoAssign').checked;
+    chainSteps.push({ id: 'pdf',    label: 'Fetch agenda PDF' });
+    if (hasAgenda) chainSteps.push({ id: 'apply',    label: 'Apply day configuration' });
+    if (hasMax)    chainSteps.push({ id: 'maxcycles',label: 'Calculate max matches/team' });
+    if (hasGen)    chainSteps.push({ id: 'generate', label: 'Generate schedule (Stage 1)' });
+    if (hasAssign) chainSteps.push({ id: 'assign',   label: 'Assign teams (Stage 2)' });
+
+    if (hasGen || hasMax || hasAgenda) {
+      _overlay.show('Loading Event', chainSteps);
+      _overlay.step('roster');
+    }
+
     fetchAndRenderAgendaFit(ev.key, ev.start_date, ev.end_date).catch(function() {}).finally(function() {
       window._agendaFetchPending = false;
     });
@@ -4020,6 +4252,7 @@ async function loadRoster() {
   if (!_currentEventId) return;
   try {
     showApiStatus('⏳ Loading team roster…');
+    if (_overlay.isVisible()) _overlay.step('roster', 'Fetching team roster…');
     const teams = await apiFetch('/api/events/' + _currentEventId + '/teams');
     // Sync numTeams with roster count — but keep input editable
     document.getElementById('numTeams').value = teams.length;
@@ -4035,6 +4268,7 @@ async function loadRoster() {
       roster.appendChild(row);
     });
     showApiStatus('✓ Roster loaded — ' + teams.length + ' team' + (teams.length !== 1 ? 's' : ''));
+    _overlay.done('roster');
     // Notify param changed so auto-generate can fire after roster loads.
     // Suppressed when an agenda PDF fetch is about to start — that fetch will
     // call onParamChanged itself once day config has been applied.
@@ -4324,14 +4558,20 @@ async function generateSchedule() {
         fakeBtn.style.color    = '';
       }
       showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
+      _overlay.done('generate');
       // Auto-assign: url-auto-teams takes priority, then autoAssign flag
       if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
-        _urlAutoTeams = null; setTimeout(assignTeams, 200);
+        _urlAutoTeams = null;
+        _overlay.step('assign', 'Assigning teams (Stage 2)\u2026');
+        setTimeout(assignTeams, 200);
       } else {
         var autoAssignEl = document.getElementById('autoAssign');
         if (autoAssignEl && autoAssignEl.checked && _currentEventId) {
-          showApiStatus('⏳ Auto-assigning teams…');
+          showApiStatus('\u23f3 Auto-assigning teams\u2026');
+          _overlay.step('assign', 'Assigning teams (Stage 2)\u2026');
           setTimeout(assignTeams, 200);
+        } else {
+          _overlay.hide();  // no assign step — chain complete
         }
       }
     }
@@ -4619,6 +4859,7 @@ async function assignTeams() {
     commitBtn.textContent = '\u2713 Commit Schedule as Active';
   }
   document.getElementById('progressWrap2').style.display = 'block';
+  if (_overlay.isVisible()) _overlay.step('assign', 'Running Stage 2 team assignment…');
 
   const iterations  = Math.max(1, parseInt(document.getElementById('assignIterations').value) || 1000);
   const assignSeed  = randomSeed();
@@ -4734,6 +4975,7 @@ async function assignTeams() {
       window._stage2Retried = false;
       document.getElementById('btnCommit').style.display = 'block';
       showApiStatus('Teams assigned — review the schedule then click Commit to activate');
+      _overlay.hide();
       // Calibrate: store wall-clock ms per iteration (elapsed already reflects parallelism)
       var elapsed2 = performance.now() - startTime;
       if (iterations > 0 && elapsed2 > 100) {

@@ -427,6 +427,30 @@ else if (autoPopulate.checked) generateSchedule();
 
 **PDF fail path:** same chain starting at `calcMaxMatches` / `generateSchedule`.
 
+### Processing overlay
+
+```javascript
+var _overlay = (function() { ... })();
+```
+IIFE module. State: `_steps = [{id, label, state}]`, `_visible`. Renders step list into `#processingSteps`. Progress bar `#processingProgressFill` advances to `idx/total * 90%` on `step()` call, 100% on `hide()`.
+
+`isVisible()` guard prevents overlay calls from manual (non-auto) triggers — e.g. `generateSchedule()` called directly by the Generate button should not advance overlay steps.
+
+`_overlay.hide()` has three call sites:
+1. After `assignTeams()` completes (chain fully done)
+2. After Stage 1 completes when `autoAssign` is off (no more steps)
+3. In PDF fail path when neither `autoMaxCycles` nor `autoPopulate` are on
+
+**`window._cpuWorkers`** — fetched from `GET /api/health` on page load, stored for display. Reflects actual `ProcessPoolExecutor` size: `CPU_WORKERS` env or `os.cpu_count()`.
+
+### Agenda fit — actual match counts
+
+`updateAgendaFit()` per-block assignment logic:
+- If `window._frcScheduled` exists: count `entry.startMin` values in `[block.start, block.end)` per block
+- If no schedule: `distributeMatchesToBlocksPerCt()` proportional estimate
+
+Summary `timeNeeded = totalMatches * effectiveCt` where `effectiveCt` = capacity-weighted average of per-block cycle times.
+
 **`getBlockCycleTime(blockIndex)`** — reads `.day-cc-row[data-is-start="1"] .cc-time` from the nth day row. Falls back to global `#cycleTime` if not found.
 
 **`distributeMatchesToBlocksPerCt(totalMatches, blocks, blockCts)`** — replaces single-ct `distributeMatchesToBlocks`. Uses each block's own capacity (`duration / blockCts[i]`) for proportional distribution. When over capacity, fills each block to floor capacity and puts overflow in the last block. `distributeMatchesToBlocks` is kept as a legacy wrapper.

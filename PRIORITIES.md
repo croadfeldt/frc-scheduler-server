@@ -108,6 +108,22 @@ Times in FIRST agenda PDFs are local event time — no timezone information is p
 ---
 
 
+### Processing overlay (`_overlay`)
+
+Modal overlay shown during multi-step auto operations. Constructed as an IIFE returning:
+- `show(title, steps)` — render steps, show overlay
+- `step(id, detail)` — mark previous active→done, set this one active, advance progress bar
+- `done(id)` — mark step done
+- `error(id, msg)` — mark step error
+- `hide()` — mark remaining active→done, 100% progress, fade out after 400ms
+- `isVisible()` — guard for manual (non-auto) calls
+
+Steps shown = only flags that are enabled. Order: roster → pdf → apply → maxcycles → generate → assign.
+
+### Agenda fit — actual match counts
+
+When `window._frcScheduled` exists, `updateAgendaFit()` counts matches by `startMin` within each block's `[start, end)` window instead of estimating. Summary stats use capacity-weighted average cycle time across blocks.
+
 ### Auto-trigger implementation notes
 
 **`_agendaFetchPending` flag** — set `true` in `activateEvent` before the PDF fetch, cleared in `.finally()`. Prevents `loadRoster()` from calling `onParamChanged()` prematurely before the PDF day config is applied, which would cause a double-generate race condition.
