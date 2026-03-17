@@ -715,11 +715,11 @@
 </head>
 <body>
 <!-- Processing overlay — shown during multi-step auto operations -->
-<div class="processing-overlay" id="processingOverlay" onclick="if(event.target===this)_overlay.hide();">
+<div class="processing-overlay" id="processingOverlay" onclick="if(event.target===this)_overlay.hide(); console.log('[overlay] hide called');">
   <div class="processing-card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
       <div class="processing-title" id="processingTitle" style="margin-bottom:0;">Processing&hellip;</div>
-      <button onclick="_overlay.hide();" style="background:none;border:none;color:var(--text-muted);font-size:1rem;cursor:pointer;padding:0.1rem 0.3rem;line-height:1;" title="Dismiss">&times;</button>
+      <button onclick="_overlay.hide(); console.log('[overlay] hide called');" style="background:none;border:none;color:var(--text-muted);font-size:1rem;cursor:pointer;padding:0.1rem 0.3rem;line-height:1;" title="Dismiss">&times;</button>
     </div>
     <div class="processing-steps" id="processingSteps"></div>
     <div class="processing-detail" id="processingDetail"></div>
@@ -1162,6 +1162,7 @@ var _overlay = (function() {
       if (p) p.style.width = Math.min(100, pct) + '%';
     },
     hide: function() {
+      console.log('[overlay] hide() executing, steps='+JSON.stringify(_steps.map(function(s){return s.id+':'+s.state;})));
       _visible = false;
       // Mark any remaining active steps as done
       _steps.forEach(function(s) { if (s.state === 'active') s.state = 'done'; });
@@ -2455,7 +2456,7 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
       var nt = parseInt(document.getElementById('numTeams').value) || 0;
       if (nt >= 6) { generateSchedule(); }
     } else {
-      _overlay.hide();
+      _overlay.hide(); console.log('[overlay] hide called');
     }
   }
 }
@@ -4619,7 +4620,7 @@ async function generateSchedule() {
         fakeBtn.style.color    = '';
       }
       showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
-      _overlay.done('generate');
+      _overlay.done('generate'); console.log('[overlay] done:generate, visible='+_overlay.isVisible());
       // Auto-assign: url-auto-teams takes priority, then autoAssign flag
       if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
         _urlAutoTeams = null;
@@ -4632,7 +4633,7 @@ async function generateSchedule() {
           _overlay.step('assign', 'Assigning teams (Stage 2)\u2026');
           setTimeout(assignTeams, 200);
         } else {
-          _overlay.hide();  // no assign step — chain complete
+          _overlay.hide(); console.log('[overlay] hide called');  console.log('[overlay] hide called: no-assign path'); // no assign step — chain complete
         }
       }
     }
@@ -5036,7 +5037,7 @@ async function assignTeams() {
       window._stage2Retried = false;
       document.getElementById('btnCommit').style.display = 'block';
       showApiStatus('Teams assigned — review the schedule then click Commit to activate');
-      _overlay.hide();
+      _overlay.hide(); console.log('[overlay] hide called');
       // Calibrate: store wall-clock ms per iteration (elapsed already reflects parallelism)
       var elapsed2 = performance.now() - startTime;
       if (iterations > 0 && elapsed2 > 100) {
