@@ -107,6 +107,24 @@ Times in FIRST agenda PDFs are local event time — no timezone information is p
 
 ---
 
+
+### Auto-trigger implementation notes
+
+**`_agendaFetchPending` flag** — set `true` in `activateEvent` before the PDF fetch, cleared in `.finally()`. Prevents `loadRoster()` from calling `onParamChanged()` prematurely before the PDF day config is applied, which would cause a double-generate race condition.
+
+**`loadRoster()`** — calls `onParamChanged()` only when `!window._agendaFetchPending`. Covers the no-event-key case (no PDF fetch pending).
+
+**`generateSchedule()`** — shows `⏳ Generating schedule…` in `showApiStatus()` immediately on entry, before the SSE stream begins.
+
+**Full trigger chain on event load:**
+```
+activateEvent → _agendaFetchPending=true → loadRoster (holds) → fetchAndRenderAgendaFit
+  PDF success + autoApplyAgenda → applyAgendaToSchedule
+    autoMaxCycles on  → calcMaxMatches → generateSchedule  [status shown]
+    autoMaxCycles off → onParamChanged → debounced generateSchedule (if autoPopulate on)
+  PDF fail → onParamChanged → debounced generateSchedule (if autoPopulate on)
+  .finally → _agendaFetchPending=false
+```
 ## Stage 2 Simulated Annealing
 
 `assign_teams()` in `scheduler.py`:

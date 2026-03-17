@@ -123,10 +123,14 @@ Three checkboxes live in one box below Match Cooldown:
 | **Auto-calculate max matches/team** | ☐ Off | Runs Calc Max Matches immediately after day config is applied; sets the matches/team field to the maximum that fits the schedule |
 
 **Interaction order when an event is loaded:**
-1. Agenda PDF is fetched and parsed
-2. If auto-apply is on → day config is populated from real qual time blocks
-3. If auto-max is on → matches/team is recalculated to fill the newly set time windows
-4. If auto-regenerate is on → Stage 1 regenerates with the new parameters
+1. Roster is fetched → `numTeams` set
+2. Agenda PDF is fetched and parsed (non-blocking, runs concurrently)
+3. If auto-apply is on → day config populated from real qual time blocks
+4. If auto-max is on → `calcMaxMatches()` recalculates matches/team → `generateSchedule()` fires (shows `⏳ Generating schedule…`)
+5. If auto-max is off and auto-regenerate is on → `onParamChanged()` triggers debounced `generateSchedule()`
+6. If no agenda PDF is available → `onParamChanged()` fires with roster team count alone
+
+A `_agendaFetchPending` flag prevents `loadRoster` from triggering generation before the PDF's day config has been applied.
 
 ### Calc Max Matches
 

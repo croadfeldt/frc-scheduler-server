@@ -91,17 +91,36 @@ Three checkboxes in one bordered box below Match Cooldown:
 | `autoApplyAgenda` | `checked` | Calls `applyAgendaToSchedule()` after successful PDF parse |
 | `autoMaxCycles` | unchecked | Calls `calcMaxMatches()` after day config applied (auto or manual) |
 
-**Execution order in `fetchAndRenderAgendaFit` success path:**
-```javascript
-if (autoApply.checked) {
-  applyAgendaToSchedule();           // fills day config from PDF blocks
-  if (autoMaxCyc.checked) calcMaxMatches();  // recalculates mpt
-} else if (autoMaxCyc.checked) {
-  calcMaxMatches();
-}
+**`window._agendaFetchPending` flag** — set `true` in `activateEvent` before firing `fetchAndRenderAgendaFit`, cleared in `.finally()`. Prevents `loadRoster()` from calling `onParamChanged()` prematurely (before day config is applied from the PDF).
+
+**`loadRoster()`** — after setting `numTeams.value`, calls `onParamChanged()` only when `!window._agendaFetchPending`. This allows auto-regenerate to fire when there is no event key (and thus no PDF fetch).
+
+**Full auto-trigger chain on event load:**
+```
+activateEvent(ev)
+  → _agendaFetchPending = true
+  → loadRoster()
+      sets numTeams.value
+      _agendaFetchPending is true → skip onParamChanged()
+  → fetchAndRenderAgendaFit(ev.key)   [non-blocking]
+      [PDF fetch + parse]
+      applyAgendaToSchedule()          [if autoApplyAgenda on]
+        sets day start/end/breaks via .value
+        if autoMaxCycles on → calcMaxMatches()
+          writes matchesPerTeam.value
+          if autoPopulate on → generateSchedule()  ← TRIGGERS
+      else if autoMaxCycles on → calcMaxMatches() → generateSchedule()
+      else → onParamChanged()  ← debounced generateSchedule() if autoPopulate on
+  .finally() → _agendaFetchPending = false
+
+  [PDF fail path]:
+      shows manual minutes input
+      onParamChanged()  ← still triggers generation with numTeams from roster
 ```
 
 `applyAgendaToSchedule()` also calls `calcMaxMatches()` at its end if `autoMaxCycles` is checked (covers the manual Apply button case).
+
+**`generateSchedule()`** — shows `⏳ Generating schedule…` in `showApiStatus()` immediately when called, before the SSE stream begins.
 
 ---
 

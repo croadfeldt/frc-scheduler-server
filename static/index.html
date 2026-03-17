@@ -2142,10 +2142,18 @@ async function fetchAndRenderAgendaFit(eventKey) {
     if (autoApply && autoApply.checked) {
       applyAgendaToSchedule();
       if (autoMaxCyc && autoMaxCyc.checked) {
+        // calcMaxMatches already calls generateSchedule() — nothing more needed
         calcMaxMatches();
+      } else {
+        // Day config was applied but mpt wasn't recalculated —
+        // fire onParamChanged so auto-regenerate can trigger
+        onParamChanged();
       }
     } else if (autoMaxCyc && autoMaxCyc.checked) {
       calcMaxMatches();
+    } else {
+      // Neither auto flag on — still notify params changed (numTeams loaded from roster)
+      onParamChanged();
     }
   } catch(e) {
     _agendaBlocks = null;
@@ -2155,6 +2163,8 @@ async function fetchAndRenderAgendaFit(eventKey) {
     badge.style.cssText = 'font-size:0.68rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:3px;background:rgba(127,132,156,0.15);color:var(--text-muted);';
     statsEl.style.display = 'grid';
     updateAgendaFit();
+    // PDF unavailable — still trigger auto-generate since numTeams was set by loadRoster
+    onParamChanged();
   }
 }
 
@@ -3790,8 +3800,13 @@ async function activateEvent(ev) {
   }
   // Fetch FIRST agenda PDF and render fit analysis (non-blocking)
   if (ev.key) {
+    window._agendaFetchPending = true;
     resetAgendaPanel();
-    fetchAndRenderAgendaFit(ev.key).catch(function() {});
+    fetchAndRenderAgendaFit(ev.key).catch(function() {}).finally(function() {
+      window._agendaFetchPending = false;
+    });
+  } else {
+    window._agendaFetchPending = false;
   }
 }
 
@@ -3890,6 +3905,12 @@ async function loadRoster() {
         '<button class="team-remove" onclick="removeTeam(' + t.number + ')" title="Remove">&#x2715;</button>';
       roster.appendChild(row);
     });
+    // Notify param changed so auto-generate can fire after roster loads.
+    // Suppressed when an agenda PDF fetch is about to start — that fetch will
+    // call onParamChanged itself once day config has been applied.
+    if (!window._agendaFetchPending) {
+      onParamChanged();
+    }
   } catch(e) { showApiStatus(e.message, true); }
 }
 
@@ -4038,6 +4059,7 @@ async function generateSchedule() {
   document.getElementById('btnAssign').disabled = true;
   document.getElementById('btnCommit').style.display = 'none';
   document.getElementById('paramChangedWarning').style.display = 'none';
+  showApiStatus('\u23f3 Generating schedule\u2026');
   // Hide fake teams button and reset mode while regenerating
   var fakeBtn2 = document.getElementById('btnShowFakeTeams');
   if (fakeBtn2) fakeBtn2.style.display = 'none';
