@@ -542,11 +542,8 @@
     .agenda-fit-grid { grid-template-columns: repeat(2, 1fr); }
     .agenda-block-row { padding: 0.5rem 0.75rem; }
   }
-</style>
-    /* Prevent iOS input zoom — all inputs must be ≥16px on mobile */
-    input[type="number"], input[type="time"], input[type="text"], select, textarea {
-      font-size: 16px !important;
-    }
+  /* ── Mobile ── */
+  @media (max-width: 640px) {
 
     .container { padding: 1rem 0.75rem; }
 
