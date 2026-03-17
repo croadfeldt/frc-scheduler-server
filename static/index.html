@@ -31,16 +31,33 @@
     --surface: #1e2235;
     --surface2: #252b42;
     --border: #45475a;
-    --accent: #89b4fa;       /* bright blue — high contrast on dark */
-    --accent2: #f38ba8;      /* soft red-pink — distinct, readable */
-    --accent3: #a6e3a1;      /* bright green — clear pass/ok indicator */
-    --text: #cdd6f4;         /* catppuccin text — proven readable */
-    --text-muted: #7f849c;   /* dimmed but legible */
-    --text-strong: #e6e9ef;  /* near-white headings */
-    --red-team: #f38ba8;     /* alliance red — bright, accessible */
-    --blue-team: #89b4fa;    /* alliance blue — clear, distinct from red */
-    --amber: #f9e2af;        /* surrogate / break — warm yellow */
+    --accent: #89b4fa;
+    --accent2: #f38ba8;
+    --accent3: #a6e3a1;
+    --text: #cdd6f4;
+    --text-muted: #7f849c;
+    --text-strong: #e6e9ef;
+    --red-team: #f38ba8;
+    --blue-team: #89b4fa;
+    --amber: #f9e2af;
     --danger: #f38ba8;
+  }
+  /* Light mode */
+  [data-theme="light"] {
+    --bg: #f4f4f8;
+    --surface: #ffffff;
+    --surface2: #eaeaf0;
+    --border: #c8c9d4;
+    --accent: #3b7dd8;
+    --accent2: #c0394e;
+    --accent3: #2a8c5a;
+    --text: #2c2f42;
+    --text-muted: #6b6e84;
+    --text-strong: #1a1c2a;
+    --red-team: #c0394e;
+    --blue-team: #3b7dd8;
+    --amber: #9a6c00;
+    --danger: #c0394e;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -526,7 +543,7 @@
   /* ── Mobile ── */
   /* ── Agenda Fit panel ── */
   .agenda-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 1.5rem; }
-  .agenda-fit-grid { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--border); }
+  .agenda-fit-grid { display: grid; grid-template-columns: repeat(6, 1fr); border-bottom: 1px solid var(--border); }
   .agenda-fit-grid .stat { border-right: 1px solid var(--border); border-radius: 0; }
   .agenda-fit-grid .stat:last-child { border-right: none; }
   .agenda-block-list { display: flex; flex-direction: column; gap: 0; }
@@ -539,7 +556,7 @@
   .agenda-fit-over  { color: var(--danger); }
   .agenda-manual { display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem 1.25rem; font-size: 0.8rem; color: var(--text-muted); }
   @media (max-width: 640px) {
-    .agenda-fit-grid { grid-template-columns: repeat(2, 1fr); }
+    .agenda-fit-grid { grid-template-columns: repeat(3, 1fr); }
     .agenda-block-row { padding: 0.5rem 0.75rem; }
   }
   /* ── Mobile ── */
@@ -642,6 +659,7 @@
       <div class="subtitle">Competition Schedule Generator</div>
     </div>
     <div class="auth-bar" id="authBar">
+      <button class="btn-auth" id="btnTheme" onclick="toggleTheme()" title="Toggle light/dark mode" style="font-size:1rem;padding:0.2rem 0.5rem;">🌙</button>
       <button class="btn-auth" id="btnSignIn" onclick="openAuthModal()" style="display:none;">Sign In</button>
       <span class="user-chip" id="userChip" style="display:none;"></span>
       <button class="btn-auth signed-in" id="btnSignOut" onclick="signOut()" style="display:none;">Sign Out</button>
@@ -916,6 +934,14 @@
           <div id="agendaFitLoading" style="padding:0.75rem 1.25rem;font-size:0.78rem;color:var(--text-muted);">&#8203;</div>
           <div id="agendaFitStats" class="agenda-fit-grid" style="display:none;"></div>
           <div id="agendaFitBlocks" class="agenda-block-list" style="display:none;"></div>
+          <div id="agendaApplyRow" style="display:none;padding:0.5rem 1.25rem;border-top:1px solid var(--border);">
+            <button class="btn-sm btn-accent" onclick="applyAgendaToSchedule()" style="font-size:0.75rem;">
+              &#8615; Apply to Day Configuration
+            </button>
+            <span style="font-size:0.7rem;color:var(--text-muted);margin-left:0.6rem;">
+              Fills day start/end times and lunch breaks from the agenda PDF
+            </span>
+          </div>
           <div id="agendaFitManual" class="agenda-manual" style="display:none;">
             No agenda PDF available.
             <label style="display:flex;align-items:center;gap:0.4rem;color:var(--text-muted);font-size:0.78rem;">
@@ -1409,6 +1435,8 @@ loadEvents();
 setTimeout(fetchTbaDropdown, 800);
 initAuth();
 autoRunFromUrl();
+// Pre-fetch TBA search index in background for cross-year event search
+setTimeout(ensureTbaSearchIndex, 2000);
 
 ['numTeams','matchesPerTeam','cooldown','breakBuffer'].forEach(function(id) {
   var el = document.getElementById(id);
@@ -2142,6 +2170,8 @@ async function fetchAndRenderAgendaFit(eventKey) {
     loading.textContent = '';
     statsEl.style.display = 'grid';
     blocksEl.style.display = 'flex';
+    var applyRow = document.getElementById('agendaApplyRow');
+    if (applyRow) applyRow.style.display = 'block';
     renderAgendaBlocks();
     updateAgendaFit();
   } catch(e) {
@@ -2193,6 +2223,7 @@ function updateAgendaFit() {
   var pct      = availableMin > 0 ? (timeNeeded / availableMin * 100) : 100;
   var mpr      = ct > 0 ? (60 / ct) : 0;
   var reqCycle = totalMatches > 0 ? (availableMin / totalMatches) : 0;
+  var mpr      = ct > 0 ? (60 / ct) : 0;
 
   var fitClass, fitLabel;
   if (pct <= 85)       { fitClass = 'agenda-fit-ok';    fitLabel = '\u2713 Comfortable'; }
@@ -2221,6 +2252,7 @@ function updateAgendaFit() {
       agendaStat(availableMin + ' min', 'Available') +
       agendaStat((surplus >= 0 ? '+' : '') + Math.round(surplus) + ' min', surplus >= 0 ? 'Buffer' : 'Overflow', fitClass) +
       agendaStat(pct.toFixed(0) + '%', 'Capacity', fitClass) +
+      agendaStat(mpr.toFixed(1), 'Matches / Hour') +
       agendaStat(reqCycle.toFixed(1) + ' min', 'Max Cycle to Fit');
   }
 
@@ -2265,6 +2297,8 @@ function resetAgendaPanel() {
   _agendaBlocks = null;
   var panel = document.getElementById('agendaFitPanel');
   if (panel) panel.style.display = 'none';
+  var applyRow = document.getElementById('agendaApplyRow');
+  if (applyRow) applyRow.style.display = 'none';
 }
 
 function onScheduleParamsChanged() {
@@ -2272,6 +2306,117 @@ function onScheduleParamsChanged() {
   if (document.getElementById('agendaFitPanel').style.display !== 'none') {
     updateAgendaFit();
   }
+}
+
+// ── Auto-populate day config from agenda PDF blocks ───────────────────────────
+// This is the key integration: when FIRST's official agenda is parsed, use its
+// qual time windows to fill in the Day Configuration fields automatically.
+function applyAgendaToSchedule() {
+  if (!_agendaBlocks || !_agendaBlocks.length) return;
+
+  // Group blocks by day label
+  var dayMap = {};
+  var dayOrder = [];
+  _agendaBlocks.forEach(function(b) {
+    var d = b.day || 'Day 1';
+    if (!dayMap[d]) { dayMap[d] = []; dayOrder.push(d); }
+    dayMap[d].push(b);
+  });
+
+  var numDays = dayOrder.length;
+  if (numDays === 0) return;
+
+  // Rebuild the day config UI
+  document.getElementById('numDays').value = numDays;
+  buildDaysUI();
+
+  var dayRows = document.querySelectorAll('.day-row');
+
+  dayOrder.forEach(function(dayLabel, i) {
+    var row = dayRows[i];
+    if (!row) return;
+    var blocks = dayMap[dayLabel]; // all qual blocks for this day
+
+    // Day start = earliest block start, day end = latest block end
+    var dayStart = Math.min.apply(null, blocks.map(function(b){return b.start;}));
+    var dayEnd   = Math.max.apply(null, blocks.map(function(b){return b.end;}));
+
+    row.querySelector('.day-start').value = minToTimeStr(dayStart);
+    row.querySelector('.day-end').value   = minToTimeStr(dayEnd);
+
+    // Gaps between consecutive blocks on the same day = breaks
+    // Sort blocks by start time
+    var sorted = blocks.slice().sort(function(a,b){return a.start - b.start;});
+    var breaksList = row.querySelector('.breaks-list');
+    if (breaksList) breaksList.innerHTML = '';
+
+    for (var j = 0; j < sorted.length - 1; j++) {
+      var gapStart = sorted[j].end;
+      var gapEnd   = sorted[j + 1].start;
+      if (gapEnd > gapStart) {
+        var gapMins = gapEnd - gapStart;
+        var breakName = gapMins >= 30 ? 'Lunch' : 'Break';
+        addBreak(row.querySelector('.btn-add-break-day'), minToTimeStr(gapStart), minToTimeStr(gapEnd), breakName);
+      }
+    }
+  });
+
+  // Apply end-of-day defaults (last day ends at last block end, rest at last block end)
+  applyDayEndTimes();
+  validateTimesAndRecalc();
+  showApiStatus('\u2713 Day config updated from agenda — ' + numDays + ' day' + (numDays!==1?'s':'') + ', ' + _agendaBlocks.length + ' qual blocks');
+}
+
+// ── Day/Night mode ────────────────────────────────────────────────────────────
+function toggleTheme() {
+  var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  var newTheme = isLight ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', newTheme === 'dark' ? '' : 'light');
+  var btn = document.getElementById('btnTheme');
+  if (btn) btn.textContent = newTheme === 'light' ? '\u2600\ufe0f' : '\uD83C\uDF19';
+  try { localStorage.setItem('frc_theme', newTheme); } catch(e) {}
+}
+
+(function initTheme() {
+  var saved = 'dark';
+  try { saved = localStorage.getItem('frc_theme') || 'dark'; } catch(e) {}
+  if (saved === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    // btn not yet in DOM — set after load
+    window.addEventListener('DOMContentLoaded', function() {
+      var btn = document.getElementById('btnTheme');
+      if (btn) btn.textContent = '\u2600\ufe0f';
+    });
+  }
+})();
+
+// ── TBA cross-year event search (search_index fallback) ───────────────────────
+// When the user types a query and the year-specific results are empty,
+// fall back to TBA's global search_index which covers all years.
+var _tbaSearchIndex = null;
+var _tbaSearchIndexLoading = false;
+
+async function ensureTbaSearchIndex() {
+  if (_tbaSearchIndex !== null) return;
+  if (_tbaSearchIndexLoading) return;
+  _tbaSearchIndexLoading = true;
+  try {
+    const data = await apiFetch('/api/tba/search_index');
+    _tbaSearchIndex = Array.isArray(data) ? data : (data.events || []);
+  } catch(e) {
+    _tbaSearchIndex = [];
+  } finally {
+    _tbaSearchIndexLoading = false;
+  }
+}
+
+function searchTbaIndex(query) {
+  if (!_tbaSearchIndex || !query || query.length < 2) return [];
+  var q = query.toLowerCase();
+  return _tbaSearchIndex
+    .filter(function(e) { return e.key.includes(q) || (e.name||'').toLowerCase().includes(q); })
+    .sort(function(a, b) { return b.key.localeCompare(a.key); })
+    .slice(0, 20);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3560,10 +3705,50 @@ function populateTbaDropdown(events) {
 
 function filterTbaDropdown(query) {
   const q = query.toLowerCase();
+  var visibleCount = 0;
   Array.from(document.getElementById('tbaDropdownList').children).forEach(function(row) {
+    // Skip error/loading rows
+    if (!row.dataset.key) { row.style.display = 'none'; return; }
     var match = !q || row.dataset.key.includes(q) || row.dataset.name.includes(q);
     row.style.display = match ? 'flex' : 'none';
+    if (match) visibleCount++;
   });
+
+  // If few local results and user has typed something, try cross-year index
+  if (q.length >= 2 && visibleCount < 3 && getEventSource() === 'tba') {
+    var crossResults = searchTbaIndex(q);
+    var list = document.getElementById('tbaDropdownList');
+    // Remove any previously injected cross-year rows
+    Array.from(list.querySelectorAll('[data-cross-year]')).forEach(function(r) { r.remove(); });
+    if (crossResults.length) {
+      var sep = document.createElement('div');
+      sep.setAttribute('data-cross-year', '1');
+      sep.style.cssText = 'padding:0.25rem 0.7rem;font-size:0.65rem;color:var(--text-muted);' +
+        'background:var(--surface2);border-bottom:1px solid var(--border);letter-spacing:0.05em;text-transform:uppercase;';
+      sep.textContent = 'Other years';
+      list.appendChild(sep);
+      crossResults.forEach(function(e) {
+        var row = document.createElement('div');
+        row.dataset.key  = e.key;
+        row.dataset.name = (e.name || '').toLowerCase();
+        row.dataset.crossYear = '1';
+        row.title = e.key + (e.name ? ' · ' + e.name : '');
+        row.style.cssText = 'display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.7rem;cursor:pointer;' +
+          'border-bottom:1px solid var(--border);font-size:0.8rem;opacity:0.85;';
+        row.innerHTML =
+          '<span style="font-family:Barlow Condensed,sans-serif;font-weight:700;color:var(--accent);min-width:5rem;flex-shrink:0;">' + e.key + '</span>' +
+          '<span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (e.name || '') + '</span>' +
+          '<span style="font-size:0.58rem;font-family:Barlow Condensed,sans-serif;font-weight:700;letter-spacing:0.06em;' +
+          'color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 4px;flex-shrink:0;">TBA</span>';
+        row.addEventListener('mouseenter', function() { this.style.background = 'var(--surface2)'; });
+        row.addEventListener('mouseleave', function() { this.style.background = ''; });
+        row.addEventListener('mousedown', function(ev) { ev.preventDefault(); selectTbaEvent(e.key); });
+        list.appendChild(row);
+      });
+    }
+    // Pre-fetch the index in background for future use
+    ensureTbaSearchIndex();
+  }
 }
 
 function showTbaDropdown(show) {

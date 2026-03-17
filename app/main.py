@@ -246,6 +246,19 @@ async def tba_events(year: int, search: str = Query("", max_length=100)):
         raise HTTPException(502, f"TBA API error: {e}")
 
 
+@app.get("/api/tba/search_index")
+async def tba_search_index():
+    """Proxy the TBA search index (all events, all years) for cross-year event search."""
+    try:
+        data = await tba_client._get("/search_index")
+        return data.get("events", []) if isinstance(data, dict) else data
+    except ValueError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        log.error("TBA search_index error: %s", e)
+        raise HTTPException(502, f"TBA API error: {e}")
+
+
 @app.post("/api/tba/import/{event_key}", status_code=201)
 async def tba_import_event(event_key: str, db: AsyncSession = Depends(get_session)):
     try:

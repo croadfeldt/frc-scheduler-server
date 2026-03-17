@@ -513,6 +513,17 @@ https://info.firstinspires.org/hubfs/web/event/frc/{year}/{YEAR}_{EVENTCODE}_Age
 
 **Status:** ✓ Comfortable (≤85%) / ⚠ Tight (≤100%) / ✗ Over Capacity (>100%)
 
+### Fit stats (6 metrics)
+Time Needed · Available · Buffer/Overflow · Capacity % · **Matches/Hour** (`60 / cycleTime`) · Max Cycle to Fit
+
+### Apply to Day Configuration
+After a successful PDF parse, an **↓ Apply to Day Configuration** button appears. Clicking it:
+1. Sets `numDays` from the number of distinct days in the agenda
+2. Sets each day's start/end times from the earliest block start and latest block end
+3. Adds break rows for gaps between consecutive qual blocks on the same day (labelled "Lunch" if ≥30 min)
+
+This replaces all manual day/break entry with the authoritative FIRST schedule.
+
 ### Fallback
 If the PDF is unavailable, a manual "total available minutes" input is shown instead.
 
@@ -522,6 +533,12 @@ Loaded lazily from CDN via a dynamically injected `<script type="module">` (work
 ## FRC Events API — duplicate routes (fixed)
 
 `main.py` previously registered `/api/frc/events/{year}` and `/api/frc/import/` twice. FastAPI silently uses the first definition and ignores duplicates. Cleaned to a single canonical set at lines ~304–400. Both `/api/frc/configured` and `/api/frc/status` now resolve to the same handler via stacked `@app.get` decorators.
+
+### TBA cross-year event search
+
+When the user types ≥2 characters in the event code input and fewer than 3 local (year-specific) results match, the dropdown augments with results from TBA's global search index via `GET /api/tba/search_index` (proxied server-side). These appear under an "Other years" separator and cover all FRC events across all seasons — useful when the user knows an event name but not its year.
+
+The search index is pre-fetched 2 seconds after page load and cached in `_tbaSearchIndex`.
 
 ### TBA event dropdown — sort order and row limit
 
@@ -612,6 +629,13 @@ The auto-generate debounce is 2500ms. The Stage 1 retry counter is reset to 0 at
 of every new `generateSchedule()` call so accumulated retries from previous edits don't
 consume the retry budget for the next attempt.
 
+
+## Day/Night mode
+
+A 🌙/☀️ toggle button in the header switches between dark (default) and light themes. The preference is persisted in `localStorage` under the key `frc_theme`.
+
+**Dark mode** (default) uses the Catppuccin Mocha palette. **Light mode** uses a high-contrast light palette with matching accent colours. Both modes use the same CSS custom properties (`--bg`, `--surface`, `--accent`, etc.) — the `[data-theme="light"]` attribute on `<html>` overrides the defaults.
+
 ## Mobile support
 
 A `@media (max-width: 640px)` block handles small screens:
@@ -649,6 +673,17 @@ https://info.firstinspires.org/hubfs/web/event/frc/{year}/{YEAR}_{EVENTCODE}_Age
 | Max cycle to fit | `available / totalMatches` |
 
 **Status:** ✓ Comfortable (≤85%) / ⚠ Tight (≤100%) / ✗ Over Capacity (>100%)
+
+### Fit stats (6 metrics)
+Time Needed · Available · Buffer/Overflow · Capacity % · **Matches/Hour** (`60 / cycleTime`) · Max Cycle to Fit
+
+### Apply to Day Configuration
+After a successful PDF parse, an **↓ Apply to Day Configuration** button appears. Clicking it:
+1. Sets `numDays` from the number of distinct days in the agenda
+2. Sets each day's start/end times from the earliest block start and latest block end
+3. Adds break rows for gaps between consecutive qual blocks on the same day (labelled "Lunch" if ≥30 min)
+
+This replaces all manual day/break entry with the authoritative FIRST schedule.
 
 ### Fallback
 If the PDF is unavailable, a manual "total available minutes" input is shown instead.

@@ -190,3 +190,15 @@ If the PDF is unavailable (not yet published, CORS blocked, or no "Qualification
 - Badge shows fit status: ✓ Comfortable / ⚠ Tight / ✗ Over Capacity
 - Per-block timeline bars update in real time as numTeams, mpt, or cycleTime change
 - Resets when event changes or full reset is triggered
+
+## UI Features
+
+### Day/Night Mode
+Toggle between dark (default, Catppuccin Mocha) and light theme via 🌙/☀️ button in the header. Persisted in localStorage.
+
+### Agenda Fit — Apply to Schedule
+After FIRST agenda PDF is parsed, "↓ Apply to Day Configuration" auto-fills the day config from real qual time windows, including breaks between sessions.
+
+### TBA Cross-Year Search
+Typing in the event field falls back to TBA's global search index when year-specific results are sparse, enabling event discovery across all seasons.
+
