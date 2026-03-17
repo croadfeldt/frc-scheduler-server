@@ -650,13 +650,11 @@
   }
   /* ── Processing overlay ── */
   .processing-overlay {
-    display: flex; position: fixed; inset: 0; z-index: 1000;
+    display: none; position: fixed; inset: 0; z-index: 1000;
     background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);
     align-items: center; justify-content: center;
-    opacity: 0; pointer-events: none;
-    transition: opacity 0.15s ease;
   }
-  .processing-overlay.active { opacity: 1; pointer-events: auto; }
+  .processing-overlay.active { display: flex; }
   .processing-card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 8px; padding: 1.5rem 2rem; min-width: 320px; max-width: 480px;
@@ -1121,7 +1119,7 @@ var _overlay = (function() {
       if (p) p.style.width = '0%';
       _render();
       var ov = document.getElementById('processingOverlay');
-      if (ov) { ov.style.opacity = ''; ov.style.pointerEvents = ''; ov.classList.add('active'); }
+      if (ov) ov.classList.add('active');
     },
     step: function(id, detail) {
       // Mark previous active as done, set this one active
@@ -1163,7 +1161,6 @@ var _overlay = (function() {
       if (p) p.style.width = Math.min(100, pct) + '%';
     },
     hide: function() {
-      console.log('[OV] hide() called, _visible=' + _visible);
       _visible = false;
       _steps.forEach(function(s) { if (s.state === 'active') s.state = 'done'; });
       _render();
@@ -1172,7 +1169,7 @@ var _overlay = (function() {
       var d = document.getElementById('processingDetail');
       if (d) d.textContent = '';
       var ov = document.getElementById('processingOverlay');
-      if (ov) { ov.classList.remove('active'); ov.style.opacity = '0'; ov.style.pointerEvents = 'none'; }
+      if (ov) { ov.classList.remove('active'); }
     },
     isVisible: function() { return _visible; },
   };
@@ -4716,25 +4713,31 @@ async function generateSchedule() {
     runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime, formatETA,
       function(done, total, best, bi) { updateProgress(done, total, best, bi); },
       function(matches, roundBoundaries, surrogateCount, bestIteration) {
-        _currentAbstractScheduleId = null;
-        _abstractParams = { numTeams, matchesPerTeam, cooldown };
-        window._frcAbstractMode = true; // client-side fallback has no real teams
-        const pseudoSched = {
-          num_teams: numTeams, matches_per_team: matchesPerTeam,
-          matches: matches.map(function(m) { return {
-            red: m.red, blue: m.blue,
-            red_surrogate: m.redSurrogate, blue_surrogate: m.blueSurrogate,
-          }; }),
-          surrogate_count: surrogateCount,
-          round_boundaries: Object.fromEntries(roundBoundaries),
-          iterations_run: iterations,
-        };
-        displayAbstractSchedule(pseudoSched, dayConfig);
-        showStage2Panel(numTeams);
-        btn.disabled = false;
-        document.getElementById('progressWrap').style.display = 'none';
-        _overlay.done('generate');
-        _overlay.hide();
+        try {
+          _currentAbstractScheduleId = null;
+          _abstractParams = { numTeams, matchesPerTeam, cooldown };
+          window._frcAbstractMode = true;
+          const pseudoSched = {
+            num_teams: numTeams, matches_per_team: matchesPerTeam,
+            matches: matches.map(function(m) { return {
+              red: m.red, blue: m.blue,
+              red_surrogate: m.redSurrogate, blue_surrogate: m.blueSurrogate,
+            }; }),
+            surrogate_count: surrogateCount,
+            round_boundaries: Object.fromEntries(roundBoundaries),
+            iterations_run: iterations,
+          };
+          displayAbstractSchedule(pseudoSched, dayConfig);
+          showStage2Panel(numTeams);
+        } catch(e) {
+          console.error('[fallback] onComplete error:', e);
+          showApiStatus('Schedule render error: ' + e.message, true);
+        } finally {
+          btn.disabled = false;
+          document.getElementById('progressWrap').style.display = 'none';
+          _overlay.done('generate');
+          _overlay.hide();
+        }
       }
     );
   }
