@@ -123,14 +123,23 @@ Three checkboxes live in one box below Match Cooldown:
 | **Auto-calculate max matches/team** | ☐ Off | Runs Calc Max Matches immediately after day config is applied; sets the matches/team field to the maximum that fits the schedule |
 
 **Interaction order when an event is loaded:**
-1. Roster is fetched → `numTeams` set
-2. Agenda PDF is fetched and parsed (non-blocking, runs concurrently)
+1. Roster is fetched → `numTeams` set (generation held by `_agendaFetchPending` flag)
+2. Agenda PDF is fetched and parsed (non-blocking)
 3. If auto-apply is on → day config populated from real qual time blocks
-4. If auto-max is on → `calcMaxMatches()` recalculates matches/team → `generateSchedule()` fires (shows `⏳ Generating schedule…`)
-5. If auto-max is off and auto-regenerate is on → `onParamChanged()` triggers debounced `generateSchedule()`
-6. If no agenda PDF is available → `onParamChanged()` fires with roster team count alone
+4. `generateSchedule()` called directly — no debounce delay (shows `⏳ Generating schedule…`)
 
-A `_agendaFetchPending` flag prevents `loadRoster` from triggering generation before the PDF's day config has been applied.
+The four auto-flag combinations:
+
+| autoApplyAgenda | autoMaxCycles | autoPopulate | Result |
+|---|---|---|---|
+| ✅ | ✅ | any | Apply day config → calcMaxMatches → generateSchedule |
+| ✅ | ☐ | ✅ | Apply day config → generateSchedule directly |
+| ☐ | ✅ | any | calcMaxMatches → generateSchedule |
+| ☐ | ☐ | ✅ | generateSchedule directly |
+
+If no PDF is available, generation still fires directly from the catch block (guarded by `numTeams >= 6`).
+
+A `_agendaFetchPending` flag prevents `loadRoster` from triggering a premature generation before the PDF chain has completed.
 
 ### Calc Max Matches
 

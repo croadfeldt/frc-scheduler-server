@@ -2139,21 +2139,20 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     // Auto-apply flags
     var autoApply   = document.getElementById('autoApplyAgenda');
     var autoMaxCyc  = document.getElementById('autoMaxCycles');
+    var autoGen     = document.getElementById('autoPopulate');
     if (autoApply && autoApply.checked) {
       applyAgendaToSchedule();
       if (autoMaxCyc && autoMaxCyc.checked) {
-        // calcMaxMatches already calls generateSchedule() — nothing more needed
+        // calcMaxMatches calls generateSchedule() directly when autoPopulate is on
         calcMaxMatches();
-      } else {
-        // Day config was applied but mpt wasn't recalculated —
-        // fire onParamChanged so auto-regenerate can trigger
-        onParamChanged();
+      } else if (autoGen && autoGen.checked) {
+        // Day config applied — generate directly, no need for debounce
+        generateSchedule();
       }
     } else if (autoMaxCyc && autoMaxCyc.checked) {
       calcMaxMatches();
-    } else {
-      // Neither auto flag on — still notify params changed (numTeams loaded from roster)
-      onParamChanged();
+    } else if (autoGen && autoGen.checked) {
+      generateSchedule();
     }
   } catch(e) {
     _agendaBlocks = null;
@@ -2198,7 +2197,11 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     statsEl.style.display = 'grid';
     updateAgendaFit();
     // PDF unavailable — still trigger auto-generate since numTeams was set by loadRoster
-    onParamChanged();
+    var autoGenFail = document.getElementById('autoPopulate');
+    if (autoGenFail && autoGenFail.checked) {
+      var nt = parseInt(document.getElementById('numTeams').value) || 0;
+      if (nt >= 6) generateSchedule();
+    }
   }
 }
 
@@ -2380,7 +2383,7 @@ function applyAgendaToSchedule() {
 
   // Apply end-of-day defaults (last day ends at last block end, rest at last block end)
   applyDayEndTimes();
-  validateTimesAndRecalc();
+  validateTimes();  // validate only — caller handles triggering generation
   showApiStatus('\u2713 Day config updated from agenda — ' + numDays + ' day' + (numDays!==1?'s':'') + ', ' + _agendaBlocks.length + ' qual blocks');
   // If auto-max-cycles is on, recalculate matches/team immediately after applying day config
   var autoMaxCyc = document.getElementById('autoMaxCycles');

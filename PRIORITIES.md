@@ -118,6 +118,8 @@ Times in FIRST agenda PDFs are local event time — no timezone information is p
 
 **`generateSchedule()`** — shows `⏳ Generating schedule…` in `showApiStatus()` immediately on entry, before the SSE stream begins.
 
+**`fetchAndRenderAgendaFit` calls `generateSchedule()` directly** after PDF processing — not via `onParamChanged()` debounce. `applyAgendaToSchedule()` uses `validateTimes()` (not `validateTimesAndRecalc()`) to avoid queuing a spurious debounce alongside the direct call.
+
 **Full trigger chain on event load:**
 ```
 activateEvent → _agendaFetchPending=true → loadRoster (holds) → fetchAndRenderAgendaFit

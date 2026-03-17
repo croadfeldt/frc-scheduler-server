@@ -396,4 +396,16 @@ Two Containerfiles: `Containerfile` (generic, apt-get, Docker Hub base) and `Con
 
 All `onParamChanged()` calls go through the 2.5s debounce — rapid typing resets the timer and fires once when the user pauses.
 
+**`fetchAndRenderAgendaFit` calls `generateSchedule()` directly** (not via debounce) after the PDF work completes. This avoids a 2500ms delay and eliminates a race condition where the debounce could fire before `generateSchedule` was ready. `applyAgendaToSchedule()` uses `validateTimes()` instead of `validateTimesAndRecalc()` so it does not queue a spurious debounce — generation is entirely the caller's responsibility.
+
+**Trigger matrix in `fetchAndRenderAgendaFit` success path:**
+```
+autoApplyAgenda ON  + autoMaxCycles ON  → applyAgendaToSchedule() → calcMaxMatches() → generateSchedule()
+autoApplyAgenda ON  + autoMaxCycles OFF → applyAgendaToSchedule() → generateSchedule() [direct]
+autoApplyAgenda OFF + autoMaxCycles ON  → calcMaxMatches() → generateSchedule()
+autoApplyAgenda OFF + autoMaxCycles OFF → generateSchedule() [direct, if autoPopulate ON]
+```
+
+**PDF fail path:** calls `generateSchedule()` directly (guarded by `autoPopulate.checked && numTeams >= 6`).
+
 **`generateSchedule()`** — shows `⏳ Generating schedule…` in `showApiStatus()` immediately on entry, before the SSE stream begins.
