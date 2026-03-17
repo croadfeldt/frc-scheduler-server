@@ -377,3 +377,23 @@ Two Containerfiles: `Containerfile` (generic, apt-get, Docker Hub base) and `Con
 ## Removed Features
 
 **Timezone selector** — removed. FIRST agenda PDFs list times in local event time with no timezone information. All scheduler times are implicitly local to the venue. Removed: `tzSelect` field, `buildTimezoneSelect()`, `getTimezoneAbbr()`, `window._frcTzAbbr`, and the inline timezone span in schedule time cells (`window._frcTzAbbr ? '<span>...' : ''`). FIRST agenda PDFs list times in local event time with no timezone information. All scheduler times are implicitly local to the venue. The `tzSelect` field, `buildTimezoneSelect()`, `getTimezoneAbbr()`, `window._frcTzAbbr`, and the inline timezone span in schedule time cells were all removed.
+
+
+### Day section input fix
+**`onParamChanged()`** — two fixes:
+
+1. Previously only debounced `generateSchedule()` when `_abstractParams !== null`. After a reset, `_abstractParams` is `null` so nothing fired. Fixed: debounce now fires whenever `autoPopulate` is checked AND `numTeams >= 6`, regardless of `_abstractParams`. Stale-warning and btnAssign-disable logic still only runs when `_abstractParams !== null`.
+
+2. Day section `input` events were not calling `onParamChanged()` — only `change` (blur/tab-away) was. Users editing cycle time fields mid-type would see no auto-regeneration. Fixed by adding `onParamChanged()` to every `input` handler in the day section:
+
+| Input | Fixed |
+|-------|-------|
+| Per-day cycle time `.cc-time` `input` | ✓ |
+| Cycle-change after-match `.cc-after` `input` | ✓ |
+| Day-level secondary cycle-change `input` | ✓ |
+| Break name `input` | ✓ (replaced old `_abstractParams !== null` guard) |
+| Global `cycleTime` field | ✓ (added `input` listener alongside existing `change`) |
+
+All `onParamChanged()` calls go through the 2.5s debounce — rapid typing resets the timer and fires once when the user pauses.
+
+**`generateSchedule()`** — shows `⏳ Generating schedule…` in `showApiStatus()` immediately on entry, before the SSE stream begins.

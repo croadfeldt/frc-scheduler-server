@@ -114,6 +114,8 @@ Times in FIRST agenda PDFs are local event time — no timezone information is p
 
 **`loadRoster()`** — calls `onParamChanged()` only when `!window._agendaFetchPending`. Covers the no-event-key case (no PDF fetch pending).
 
+**Day section `input` events** — all cycle time and break fields in the day section now call `onParamChanged()` on both `input` (keystroke) and `change` (blur). Previously only `change` fired `onParamChanged()`, so edits weren't picked up until the user tabbed away. The 2.5s debounce absorbs rapid typing.
+
 **`generateSchedule()`** — shows `⏳ Generating schedule…` in `showApiStatus()` immediately on entry, before the SSE stream begins.
 
 **Full trigger chain on event load:**

@@ -2104,7 +2104,7 @@ function distributeMatchesToBlocks(totalMatches, blocks, cycleTime) {
   return assignments;
 }
 
-async function fetchAndRenderAgendaFit(eventKey) {
+async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
   const panel = document.getElementById('agendaFitPanel');
   const loading = document.getElementById('agendaFitLoading');
   const statsEl = document.getElementById('agendaFitStats');
@@ -2117,6 +2117,8 @@ async function fetchAndRenderAgendaFit(eventKey) {
   blocksEl.style.display = 'none';
   manualEl.style.display = 'none';
   loading.textContent = '\u23f3 Fetching agenda PDF\u2026';
+  loading.style.color = '';
+  loading.style.fontSize = '';
   badge.textContent = '';
   badge.style.background = '';
 
@@ -2156,8 +2158,42 @@ async function fetchAndRenderAgendaFit(eventKey) {
   } catch(e) {
     _agendaBlocks = null;
     loading.textContent = '';
+    loading.style.color = 'var(--text-muted)';
+    loading.style.fontSize = '0.75rem';
+
+    // Distinguish 404 (not published yet) from other errors
+    var pdfMsg = e.message || '';
+    var isNotFound = pdfMsg.includes('404') || pdfMsg.includes('not found') || pdfMsg.includes('not a PDF');
+
+    // Use start/end dates from event data to estimate number of days
+    var eventDays = 1;
+    if (startDate && endDate) {
+      var d0 = new Date(startDate), d1 = new Date(endDate);
+      var diff = Math.round((d1 - d0) / 86400000);
+      // FRC events: practice day is day 0; qual days are typically days 1-2 for district, 2-3 for regional
+      // Clamp to 1-3 qual days (start+1 .. end is a reasonable estimate)
+      eventDays = Math.max(1, Math.min(3, diff));
+    }
+
+    var daysHint = eventDays > 1 ? ' Event appears to span ' + eventDays + ' days.' : '';
+    var notFoundText = isNotFound
+      ? '\u26a0\ufe0f No agenda PDF found for this event.' + daysHint + ' Enter available minutes manually below.'
+      : '\u26a0\ufe0f Could not load agenda PDF: ' + pdfMsg + '. Enter available minutes manually below.';
+
+    loading.textContent = notFoundText;
+
+    // Pre-populate numDays from event date range if we have it and days haven't been set yet
+    if (eventDays > 1) {
+      var numDaysEl = document.getElementById('numDays');
+      var currentDays = parseInt(numDaysEl.value) || 1;
+      if (currentDays === 1) {
+        numDaysEl.value = eventDays;
+        buildDaysUI();
+      }
+    }
+
     manualEl.style.display = 'flex';
-    badge.textContent = 'Manual';
+    badge.textContent = 'No PDF';
     badge.style.cssText = 'font-size:0.68rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:3px;background:rgba(127,132,156,0.15);color:var(--text-muted);';
     statsEl.style.display = 'grid';
     updateAgendaFit();
@@ -3805,7 +3841,7 @@ async function activateEvent(ev) {
   if (ev.key) {
     window._agendaFetchPending = true;
     resetAgendaPanel();
-    fetchAndRenderAgendaFit(ev.key).catch(function() {}).finally(function() {
+    fetchAndRenderAgendaFit(ev.key, ev.start_date, ev.end_date).catch(function() {}).finally(function() {
       window._agendaFetchPending = false;
     });
   } else {
