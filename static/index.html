@@ -2569,9 +2569,13 @@ function onParamChanged() {
       document.getElementById('paramChangedWarning').style.display = 'block';
       document.getElementById('btnAssign').disabled = true;
     }
-    // Auto-generate debounce fires for ALL param changes (structural or not)
-    // since times, breaks, and cycle changes all affect the schedule output.
-    if (document.getElementById('autoPopulate').checked) {
+  }
+  // Auto-generate debounce fires for ALL param changes when autoPopulate is on,
+  // whether or not a schedule already exists — covers both initial generation
+  // (after event load) and re-generation (after param edits).
+  if (document.getElementById('autoPopulate').checked) {
+    var numTeams = parseInt(document.getElementById('numTeams').value) || 0;
+    if (numTeams >= 6) {
       clearTimeout(_autoPopulateTimeout);
       _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 2500);
     }
