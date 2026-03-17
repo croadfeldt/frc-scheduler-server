@@ -1125,10 +1125,9 @@ var _overlay = (function() {
       var s = _steps.find(function(s) { return s.id === id; });
       if (s) s.state = 'active';
       _render();
-      if (detail) {
-        var d = document.getElementById('processingDetail');
-        if (d) d.textContent = detail;
-      }
+      // Always update detail — clear stale text if no detail provided
+      var d = document.getElementById('processingDetail');
+      if (d) d.textContent = detail || '';
       // Auto-progress bar based on step index
       var idx = _steps.findIndex(function(s) { return s.id === id; });
       if (idx >= 0) {
@@ -2392,8 +2391,7 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
       _overlay.step('maxcycles', 'Calculating max matches/team…');
       calcMaxMatches();  // calls generateSchedule() if autoPopulate on
     } else if (autoGen && autoGen.checked) {
-      _overlay.step('generate', 'Generating schedule…');
-      generateSchedule();
+      generateSchedule();  // steps 'generate' overlay internally
     }
     // autoAssign is handled inside generateSchedule's Stage 1 completion hook
   } catch(e) {
@@ -2450,7 +2448,7 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
       calcMaxMatches();  // calls generateSchedule() if autoPopulate on
     } else if (autoGenFail && autoGenFail.checked) {
       var nt = parseInt(document.getElementById('numTeams').value) || 0;
-      if (nt >= 6) { _overlay.step('generate', 'Generating schedule…'); generateSchedule(); }
+      if (nt >= 6) { generateSchedule(); }
     } else {
       _overlay.hide();
     }
@@ -4424,6 +4422,9 @@ async function generateSchedule() {
   document.getElementById('btnCommit').style.display = 'none';
   document.getElementById('paramChangedWarning').style.display = 'none';
   showApiStatus('\u23f3 Generating schedule\u2026');
+  if (_overlay.isVisible()) {
+    _overlay.step('generate', 'Stage 1: building match structure\u2026');
+  }
   // Hide fake teams button and reset mode while regenerating
   var fakeBtn2 = document.getElementById('btnShowFakeTeams');
   if (fakeBtn2) fakeBtn2.style.display = 'none';
