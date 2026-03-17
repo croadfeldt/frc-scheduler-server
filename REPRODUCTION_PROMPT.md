@@ -89,7 +89,7 @@ Three checkboxes in one bordered box below Match Cooldown:
 |----|---------|-----------|
 | `autoPopulate` | `checked` | Debounced Stage 1 regeneration on param change (1.5s) |
 | `autoApplyAgenda` | `checked` | Calls `applyAgendaToSchedule()` after successful PDF parse |
-| `autoMaxCycles` | unchecked | Calls `calcMaxMatches()` after day config applied (auto or manual) |
+| `autoMaxCycles` | `checked` | Calls `calcMaxMatches()` after day config applied (auto or manual) |
 
 **`window._agendaFetchPending` flag** — set `true` in `activateEvent` before firing `fetchAndRenderAgendaFit`, cleared in `.finally()`. Prevents `loadRoster()` from calling `onParamChanged()` prematurely (before day config is applied from the PDF).
 
@@ -230,6 +230,23 @@ Key functions:
 - `normalise_event(tba)` → `{key, name, year, location, start_date, end_date, tba_synced}`
 - `normalise_team(tba)` → `{number, name, nickname, city, state, country, rookie_year}`
 
+
+### Auto flags — URL and DB persistence
+
+Auto flags are stored as **named booleans** in two places:
+
+**URL:** Each flag has its own param (`autoPopulate`, `autoApplyAgenda`, `autoMaxCycles`). A param is only included when it is **off** (`=0`) — all defaults are on, so omitting a param means on. This keeps share URLs clean for the common all-on case and is trivially extensible: adding a new flag never reinterprets existing URLs.
+
+```
+?autoPopulate=0              — only autoPopulate is off
+?autoApplyAgenda=0           — only autoApplyAgenda is off
+?autoMaxCycles=0&autoApplyAgenda=0  — two flags off
+(no flag params)             — all flags on (default)
+```
+
+**DB:** `day_config` JSON stores named boolean fields. `collectDayConfig()` writes `autoPopulate`, `autoApplyAgenda`, `autoMaxCycles`. `applyDayConfigToUI()` restores them; `null` (field absent) leaves the current default unchanged.
+
+**`parseBoolFlag(name)`** helper in `parseUrlParams()`: returns `true` if param present and not `"0"`, `false` if present and `"0"`, `null` if absent. Downstream code only applies the value when non-null.
 ### `GET /api/tba/search_index`
 Proxies `tba_client._get("/search_index")` → returns `data["events"]` (key+name pairs, all years, all events).
 

@@ -876,9 +876,14 @@
             <span style="font-size:0.68rem;color:var(--text-muted);margin-left:0.25rem;">Fills day times and breaks from FIRST agenda when an event is loaded</span>
           </label>
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
-            <input type="checkbox" id="autoMaxCycles" style="accent-color:var(--accent);width:14px;height:14px;">
+            <input type="checkbox" id="autoMaxCycles" checked style="accent-color:var(--accent);width:14px;height:14px;">
             Auto-calculate max matches/team
             <span style="font-size:0.68rem;color:var(--text-muted);margin-left:0.25rem;">Recalculates matches/team to fill available time after day config is set</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;font-size:0.8rem;color:var(--text-strong);user-select:none;">
+            <input type="checkbox" id="autoAssign" style="accent-color:var(--accent);width:14px;height:14px;">
+            Auto-assign teams after schedule generation
+            <span style="font-size:0.68rem;color:var(--text-muted);margin-left:0.25rem;">Automatically runs Stage 2 team assignment after Stage 1 completes</span>
           </label>
         </div>
         <div id="paramChangedWarning" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.75rem;color:var(--amber);">
@@ -1594,6 +1599,15 @@ function buildShareUrl() {
   if (nd)  params.set('days', nd);
   const bb = document.getElementById('breakBuffer').value;
   if (bb) params.set('bb', bb);
+  // Encode auto flags — only include a param when it differs from its default (all on)
+  var urlAP = document.getElementById('autoPopulate');
+  var urlAA = document.getElementById('autoApplyAgenda');
+  var urlAM = document.getElementById('autoMaxCycles');
+  var urlAS = document.getElementById('autoAssign');
+  if (urlAP && !urlAP.checked) params.set('autoPopulate',    '0');
+  if (urlAA && !urlAA.checked) params.set('autoApplyAgenda', '0');
+  if (urlAM && !urlAM.checked) params.set('autoMaxCycles',   '0');
+  if (urlAS &&  urlAS.checked) params.set('autoAssign',      '1');  // default off \u2014 store when on
   if (_currentSeed)                params.set('seed',  _currentSeed);
   if (_currentAssignSeed)          params.set('aseed', _currentAssignSeed);
   if (_currentAbstractScheduleId)  params.set('sid',   _currentAbstractScheduleId);
@@ -1663,21 +1677,30 @@ function parseUrlParams() {
     }).filter(Boolean) : [];
     days.push({ start, end, breaks });
   }
+  // Parse auto flags — null means "not in URL, keep current default"
+  function parseBoolFlag(name) {
+    var v = p.get(name);
+    return v !== null ? v !== '0' : null;
+  }
   return {
-    n:      parseInt(p.get('n'))    || null,
-    mpt:    parseInt(p.get('mpt'))  || null,
-    cd:     parseInt(p.get('cd'))   || null,
-    ct:     parseInt(p.get('ct'))   || null,
-    days:   days.length ? days : null,
-    numDays:nd || null,
-    seed:   p.get('seed')  || null,
-    aseed:  p.get('aseed') || null,
-    cc:     p.get('cc')    || null,
-    teams:  p.get('teams') ? p.get('teams').split(',').map(Number).filter(Boolean) : null,
-    event:  p.get('event') || null,
-    bb:     p.get('bb')    || null,
-    sid:    p.get('sid')   ? parseInt(p.get('sid'))  : null,
-    aid:    p.get('aid')   ? parseInt(p.get('aid'))  : null,
+    n:               parseInt(p.get('n'))    || null,
+    mpt:             parseInt(p.get('mpt'))  || null,
+    cd:              parseInt(p.get('cd'))   || null,
+    ct:              parseInt(p.get('ct'))   || null,
+    days:            days.length ? days : null,
+    numDays:         nd || null,
+    seed:            p.get('seed')  || null,
+    aseed:           p.get('aseed') || null,
+    cc:              p.get('cc')    || null,
+    teams:           p.get('teams') ? p.get('teams').split(',').map(Number).filter(Boolean) : null,
+    event:           p.get('event') || null,
+    bb:              p.get('bb')    || null,
+    sid:             p.get('sid')   ? parseInt(p.get('sid'))  : null,
+    aid:             p.get('aid')   ? parseInt(p.get('aid'))  : null,
+    autoPopulate:    parseBoolFlag('autoPopulate'),
+    autoApplyAgenda: parseBoolFlag('autoApplyAgenda'),
+    autoMaxCycles:   parseBoolFlag('autoMaxCycles'),
+    autoAssign:      parseBoolFlag('autoAssign'),
   };
 }
 
@@ -1687,6 +1710,15 @@ function applyDayConfigToUI(dc) {
   if (!dc) return;
   if (dc.cycleTime)   document.getElementById('cycleTime').value   = dc.cycleTime;
   if (dc.breakBuffer != null) document.getElementById('breakBuffer').value = dc.breakBuffer;
+  // Restore auto flags if stored (named booleans; undefined = leave as current default)
+  var dcAP = document.getElementById('autoPopulate');
+  var dcAA = document.getElementById('autoApplyAgenda');
+  var dcAM = document.getElementById('autoMaxCycles');
+  var dcAS = document.getElementById('autoAssign');
+  if (dc.autoPopulate    != null && dcAP) dcAP.checked = !!dc.autoPopulate;
+  if (dc.autoApplyAgenda != null && dcAA) dcAA.checked = !!dc.autoApplyAgenda;
+  if (dc.autoMaxCycles   != null && dcAM) dcAM.checked = !!dc.autoMaxCycles;
+  if (dc.autoAssign      != null && dcAS) dcAS.checked = !!dc.autoAssign;
 
   var nd = dc.numDays || (dc.days && dc.days.length) || 0;
   if (nd) {
@@ -1772,6 +1804,16 @@ function applyUrlParams(params) {
       }
     });
   }
+
+  // Restore auto flags from URL if present (null = not in URL, leave as default)
+  var urlApplyAP = document.getElementById('autoPopulate');
+  var urlApplyAA = document.getElementById('autoApplyAgenda');
+  var urlApplyAM = document.getElementById('autoMaxCycles');
+  var urlApplyAS = document.getElementById('autoAssign');
+  if (params.autoPopulate    != null && urlApplyAP) urlApplyAP.checked = params.autoPopulate;
+  if (params.autoApplyAgenda != null && urlApplyAA) urlApplyAA.checked = params.autoApplyAgenda;
+  if (params.autoMaxCycles   != null && urlApplyAM) urlApplyAM.checked = params.autoMaxCycles;
+  if (params.autoAssign      != null && urlApplyAS) urlApplyAS.checked = params.autoAssign;
 
   if (params.seed) {
     _currentSeed = params.seed;
@@ -2136,6 +2178,19 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     renderAgendaBlocks();
     updateAgendaFit();
 
+    // Always sync numDays from the parsed blocks — even when autoApplyAgenda is off,
+    // the day count from the official PDF is authoritative
+    var distinctDays = [...new Set(blocks.map(function(b){return b.day;}))].length;
+    if (distinctDays > 0) {
+      var numDaysEl2 = document.getElementById('numDays');
+      var curDays2   = parseInt(numDaysEl2.value) || 1;
+      if (distinctDays !== curDays2) {
+        numDaysEl2.value = distinctDays;
+        buildDaysUI();
+        applyDayEndTimes();
+      }
+    }
+
     // Auto-apply flags
     var autoApply   = document.getElementById('autoApplyAgenda');
     var autoMaxCyc  = document.getElementById('autoMaxCycles');
@@ -2164,31 +2219,34 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     var pdfMsg = e.message || '';
     var isNotFound = pdfMsg.includes('404') || pdfMsg.includes('not found') || pdfMsg.includes('not a PDF');
 
-    // Use start/end dates from event data to estimate number of days
-    var eventDays = 1;
+    // Use start/end dates from event data to estimate number of qual days
+    var eventDays = 2; // default: 2 qual days if no date info
     if (startDate && endDate) {
       var d0 = new Date(startDate), d1 = new Date(endDate);
-      var diff = Math.round((d1 - d0) / 86400000);
-      // FRC events: practice day is day 0; qual days are typically days 1-2 for district, 2-3 for regional
-      // Clamp to 1-3 qual days (start+1 .. end is a reasonable estimate)
+      // +1 for inclusive day count: Sat→Sun = 2 days, Thu→Sat = 3 days
+      var diff = Math.round((d1 - d0) / 86400000) + 1;
+      // FRC events: district events are typically 2 qual days, regionals 2-3.
+      // start_date from TBA/FRC Events is the first competition day (not practice).
+      // Clamp to 1-3: single-day scrimmages exist, max 3 qual days in practice.
       eventDays = Math.max(1, Math.min(3, diff));
     }
 
-    var daysHint = eventDays > 1 ? ' Event appears to span ' + eventDays + ' days.' : '';
+    var daysHint = ' Event appears to span ' + eventDays + ' qual day' + (eventDays !== 1 ? 's' : '') + '.';
     var notFoundText = isNotFound
       ? '\u26a0\ufe0f No agenda PDF found for this event.' + daysHint + ' Enter available minutes manually below.'
       : '\u26a0\ufe0f Could not load agenda PDF: ' + pdfMsg + '. Enter available minutes manually below.';
 
     loading.textContent = notFoundText;
 
-    // Pre-populate numDays from event date range if we have it and days haven't been set yet
-    if (eventDays > 1) {
-      var numDaysEl = document.getElementById('numDays');
-      var currentDays = parseInt(numDaysEl.value) || 1;
-      if (currentDays === 1) {
-        numDaysEl.value = eventDays;
-        buildDaysUI();
-      }
+    // Always apply the event-date-based day count on a fresh event load
+    // (removed the currentDays===1 guard — after reset, numDays defaults to 2
+    // which would always block the update)
+    var numDaysEl = document.getElementById('numDays');
+    var currentDays = parseInt(numDaysEl.value) || 1;
+    if (eventDays !== currentDays) {
+      numDaysEl.value = eventDays;
+      buildDaysUI();
+      applyDayEndTimes();
     }
 
     manualEl.style.display = 'flex';
@@ -4236,8 +4294,14 @@ async function generateSchedule() {
         fakeBtn.style.color    = '';
       }
       showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
+      // Auto-assign: url-auto-teams takes priority, then autoAssign flag
       if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
         _urlAutoTeams = null; setTimeout(assignTeams, 200);
+      } else {
+        var autoAssignEl = document.getElementById('autoAssign');
+        if (autoAssignEl && autoAssignEl.checked && _currentEventId) {
+          setTimeout(assignTeams, 200);
+        }
       }
     }
   } catch(err) {
@@ -4306,10 +4370,18 @@ function updateUrlFromState() {
 // Collect day/timing config from UI
 function collectDayConfig() {
   var defaultCt = parseFloat(document.getElementById('cycleTime').value) || 8;
+  var elAP = document.getElementById('autoPopulate');
+  var elAA = document.getElementById('autoApplyAgenda');
+  var elAM = document.getElementById('autoMaxCycles');
+  var elAS = document.getElementById('autoAssign');
   return {
-    cycleTime:    defaultCt,
-    breakBuffer:  parseFloat(document.getElementById('breakBuffer').value) || 5,
-    numDays:      parseInt(document.getElementById('numDays').value),
+    cycleTime:        defaultCt,
+    breakBuffer:      parseFloat(document.getElementById('breakBuffer').value) || 5,
+    numDays:          parseInt(document.getElementById('numDays').value),
+    autoPopulate:     elAP ? elAP.checked : true,
+    autoApplyAgenda:  elAA ? elAA.checked : true,
+    autoMaxCycles:    elAM ? elAM.checked : true,
+    autoAssign:       elAS ? elAS.checked : false,
     cycleChanges: getCycleTimeChanges(),
     days: Array.from(document.querySelectorAll('.day-row')).map(function(row) {
       // Collect per-day cycle changes (start-of-day + after-match entries)

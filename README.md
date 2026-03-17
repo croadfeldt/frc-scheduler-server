@@ -120,7 +120,8 @@ Three checkboxes live in one box below Match Cooldown:
 |------|---------|-----------|
 | **Auto-regenerate on parameter change** | ✅ On | Regenerates Stage 1 whenever a parameter changes (1.5s debounce) |
 | **Auto-apply PDF agenda to day config** | ✅ On | Automatically fills day start/end times and breaks from the FIRST agenda PDF when an event is loaded |
-| **Auto-calculate max matches/team** | ☐ Off | Runs Calc Max Matches immediately after day config is applied; sets the matches/team field to the maximum that fits the schedule |
+| **Auto-calculate max matches/team** | ✅ On | Runs Calc Max Matches immediately after day config is applied; sets the matches/team field to the maximum that fits the schedule |
+| **Auto-assign teams after schedule generation** | ☐ Off | Automatically runs Stage 2 team assignment after Stage 1 completes |
 
 **Interaction order when an event is loaded:**
 1. Roster is fetched → `numTeams` set (generation held by `_agendaFetchPending` flag)
@@ -130,7 +131,7 @@ Three checkboxes live in one box below Match Cooldown:
 
 The four auto-flag combinations:
 
-| autoApplyAgenda | autoMaxCycles | autoPopulate | Result |
+| autoApplyAgenda (default ✅) | autoMaxCycles (default ✅) | autoPopulate (default ✅) | Result |
 |---|---|---|---|
 | ✅ | ✅ | any | Apply day config → calcMaxMatches → generateSchedule |
 | ✅ | ☐ | ✅ | Apply day config → generateSchedule directly |

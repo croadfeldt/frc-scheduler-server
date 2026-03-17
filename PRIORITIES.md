@@ -77,7 +77,7 @@ Times in FIRST agenda PDFs are local event time — no timezone information is p
 |------|----|---------|---------|
 | Auto-apply PDF agenda | `autoPopulate` | ✅ On | Debounced Stage 1 regeneration on param change (1.5s debounce) |
 | `autoApplyAgenda` | ✅ On | Calls `applyAgendaToSchedule()` automatically after successful PDF parse |
-| Auto-calculate max matches/team | `autoMaxCycles` | ☐ Off | Calls `calcMaxMatches()` after day config is applied (auto or manual) |
+| Auto-calculate max matches/team | `autoMaxCycles` | ✅ On | Calls `calcMaxMatches()` after day config is applied (auto or manual) |
 
 ### Apply to Day Configuration
 
@@ -156,6 +156,10 @@ activateEvent → _agendaFetchPending=true → loadRoster (holds) → fetchAndRe
 | `d1b`–`d5b` | `Lunch\|12:00\|13:00` | Per-day breaks |
 | `cc` | `1:45:7.5` | Cycle changes: Day:AfterMatch:Time |
 | `bb` | `5` | Break buffer minutes |
+| `autoPopulate` | *(omitted)* | Auto-regenerate flag. Only included when `0` (off). Omitting means on (default). |
+| `autoApplyAgenda` | *(omitted)* | Auto-apply PDF agenda flag. Only included when `0`. |
+| `autoMaxCycles` | *(omitted)* | Auto-calculate max matches flag. Only included when `0`. |
+| `autoAssign` | *(omitted)* | Auto-assign teams flag. **Default off** — only included when `1` (on). |
 | `sid` | `16` | Restore abstract schedule from DB |
 | `aid` | `7` | Restore assigned schedule from DB |
 | `event` | `2026wasno` | Event key to auto-load |
