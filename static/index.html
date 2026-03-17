@@ -3143,12 +3143,17 @@ async function fetchTbaDropdown() {
         populateTbaDropdown(events);
       }
     } catch(e) {
+      const msg = e.message || '';
       const list = document.getElementById('tbaDropdownList');
-      if (list) {
-        list.innerHTML = '<div style="padding:0.5rem 0.7rem;font-size:0.75rem;color:var(--danger);">'
-          + (e.message || 'FRC Events unavailable') + '</div>';
-        document.getElementById('tbaDropdown').style.display = 'block';
+      const isCredErr = msg.includes('not configured') || msg.includes('credentials') || msg.includes('503');
+      if (isCredErr) {
+        // Surface credential errors in the main status bar, not just the hidden dropdown
+        showApiStatus('\u26a0 FRC Events API credentials not configured. Set FRC_EVENTS_USERNAME and FRC_EVENTS_TOKEN, or register free at frc-events.firstinspires.org/services/API', true);
+        if (list) list.innerHTML = '<div style="padding:0.5rem 0.7rem;font-size:0.75rem;color:var(--danger);">FRC Events credentials not configured on server</div>';
+      } else {
+        if (list) list.innerHTML = '<div style="padding:0.5rem 0.7rem;font-size:0.75rem;color:var(--danger);">' + (msg || 'FRC Events unavailable') + '</div>';
       }
+      if (list) document.getElementById('tbaDropdown').style.display = 'block';
     }
     return;
   }
@@ -3174,21 +3179,39 @@ async function fetchTbaDropdown() {
 function populateTbaDropdown(events) {
   const list = document.getElementById('tbaDropdownList');
   list.innerHTML = '';
-  events.slice(0, 200).forEach(function(e) {
+  const src = getEventSource();
+  const srcLabel = src === 'frc' ? 'FRC' : 'TBA';
+  const srcColor = src === 'frc' ? 'var(--accent3)' : 'var(--accent)';
+  const srcBg    = src === 'frc' ? 'rgba(166,227,161,0.12)' : 'rgba(122,164,240,0.12)';
+
+  events.slice(0, 200).forEach(function(ev) {
     const row = document.createElement('div');
-    row.dataset.key  = e.key;
-    row.dataset.name = (e.name || '').toLowerCase();
-    row.dataset.date = e.start_date || '';
+    row.dataset.key  = ev.key;
+    row.dataset.name = (ev.name || '').toLowerCase();
+    row.dataset.date = ev.start_date || '';
+    row.dataset.src  = src;
+
+    // Build tooltip text for title attribute (works on desktop hover + mobile long-press)
+    var tipParts = [];
+    if (ev.location)   tipParts.push(ev.location);
+    if (ev.start_date) tipParts.push(ev.start_date);
+    tipParts.push('Source: ' + srcLabel);
+    row.title = tipParts.join(' · ');
+
     row.style.cssText = 'display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.7rem;cursor:pointer;border-bottom:1px solid var(--border);font-size:0.8rem;';
     row.innerHTML =
-      '<span style="font-family:Barlow Condensed,sans-serif;font-weight:700;color:var(--accent);min-width:5rem;flex-shrink:0;">' + e.key + '</span>' +
-      '<span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (e.name || '') + '</span>' +
-      '<span style="color:var(--text-muted);font-size:0.7rem;flex-shrink:0;">' + (e.start_date || '') + '</span>';
+      '<span style="font-family:Barlow Condensed,sans-serif;font-weight:700;color:var(--accent);min-width:5rem;flex-shrink:0;">' + ev.key + '</span>' +
+      '<span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (ev.name || '') + '</span>' +
+      (ev.location ? '<span style="color:var(--text-muted);font-size:0.68rem;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;" title="' + ev.location + '">' + ev.location + '</span>' : '') +
+      '<span style="color:var(--text-muted);font-size:0.7rem;flex-shrink:0;">' + (ev.start_date || '') + '</span>' +
+      '<span style="font-size:0.58rem;font-family:Barlow Condensed,sans-serif;font-weight:700;letter-spacing:0.06em;' +
+        'color:' + srcColor + ';background:' + srcBg + ';border:1px solid ' + srcColor + ';' +
+        'border-radius:3px;padding:1px 4px;flex-shrink:0;">' + srcLabel + '</span>';
     row.addEventListener('mouseenter', function() { this.style.background = 'var(--surface2)'; });
     row.addEventListener('mouseleave', function() { this.style.background = ''; });
-    row.addEventListener('mousedown', function(ev) {
-      ev.preventDefault(); // prevent blur before click
-      selectTbaEvent(e.key);
+    row.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      selectTbaEvent(ev.key);
     });
     list.appendChild(row);
   });

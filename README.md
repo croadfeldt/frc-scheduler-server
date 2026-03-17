@@ -490,6 +490,10 @@ oc exec -n frc-scheduler-server $(oc get pod -l app=frc-postgres -o name) \
 
 Or use the included `migrate_abstract_day_config.sql`. Fresh databases are unaffected (`create_all` builds the correct schema).
 
+### FRC Events API — duplicate routes (fixed)
+
+`main.py` previously registered `/api/frc/events/{year}` and `/api/frc/import/` twice. FastAPI silently uses the first definition and ignores duplicates. Cleaned to a single canonical set at lines ~304–400. Both `/api/frc/configured` and `/api/frc/status` now resolve to the same handler via stacked `@app.get` decorators.
+
 ### TBA event load — error handling
 
 `loadEventByCode()` distinguishes four failure modes from the server's HTTP status and `detail` message:
@@ -587,6 +591,34 @@ A `@media (max-width: 640px)` block handles small screens:
 - **Container** — padding reduces to `0.75rem 0.75rem`
 
 The `event-bar-actions` class wraps the second row of event bar buttons. The vertical divider (`.event-bar-divider`) is hidden on mobile.
+
+## FRC Events API
+
+The scheduler supports importing events and teams from FIRST's official FRC Events API as an alternative to The Blue Alliance.
+
+**Registration:** Free at `frc-events.firstinspires.org/services/API`
+
+**Environment variables:**
+```bash
+FRC_EVENTS_USERNAME=your_username
+FRC_EVENTS_TOKEN=your_token
+```
+
+**Add to OpenShift secret:**
+```bash
+oc patch secret frc-app-secret -n frc-scheduler-server --type=merge \
+  -p '{"stringData": {"FRC_EVENTS_USERNAME": "your_username", "FRC_EVENTS_TOKEN": "your_token"}}'
+oc rollout restart deployment/frc-scheduler-server -n frc-scheduler-server
+```
+
+**Endpoints:**
+- `GET /api/frc/configured` — whether credentials are set
+- `GET /api/frc/events/{year}?search=` — list/search events
+- `POST /api/frc/import/{year}/{event_code}` — import event + teams
+
+**Event code format:** Short FIRST codes like `WASNO`, `MNMI` (without year prefix). The scheduler normalises these to TBA-style keys (`2026wasno`) for internal storage.
+
+**Source selector:** In the event bar, switch between TBA and FRC Events using the dropdown. When FRC Events is selected, the event autocomplete dropdown fetches from the FRC Events API. If credentials are not configured, a clear error appears in the status bar immediately.
 
 ## Development
 

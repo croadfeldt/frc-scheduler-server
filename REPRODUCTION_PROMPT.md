@@ -624,6 +624,30 @@ const interruptBreak = (!nextBreak || breakBuffer <= 0 || (nextBreak.start - cur
 
 Applied in `_finishGenerationInner` and `calcMaxMatches`.
 `bb` encoded in share URL, restored via `applyUrlParams`.
+### FRC Events API (`app/frc_events.py`)
+
+HTTP Basic auth: `base64(FRC_EVENTS_USERNAME:FRC_EVENTS_TOKEN)`. No credentials → `ValueError` → HTTP 503.
+
+Key functions:
+- `get_events(year)` — `GET /{year}/events` → `data["Events"]`
+- `get_event(year, code)` — same endpoint with `?eventCode=CODE` (uppercase), returns first or None
+- `get_event_teams(year, code)` — `GET /{year}/teams?eventCode=CODE`, paginates (page size 65)
+- `normalise_event(frc, year)` — converts FRC dict to our schema; builds `key = f"{year}{code.lower()}"`, stores original code in `_frc_code` (stripped before DB write)
+- `normalise_team(frc)` — maps `teamNumber`, `nameFull`/`nameShort`, `city`, `stateProv`, `country`, `rookieYear`
+- `is_configured()` — bool, used by `/api/frc/configured` + `/api/frc/status`
+
+Routes (single set, no duplicates):
+- `GET /api/frc/configured` and `GET /api/frc/status` → same handler via stacked decorators
+- `GET /api/frc/events/{year}` → list/search
+- `POST /api/frc/import/{year}/{event_code}` → upsert event + teams into DB
+
+Frontend integration:
+- `getEventSource()` reads `#eventSource` select (`tba` or `frc`)
+- `fetchTbaDropdown()` branches on source; FRC path hits `/api/frc/events/{year}`
+- Credential errors surfaced immediately in `showApiStatus` (not hidden in dropdown)
+- `loadEventByCode()` uses `/api/frc/import/{year}/{frcCode}` when source=frc
+- Cache key: `frc_{year}` in `_frcDropdownCache`
+
 
 ### Stage 2 search: simulated annealing (`scheduler.py: assign_teams`)
 
