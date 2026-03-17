@@ -55,8 +55,11 @@ async def _get(path: str) -> Any:
 # ── Public API calls ──────────────────────────────────────────────────────────
 
 async def get_events(year: int) -> list[dict]:
-    """All events for a given year."""
-    return await _get(f"/events/{year}/simple")
+    """All events for a given year, sorted by start date."""
+    events = await _get(f"/events/{year}/simple")
+    # Sort by start_date so upcoming events appear first in the dropdown
+    events.sort(key=lambda e: e.get("start_date") or "")
+    return events
 
 
 async def get_event(event_key: str) -> dict:

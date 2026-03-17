@@ -674,6 +674,12 @@ for step in range(budget):
 - Guard: `!== null` not `||` so a calibrated value of `0` (impossibly fast) wouldn't revert to default
 - Called from: `showStage2Panel()`, post-calibration in `assignTeams()`, `oninput`/`onchange` on `#assignIterations`
 
+### TBA dropdown — sort and row limit
+
+`tba.py: get_events(year)` now calls `events.sort(key=lambda e: e.get("start_date") or "")` before returning. Previously events came back in TBA's alphabetical-by-key default order, which put late-alphabet events (e.g. `2026wasno`) past the old 200-row cap.
+
+`populateTbaDropdown()` previously used `events.slice(0, 200)` — removed. All events are now rendered; filter-as-you-type limits visible rows.
+
 ### TBA error handling (`loadEventByCode`)
 
 Four distinct error messages based on `e.message` content matching server's `detail` field:
@@ -749,3 +755,67 @@ async with httpx.AsyncClient(base_url=TBA_BASE, headers=..., timeout=15.0) as cl
 ```
 
 No module-level singleton. Previous singleton was created at import time (outside async event loop) causing silent hangs → raw OCP 502s.
+
+---
+
+## Agenda Fit Integration (from frc-schedule-builder)
+
+Ported from `github.com/phil-lopreiato/frc-schedule-builder` — a standalone HTML tool by Phil Lopreiato.
+
+### State
+```javascript
+let _agendaBlocks = null;  // [{start, end, duration, startStr, endStr, day}] or null
+```
+
+### PDF.js loading (`loadPdfJs`)
+Cannot use `import()` directly in a non-module script tag. Uses a dynamically injected `<script type="module">` that imports PDF.js from CDN and dispatches a `pdfjsloaded` event, exposing the lib on `window._pdfjsLib`. Deduped via `_pdfjsLoading` promise.
+
+```
+CDN: https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379
+Files: pdf.min.mjs, pdf.worker.min.mjs
+```
+
+### PDF fetch (`fetchAgendaPDF(eventKey)`)
+```
+GET https://info.firstinspires.org/hubfs/web/event/frc/{year}/{YEAR}_{EVENTCODE}_Agenda.pdf
+```
+Requires CORS to be open on FIRST's CDN (it is for GET requests). Throws if status ≠ 200 or content-type ≠ pdf.
+
+### PDF parsing (`parsePDFBlocks`, `parseQualBlocks`)
+1. Extract text per page, group items by Y coordinate (PDF coordinate space), sort Y descending, join items by X ascending → reconstructs lines
+2. Collapse PDF.js character-spacing artifacts in time tokens (regex: digits with internal spaces before AM/PM)
+3. Line-by-line scan:
+   - Day pattern: `Monday|Tuesday|…` followed by month+day
+   - Qual block pattern: `HH:MM AM/PM – HH:MM AM/PM Qualification Match`
+4. Fallback: scan joined full text if line-by-line finds nothing
+
+### Fit calculation (`updateAgendaFit`)
+Called on: `activateEvent` completion, `numTeams`/`matchesPerTeam`/`cycleTime` input events, manual minutes change.
+
+```
+totalMatches = ceil(numTeams * mpt / 6)
+surrogates   = totalMatches * 6 - numTeams * mpt
+timeNeeded   = totalMatches * cycleTime
+available    = sum(_agendaBlocks[i].duration)  OR  agendaManualMin input
+surplus      = available - timeNeeded
+pct          = timeNeeded / available * 100
+reqCycle     = available / totalMatches
+```
+
+### Block distribution (`distributeMatchesToBlocks`)
+When fits (surplus ≥ 0): distribute proportionally by block duration using floor + fractional remainder sort.
+When over: fill each block to floor capacity, pour overflow into block[1] (Saturday/later block).
+
+### HTML elements
+- `#agendaFitPanel` — outer container, hidden until event loaded
+- `#agendaFitBadge` — fit status badge in header
+- `#agendaChevron` — collapse/expand indicator
+- `#agendaFitLoading` — loading/error text
+- `#agendaFitStats` — 5-stat grid (time needed, available, buffer, capacity%, max cycle)
+- `#agendaFitBlocks` — per-block rows with timeline bars (`#agendaBar_{start}`)
+- `#agendaFitManual` — shown when PDF unavailable; contains `#agendaManualMin`
+
+### Lifecycle hooks
+- `activateEvent(ev)` → calls `fetchAndRenderAgendaFit(ev.key)` (non-blocking, `.catch(() => {})`)
+- `fullReset()` → calls `resetAgendaPanel()` (hides panel, clears `_agendaBlocks`)
+- `['numTeams','matchesPerTeam','cycleTime']` input events → `onScheduleParamsChanged()` → `updateAgendaFit()`

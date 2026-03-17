@@ -490,9 +490,44 @@ oc exec -n frc-scheduler-server $(oc get pod -l app=frc-postgres -o name) \
 
 Or use the included `migrate_abstract_day_config.sql`. Fresh databases are unaffected (`create_all` builds the correct schema).
 
-### FRC Events API — duplicate routes (fixed)
+### Agenda Fit (from frc-schedule-builder)
+
+Integrated from [github.com/phil-lopreiato/frc-schedule-builder](https://github.com/phil-lopreiato/frc-schedule-builder).
+
+When an event is activated, the scheduler automatically fetches the official FIRST agenda PDF and extracts the "Qualification Match" time windows. It then displays a live fit analysis showing whether your schedule parameters fit within the real available time.
+
+### Agenda PDF URL pattern
+```
+https://info.firstinspires.org/hubfs/web/event/frc/{year}/{YEAR}_{EVENTCODE}_Agenda.pdf
+```
+
+### Fit metrics
+
+| Metric | Formula |
+|---|---|
+| Total matches needed | `ceil(teams × mpt / 6)` |
+| Time needed | `totalMatches × cycleTime` |
+| Buffer / Overflow | `available − needed` |
+| Capacity % | `needed / available × 100` |
+| Max cycle to fit | `available / totalMatches` |
+
+**Status:** ✓ Comfortable (≤85%) / ⚠ Tight (≤100%) / ✗ Over Capacity (>100%)
+
+### Fallback
+If the PDF is unavailable, a manual "total available minutes" input is shown instead.
+
+### PDF.js
+Loaded lazily from CDN via a dynamically injected `<script type="module">` (workaround for non-module main script). CDN: `cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379`.
+
+## FRC Events API — duplicate routes (fixed)
 
 `main.py` previously registered `/api/frc/events/{year}` and `/api/frc/import/` twice. FastAPI silently uses the first definition and ignores duplicates. Cleaned to a single canonical set at lines ~304–400. Both `/api/frc/configured` and `/api/frc/status` now resolve to the same handler via stacked `@app.get` decorators.
+
+### TBA event dropdown — sort order and row limit
+
+Events from `GET /api/tba/events/{year}` are now sorted by `start_date` ascending in `tba.py` (previously returned in TBA's default alphabetical-by-key order). This ensures current/upcoming events appear at the top of the dropdown regardless of their event code.
+
+The 200-row cap (`events.slice(0, 200)`) has been removed. TBA can return 250+ events for a given year, and the cap was silently hiding events with alphabetically late keys (e.g. `2026wasno`). The dropdown now renders all events; the filter-as-you-type behaviour already limits visible rows to a manageable count.
 
 ### TBA event load — error handling
 
@@ -591,6 +626,35 @@ A `@media (max-width: 640px)` block handles small screens:
 - **Container** — padding reduces to `0.75rem 0.75rem`
 
 The `event-bar-actions` class wraps the second row of event bar buttons. The vertical divider (`.event-bar-divider`) is hidden on mobile.
+
+## Agenda Fit (from frc-schedule-builder)
+
+Integrated from [github.com/phil-lopreiato/frc-schedule-builder](https://github.com/phil-lopreiato/frc-schedule-builder).
+
+When an event is activated, the scheduler automatically fetches the official FIRST agenda PDF and extracts the "Qualification Match" time windows. It then displays a live fit analysis showing whether your schedule parameters fit within the real available time.
+
+### Agenda PDF URL pattern
+```
+https://info.firstinspires.org/hubfs/web/event/frc/{year}/{YEAR}_{EVENTCODE}_Agenda.pdf
+```
+
+### Fit metrics
+
+| Metric | Formula |
+|---|---|
+| Total matches needed | `ceil(teams × mpt / 6)` |
+| Time needed | `totalMatches × cycleTime` |
+| Buffer / Overflow | `available − needed` |
+| Capacity % | `needed / available × 100` |
+| Max cycle to fit | `available / totalMatches` |
+
+**Status:** ✓ Comfortable (≤85%) / ⚠ Tight (≤100%) / ✗ Over Capacity (>100%)
+
+### Fallback
+If the PDF is unavailable, a manual "total available minutes" input is shown instead.
+
+### PDF.js
+Loaded lazily from CDN via a dynamically injected `<script type="module">` (workaround for non-module main script). CDN: `cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379`.
 
 ## FRC Events API
 

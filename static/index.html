@@ -524,7 +524,25 @@
   }
 
   /* ── Mobile ── */
+  /* ── Agenda Fit panel ── */
+  .agenda-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 1.5rem; }
+  .agenda-fit-grid { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--border); }
+  .agenda-fit-grid .stat { border-right: 1px solid var(--border); border-radius: 0; }
+  .agenda-fit-grid .stat:last-child { border-right: none; }
+  .agenda-block-list { display: flex; flex-direction: column; gap: 0; }
+  .agenda-block-row { padding: 0.6rem 1.25rem; border-bottom: 1px solid var(--border); font-size: 0.8rem; display: flex; flex-direction: column; gap: 0.35rem; }
+  .agenda-block-row:last-child { border-bottom: none; }
+  .agenda-timeline-bar { height: 28px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; position: relative; }
+  .agenda-timeline-fill { height: 100%; border-radius: 3px; display: flex; align-items: center; padding-left: 0.5rem; font-size: 0.72rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; transition: width 0.3s ease; }
+  .agenda-fit-ok    { color: var(--accent3); }
+  .agenda-fit-tight { color: var(--amber); }
+  .agenda-fit-over  { color: var(--danger); }
+  .agenda-manual { display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem 1.25rem; font-size: 0.8rem; color: var(--text-muted); }
   @media (max-width: 640px) {
+    .agenda-fit-grid { grid-template-columns: repeat(2, 1fr); }
+    .agenda-block-row { padding: 0.5rem 0.75rem; }
+  }
+</style>
     /* Prevent iOS input zoom — all inputs must be ≥16px on mobile */
     input[type="number"], input[type="time"], input[type="text"], select, textarea {
       font-size: 16px !important;
@@ -890,7 +908,30 @@
     </div>
 
     <div class="panel results-panel">
-      <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;">
+      <!-- Agenda Fit panel — shown when an event with a FIRST agenda PDF is loaded -->
+      <div id="agendaFitPanel" style="display:none;margin-bottom:0;border-bottom:1px solid var(--border);">
+        <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;" onclick="toggleAgendaPanel()">
+          <span>&#128197; Agenda Fit</span>
+          <span id="agendaFitBadge" style="font-size:0.72rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:3px;"></span>
+          <span id="agendaChevron" style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">&#9660;</span>
+        </div>
+        <div id="agendaFitBody">
+          <div id="agendaFitLoading" style="padding:0.75rem 1.25rem;font-size:0.78rem;color:var(--text-muted);">&#8203;</div>
+          <div id="agendaFitStats" class="agenda-fit-grid" style="display:none;"></div>
+          <div id="agendaFitBlocks" class="agenda-block-list" style="display:none;"></div>
+          <div id="agendaFitManual" class="agenda-manual" style="display:none;">
+            No agenda PDF available.
+            <label style="display:flex;align-items:center;gap:0.4rem;color:var(--text-muted);font-size:0.78rem;">
+              Total available minutes:
+              <input type="number" id="agendaManualMin" value="360" min="1" max="1440"
+                style="width:72px;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
+                       padding:0.3rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.82rem;"
+                oninput="updateAgendaFit()" onchange="updateAgendaFit()">
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;border-top:none;">
         <span>Schedule Output</span>
         <div id="downloadBar" style="display:none;gap:0.4rem;display:none;align-items:center;">
           <button class="btn-export" id="btnDownloadCSV" onclick="downloadCSV()" title="Download schedule as CSV">&#11015; CSV</button>
@@ -938,6 +979,7 @@ let _currentSlotMap = null;              // {slot_str: team_number} from Stage 2
 let _currentSeed = null;                 // hex Stage 1 seed
 let _currentAssignSeed = null;           // hex Stage 2 seed
 let _urlAutoTeams = null;                // teams from URL for Stage 2 auto-assign
+let _agendaBlocks = null;                // parsed qual time blocks from FIRST agenda PDF
 
 function timeToMin(t) {
   const [h, m] = t.split(':').map(Number);
@@ -1376,6 +1418,12 @@ autoRunFromUrl();
   if (el) el.addEventListener('input', onParamChanged);
 });
 // Note: cycleTime and numDays have their own dedicated change listeners
+
+// Wire agenda fit updates to the three params that affect it
+['numTeams','matchesPerTeam','cycleTime'].forEach(function(id) {
+  var el = document.getElementById(id);
+  if (el) el.addEventListener('input', onScheduleParamsChanged);
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AUTH STATE
@@ -1872,6 +1920,7 @@ function fullReset() {
   window._frcFilters          = { teams: [], alliance: null, day: null, b2b: false, surrogate: false };
   window._stage1RetryCount    = 0;
   window._stage2Retried       = false;
+  resetAgendaPanel();
 
   // Reset UI panels
   document.getElementById('stage2Panel').style.display       = 'none';
@@ -1935,6 +1984,300 @@ function fullReset() {
 }
 
 // ── Calculate maximum matches per team given current schedule parameters ─────
+// ══════════════════════════════════════════════════════════════════════════════
+// AGENDA FIT — fetches FIRST's official event agenda PDF, parses qual blocks,
+// and shows a schedule fit analysis against the real available time windows.
+// Ported and integrated from github.com/phil-lopreiato/frc-schedule-builder
+// ══════════════════════════════════════════════════════════════════════════════
+
+const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379';
+let _pdfjsLib = null; // lazy-loaded
+let _pdfjsLoading = null; // promise to avoid double-load
+
+async function loadPdfJs() {
+  if (_pdfjsLib) return _pdfjsLib;
+  if (_pdfjsLoading) return _pdfjsLoading;
+  _pdfjsLoading = new Promise(function(resolve, reject) {
+    // Inject a module script to load PDF.js and expose it on window
+    var s = document.createElement('script');
+    s.type = 'module';
+    s.textContent = [
+      "import * as pdfjsLib from '" + PDFJS_CDN + "/pdf.min.mjs';",
+      "pdfjsLib.GlobalWorkerOptions.workerSrc = '" + PDFJS_CDN + "/pdf.worker.min.mjs';",
+      "window._pdfjsLib = pdfjsLib;",
+      "window.dispatchEvent(new Event('pdfjsloaded'));"
+    ].join('\n');
+    window.addEventListener('pdfjsloaded', function() {
+      _pdfjsLib = window._pdfjsLib;
+      resolve(_pdfjsLib);
+    }, { once: true });
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  return _pdfjsLoading;
+}
+
+function parseTime12agenda(s) {
+  s = s.trim().toUpperCase();
+  const m = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+  if (!m) return null;
+  let h = parseInt(m[1]), min = parseInt(m[2]), ap = m[3];
+  if (ap === 'PM' && h !== 12) h += 12;
+  if (ap === 'AM' && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+function fmtTime12(mins) {
+  let h = Math.floor(mins / 60), m = mins % 60;
+  const ap = h >= 12 ? 'PM' : 'AM';
+  if (h > 12) h -= 12;
+  if (h === 0) h = 12;
+  return h + ':' + String(m).padStart(2, '0') + ' ' + ap;
+}
+
+async function fetchAgendaPDF(eventCode) {
+  const year = eventCode.substring(0, 4);
+  const eventPart = eventCode.substring(4).toUpperCase();
+  const url = `https://info.firstinspires.org/hubfs/web/event/frc/${year}/${year}_${eventPart}_Agenda.pdf`;
+  const r = await fetch(url, { mode: 'cors' });
+  if (!r.ok) throw new Error('PDF not found (status ' + r.status + ')');
+  const ct = r.headers.get('content-type') || '';
+  if (!ct.includes('pdf') && !url.endsWith('.pdf')) throw new Error('Response is not a PDF');
+  return await r.arrayBuffer();
+}
+
+async function parsePDFBlocks(buf) {
+  const lib = await loadPdfJs();
+  const pdf = await lib.getDocument({ data: buf }).promise;
+  let allText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    const byY = {};
+    for (const item of tc.items) {
+      const y = Math.round(item.transform[5]);
+      if (!byY[y]) byY[y] = [];
+      byY[y].push({ x: item.transform[4], str: item.str });
+    }
+    const sortedYs = Object.keys(byY).map(Number).sort((a, b) => b - a);
+    for (const y of sortedYs) {
+      const items = byY[y].sort((a, b) => a.x - b.x);
+      allText += items.map(it => it.str).join(' ').trim() + '\n';
+    }
+  }
+  // Collapse PDF.js character-spacing artifacts in time tokens
+  allText = allText.replace(/\d[ \t]?\d?[ \t]*:[ \t]*\d[ \t]*\d[ \t]*[AaPp][ \t]*[Mm]/g,
+    m => m.replace(/\s+/g, ''));
+  return parseQualBlocks(allText);
+}
+
+function parseQualBlocks(text) {
+  const blocks = [];
+  const lines = text.replace(/\r/g, '').split('\n');
+  const dayRe  = /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b\s*[,]?\s+(\w+\s+\d{1,2})/i;
+  const qualRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-–—]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Match/i;
+  let currentDay = '';
+  let blockNum = 0;
+  for (const line of lines) {
+    const dayMatch = dayRe.exec(line);
+    if (dayMatch) currentDay = dayMatch[1].substring(0, 3) + ' ' + dayMatch[2];
+    const qualMatch = qualRe.exec(line);
+    if (qualMatch) {
+      const start = parseTime12agenda(qualMatch[1]);
+      const end   = parseTime12agenda(qualMatch[2]);
+      if (start !== null && end !== null && end > start) {
+        blockNum++;
+        blocks.push({ start, end, duration: end - start,
+          startStr: qualMatch[1].trim(), endStr: qualMatch[2].trim(),
+          day: currentDay || ('Block ' + blockNum) });
+      }
+    }
+  }
+  if (blocks.length === 0) {
+    // Fallback: scan joined text
+    const fullText = text.replace(/\n/g, ' ');
+    const reG = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-–—]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Match/gi;
+    let m;
+    while ((m = reG.exec(fullText)) !== null) {
+      const start = parseTime12agenda(m[1]);
+      const end   = parseTime12agenda(m[2]);
+      blockNum++;
+      if (start !== null && end !== null && end > start)
+        blocks.push({ start, end, duration: end - start,
+          startStr: m[1].trim(), endStr: m[2].trim(), day: 'Block ' + blockNum });
+    }
+  }
+  return blocks;
+}
+
+function distributeMatchesToBlocks(totalMatches, blocks, cycleTime) {
+  const totalDur = blocks.reduce((s, b) => s + b.duration, 0);
+  const assignments = blocks.map(b => Math.floor(b.duration / totalDur * totalMatches));
+  let assigned = assignments.reduce((a, b) => a + b, 0);
+  const fracs = blocks.map((b, i) => [i, b.duration / totalDur * totalMatches - assignments[i]]);
+  fracs.sort((a, b) => b[1] - a[1]);
+  for (let i = 0; assigned < totalMatches; i++, assigned++) assignments[fracs[i][0]]++;
+  return assignments;
+}
+
+async function fetchAndRenderAgendaFit(eventKey) {
+  const panel = document.getElementById('agendaFitPanel');
+  const loading = document.getElementById('agendaFitLoading');
+  const statsEl = document.getElementById('agendaFitStats');
+  const blocksEl = document.getElementById('agendaFitBlocks');
+  const manualEl = document.getElementById('agendaFitManual');
+  const badge = document.getElementById('agendaFitBadge');
+
+  panel.style.display = 'block';
+  statsEl.style.display = 'none';
+  blocksEl.style.display = 'none';
+  manualEl.style.display = 'none';
+  loading.textContent = '\u23f3 Fetching agenda PDF\u2026';
+  badge.textContent = '';
+  badge.style.background = '';
+
+  try {
+    const buf = await fetchAgendaPDF(eventKey);
+    loading.textContent = 'Parsing PDF\u2026';
+    const blocks = await parsePDFBlocks(buf);
+    if (blocks.length === 0) throw new Error('No "Qualification Match" blocks found in PDF');
+    _agendaBlocks = blocks;
+    loading.textContent = '';
+    statsEl.style.display = 'grid';
+    blocksEl.style.display = 'flex';
+    renderAgendaBlocks();
+    updateAgendaFit();
+  } catch(e) {
+    _agendaBlocks = null;
+    loading.textContent = '';
+    manualEl.style.display = 'flex';
+    badge.textContent = 'Manual';
+    badge.style.cssText = 'font-size:0.68rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:3px;background:rgba(127,132,156,0.15);color:var(--text-muted);';
+    statsEl.style.display = 'grid';
+    updateAgendaFit();
+  }
+}
+
+function renderAgendaBlocks() {
+  const el = document.getElementById('agendaFitBlocks');
+  if (!_agendaBlocks || !_agendaBlocks.length) { el.innerHTML = ''; return; }
+  el.innerHTML = _agendaBlocks.map(function(b) {
+    return '<div class="agenda-block-row">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+        '<span style="font-weight:600;font-size:0.78rem;color:var(--accent2);">' + b.day + '</span>' +
+        '<span style="color:var(--text-muted);font-size:0.72rem;">' + b.duration + ' min available</span>' +
+      '</div>' +
+      '<div style="font-size:0.78rem;color:var(--text);">' + fmtTime12(b.start) + ' \u2013 ' + fmtTime12(b.end) + '</div>' +
+      '<div id="agendaBar_' + b.start + '" class="agenda-timeline-bar"><div class="agenda-timeline-fill" style="width:0%;background:var(--accent3);"></div></div>' +
+    '</div>';
+  }).join('');
+}
+
+function updateAgendaFit() {
+  var numTeams = parseInt(document.getElementById('numTeams').value) || 0;
+  var mpt      = parseInt(document.getElementById('matchesPerTeam').value) || 10;
+  var ct       = parseFloat(document.getElementById('cycleTime').value) || 8;
+  if (numTeams < 1) return;
+
+  var totalSlots   = numTeams * mpt;
+  var totalMatches = Math.ceil(totalSlots / 6);
+  var surrogates   = totalMatches * 6 - totalSlots;
+  var timeNeeded   = totalMatches * ct;
+
+  var availableMin = 0;
+  if (_agendaBlocks && _agendaBlocks.length) {
+    availableMin = _agendaBlocks.reduce(function(s, b) { return s + b.duration; }, 0);
+  } else {
+    var manEl = document.getElementById('agendaManualMin');
+    availableMin = manEl ? (parseInt(manEl.value) || 360) : 360;
+  }
+
+  var surplus  = availableMin - timeNeeded;
+  var pct      = availableMin > 0 ? (timeNeeded / availableMin * 100) : 100;
+  var mpr      = ct > 0 ? (60 / ct) : 0;
+  var reqCycle = totalMatches > 0 ? (availableMin / totalMatches) : 0;
+
+  var fitClass, fitLabel;
+  if (pct <= 85)       { fitClass = 'agenda-fit-ok';    fitLabel = '\u2713 Comfortable'; }
+  else if (pct <= 100) { fitClass = 'agenda-fit-tight'; fitLabel = '\u26a0 Tight'; }
+  else                 { fitClass = 'agenda-fit-over';  fitLabel = '\u2717 Over Capacity'; }
+
+  // Update badge
+  var badge = document.getElementById('agendaFitBadge');
+  if (badge) {
+    badge.textContent = fitLabel;
+    var bgMap = {'agenda-fit-ok':'rgba(166,227,161,0.15)','agenda-fit-tight':'rgba(249,226,175,0.15)','agenda-fit-over':'rgba(243,139,168,0.15)'};
+    badge.style.cssText = 'font-size:0.68rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:3px;' +
+      'background:' + bgMap[fitClass] + ';color:var(--' +
+      (fitClass==='agenda-fit-ok'?'accent3':fitClass==='agenda-fit-tight'?'amber':'danger') + ');';
+  }
+
+  // Stats
+  function agendaStat(val, label, cls) {
+    return '<div class="stat" style="border-radius:0;"><div class="stat-value ' + (cls||'') + '" style="font-size:1.3rem;">' +
+      val + '</div><div class="stat-label">' + label + '</div></div>';
+  }
+  var statsEl = document.getElementById('agendaFitStats');
+  if (statsEl) {
+    statsEl.innerHTML =
+      agendaStat(Math.round(timeNeeded) + ' min', 'Time Needed') +
+      agendaStat(availableMin + ' min', 'Available') +
+      agendaStat((surplus >= 0 ? '+' : '') + Math.round(surplus) + ' min', surplus >= 0 ? 'Buffer' : 'Overflow', fitClass) +
+      agendaStat(pct.toFixed(0) + '%', 'Capacity', fitClass) +
+      agendaStat(reqCycle.toFixed(1) + ' min', 'Max Cycle to Fit');
+  }
+
+  // Per-block timeline bars
+  if (_agendaBlocks && _agendaBlocks.length) {
+    var assignments = surplus >= 0
+      ? distributeMatchesToBlocks(totalMatches, _agendaBlocks, ct)
+      : _agendaBlocks.map(function(b) { return Math.floor(b.duration / ct); });
+    if (surplus < 0) {
+      var assigned = assignments.reduce(function(a,b){return a+b;},0);
+      assignments[Math.min(1, _agendaBlocks.length-1)] += totalMatches - assigned;
+    }
+    _agendaBlocks.forEach(function(b, bi) {
+      var bar = document.getElementById('agendaBar_' + b.start);
+      if (!bar) return;
+      var used = assignments[bi];
+      var usedTime = used * ct;
+      var fillPct = Math.min(usedTime / b.duration * 100, 100);
+      var overage = Math.round(usedTime - b.duration);
+      var color = overage > 0 ? 'var(--amber)' : fillPct > 85 ? 'var(--amber)' : 'var(--accent3)';
+      var label = used + ' matches \u00b7 ' + Math.round(usedTime) + ' min';
+      if (overage > 0) label += ' (+' + overage + ' min over)';
+      else if (overage < 0) label += ' (' + Math.abs(overage) + ' min buffer)';
+      var fill = bar.querySelector('.agenda-timeline-fill');
+      fill.style.width = fillPct + '%';
+      fill.style.background = color;
+      fill.textContent = label;
+    });
+  }
+}
+
+function toggleAgendaPanel() {
+  var body = document.getElementById('agendaFitBody');
+  var chev = document.getElementById('agendaChevron');
+  if (!body) return;
+  var collapsed = body.style.display === 'none';
+  body.style.display = collapsed ? '' : 'none';
+  if (chev) chev.textContent = collapsed ? '\u25bc' : '\u25b6';
+}
+
+function resetAgendaPanel() {
+  _agendaBlocks = null;
+  var panel = document.getElementById('agendaFitPanel');
+  if (panel) panel.style.display = 'none';
+}
+
+function onScheduleParamsChanged() {
+  // Re-run agenda fit whenever schedule params change (teams, mpt, cycle time)
+  if (document.getElementById('agendaFitPanel').style.display !== 'none') {
+    updateAgendaFit();
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 function calcMaxMatches() {
   var numTeams    = parseInt(document.getElementById('numTeams').value) || 0;
   var breakBuffer = parseFloat(document.getElementById('breakBuffer').value) || 0;
@@ -3184,7 +3527,7 @@ function populateTbaDropdown(events) {
   const srcColor = src === 'frc' ? 'var(--accent3)' : 'var(--accent)';
   const srcBg    = src === 'frc' ? 'rgba(166,227,161,0.12)' : 'rgba(122,164,240,0.12)';
 
-  events.slice(0, 200).forEach(function(ev) {
+  events.forEach(function(ev) {
     const row = document.createElement('div');
     row.dataset.key  = ev.key;
     row.dataset.name = (ev.name || '').toLowerCase();
@@ -3284,6 +3627,11 @@ async function activateEvent(ev) {
   // Re-evaluate btnAssign if a schedule is already displayed (e.g. restored from URL)
   if (_abstractParams !== null) {
     showStage2Panel(_abstractParams.numTeams);
+  }
+  // Fetch FIRST agenda PDF and render fit analysis (non-blocking)
+  if (ev.key) {
+    resetAgendaPanel();
+    fetchAndRenderAgendaFit(ev.key).catch(function() {});
   }
 }
 

@@ -152,3 +152,41 @@ Up to 5 days supported (`d1`–`d5`, `d1b`–`d5b`).
 
 `created_by` = OAuth subject (`google:<sub>` or `apple:<sub>`).
 NULL `created_by` = anonymous schedule; readable by all, deletable by none.
+
+---
+
+## Agenda Fit (from frc-schedule-builder)
+
+Integrated from [github.com/phil-lopreiato/frc-schedule-builder](https://github.com/phil-lopreiato/frc-schedule-builder).
+
+### What it does
+When an event is activated, the scheduler automatically fetches the official FIRST agenda PDF and extracts the "Qualification Match" time blocks. It then computes a fit analysis:
+
+| Metric | Formula |
+|---|---|
+| Total matches needed | `ceil(teams × mpt / 6)` |
+| Surrogates | `totalMatches × 6 − teams × mpt` |
+| Time needed | `totalMatches × cycleTime` |
+| Time available | Sum of parsed qual block durations |
+| Buffer / Overflow | `available − needed` |
+| Capacity % | `needed / available × 100` |
+| Max cycle to fit | `available / totalMatches` |
+| Matches per hour | `60 / cycleTime` |
+
+**Fit status:** Comfortable (≤85%), Tight (≤100%), Over Capacity (>100%)
+
+### Agenda PDF URL pattern
+```
+https://info.firstinspires.org/hubfs/web/event/frc/{year}/{year}_{EVENTCODE}_Agenda.pdf
+```
+e.g. `2026_WASNO_Agenda.pdf` for event key `2026wasno`.
+
+### Fallback
+If the PDF is unavailable (not yet published, CORS blocked, or no "Qualification Match" blocks found), the panel shows a manual "total available minutes" input instead.
+
+### UI behaviour
+- Panel appears at the top of the results column when an event is loaded
+- Collapsible (click header to toggle)
+- Badge shows fit status: ✓ Comfortable / ⚠ Tight / ✗ Over Capacity
+- Per-block timeline bars update in real time as numTeams, mpt, or cycleTime change
+- Resets when event changes or full reset is triggered
