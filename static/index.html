@@ -3559,7 +3559,7 @@ async function assignTeams() {
           document.getElementById('progressFill2').style.width = pct + '%';
           const elapsed = performance.now() - startTime;
           const eta = msg2.done > 1 ? formatETA((elapsed/msg2.done)*(msg2.total-msg2.done)) : '';
-          const scoreStr2 = (msg2.score !== undefined && msg2.score > -1e17)
+          const scoreStr2 = (msg2.score !== undefined && msg2.score !== null && msg2.score > -1e17)
             ? ' \u00b7 score ' + msg2.score.toFixed(0) : '';
           document.getElementById('progressLabel2').textContent =
             msg2.done + ' / ' + msg2.total + ' iterations' + (eta ? ' \u00b7 ' + eta : '') + scoreStr2 + '\u2026';
