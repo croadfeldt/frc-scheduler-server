@@ -539,11 +539,21 @@
     </div>
   </header>
   <!-- Share/seed bar — shown after schedule is generated -->
-  <div id="shareBar" style="display:none;background:var(--surface);border-bottom:1px solid var(--border);padding:0.4rem 1.25rem;display:none;align-items:center;gap:0.75rem;flex-wrap:wrap;">
-    <div class="seed-row">
-      <span style="color:var(--text-muted);font-size:0.7rem;">Seed:</span>
-      <span class="seed-val" id="displaySeed" title="Click to copy seed" onclick="copySeed()"></span>
-      <span id="assignSeedDisplay" style="display:none;color:var(--text-muted);font-size:0.68rem;"> · assign: <span class="seed-val" id="displayAssignSeed" onclick="copyAssignSeed()"></span></span>
+  <div id="shareBar" style="display:none;background:var(--surface);border-bottom:1px solid var(--border);padding:0.4rem 1.25rem;display:none;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+    <div class="seed-row" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+      <!-- Schedule ID (abstract) -->
+      <span style="color:var(--text-muted);font-size:0.68rem;">Schedule&nbsp;ID:</span>
+      <span class="seed-val" id="displayAbstractId" title="Click to copy — use this ID to reload this exact schedule from the server" onclick="copyAbstractId()" style="font-family:monospace;letter-spacing:0.03em;"></span>
+      <!-- Seed (re-generates same schedule from scratch) -->
+      <span style="color:var(--text-muted);font-size:0.68rem;margin-left:0.25rem;">seed:</span>
+      <span class="seed-val" id="displaySeed" title="Click to copy — the seed reproduces this schedule layout from scratch (without server)" onclick="copySeed()" style="font-size:0.68rem;opacity:0.75;"></span>
+      <!-- Assignment ID + assign seed -->
+      <span id="assignSeedDisplay" style="display:none;align-items:center;gap:0.4rem;margin-left:0.25rem;">
+        <span style="color:var(--text-muted);font-size:0.68rem;">· Assignment&nbsp;ID:</span>
+        <span class="seed-val" id="displayAssignedId" title="Click to copy — use this ID to reload this specific team assignment from the server" onclick="copyAssignedId()" style="font-family:monospace;letter-spacing:0.03em;"></span>
+        <span style="color:var(--text-muted);font-size:0.68rem;">assign&nbsp;seed:</span>
+        <span class="seed-val" id="displayAssignSeed" title="Click to copy assign seed" onclick="copyAssignSeed()" style="font-size:0.68rem;opacity:0.75;"></span>
+      </span>
     </div>
     <div style="margin-left:auto;display:flex;gap:0.5rem;">
       <button class="btn-share" onclick="shareSchedule()" title="Copy shareable URL">&#128279; Share</button>
@@ -1317,6 +1327,18 @@ function copySeed() {
 function copyAssignSeed() {
   if (_currentAssignSeed) { navigator.clipboard.writeText(_currentAssignSeed).catch(function(){}); showApiStatus('Assign seed copied'); }
 }
+function copyAbstractId() {
+  if (_currentAbstractScheduleId) {
+    navigator.clipboard.writeText(String(_currentAbstractScheduleId)).catch(function(){});
+    showApiStatus('Schedule ID ' + _currentAbstractScheduleId + ' copied — paste into URL as ?sid=' + _currentAbstractScheduleId + ' to reload');
+  }
+}
+function copyAssignedId() {
+  if (_currentAssignedScheduleId) {
+    navigator.clipboard.writeText(String(_currentAssignedScheduleId)).catch(function(){});
+    showApiStatus('Assignment ID ' + _currentAssignedScheduleId + ' copied — paste into URL as ?aid=' + _currentAssignedScheduleId + ' to reload');
+  }
+}
 
 function updateSeedDisplay(seed, assignSeed) {
   _currentSeed = seed || null;
@@ -1324,14 +1346,28 @@ function updateSeedDisplay(seed, assignSeed) {
   const bar = document.getElementById('shareBar');
   bar.style.display = 'flex';
   document.getElementById('displaySeed').textContent = seed || '(client-side)';
+  // Show abstract schedule ID
+  var absIdEl = document.getElementById('displayAbstractId');
+  if (absIdEl) absIdEl.textContent = _currentAbstractScheduleId ? '#' + _currentAbstractScheduleId : '';
   const assignRow = document.getElementById('assignSeedDisplay');
   if (assignSeed) {
     document.getElementById('displayAssignSeed').textContent = assignSeed;
-    assignRow.style.display = 'inline';
+    // Show assigned schedule ID
+    var asgIdEl = document.getElementById('displayAssignedId');
+    if (asgIdEl) asgIdEl.textContent = _currentAssignedScheduleId ? '#' + _currentAssignedScheduleId : '';
+    assignRow.style.display = 'flex';
   } else {
     assignRow.style.display = 'none';
   }
   updateDuplicateButton();
+}
+
+// Refresh just the ID badges without touching seed text (call after IDs change)
+function refreshIdBadges() {
+  var absIdEl = document.getElementById('displayAbstractId');
+  if (absIdEl) absIdEl.textContent = _currentAbstractScheduleId ? '#' + _currentAbstractScheduleId : '';
+  var asgIdEl = document.getElementById('displayAssignedId');
+  if (asgIdEl) asgIdEl.textContent = _currentAssignedScheduleId ? '#' + _currentAssignedScheduleId : '';
 }
 
 function updateDuplicateButton() {
@@ -1363,8 +1399,10 @@ function buildShareUrl() {
   if (nd)  params.set('days', nd);
   const bb = document.getElementById('breakBuffer').value;
   if (bb) params.set('bb', bb);
-  if (_currentSeed)       params.set('seed',  _currentSeed);
-  if (_currentAssignSeed) params.set('aseed', _currentAssignSeed);
+  if (_currentSeed)                params.set('seed',  _currentSeed);
+  if (_currentAssignSeed)          params.set('aseed', _currentAssignSeed);
+  if (_currentAbstractScheduleId)  params.set('sid',   _currentAbstractScheduleId);
+  if (_currentAssignedScheduleId)  params.set('aid',   _currentAssignedScheduleId);
 
   // Encode per-day schedule: d1=HH:MM-HH:MM, d1b=Name|HH:MM|HH:MM,...
   document.querySelectorAll('.day-row').forEach(function(row, i) {
@@ -1443,7 +1481,57 @@ function parseUrlParams() {
     teams:  p.get('teams') ? p.get('teams').split(',').map(Number).filter(Boolean) : null,
     event:  p.get('event') || null,
     bb:     p.get('bb')    || null,
+    sid:    p.get('sid')   ? parseInt(p.get('sid'))  : null,
+    aid:    p.get('aid')   ? parseInt(p.get('aid'))  : null,
   };
+}
+
+// Apply a stored day_config object back to the UI — used when restoring ?sid= from DB.
+// Mirrors applyUrlParams but reads from the day_config JSON structure directly.
+function applyDayConfigToUI(dc) {
+  if (!dc) return;
+  if (dc.cycleTime)   document.getElementById('cycleTime').value   = dc.cycleTime;
+  if (dc.breakBuffer != null) document.getElementById('breakBuffer').value = dc.breakBuffer;
+
+  var nd = dc.numDays || (dc.days && dc.days.length) || 0;
+  if (nd) {
+    document.getElementById('numDays').value = nd;
+    buildDaysUI();
+  }
+
+  if (dc.days && dc.days.length) {
+    var dayRows = document.querySelectorAll('.day-row');
+    dc.days.forEach(function(day, i) {
+      var row = dayRows[i];
+      if (!row) return;
+      if (day.start) row.querySelector('.day-start').value = day.start;
+      if (day.end)   row.querySelector('.day-end').value   = day.end;
+
+      // Restore breaks
+      if (day.breaks && day.breaks.length) {
+        row.querySelector('.breaks-list').innerHTML = '';
+        day.breaks.forEach(function(b) {
+          addBreak(row.querySelector('.btn-add-break'), b.start, b.end, b.name);
+        });
+      }
+
+      // Restore per-day cycle changes (skip the isStart/start-of-day row — buildDaysUI adds it)
+      if (day.cycleChanges) {
+        day.cycleChanges.forEach(function(cc) {
+          if (!cc.isStart && !isNaN(cc.afterMatch) && cc.afterMatch >= 1) {
+            addDayCycleChange(row, cc.afterMatch, cc.time, false);
+          } else if (cc.isStart) {
+            // Update the start-of-day cycle time row value
+            var startRow = row.querySelector('.day-cc-row[data-is-start="1"]');
+            if (startRow) {
+              var inp = startRow.querySelector('.cc-time');
+              if (inp) inp.value = cc.time;
+            }
+          }
+        });
+      }
+    });
+  }
 }
 
 function applyUrlParams(params) {
@@ -1500,12 +1588,62 @@ function applyUrlParams(params) {
 // Auto-run from URL params on load
 async function autoRunFromUrl() {
   const params = parseUrlParams();
-  if (!params.seed && !params.n && !params.days) return;  // nothing to auto-run
+  if (!params.seed && !params.n && !params.days && !params.sid && !params.aid) return;
   applyUrlParams(params);
 
-  // Auto-generate Stage 1 with the seed
+  // If we have a server-side ID, load directly from DB (faster, exact match)
+  if (params.aid) {
+    // aid = assigned schedule ID — load full assignment + underlying abstract
+    try {
+      const adResp  = await apiFetch('/api/assigned-schedules/' + params.aid);
+      const absResp = await apiFetch('/api/abstract-schedules/' + adResp.abstract_schedule_id);
+      _currentAbstractScheduleId = absResp.id;
+      _currentAssignedScheduleId = adResp.id;
+      _currentSeed       = absResp.seed || null;
+      _currentAssignSeed = adResp.assign_seed || null;
+      _currentSlotMap    = adResp.slot_map || null;
+      _abstractParams    = { numTeams: absResp.num_teams, matchesPerTeam: absResp.matches_per_team, cooldown: absResp.cooldown };
+      updateSeedDisplay(_currentSeed, _currentAssignSeed);
+      updateUrlFromState();
+      const dayConfig = adResp.day_config || collectDayConfig();
+      await loadAssignedSchedule(adResp.id, dayConfig);
+      showStage2Panel(_abstractParams.numTeams);
+      document.getElementById('btnCommit').style.display = 'block';
+      showApiStatus('\u2713 Assignment #' + params.aid + ' loaded from server');
+    } catch(e) {
+      showApiStatus('Could not load assignment #' + params.aid + ': ' + e.message, true);
+      if (params.seed) { _urlAutoTeams = params.teams; await generateScheduleWithSeed(params.seed); }
+    }
+    return;
+  }
+
+  if (params.sid) {
+    // sid = abstract schedule ID — restore Stage 1 without re-generating
+    try {
+      const absResp = await apiFetch('/api/abstract-schedules/' + params.sid);
+      _currentAbstractScheduleId = absResp.id;
+      _currentSeed    = absResp.seed || null;
+      _abstractParams = { numTeams: absResp.num_teams, matchesPerTeam: absResp.matches_per_team, cooldown: absResp.cooldown };
+      updateSeedDisplay(_currentSeed, null);
+      // Use stored day_config if available (fully self-contained restore)
+      const dayConfig = absResp.day_config || collectDayConfig();
+      if (absResp.day_config) applyDayConfigToUI(absResp.day_config);
+      updateUrlFromState();
+      window._frcAbstractMode = true;
+      displayAbstractSchedule(absResp, dayConfig);
+      showStage2Panel(_abstractParams.numTeams);
+      await checkForSavedAssignment(absResp.id);
+      showApiStatus('\u2713 Schedule #' + params.sid + ' loaded from server');
+    } catch(e) {
+      showApiStatus('Could not load schedule #' + params.sid + ': ' + e.message, true);
+      if (params.seed) { _urlAutoTeams = params.teams; await generateScheduleWithSeed(params.seed); }
+    }
+    return;
+  }
+
+  // Fall back to seed-based client regeneration
   if (params.seed) {
-    _urlAutoTeams = params.teams;  // stash for Stage 2
+    _urlAutoTeams = params.teams;
     await generateScheduleWithSeed(params.seed);
   }
 }
@@ -3154,6 +3292,7 @@ async function generateSchedule() {
         seed,
         name: 'Abstract ' + new Date().toLocaleTimeString(),
         event_id: _currentEventId ? parseInt(_currentEventId) : null,
+        day_config: dayConfig,
       }),
     });
 

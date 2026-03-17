@@ -625,6 +625,43 @@ const interruptBreak = (!nextBreak || breakBuffer <= 0 || (nextBreak.start - cur
 Applied in `_finishGenerationInner` and `calcMaxMatches`.
 `bb` encoded in share URL, restored via `applyUrlParams`.
 
+### `applyDayConfigToUI(dc)`
+
+Restores a `day_config` object (from `AbstractSchedule.day_config` or `AssignedSchedule.day_config`) back into the UI fields. Called during `?sid=` restore so the UI reflects the exact timing config used when the schedule was generated.
+
+Steps: sets `cycleTime`, `breakBuffer`; calls `buildDaysUI()` with the correct `numDays`; for each day row sets `start`/`end`, clears and re-adds breaks via `addBreak()`, updates the start-of-day cycle time input, and adds after-match cycle changes via `addDayCycleChange()`.
+
+### `AbstractSchedule.day_config` (DB column)
+
+`JSON, nullable=True` — stores the full `collectDayConfig()` snapshot at Stage 1 time. This makes `?sid=` restores fully self-contained: no URL timing params needed. The column is also copied by the duplicate endpoint.
+
+**DB migration required for existing databases:**
+```sql
+ALTER TABLE abstract_schedules ADD COLUMN IF NOT EXISTS day_config JSON;
+```
+See `migrate_abstract_day_config.sql`.
+
+### Schedule & assignment IDs (`sid` / `aid`)
+
+**Share bar** (visible after Stage 1):
+```
+Schedule ID: #16  seed: 1f213205  ·  Assignment ID: #7  assign seed: cafebabe
+```
+- `#16` = `_currentAbstractScheduleId` (DB PK). Clicking copies it; tooltip shows `?sid=16`.
+- `#7` = `_currentAssignedScheduleId` (DB PK). Clicking copies it; tooltip shows `?aid=7`.
+- Seeds are shown smaller/dimmed as secondary identifiers.
+
+**`buildShareUrl`** encodes `sid` and `aid` alongside seed/aseed.
+
+**`autoRunFromUrl` restore priority:**
+1. `params.aid` → `GET /api/assigned-schedules/{aid}` + `GET /api/abstract-schedules/{abstract_id}` → `loadAssignedSchedule()` (no regeneration)
+2. `params.sid` → `GET /api/abstract-schedules/{sid}` → `displayAbstractSchedule()` + `checkForSavedAssignment()` (no regeneration)
+3. `params.seed` → `generateScheduleWithSeed()` (original client-side path)
+
+**`updateSeedDisplay(seed, assignSeed)`** updates both seed text and ID badges. ID badges also updated via `refreshIdBadges()` when IDs change independently.
+
+**Copy functions:** `copyAbstractId()`, `copyAssignedId()`, `copySeed()`, `copyAssignSeed()` — all show a status message explaining how to use the copied value in a URL.
+
 ### db.py column types
 
 `teams.name`, `events.name`, `events.location` use `Text` (SQLAlchemy `Text`, PostgreSQL `TEXT`, unlimited length). Needed because TBA sponsor names regularly exceed 256 characters. Import `Text` from `sqlalchemy` alongside `String`.

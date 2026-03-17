@@ -150,6 +150,7 @@ class AbstractGenerateRequest(BaseModel):
     seed:             str | None  = None
     name:             str         = "Abstract Schedule"
     event_id:         int | None  = None
+    day_config:       Any         = None
 
     from pydantic import field_validator
 
@@ -426,6 +427,7 @@ async def generate_abstract(
                     matches=result["matches"],
                     surrogate_count=result["surrogate_count"],
                     round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
+                    day_config=body.day_config,
                 )
                 db.add(sched)
                 await db.commit()
@@ -476,6 +478,7 @@ async def get_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(get
         "score": sched.score, "matches": sched.matches,
         "surrogate_count": sched.surrogate_count,
         "round_boundaries": sched.round_boundaries,
+        "day_config": sched.day_config,
         "created_by": sched.created_by,
         "created_at": sched.created_at.isoformat(),
     }
@@ -887,6 +890,7 @@ async def duplicate_assigned_schedule(
         matches=abs_src.matches,
         surrogate_count=abs_src.surrogate_count,
         round_boundaries=abs_src.round_boundaries,
+        day_config=abs_src.day_config,
         created_by=current_user["sub"] if current_user else None,
     )
     db.add(new_abs)

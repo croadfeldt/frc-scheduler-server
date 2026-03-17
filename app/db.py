@@ -128,6 +128,7 @@ class AbstractSchedule(Base):
     matches:          Mapped[Any] = mapped_column(JSON)  # [{red:[s1,s2,s3], blue:[s4,s5,s6], red_surrogate:[...], blue_surrogate:[...]}]
     surrogate_count:  Mapped[Any] = mapped_column(JSON)  # [0, count_slot1, count_slot2, ...] 1-indexed
     round_boundaries: Mapped[Any] = mapped_column(JSON)  # {"1": match_idx, "2": match_idx, ...}
+    day_config:       Mapped[Any|None] = mapped_column(JSON, nullable=True)  # timing/break/cycle config snapshot
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

@@ -451,7 +451,44 @@ Without `JWT_SECRET`, the server starts but `/auth/google/login` and `/auth/appl
 
 ---
 
+## Share bar & schedule IDs
+
+After Stage 1 completes, a bar appears below the header with clickable identifiers:
+
+```
+Schedule ID: #16  seed: 1f213205  ·  Assignment ID: #7  assign seed: cafebabe
+```
+
+| Element | Purpose | Click action |
+|---|---|---|
+| **Schedule ID `#16`** | `abstract_schedule_id` — DB primary key for the slot-based schedule | Copies `#16`; tooltip shows `?sid=16` URL syntax |
+| **seed `1f213205`** | 8-hex seed that reproduces the schedule from scratch (no server needed) | Copies seed |
+| **Assignment ID `#7`** | `assigned_schedule_id` — DB primary key for the team assignment | Copies `#7`; tooltip shows `?aid=7` URL syntax |
+| **assign seed** | Seed used for team assignment iteration | Copies assign seed |
+
+### URL restore priority
+
+When loading a URL, the app resolves the schedule in this order:
+
+1. `?aid=7` — fetches the assigned schedule + its abstract from DB, renders immediately with real teams. No regeneration needed.
+2. `?sid=16` — fetches the abstract schedule from DB, restores its stored day/timing config to the UI, and renders the schedule. Fully self-contained — no URL timing params needed. Shows "Load saved assignment" banner if an assignment exists.
+3. `?seed=…` — falls back to client-side regeneration from the seed (original behaviour).
+
+The **Share** button copies the full URL including `sid` and `aid` so any recipient can load the exact same schedule instantly.
+
 ## Known behaviour & recent fixes
+
+### DB migration required — `abstract_schedules.day_config`
+
+The `abstract_schedules` table needs a new `day_config` column. On any **existing** database run:
+
+```bash
+oc exec -n frc-scheduler-server $(oc get pod -l app=frc-postgres -o name) \
+  -- psql -U frc -d frc_scheduler \
+  -c "ALTER TABLE abstract_schedules ADD COLUMN IF NOT EXISTS day_config JSON;"
+```
+
+Or use the included `migrate_abstract_day_config.sql`. Fresh databases are unaffected (`create_all` builds the correct schema).
 
 ### TBA import — team name length
 TBA sponsor names can exceed 256 characters (e.g. WildStang team 111). The `teams.name`,
