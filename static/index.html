@@ -1271,12 +1271,7 @@ function addBreak(btn, startVal, endVal, nameVal) {
   const nameInput = row.querySelector('.break-name');
   nameInput.addEventListener('focus', function() { this.select(); });
   nameInput.addEventListener('change', validateTimesAndRecalc);
-  nameInput.addEventListener('input', function() {
-    clearTimeout(_autoPopulateTimeout);
-    if (_abstractParams !== null && document.getElementById('autoPopulate').checked) {
-      _autoPopulateTimeout = setTimeout(function() { generateSchedule(); }, 1500);
-    }
-  });
+  nameInput.addEventListener('input', function() { onParamChanged(); });
 
   startInput.addEventListener('change', function() {
     // Shift end time to preserve the original duration
@@ -1370,6 +1365,9 @@ document.getElementById('numDays').addEventListener('change', function() {
 });
 
 // cycleTime field: push value down to all day start-of-day rows (one-way only)
+document.getElementById('cycleTime').addEventListener('input', function() {
+  onParamChanged();
+});
 document.getElementById('cycleTime').addEventListener('change', function() {
   var newCt = parseFloat(this.value);
   if (!newCt || newCt <= 0) return;
@@ -2720,6 +2718,7 @@ function addDayCycleChange(dayRow, afterMatch, newTime, isStart) {
 
   timeInput.addEventListener('input', function() {
     checkCcTime(); validateCycleChanges();
+    onParamChanged();
   });
   timeInput.addEventListener('change', function() {
     checkCcTime(); validateCycleChanges();
@@ -2733,7 +2732,7 @@ function addDayCycleChange(dayRow, afterMatch, newTime, isStart) {
       afterInput.classList.toggle('input-error', bad);
       return !bad;
     }
-    afterInput.addEventListener('input',  function() { checkAfter(); refreshCycleDayLabels(); validateCycleChanges(); });
+    afterInput.addEventListener('input',  function() { checkAfter(); refreshCycleDayLabels(); validateCycleChanges(); onParamChanged(); });
     afterInput.addEventListener('change', function() { checkAfter(); refreshCycleDayLabels(); validateCycleChanges(); onParamChanged(); });
 
     row.querySelector('.btn-remove-cc').addEventListener('click', function() {
@@ -2813,9 +2812,9 @@ function addCycleChange(afterMatch, newTime, forDay) {
   if (defaultAfter !== '') checkAfter();
   if (newTime) checkTime();
 
-  afterInput.addEventListener('input', function() { checkAfter(); updateDayLabel(); validateCycleChanges(); });
+  afterInput.addEventListener('input', function() { checkAfter(); updateDayLabel(); validateCycleChanges(); onParamChanged(); });
   afterInput.addEventListener('change', function() { checkAfter(); updateDayLabel(); validateCycleChanges(); onParamChanged(); });
-  timeInput.addEventListener('input',  function() { checkTime(); validateCycleChanges(); });
+  timeInput.addEventListener('input',  function() { checkTime(); validateCycleChanges(); onParamChanged(); });
   timeInput.addEventListener('change', function() { checkTime(); validateCycleChanges(); onParamChanged(); });
   row.querySelector('.btn-remove-cc').addEventListener('click', function() {
     row.remove(); validateCycleChanges(); onParamChanged();
