@@ -1678,16 +1678,23 @@ function calcMaxMatches() {
       if (nextBreak && breakBuffer > 0 && nextBreak.start - cursor < breakBuffer) {
         cursor = Math.max(cursor, nextBreak.end); nextBreak.done = true; continue;
       }
-      // Get effective cycle time for this match using per-day rules
+      // Get effective cycle time — use GLOBAL totalSlotMatches so cross-day
+      // cycle changes (e.g. after match 65) fire correctly on Day 2+
       var ct = (function() {
         var t = dayCycleChanges.length > 0 ? dayCycleChanges[0].time : (parseFloat(document.getElementById('cycleTime').value) || 8);
         dayCycleChanges.forEach(function(cc) {
           if (cc.isStart) { t = cc.time; }
-          else if (!isNaN(cc.afterMatch) && dayMatchCount + 1 > cc.afterMatch) { t = cc.time; }
+          else if (!isNaN(cc.afterMatch) && totalSlotMatches + 1 > cc.afterMatch) { t = cc.time; }
         });
         return t;
       })();
       if (cursor + ct > dayEnd) break;
+      // Interrupt suppression: if match start already cleared the buffer, don't
+      // interrupt it even if the cycle time overlaps the break start
+      var alreadyCleared = nextBreak && breakBuffer > 0 && nextBreak.start - cursor >= breakBuffer;
+      if (!alreadyCleared && nextBreak && nextBreak.start > cursor && nextBreak.start < cursor + ct) {
+        cursor = Math.max(cursor, nextBreak.end); nextBreak.done = true; continue;
+      }
       cursor += ct;
       dayMatchCount++;
       totalSlotMatches++;
