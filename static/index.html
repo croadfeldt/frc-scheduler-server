@@ -650,11 +650,13 @@
   }
   /* ── Processing overlay ── */
   .processing-overlay {
-    display: none; position: fixed; inset: 0; z-index: 1000;
+    display: flex; position: fixed; inset: 0; z-index: 1000;
     background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);
     align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.15s ease;
   }
-  .processing-overlay.active { display: flex; }
+  .processing-overlay.active { opacity: 1; pointer-events: auto; }
   .processing-card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 8px; padding: 1.5rem 2rem; min-width: 320px; max-width: 480px;
@@ -713,9 +715,12 @@
 </head>
 <body>
 <!-- Processing overlay — shown during multi-step auto operations -->
-<div class="processing-overlay" id="processingOverlay">
+<div class="processing-overlay" id="processingOverlay" onclick="if(event.target===this)_overlay.hide();">
   <div class="processing-card">
-    <div class="processing-title" id="processingTitle">Processing&hellip;</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+      <div class="processing-title" id="processingTitle" style="margin-bottom:0;">Processing&hellip;</div>
+      <button onclick="_overlay.hide();" style="background:none;border:none;color:var(--text-muted);font-size:1rem;cursor:pointer;padding:0.1rem 0.3rem;line-height:1;" title="Dismiss">&times;</button>
+    </div>
     <div class="processing-steps" id="processingSteps"></div>
     <div class="processing-detail" id="processingDetail"></div>
     <div class="processing-progress"><div class="processing-progress-fill" id="processingProgressFill"></div></div>
@@ -1163,10 +1168,10 @@ var _overlay = (function() {
       _render();
       var p = document.getElementById('processingProgressFill');
       if (p) p.style.width = '100%';
-      setTimeout(function() {
-        var ov = document.getElementById('processingOverlay');
-        if (ov) ov.classList.remove('active');
-      }, 400);
+      var d = document.getElementById('processingDetail');
+      if (d) d.textContent = '';
+      var ov = document.getElementById('processingOverlay');
+      if (ov) ov.classList.remove('active');
     },
     isVisible: function() { return _visible; },
   };
