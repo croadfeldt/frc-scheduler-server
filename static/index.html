@@ -2241,6 +2241,23 @@ async function fetchAgendaPDF(eventCode) {
   return await r.arrayBuffer();
 }
 
+/**
+ * Normalise time tokens that PDF.js fragments with spurious spaces.
+ * Also repairs district-specific artefacts:
+ *   - "fi" ligature split ("Qualifi cation" in Wisconsin/other PDFs)
+ *   - Truncated AM/PM ("12:30P" → "12:30PM", seen in California district PDFs)
+ * Uses [ \t] instead of \s so the regex never crosses a newline boundary.
+ */
+function normalizePDFText(text) {
+  text = text.replace(/Qualif\s+ication/gi, 'Qualification');
+  text = text.replace(/Quali\s+fi\s*cation/gi, 'Qualification');
+  text = text.replace(/(\d{1,2}:\d{2})([AaPp])(?![Mm])/g, '$1$2M');
+  return text.replace(
+    /\d[ \t]?\d?[ \t]*:[ \t]*\d[ \t]*\d[ \t]*[AaPp][ \t]*[Mm]/g,
+    m => m.replace(/\s+/g, '')
+  );
+}
+
 async function parsePDFBlocks(buf) {
   const lib = await loadPdfJs();
   const pdf = await lib.getDocument({ data: buf }).promise;
@@ -2260,38 +2277,109 @@ async function parsePDFBlocks(buf) {
       allText += items.map(it => it.str).join(' ').trim() + '\n';
     }
   }
-  // Collapse PDF.js character-spacing artifacts in time tokens
-  allText = allText.replace(/\d[ \t]?\d?[ \t]*:[ \t]*\d[ \t]*\d[ \t]*[AaPp][ \t]*[Mm]/g,
-    m => m.replace(/\s+/g, ''));
-  return parseQualBlocks(allText);
+  return parseQualBlocks(normalizePDFText(allText));
 }
 
+/**
+ * Parse qual match blocks from normalised agenda text.
+ * Handles multiple FIRST district format variants:
+ *   - Standard / Peachtree / Chesapeake: "HH:MM AM – HH:MM AM  Qualification Matches"
+ *     (with optional footnote markers, ~ on end time for Chesapeake approx times)
+ *   - Ontario: two-column no-separator "HH:MM am  HH:MM am  Qualification Matches"
+ *   - North Carolina: start-time-only "HH:MM AM  Qualification Matches Begin/Continue"
+ *   - Wisconsin: "fi" ligature split fixed by normalizePDFText
+ *   - Colorado: numeric date "Friday, 4/10/26"
+ * After parsing, merges consecutive blocks with a gap ≤ 30 min (brief field breaks).
+ */
 function parseQualBlocks(text) {
   const blocks = [];
   const lines = text.replace(/\r/g, '').split('\n');
-  const dayRe  = /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b\s*[,]?\s+(\w+\s+\d{1,2})/i;
-  const qualRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-–—]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Match/i;
+
+  // Day header — also handles numeric dates like "Friday, 4/10/26" (Colorado)
+  const dayRe = /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b\s*[,]?\s+(\w+\s+\d{1,2}|\d+\/\d+\/\d+)/i;
+
+  // Standard / Peachtree / Chesapeake:
+  // optional single-char note marker, optional ~ on end time
+  const qualRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z*†~]{1,2})?\s*[-\u2013\u2014]\s*~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z0-9*†~]{1,2})?\s+Qualification\s+Match/i;
+
+  // Ontario: two-column, no dash separator
+  const qualNoSepRe = /^(\d{1,2}:\d{2}\s*[AaPp][Mm])[ \t]+(\d{1,2}:\d{2}\s*[AaPp][Mm])[ \t*]+Qualification\s+Match/i;
+
+  // North Carolina: single start time with Begin/Continue keyword
+  const qualBeginRe = /^~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])[ \t]+Qualification\s+Match(?:es?)?[ \t]+(?:Begin|Continue)/i;
+  const leadTimeRe  = /^~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])/;
+
   let currentDay = '';
   let blockNum = 0;
+  let openBeginBlock = null;
+
+  const hasBlock = start => blocks.some(b => Math.abs(b.start - start) < 20);
+
+  function closeOpenBlock(endStr, endTime) {
+    if (!openBeginBlock) return;
+    if (endTime !== null && endTime > openBeginBlock.start && !hasBlock(openBeginBlock.start)) {
+      blockNum++;
+      blocks.push({
+        start: openBeginBlock.start, end: endTime,
+        duration: endTime - openBeginBlock.start,
+        startStr: openBeginBlock.startStr, endStr,
+        day: openBeginBlock.day,
+      });
+    }
+    openBeginBlock = null;
+  }
+
   for (const line of lines) {
     const dayMatch = dayRe.exec(line);
     if (dayMatch) currentDay = dayMatch[1].substring(0, 3) + ' ' + dayMatch[2];
-    const qualMatch = qualRe.exec(line);
+
+    const qualMatch = qualRe.exec(line) || qualNoSepRe.exec(line);
     if (qualMatch) {
       const start = parseTime12agenda(qualMatch[1]);
       const end   = parseTime12agenda(qualMatch[2]);
       if (start !== null && end !== null && end > start) {
+        if (openBeginBlock) {
+          if (Math.abs(openBeginBlock.start - start) >= 20) {
+            closeOpenBlock(qualMatch[1].trim(), start);
+          } else {
+            openBeginBlock = null;
+          }
+        }
         blockNum++;
         blocks.push({ start, end, duration: end - start,
           startStr: qualMatch[1].trim(), endStr: qualMatch[2].trim(),
           day: currentDay || ('Block ' + blockNum) });
       }
+      continue;
+    }
+
+    const beginMatch = qualBeginRe.exec(line.trim());
+    if (beginMatch) {
+      const t = parseTime12agenda(beginMatch[1]);
+      if (t !== null) {
+        if (openBeginBlock && t > openBeginBlock.start) {
+          closeOpenBlock(beginMatch[1].trim(), t);
+        }
+        openBeginBlock = { start: t, startStr: beginMatch[1].trim(), day: currentDay || '' };
+      }
+      continue;
+    }
+
+    if (openBeginBlock) {
+      const m = leadTimeRe.exec(line.trim());
+      if (m) {
+        const t = parseTime12agenda(m[1]);
+        if (t && t > openBeginBlock.start && (t - openBeginBlock.start) >= 30) {
+          closeOpenBlock(m[1].trim(), t);
+        }
+      }
     }
   }
+
+  // Fallback: join all lines and retry
   if (blocks.length === 0) {
-    // Fallback: scan joined text
     const fullText = text.replace(/\n/g, ' ');
-    const reG = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-–—]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Match/gi;
+    const reG = /(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z*†~]{1,2})?\s*[-\u2013\u2014]\s*~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z0-9*†~]{1,2})?\s+Qualification\s+Match/gi;
     let m;
     while ((m = reG.exec(fullText)) !== null) {
       const start = parseTime12agenda(m[1]);
@@ -2302,6 +2390,20 @@ function parseQualBlocks(text) {
           startStr: m[1].trim(), endStr: m[2].trim(), day: 'Block ' + blockNum });
     }
   }
+
+  // Merge consecutive blocks with gap ≤ 30 min (brief field breaks between sessions)
+  for (let i = blocks.length - 1; i > 0; i--) {
+    const gap = blocks[i].start - blocks[i - 1].end;
+    if (gap >= 0 && gap <= 30) {
+      blocks[i - 1] = {
+        ...blocks[i - 1],
+        end: blocks[i].end, endStr: blocks[i].endStr,
+        duration: blocks[i].end - blocks[i - 1].start,
+      };
+      blocks.splice(i, 1);
+    }
+  }
+
   return blocks;
 }
 
