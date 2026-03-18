@@ -1070,6 +1070,7 @@
 <script>
 // ── API base URL — must be declared before any function that references it ────
 const API = window.location.origin;
+const _PAGE_T0 = performance.now();
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let _currentEventId = null;
@@ -2028,9 +2029,11 @@ function applyUrlParams(params) {
 
 // Auto-run from URL params on load
 async function autoRunFromUrl() {
+  const _auto0 = performance.now();
   const params = parseUrlParams();
   if (!params.seed && !params.n && !params.days && !params.sid && !params.aid) return;
   applyUrlParams(params);
+  console.debug('[timing] params+UI applied', Math.round(performance.now() - _PAGE_T0) + 'ms from page start');
 
   // If we have a server-side ID, load directly from DB (faster, exact match)
   if (params.aid) {
@@ -5506,6 +5509,7 @@ async function assignTeams() {
 
 // Load and display an assigned schedule (Stage 2 result)
 async function loadAssignedSchedule(scheduleId, dayConfig) {
+  const _las0 = performance.now();
   window._frcAbstractMode  = false; // real team numbers are now available
   window._frcShowFakeTeams = false;
   var fakeBtn3 = document.getElementById('btnShowFakeTeams');
@@ -5531,8 +5535,10 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
       Object.entries(sched.round_boundaries || {}).map(function(e) { return [parseInt(e[0]), e[1]]; })
     );
     window._frcAbstractMode = false;
+    console.debug('[timing] data fetched+mapped', Math.round(performance.now() - _las0) + 'ms');
     finishGeneration(matches, roundBoundaries, sched.surrogate_count,
       0, 0, dayConfig || sched.day_config);
+    console.debug('[timing] loadAssignedSchedule total', Math.round(performance.now() - _las0) + 'ms');
     showApiStatus('Schedule loaded');
   } catch(e) { showApiStatus(e.message, true); }
 }
@@ -5625,8 +5631,11 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
 
 
 function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride) {
+  const _fg0 = performance.now();
   try {
-    return _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride);
+    const result = _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride);
+    console.debug('[timing] finishGeneration total', Math.round(performance.now() - _fg0) + 'ms');
+    return result;
   } catch(e) {
     console.error('finishGeneration error:', e);
     showApiStatus('Schedule render error: ' + e.message, true);
@@ -5694,6 +5703,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   const totalMatches = matches.length;
   const scheduled = [];
   let matchIdx = 0;
+  const _loop0 = performance.now();
 
   for (let d = 0; d < days.length && matchIdx < totalMatches; d++) {
     const day = days[d];
@@ -5822,7 +5832,9 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   }
 
   // Update stats
+  const _b2b0 = performance.now();
   const b2bRaw = countBackToBacks(matches);
+  console.debug('[timing] countBackToBacks', Math.round(performance.now() - _b2b0) + 'ms');
   // In abstract mode slot indices are not real teams — B2B count is meaningless.
   // Only show it when real teams are assigned or fake teams are being displayed.
   const b2b = window._frcAbstractMode ? 0 : b2bRaw;
@@ -5876,6 +5888,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   if (dlBar) dlBar.style.display = 'flex';
 
   // Store scheduled globally for filter re-application
+  console.debug('[timing] placement loop', Math.round(performance.now() - _loop0) + 'ms');
   window._frcScheduled = scheduled;
   refreshCycleDayLabels(); // update day labels on cycle change rows
   window._frcRoundBoundaries = roundBoundaries;
@@ -5903,8 +5916,11 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   // Sync agenda fit panel with the freshly rendered schedule
   if (document.getElementById('agendaFitPanel') &&
       document.getElementById('agendaFitPanel').style.display !== 'none') {
+    const _af0 = performance.now();
     updateAgendaFit();
+    console.debug('[timing] updateAgendaFit', Math.round(performance.now() - _af0) + 'ms');
   }
+  console.debug('[timing] page interactive', Math.round(performance.now() - _PAGE_T0) + 'ms from page start');
 }
 
 // ── Filter state ─────────────────────────────────────────────────────────────
@@ -6060,6 +6076,7 @@ function renderTeam(team, isSurrogate, isB2B, colorClass) {
 }
 
 function renderSchedule() {
+  const _rs0 = performance.now();
   var scheduled = window._frcScheduled;
   if (!scheduled) return;
   if (!window._frcFilters) window._frcFilters = { teams: [], alliance: null, day: null, b2b: false, surrogate: false };
@@ -6199,6 +6216,7 @@ function renderSchedule() {
     block.appendChild(table);
     output.appendChild(block);
   });
+  console.debug('[timing] renderSchedule', Math.round(performance.now() - _rs0) + 'ms');
 }
 
 function downloadCSV() {
