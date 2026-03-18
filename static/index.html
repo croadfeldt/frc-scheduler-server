@@ -2488,41 +2488,46 @@ function renderScheduleBars() {
     return;
   }
 
-  var ct = parseFloat(document.getElementById('cycleTime').value) || 8;
+  // Day color palette — one distinct color per day number
+  var DAY_COLORS = [
+    'var(--accent)',   // Day 1 — blue
+    'var(--accent3)',  // Day 2 — green
+    '#cba6f7',         // Day 3 — mauve/purple
+    '#f38ba8',         // Day 4 — red/pink
+    '#fab387',         // Day 5 — peach
+  ];
+  function dayColor(n) { return DAY_COLORS[(n - 1) % DAY_COLORS.length] || DAY_COLORS[0]; }
 
   // ── Build sections from schedule ────────────────────────────────────────────
-  // A section = contiguous match play separated from neighbours by a break > threshold.
-  // windowDur = section's available time slot (slot start→end, from day config).
-  // committed = matchCount × ct.
+  // committed = sum of actual match durations (endMin - startMin), which already
+  // reflects per-match cycle time changes embedded in the schedule.
   var allSections = [];
 
   window._frcScheduled.forEach(function(day) {
     if (!day.entries || !day.entries.length) return;
-
-    // Day label: use day.dayNum if available
-    var dayLabel = day.dayNum ? 'Day ' + day.dayNum : '';
-
-    // Walk entries, splitting at large breaks
-    var currentMatches = [];
+    var dayNum   = day.dayNum || 1;
+    var dayLabel = 'Day ' + dayNum;
+    var currentMatches     = [];
     var currentShortBreaks = [];
-    var slotStart = day.start != null ? day.start : null;  // start of current slot
-    var prevBreakEnd = slotStart;                          // after last large break
+    var slotStart = (day.start != null) ? day.start : null;
 
-    function flushSection() {
+    function flushSection(slotEndOverride) {
       if (!currentMatches.length) return;
-      // Slot end = start of the next large break (or day end)
-      var slotEnd = day.end != null ? day.end : currentMatches[currentMatches.length - 1].endMin;
+      var slotEnd = (slotEndOverride != null) ? slotEndOverride
+                  : (day.end   != null)        ? day.end
+                  : currentMatches[currentMatches.length - 1].endMin;
+      var committed = currentMatches.reduce(function(sum, m) {
+        return sum + ((m.endMin || 0) - (m.startMin || 0));
+      }, 0);
       allSections.push({
-        dayLabel:    dayLabel,
-        slotStart:   prevBreakEnd != null ? prevBreakEnd : currentMatches[0].startMin,
-        slotEnd:     slotEnd,
+        dayNum, dayLabel,
+        slotStart: (slotStart != null) ? slotStart : currentMatches[0].startMin,
+        slotEnd,
         matchCount:  currentMatches.length,
+        committed,
         shortBreaks: currentShortBreaks.slice(),
-        firstMatchStart: currentMatches[0].startMin,
-        lastMatchEnd:    currentMatches[currentMatches.length - 1].endMin,
       });
-      currentMatches = [];
-      currentShortBreaks = [];
+      currentMatches = []; currentShortBreaks = [];
     }
 
     day.entries.forEach(function(entry) {
@@ -2531,17 +2536,15 @@ function renderScheduleBars() {
       } else if (entry.type === 'break') {
         var dur = (entry.end || 0) - (entry.start || 0);
         if (dur > AGENDA_BREAK_THRESHOLD) {
-          // Large break — close section, update slot start for next section
-          flushSection();
-          prevBreakEnd = entry.end;
-          slotStart    = entry.end;
+          flushSection(entry.start);
+          slotStart = entry.end;
         } else {
-          // Short break — tick mark inside current section
           if (currentMatches.length) currentShortBreaks.push(entry);
         }
       }
+      // cycle-change entries already baked into match endMin — skip here
     });
-    flushSection();
+    flushSection(null);
   });
 
   if (!allSections.length) {
@@ -2550,51 +2553,45 @@ function renderScheduleBars() {
   }
 
   // ── Proportional bar widths ──────────────────────────────────────────────────
-  // Largest slot fills 100% of container; others scale proportionally.
   var maxSlotDur = 0;
-  allSections.forEach(function(s) {
-    var dur = s.slotEnd - s.slotStart;
-    if (dur > maxSlotDur) maxSlotDur = dur;
-  });
+  allSections.forEach(function(s) { var d = s.slotEnd - s.slotStart; if (d > maxSlotDur) maxSlotDur = d; });
 
   // ── Render ──────────────────────────────────────────────────────────────────
   var html = '';
   allSections.forEach(function(s) {
-    var slotDur    = s.slotEnd - s.slotStart;
+    var slotDur     = s.slotEnd - s.slotStart;
     var barWidthPct = maxSlotDur > 0 ? (slotDur / maxSlotDur * 100) : 100;
-    var committed  = s.matchCount * ct;
-    var fillPct    = slotDur > 0 ? Math.min(committed / slotDur * 100, 100) : 0;
-    var overage    = Math.round(committed - slotDur);
-    var color      = overage > 0   ? 'var(--amber)'
-                   : fillPct > 90  ? 'var(--amber)'
-                   : 'var(--accent3)';
+    var committed   = s.committed;
+    var fillPct     = slotDur > 0 ? Math.min(committed / slotDur * 100, 100) : 0;
+    var overage     = Math.round(committed - slotDur);
+    var dc          = dayColor(s.dayNum);
+    var fillColor   = (overage > 0 || fillPct > 90) ? 'var(--amber)' : dc;
+    var avgCt       = s.matchCount > 0 ? (committed / s.matchCount).toFixed(1) : '\u2014';
 
     var label = s.matchCount + ' match' + (s.matchCount !== 1 ? 'es' : '')
-              + ' \u00b7 ' + Math.round(committed) + '\u202fmin committed';
-    if (overage > 0)  label += ' (+' + overage + ' over)';
-    else              label += ' / ' + Math.round(slotDur) + '\u202fmin slot';
+              + ' \u00b7 ' + Math.round(committed) + '\u202fmin'
+              + ' (avg ' + avgCt + '\u202fmin/match)';
+    if (overage > 0) label += ' \u00b7 +' + overage + ' over';
+    else             label += ' / ' + Math.round(slotDur) + '\u202fmin slot';
 
-    // Short-break tick marks — positioned relative to slot window
     var ticksHtml = s.shortBreaks.map(function(brk) {
       var pos = slotDur > 0 ? ((brk.start - s.slotStart) / slotDur * 100) : 0;
       return '<div title="' + (brk.name || 'Break') + ' (' + Math.round((brk.end||0)-(brk.start||0)) + '\u202fmin)" '
            + 'style="position:absolute;top:0;bottom:0;left:' + pos.toFixed(1) + '%;'
-           + 'width:2px;background:rgba(255,255,255,0.35);pointer-events:auto;"></div>';
+           + 'width:2px;background:rgba(0,0,0,0.25);pointer-events:auto;cursor:default;"></div>';
     }).join('');
 
     html += '<div class="agenda-block-row">'
-          // Header row: day label + time range + slot duration
           + '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.2rem;">'
-          +   '<span style="font-size:0.7rem;font-weight:700;color:var(--accent2);letter-spacing:0.04em;">' + s.dayLabel + '</span>'
+          +   '<span style="font-size:0.7rem;font-weight:700;color:' + dc + ';letter-spacing:0.04em;">' + s.dayLabel + '</span>'
           +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
           +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
           +   '</span>'
           +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(slotDur) + '\u202fmin</span>'
           + '</div>'
-          // Bar — width proportional to largest slot
           + '<div style="width:' + barWidthPct.toFixed(1) + '%;min-width:60px;">'
           +   '<div class="agenda-timeline-bar" style="position:relative;">'
-          +     '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + color + ';">'
+          +     '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + fillColor + ';">'
           +       label
           +     '</div>'
           +     ticksHtml
@@ -2628,26 +2625,39 @@ function updateAgendaFit() {
   var totalMatches = Math.ceil(totalSlots / 6);
   var surrogates   = totalMatches * 6 - totalSlots;
 
-  // Compute available time and weighted-average cycle time across blocks
+  // Compute available time and committed time
+  // If a schedule exists, use actual match durations (respects cycle time changes).
+  // Otherwise estimate from weighted-average cycle time across agenda blocks.
   var availableMin = 0;
-  var effectiveCt = ct; // fallback to global if no blocks
-  if (_agendaBlocks && _agendaBlocks.length) {
+  var timeNeeded   = 0;
+  var effectiveCt  = ct;
+
+  if (window._frcScheduled && window._frcScheduled.length) {
+    // Available = sum of all slot durations from the day config
+    // Committed = sum of actual match endMin - startMin across entire schedule
+    window._frcScheduled.forEach(function(day) {
+      if (day.start != null && day.end != null) availableMin += (day.end - day.start);
+      (day.entries || []).forEach(function(entry) {
+        if (entry.type === 'match') timeNeeded += ((entry.endMin || 0) - (entry.startMin || 0));
+        else if (entry.type === 'break') availableMin -= ((entry.end || 0) - (entry.start || 0));
+      });
+    });
+    effectiveCt = totalMatches > 0 ? timeNeeded / totalMatches : ct;
+  } else if (_agendaBlocks && _agendaBlocks.length) {
     availableMin = _agendaBlocks.reduce(function(s, b) { return s + b.duration; }, 0);
-    // Weighted average: each block's cycle time weighted by its capacity share
-    var totalCap = 0;
-    var weightedCt = 0;
+    var totalCap = 0, weightedCt = 0;
     _agendaBlocks.forEach(function(b, bi) {
       var bCt = getBlockCycleTime(bi);
       var cap = b.duration / bCt;
-      totalCap  += cap;
-      weightedCt += bCt * cap;
+      totalCap += cap; weightedCt += bCt * cap;
     });
     if (totalCap > 0) effectiveCt = weightedCt / totalCap;
+    timeNeeded = totalMatches * effectiveCt;
   } else {
     var manEl = document.getElementById('agendaManualMin');
     availableMin = manEl ? (parseInt(manEl.value) || 360) : 360;
+    timeNeeded = totalMatches * ct;
   }
-  var timeNeeded = totalMatches * effectiveCt;
 
   var surplus  = availableMin - timeNeeded;
   var pct      = availableMin > 0 ? (timeNeeded / availableMin * 100) : 100;
