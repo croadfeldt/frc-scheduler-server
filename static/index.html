@@ -1258,13 +1258,16 @@ function randomSeed() {
 var DEFAULT_END_TIMES = ['17:00','18:00','12:00','12:00','12:00'];
 function applyDayEndTimes() {
   var rows = Array.from(document.querySelectorAll('.day-row'));
+  var total = rows.length;
   rows.forEach(function(row, i) {
     var endEl = row.querySelector('.day-end');
     if (!endEl) return;
     var cur = endEl.value;
     var isDefault = !cur || cur === '17:00' || cur === '18:00' || cur === '12:00';
     if (!isDefault) return; // user has set a custom time — leave it
-    var isLast = (i === rows.length - 1);
+    // Only apply noon to the last day of a multi-day event.
+    // Single-day events use 18:00 — noon as a default makes no sense for a full-day event.
+    var isLast = (i === total - 1) && (total > 1);
     endEl.value = isLast ? '12:00' : '18:00';
   });
 }
