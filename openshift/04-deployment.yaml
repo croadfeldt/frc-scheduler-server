@@ -18,19 +18,30 @@ metadata:
   namespace: frc-scheduler-server
 spec:
   progressDeadlineSeconds: 600
-  replicas: 1
+  replicas: 2
   revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: frc-scheduler-server
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # allow 3 pods during rollout
+      maxUnavailable: 0  # never take a pod down before a new one is ready
   template:
     metadata:
       labels:
         app: frc-scheduler-server
         deployment: frc-scheduler-server
     spec:
+      # Spread pods across different nodes so each gets its own 16-CPU node
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: frc-scheduler-server
       securityContext:
         runAsNonRoot: true
 
@@ -74,13 +85,13 @@ spec:
                   name: frc-app-secret
                   key: TBA_API_KEY
             - name: CPU_WORKERS
-              value: "0"
+              value: "12"   # 12 SA workers per pod; 2 pods = 24 total across cluster
             - name: PYTHONUNBUFFERED
               value: "1"
             - name: APP_PORT
               value: "8080"
             - name: WEB_WORKERS
-              value: "4"
+              value: "1"    # 1 uvicorn process owns the full pool — no inter-process contention
             - name: PUID
               value: "1000"
             - name: PGID
@@ -110,10 +121,10 @@ spec:
 
           resources:
             requests:
-              cpu:    500m
+              cpu:    "4"    # guaranteed 4 CPUs at all times per pod
               memory: 512Mi
             limits:
-              cpu:    "2"
+              cpu:    "12"   # burst to 12 CPUs per pod (leaves 4 for OS/other pods per node)
               memory: 1Gi
 
           terminationMessagePath: /dev/termination-log
@@ -140,3 +151,15 @@ spec:
       port: 8080
       targetPort: 8080
   type: ClusterIP
+---
+# Keep at least 1 pod available during voluntary disruptions (node drain, rollout)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frc-scheduler-server-pdb
+  namespace: frc-scheduler-server
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: frc-scheduler-server

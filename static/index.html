@@ -2628,7 +2628,8 @@ function renderScheduleBars() {
         dayNum, dayLabel,
         slotStart: (slotStart != null) ? slotStart : currentMatches[0].startMin,
         slotEnd,
-        matchCount:  currentMatches.length,
+        matchCount:   currentMatches.length,
+        firstMatchNum: currentMatches.length > 0 ? currentMatches[0].num : null,
         committed,           // pre-summed (used by stats); render re-sums with cap
         matches:     currentMatches.slice(),
         shortBreaks: currentShortBreaks.slice(),
@@ -2725,8 +2726,8 @@ function renderScheduleBars() {
     html += '<div class="agenda-block-row">'
           + '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.25rem;">'
           +   '<span class="day-label-link" '
-          +     'onclick="scrollToDay(' + s.dayNum + ')" '
-          +     'title="Scroll schedule to ' + s.dayLabel + '">' + s.dayLabel + '</span>'
+          +     'onclick="' + (s.firstMatchNum ? 'scrollToMatch(' + s.firstMatchNum + ')' : 'scrollToDay(' + s.dayNum + ')') + '" '
+          +     'title="Scroll to match ' + (s.firstMatchNum || 1) + ' · ' + s.dayLabel + '">' + s.dayLabel + '</span>'
           +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
           +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
           +   '</span>'
@@ -3133,8 +3134,33 @@ function scrollToDay(dayNum) {
   var block = document.getElementById('schedule-day-' + dayNum);
   if (!block) return;
   var output = document.getElementById('scheduleOutput');
-  // Scroll within the scrollable schedule-output container
   output.scrollTo({ top: block.offsetTop - output.offsetTop, behavior: 'smooth' });
+}
+
+function scrollToMatch(matchNum) {
+  // Scroll schedule output to a specific match row, or nearest visible one
+  var output = document.getElementById('scheduleOutput');
+  if (!output) return;
+  var row = document.getElementById('schedule-match-' + matchNum);
+  if (!row) {
+    // Match may be filtered out — find the first visible match at or after matchNum
+    var scheduled = window._frcScheduled;
+    if (!scheduled) return;
+    var allMatches = scheduled.flatMap(function(d) {
+      return d.entries.filter(function(e) { return e.type === 'match'; });
+    });
+    var target = allMatches.find(function(m) { return m.num >= matchNum; });
+    if (target) row = document.getElementById('schedule-match-' + target.num);
+  }
+  if (!row) return;
+  // Scroll the row's table (inside the day block) into view within scheduleOutput
+  var rowTop = row.offsetTop;
+  var parent = row.offsetParent;
+  while (parent && parent !== output) {
+    rowTop += parent.offsetTop;
+    parent = parent.offsetParent;
+  }
+  output.scrollTo({ top: rowTop - 60, behavior: 'smooth' });
 }
 
 function updateB2BStat() {
@@ -5952,6 +5978,7 @@ function renderSchedule() {
 
         var hasB2B = entry.b2bTeams && entry.b2bTeams.size > 0;
         if (hasB2B) tr.classList.add('b2b-match');
+        tr.id = 'schedule-match-' + entry.num;  // for scrollToMatch()
 
         var redTeams = entry.red.map(function(t, i) {
           return renderTeam(t, entry.redSurrogate && entry.redSurrogate[i],

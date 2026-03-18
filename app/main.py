@@ -66,9 +66,10 @@ def get_pool() -> ProcessPoolExecutor:
 
 # Semaphore limits concurrent schedule generations so the ProcessPoolExecutor
 # is never completely saturated by a single user, preventing 503s for others.
-# Value: number of simultaneous Stage 1+2 generation requests allowed.
-# Defaults to CPU count // 2, minimum 2 so at least two users can generate at once.
-_gen_concurrency = max(2, (CPU_WORKERS or os.cpu_count() or 4) // 2)
+# With WEB_WORKERS=1, the pool is shared by all requests in this process.
+# Allow up to CPU_WORKERS // 3 concurrent jobs (each job gets ~3 workers minimum).
+# Minimum 2 so at least two users can generate at once even on small deployments.
+_gen_concurrency = max(2, (CPU_WORKERS or os.cpu_count() or 4) // 3)
 _generation_semaphore: asyncio.Semaphore | None = None
 
 def get_generation_semaphore() -> asyncio.Semaphore:
