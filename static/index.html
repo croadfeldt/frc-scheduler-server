@@ -3134,7 +3134,9 @@ function scrollToDay(dayNum) {
   var block = document.getElementById('schedule-day-' + dayNum);
   if (!block) return;
   var output = document.getElementById('scheduleOutput');
-  output.scrollTo({ top: block.offsetTop - output.offsetTop, behavior: 'smooth' });
+  var blockRect  = block.getBoundingClientRect();
+  var outputRect = output.getBoundingClientRect();
+  output.scrollTo({ top: output.scrollTop + (blockRect.top - outputRect.top) - 8, behavior: 'smooth' });
 }
 
 function scrollToMatch(matchNum) {
@@ -3153,14 +3155,11 @@ function scrollToMatch(matchNum) {
     if (target) row = document.getElementById('schedule-match-' + target.num);
   }
   if (!row) return;
-  // Scroll the row's table (inside the day block) into view within scheduleOutput
-  var rowTop = row.offsetTop;
-  var parent = row.offsetParent;
-  while (parent && parent !== output) {
-    rowTop += parent.offsetTop;
-    parent = parent.offsetParent;
-  }
-  output.scrollTo({ top: rowTop - 60, behavior: 'smooth' });
+  // Use getBoundingClientRect relative to the scrollable container — reliable across all element types
+  var rowRect    = row.getBoundingClientRect();
+  var outputRect = output.getBoundingClientRect();
+  var scrollTarget = output.scrollTop + (rowRect.top - outputRect.top) - 48;
+  output.scrollTo({ top: scrollTarget, behavior: 'smooth' });
 }
 
 function updateB2BStat() {
@@ -4415,6 +4414,15 @@ document.addEventListener('DOMContentLoaded', function() {
 async function activateEvent(ev) {
   _currentEventId = ev.id;
   document.getElementById('eventYear').value = ev.year;
+  // Sync the event code input and status label to the loaded event
+  var codeInput = document.getElementById('eventCodeInput');
+  if (codeInput) {
+    codeInput.value = ev.key || '';
+    codeInput.classList.remove('invalid');
+    codeInput.classList.add('valid');
+  }
+  var codeStatus = document.getElementById('eventCodeStatus');
+  if (codeStatus) codeStatus.textContent = ev.name ? ev.name + ' (' + ev.year + ')' : '';
   // Sync dropdown selection
   const sel = document.getElementById('eventSelect');
   if (![...sel.options].some(o => { if (o.value == ev.id) { o.selected = true; return true; } return false; })) {
