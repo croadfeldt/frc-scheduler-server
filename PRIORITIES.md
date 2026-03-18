@@ -54,6 +54,8 @@ When `numTeams × matchesPerTeam` is not evenly divisible by 6, some teams play 
 4. → assignTeams()                       [autoAssign]
 ```
 
+**PDF fail warning** — uses `querySelectorAll('.day-row').length` (`configuredDays`) as the day count in the warning message. Falls back to date-based estimate only if `configuredDays === 0`. The message reads *"Schedule is configured for N qual day(s)"* — reflecting the user's actual day setup, not an estimate from event dates.
+
 **`numDays` ↔ day rows sync** — bidirectional, always in sync:
 - `numDays` `change` + `input` events → `syncDayRowsToNumDays()` — adds or removes `.day-row` elements to match. `input` is guarded (`!isNaN(n) && n >= 1 && n <= 5`) so it only fires on valid integers.
 - `addDay()` → increments `numDays.value` before calling `buildDaysUI()`
@@ -65,6 +67,8 @@ When `numTeams × matchesPerTeam` is not evenly divisible by 6, some teams play 
 **`onCycleTimeChanged()`** — all cycle-time inputs (start-of-day and after-match rows) call this instead of `onParamChanged()`. Applies a 1.2s debounce then calls `calcMaxMatches()` if `autoMaxCycles` is on, bypassing the plain 2.5s debounce. Prevents mid-keystroke fires that caused infinite loops.
 
 **`calcMaxMatches()` safety guards** — the simulation loop has a `_safetyLimit = 2000` iteration cap and a `ct < 0.5 → break` guard. Without these, a blank or zero cycle-time field (e.g. mid-keystroke) causes an infinite loop that permanently hangs the browser tab.
+
+**Overlay early-exit discipline** — every early-return path in `calcMaxMatches()` and `generateSchedule()` calls `_overlay.done(stepId)` + `_overlay.hide()` before returning. Without this, validation failures (e.g. `numTeams < 6`, `!validateTimes()`, `totalSlotMatches === 0`) leave the overlay permanently stuck. `done()` and `hide()` are no-ops when the overlay is not visible, so these calls are safe from all call paths including `onParamChanged` debounce.
 
 ---
 

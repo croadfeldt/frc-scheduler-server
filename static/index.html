@@ -1323,7 +1323,7 @@ function addDay() {
   applyDayEndTimes();    // previous last day → 18:00, new last → 12:00
   renumberDays();
   validateTimes();
-  onParamChanged();
+  onCycleTimeChanged();
 }
 
 // Remove a day (called from the day row header's remove button)
@@ -1340,7 +1340,7 @@ function removeDay(dayEl) {
   if (rows.length > 0) pruneAfterEndTime(rows[rows.length - 1]);
   validateTimes();
   refreshCycleDayLabels();
-  onParamChanged();
+  onCycleTimeChanged();
 }
 
 // Permanent day color palette — 7 distinct, readable colors with good white-text contrast.
@@ -1582,7 +1582,9 @@ function syncDayRowsToNumDays() {
   if (lastRow.length) pruneAfterEndTime(lastRow[lastRow.length - 1]);
   validateTimes();
   refreshCycleDayLabels();
-  onParamChanged();
+  // Day count changes affect scheduling capacity — route through onCycleTimeChanged
+  // so autoMaxCycles recalculates before autoPopulate regenerates.
+  onCycleTimeChanged();
 }
 document.getElementById('numDays').addEventListener('change', syncDayRowsToNumDays);
 document.getElementById('numDays').addEventListener('input', function() {
@@ -2700,13 +2702,31 @@ function renderScheduleBars() {
         slotEnd,
         matchCount:   currentMatches.length,
         firstMatchNum: currentMatches.length > 0 ? currentMatches[0].num : null,
-        committed,           // pre-summed (used by stats); render re-sums with cap
+        committed,
         matches:     currentMatches.slice(),
         shortBreaks: currentShortBreaks.slice(),
         cycleChanges: currentCycleChanges.slice(),
         hasTrailingBreak: !!hasTrailingBreak,
       });
       currentMatches = []; currentShortBreaks = [];
+    }
+
+    // For days with no matches at all, still push a zero-match section
+    // so the agenda fit bar shows the available time slot
+    function flushEmptyDay() {
+      if (day.start == null || day.end == null || day.end <= day.start) return;
+      allSections.push({
+        dayNum, dayLabel,
+        slotStart: day.start,
+        slotEnd:   day.end,
+        matchCount: 0,
+        firstMatchNum: null,
+        committed: 0,
+        matches:     [],
+        shortBreaks: [],
+        cycleChanges: [],
+        hasTrailingBreak: false,
+      });
     }
 
     var currentCycleChanges = [];
@@ -2729,6 +2749,9 @@ function renderScheduleBars() {
       }
     });
     flushSection(null);
+    // If no sections were added for this day (no matches), show an empty bar
+    var sectionsForDay = allSections.filter(function(s) { return s.dayNum === dayNum; });
+    if (!sectionsForDay.length) flushEmptyDay();
   });
 
   if (!allSections.length) {
@@ -2778,10 +2801,17 @@ function renderScheduleBars() {
       return seenCts.map(function(t) { return t % 1 === 0 ? t : t.toFixed(1); }).join('\u2192') + '\u202fmin/match';
     })();
 
-    var label = s.matchCount + ' match' + (s.matchCount !== 1 ? 'es' : '')
+    var label = s.matchCount > 0
+      ? s.matchCount + ' match' + (s.matchCount !== 1 ? 'es' : '')
               + '\u2002\u00b7\u2002' + Math.round(committed) + ' / ' + Math.round(available) + '\u202fmin'
-              + '\u2002(avg ' + ctProgression + ')';
+              + '\u2002(avg ' + ctProgression + ')'
+      : 'No matches scheduled \u00b7 ' + Math.round(available) + '\u202fmin available';
     if (overage > 0) label += '\u2002\u00b7\u2002+' + overage + '\u202fmin over';
+
+    // Suppress avg cycle time badge for empty days
+    var ctBadge = s.matchCount > 0
+      ? '<span style="font-size:0.65rem;color:var(--text-muted);border:1px solid var(--border);border-radius:3px;padding:0 0.3rem;line-height:1.6;" title="' + ctProgression + '">' + avgCtStr + '\u202fmin/match</span>'
+      : '';
 
     var ticksHtml = s.shortBreaks.map(function(brk) {
       var pos = slotDur > 0 ? ((brk.start - s.slotStart) / slotDur * 100) : 0;
@@ -2799,6 +2829,7 @@ function renderScheduleBars() {
           +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
           +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
           +   '</span>'
+          +   ctBadge
           +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(available) + '\u202fmin avail</span>'
           + '</div>'
           // Bar always fills full container width
@@ -5954,7 +5985,10 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   const scheduled = [];
   let matchIdx = 0;
 
-  for (let d = 0; d < days.length && matchIdx < totalMatches; d++) {
+  // Iterate all configured days. The inner loop stops when all matches are placed,
+  // but we still push remaining days (with empty entries) so agenda fit bars show
+  // the full configured time even when matches don't fill all days.
+  for (let d = 0; d < days.length; d++) {
     const day = days[d];
     // Deep copy breaks with done flag
     const breaks = day.breaks.map(b => Object.assign({}, b, {done: false}));
