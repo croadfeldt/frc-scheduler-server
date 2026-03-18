@@ -934,6 +934,9 @@
           <label id="printOptTeamNumsLabel" style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
             <input type="checkbox" id="printOptTeamNums" checked> Team numbers
           </label>
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+            <input type="checkbox" id="printOptRoundDividers" checked> Round dividers
+          </label>
         </div>
       </div>
       <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
@@ -1647,16 +1650,38 @@ document.getElementById('cycleTime').addEventListener('input', function() {
 document.getElementById('cycleTime').addEventListener('change', function() {
   var newCt = parseFloat(this.value);
   if (!newCt || newCt <= 0) return;
-  document.querySelectorAll('.day-cc-row[data-is-start="1"] .cc-time').forEach(function(inp) {
-    inp.value = newCt;
-    inp.classList.toggle('input-error', false);
+
+  // Check if any day start row differs from the new value
+  var dayStartInputs = Array.from(document.querySelectorAll('.day-cc-row[data-is-start="1"] .cc-time'));
+  var anyDiffers = dayStartInputs.some(function(inp) {
+    return parseFloat(inp.value) !== newCt;
   });
-  // Show brief info warning
-  var warn = document.getElementById('cycleTimePushWarning');
-  if (warn) {
-    warn.style.display = 'block';
-    clearTimeout(warn._hideTimer);
-    warn._hideTimer = setTimeout(function() { warn.style.display = 'none'; }, 4000);
+
+  if (anyDiffers && dayStartInputs.length > 0) {
+    var apply = confirm(
+      'Apply ' + newCt + ' min cycle time to all day start-of-day rows?\n\n' +
+      'OK = update all days\n' +
+      'Cancel = leave day rows unchanged'
+    );
+    if (apply) {
+      dayStartInputs.forEach(function(inp) {
+        inp.value = newCt;
+        inp.classList.toggle('input-error', false);
+      });
+      // Show brief info warning
+      var warn = document.getElementById('cycleTimePushWarning');
+      if (warn) {
+        warn.style.display = 'block';
+        clearTimeout(warn._hideTimer);
+        warn._hideTimer = setTimeout(function() { warn.style.display = 'none'; }, 4000);
+      }
+    }
+  } else {
+    // All match or no days — push silently
+    dayStartInputs.forEach(function(inp) {
+      inp.value = newCt;
+      inp.classList.toggle('input-error', false);
+    });
   }
   validateCycleChanges();
   onParamChanged();
@@ -6719,12 +6744,13 @@ function printSchedule() {
   closeModal('modalPrint');
 
   var opts = {
-    cycleTimes:   document.getElementById('printOptCycleTimes').checked,
-    cycleChanges: document.getElementById('printOptCycleChanges').checked,
-    breaks:       document.getElementById('printOptBreaks').checked,
-    dayBreaks:    document.getElementById('printOptDayBreaks').checked,
-    slotNums:     document.getElementById('printOptSlotNums').checked,
-    teamNums:     document.getElementById('printOptTeamNums').checked,
+    cycleTimes:     document.getElementById('printOptCycleTimes').checked,
+    cycleChanges:   document.getElementById('printOptCycleChanges').checked,
+    breaks:         document.getElementById('printOptBreaks').checked,
+    dayBreaks:      document.getElementById('printOptDayBreaks').checked,
+    slotNums:       document.getElementById('printOptSlotNums').checked,
+    teamNums:       document.getElementById('printOptTeamNums').checked,
+    roundDividers:  document.getElementById('printOptRoundDividers').checked,
   };
 
   var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
@@ -6732,8 +6758,12 @@ function printSchedule() {
   // Resolve team number from slot
   function teamLabel(slot) {
     if (opts.slotNums) return 'S' + slot;
-    if (hasAssignment && opts.teamNums && _currentSlotMap[String(slot)]) return _currentSlotMap[String(slot)];
-    if (hasAssignment && opts.teamNums) return slot;
+    if (hasAssignment && opts.teamNums) {
+      var real = _currentSlotMap[String(slot)];
+      return real != null ? real : slot;
+    }
+    // No assignment and slot numbers off — show slot as number (best we have)
+    // If Stage 2 hasn't been run, slot indices ARE the only identifiers
     return slot;
   }
 
@@ -6803,7 +6833,7 @@ function printSchedule() {
         html += '<tr class="cc-row"><td colspan="4">&#8645; Cycle time &rarr; <strong>' + entry.newTime + ' min</strong> from match ' + (entry.afterMatch + 1) + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.atMin) + '</td></tr>';
       } else if (entry.type === 'match') {
         // Round boundary
-        if (matchNumToRound.has(entry.num)) {
+        if (opts.roundDividers && matchNumToRound.has(entry.num)) {
           var rn = matchNumToRound.get(entry.num);
           var rnote = rn === 1 ? 'all teams guaranteed a first match' : 'approximate boundary';
           html += '<tr class="round-row"><td colspan="4">Round ' + rn + ' &mdash; ' + rnote + '</td></tr>';
