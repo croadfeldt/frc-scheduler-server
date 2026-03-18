@@ -1504,7 +1504,8 @@ function validateTimes() {
 function validateTimesAndRecalc() {
   const valid = validateTimes();
   if (!valid) return;
-  onParamChanged(); // triggers auto-populate debounce if enabled
+  onParamChanged();       // triggers auto-populate debounce if enabled
+  onDayConfigChanged();   // updates agenda fit stats/bars immediately
 }
 
 // numDays is now managed by addDay/removeDay buttons, not a field
@@ -1577,8 +1578,8 @@ setTimeout(ensureTbaSearchIndex, 2000);
 });
 // Note: cycleTime and numDays have their own dedicated change listeners
 
-// Wire agenda fit updates to the three params that affect it
-['numTeams','matchesPerTeam','cycleTime'].forEach(function(id) {
+// Wire agenda fit updates to params that affect it (numTeams, mpt, cycleTime, breakBuffer)
+['numTeams','matchesPerTeam','cycleTime','breakBuffer'].forEach(function(id) {
   var el = document.getElementById(id);
   if (el) el.addEventListener('input', onScheduleParamsChanged);
 });
@@ -2511,7 +2512,7 @@ function renderScheduleBars() {
     var currentShortBreaks = [];
     var slotStart = (day.start != null) ? day.start : null;
 
-    function flushSection(slotEndOverride) {
+    function flushSection(slotEndOverride, hasTrailingBreak) {
       if (!currentMatches.length) return;
       var slotEnd = (slotEndOverride != null) ? slotEndOverride
                   : (day.end   != null)        ? day.end
@@ -2526,6 +2527,7 @@ function renderScheduleBars() {
         matchCount:  currentMatches.length,
         committed,
         shortBreaks: currentShortBreaks.slice(),
+        hasTrailingBreak: !!hasTrailingBreak,
       });
       currentMatches = []; currentShortBreaks = [];
     }
@@ -2536,7 +2538,7 @@ function renderScheduleBars() {
       } else if (entry.type === 'break') {
         var dur = (entry.end || 0) - (entry.start || 0);
         if (dur > AGENDA_BREAK_THRESHOLD) {
-          flushSection(entry.start);
+          flushSection(entry.start, true);  // hasTrailingBreak = true
           slotStart = entry.end;
         } else {
           if (currentMatches.length) currentShortBreaks.push(entry);
@@ -2560,10 +2562,13 @@ function renderScheduleBars() {
   var html = '';
   allSections.forEach(function(s) {
     var slotDur     = s.slotEnd - s.slotStart;
+    // Subtract break buffer if this section is followed by a large break
+    var bb = parseFloat(document.getElementById('breakBuffer').value) || 0;
+    var effectiveSlot = slotDur - (s.hasTrailingBreak ? bb : 0);
     var barWidthPct = maxSlotDur > 0 ? (slotDur / maxSlotDur * 100) : 100;
     var committed   = s.committed;
-    var fillPct     = slotDur > 0 ? Math.min(committed / slotDur * 100, 100) : 0;
-    var overage     = Math.round(committed - slotDur);
+    var fillPct     = effectiveSlot > 0 ? Math.min(committed / effectiveSlot * 100, 100) : 0;
+    var overage     = Math.round(committed - effectiveSlot);
     var dc          = dayColor(s.dayNum);
     var fillColor   = (overage > 0 || fillPct > 90) ? 'var(--amber)' : dc;
     var avgCt       = s.matchCount > 0 ? (committed / s.matchCount).toFixed(1) : '\u2014';
@@ -2572,7 +2577,7 @@ function renderScheduleBars() {
               + ' \u00b7 ' + Math.round(committed) + '\u202fmin'
               + ' (avg ' + avgCt + '\u202fmin/match)';
     if (overage > 0) label += ' \u00b7 +' + overage + ' over';
-    else             label += ' / ' + Math.round(slotDur) + '\u202fmin slot';
+    else             label += ' / ' + Math.round(effectiveSlot) + '\u202fmin avail';
 
     var ticksHtml = s.shortBreaks.map(function(brk) {
       var pos = slotDur > 0 ? ((brk.start - s.slotStart) / slotDur * 100) : 0;
@@ -2583,14 +2588,14 @@ function renderScheduleBars() {
 
     html += '<div class="agenda-block-row">'
           + '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.2rem;">'
-          +   '<span style="font-size:0.7rem;font-weight:700;color:' + dc + ';letter-spacing:0.04em;">' + s.dayLabel + '</span>'
+          +   '<span style="font-size:0.7rem;font-weight:700;color:var(--text-muted);letter-spacing:0.04em;">' + s.dayLabel + '</span>'
           +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
           +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
           +   '</span>'
           +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(slotDur) + '\u202fmin</span>'
           + '</div>'
           + '<div style="width:' + barWidthPct.toFixed(1) + '%;min-width:60px;">'
-          +   '<div class="agenda-timeline-bar" style="position:relative;">'
+          +   '<div class="agenda-timeline-bar" style="position:relative;border-color:' + dc + ';background:color-mix(in srgb,' + dc + ' 12%,var(--bg));">'
           +     '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + fillColor + ';">'
           +       label
           +     '</div>'
@@ -2632,14 +2637,29 @@ function updateAgendaFit() {
   var timeNeeded   = 0;
   var effectiveCt  = ct;
 
+  // Available always comes from day-config (agenda): what was allocated on the schedule.
+  // This is the authoritative source — same data that fed day start/end/breaks.
+  function _availFromDayConfig() {
+    var avail = 0;
+    document.querySelectorAll('.day-row').forEach(function(row) {
+      var s = timeStrToMin(row.querySelector('.day-start').value);
+      var e = timeStrToMin(row.querySelector('.day-end').value);
+      if (e > s) avail += (e - s);
+      row.querySelectorAll('.break-row').forEach(function(br) {
+        var bs = timeStrToMin(br.querySelector('.break-start').value);
+        var be = timeStrToMin(br.querySelector('.break-end').value);
+        if (be > bs) avail -= (be - bs);
+      });
+    });
+    return avail;
+  }
+
   if (window._frcScheduled && window._frcScheduled.length) {
-    // Available = sum of all slot durations from the day config
-    // Committed = sum of actual match endMin - startMin across entire schedule
+    // Committed = actual match time from schedule (respects cycle-time changes)
+    availableMin = _availFromDayConfig();
     window._frcScheduled.forEach(function(day) {
-      if (day.start != null && day.end != null) availableMin += (day.end - day.start);
       (day.entries || []).forEach(function(entry) {
         if (entry.type === 'match') timeNeeded += ((entry.endMin || 0) - (entry.startMin || 0));
-        else if (entry.type === 'break') availableMin -= ((entry.end || 0) - (entry.start || 0));
       });
     });
     effectiveCt = totalMatches > 0 ? timeNeeded / totalMatches : ct;
@@ -2717,10 +2737,16 @@ function resetAgendaPanel() {
 }
 
 function onScheduleParamsChanged() {
-  // Re-run agenda fit whenever schedule params change (teams, mpt, cycle time)
-  if (document.getElementById('agendaFitPanel').style.display !== 'none') {
+  // Re-run agenda fit whenever any schedule param changes
+  if (document.getElementById('agendaFitPanel') &&
+      document.getElementById('agendaFitPanel').style.display !== 'none') {
     updateAgendaFit();
   }
+}
+
+function onDayConfigChanged() {
+  // Called when day start/end/break times change — update agenda fit stats and bars
+  onScheduleParamsChanged();
 }
 
 // ── Auto-populate day config from agenda PDF blocks ───────────────────────────
