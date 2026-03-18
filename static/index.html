@@ -2691,28 +2691,25 @@ function renderScheduleBars() {
     var overage   = Math.round(committed - available);
     var dc        = dayColor(s.dayNum);
     var fillColor = (overage > 0 || fillPct > 95) ? 'var(--amber)' : dc;
-    // Build cycle time progression string from cycle-change markers
-    // e.g. "9 min" or "9 → 8 min" when ct changes during the section
-    var ctLabel = (function() {
-      if (!s.cycleChanges || !s.cycleChanges.length) {
-        var singleCt = s.matchCount > 0 ? (committed / s.matchCount).toFixed(1) : '?';
-        return singleCt + '\u202fmin/match';
-      }
-      // Starting ct = duration of first match
+
+    // Average cycle time = committed / matches (actual weighted average from schedule)
+    var avgCt = s.matchCount > 0 ? (committed / s.matchCount) : 0;
+    var avgCtStr = avgCt % 1 < 0.05 ? Math.round(avgCt) : avgCt.toFixed(1);
+
+    // Cycle time progression for tooltip: e.g. "9→8 min/match"
+    var ctProgression = (function() {
+      if (!s.cycleChanges || !s.cycleChanges.length) return avgCtStr + '\u202fmin/match';
       var firstCt = s.matches.length > 0
-        ? ((s.matches[0].endMin || 0) - (s.matches[0].startMin || 0))
-        : null;
+        ? ((s.matches[0].endMin || 0) - (s.matches[0].startMin || 0)) : null;
       var seenCts = firstCt ? [firstCt] : [];
       s.cycleChanges.forEach(function(cc) {
-        var last = seenCts[seenCts.length - 1];
-        if (cc.newTime !== last) seenCts.push(cc.newTime);
+        if (cc.newTime !== seenCts[seenCts.length - 1]) seenCts.push(cc.newTime);
       });
       return seenCts.map(function(t) { return t % 1 === 0 ? t : t.toFixed(1); }).join('\u2192') + '\u202fmin/match';
     })();
 
     var label = s.matchCount + ' match' + (s.matchCount !== 1 ? 'es' : '')
-              + '\u2002\u00b7\u2002' + Math.round(committed) + ' / ' + Math.round(available) + '\u202fmin'
-              + '\u2002(' + ctLabel + ')';
+              + '\u2002\u00b7\u2002' + Math.round(committed) + ' / ' + Math.round(available) + '\u202fmin';
     if (overage > 0) label += '\u2002\u00b7\u2002+' + overage + '\u202fmin over';
 
     var ticksHtml = s.shortBreaks.map(function(brk) {
@@ -2731,6 +2728,7 @@ function renderScheduleBars() {
           +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
           +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
           +   '</span>'
+          +   '<span style="font-size:0.65rem;color:var(--text-muted);border:1px solid var(--border);border-radius:3px;padding:0 0.3rem;line-height:1.6;" title="' + ctProgression + '">' + avgCtStr + '\u202fmin/match</span>'
           +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(available) + '\u202fmin avail</span>'
           + '</div>'
           // Bar always fills full container width
@@ -2885,6 +2883,25 @@ function onScheduleParamsChanged() {
 function onDayConfigChanged() {
   // Called when day start/end/break times change — update agenda fit stats and bars
   onScheduleParamsChanged();
+}
+
+function onCycleTimeChanged() {
+  // Called when any cycle time value changes (start-of-day ct, or after-match ct).
+  // 1. Update agenda fit immediately
+  onScheduleParamsChanged();
+  // 2. If autoMaxCycles is on and we're not in the middle of the agenda chain,
+  //    recalculate max matches (which then triggers generateSchedule if autoPopulate on).
+  if (window._agendaFetchPending) return;
+  if (window._assigningTeams) return;
+  var autoMax = document.getElementById('autoMaxCycles');
+  if (autoMax && autoMax.checked) {
+    clearTimeout(_autoPopulateTimeout);  // cancel any queued plain generate
+    _autoPopulateTimeout = null;
+    var numTeams = parseInt(document.getElementById('numTeams').value) || 0;
+    if (numTeams >= 6) calcMaxMatches();  // calcMaxMatches calls generateSchedule internally
+  } else {
+    onParamChanged();  // fall back to plain debounced regenerate
+  }
 }
 
 // ── Auto-populate day config from agenda PDF blocks ───────────────────────────
@@ -3350,11 +3367,11 @@ function addDayCycleChange(dayRow, afterMatch, newTime, isStart) {
 
   timeInput.addEventListener('input', function() {
     checkCcTime(); validateCycleChanges();
-    onParamChanged();
+    onCycleTimeChanged();
   });
   timeInput.addEventListener('change', function() {
     checkCcTime(); validateCycleChanges();
-    onParamChanged();
+    onCycleTimeChanged();
   });
 
   if (!isFirst) {
@@ -3364,11 +3381,11 @@ function addDayCycleChange(dayRow, afterMatch, newTime, isStart) {
       afterInput.classList.toggle('input-error', bad);
       return !bad;
     }
-    afterInput.addEventListener('input',  function() { checkAfter(); refreshCycleDayLabels(); validateCycleChanges(); onParamChanged(); });
-    afterInput.addEventListener('change', function() { checkAfter(); refreshCycleDayLabels(); validateCycleChanges(); onParamChanged(); });
+    afterInput.addEventListener('input',  function() { checkAfter(); refreshCycleDayLabels(); validateCycleChanges(); onCycleTimeChanged(); });
+    afterInput.addEventListener('change', function() { checkAfter(); refreshCycleDayLabels(); validateCycleChanges(); onCycleTimeChanged(); });
 
     row.querySelector('.btn-remove-cc').addEventListener('click', function() {
-      row.remove(); validateCycleChanges(); onParamChanged();
+      row.remove(); validateCycleChanges(); onCycleTimeChanged();
     });
   }
 }
@@ -3444,10 +3461,10 @@ function addCycleChange(afterMatch, newTime, forDay) {
   if (defaultAfter !== '') checkAfter();
   if (newTime) checkTime();
 
-  afterInput.addEventListener('input', function() { checkAfter(); updateDayLabel(); validateCycleChanges(); onParamChanged(); });
-  afterInput.addEventListener('change', function() { checkAfter(); updateDayLabel(); validateCycleChanges(); onParamChanged(); });
-  timeInput.addEventListener('input',  function() { checkTime(); validateCycleChanges(); onParamChanged(); });
-  timeInput.addEventListener('change', function() { checkTime(); validateCycleChanges(); onParamChanged(); });
+  afterInput.addEventListener('input', function() { checkAfter(); updateDayLabel(); validateCycleChanges(); onCycleTimeChanged(); });
+  afterInput.addEventListener('change', function() { checkAfter(); updateDayLabel(); validateCycleChanges(); onCycleTimeChanged(); });
+  timeInput.addEventListener('input',  function() { checkTime(); validateCycleChanges(); onCycleTimeChanged(); });
+  timeInput.addEventListener('change', function() { checkTime(); validateCycleChanges(); onCycleTimeChanged(); });
   row.querySelector('.btn-remove-cc').addEventListener('click', function() {
     row.remove(); validateCycleChanges(); onParamChanged();
   });
