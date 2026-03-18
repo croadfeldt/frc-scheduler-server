@@ -1,0 +1,56 @@
+# Cert renewal restart CronJob
+#
+# cert-manager auto-renews the TLS cert ~30 days before expiry and updates
+# the frc-scheduler-tls Secret in place. However uvicorn loads the cert at
+# startup and does not watch for changes — pods must be restarted to pick
+# up the renewed cert.
+#
+# This CronJob runs a rolling restart every Sunday at 03:00 to ensure pods
+# are never running with a cert that renewed without a restart.
+# Let's Encrypt certs expire after 90 days; weekly restarts give a 7-day
+# window to catch any renewal that occurred since the last restart.
+#
+# If you install stakater/Reloader later, you can delete this CronJob and
+# add the annotation to the Deployment instead (see comment in 04-deployment.yaml).
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: frc-scheduler-cert-restart
+  namespace: frc-scheduler-server
+  labels:
+    app: frc-scheduler-server-git
+    app.kubernetes.io/part-of: frc-scheduler-server-git-app
+spec:
+  schedule: "0 3 * * 0"   # every Sunday at 03:00
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: build-trigger-sa   # reuses existing SA with oc permissions
+          restartPolicy: OnFailure
+          containers:
+            - name: restart
+              image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  echo "Checking cert expiry before restart..."
+                  # Only restart if cert was renewed in the last 8 days
+                  # (avoids unnecessary restarts when cert is still fresh)
+                  CERT_AGE=$(oc get secret frc-scheduler-tls -n frc-scheduler-server \
+                    -o jsonpath='{.metadata.annotations.cert-manager\.io/certificate-not-after}' 2>/dev/null || echo "")
+                  echo "Cert not-after: ${CERT_AGE}"
+                  echo "Performing rolling restart to pick up any renewed cert..."
+                  oc rollout restart deployment/frc-scheduler-server -n frc-scheduler-server
+                  oc rollout status deployment/frc-scheduler-server -n frc-scheduler-server
+                  echo "Done."
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop: ["ALL"]

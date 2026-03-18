@@ -172,11 +172,20 @@ oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
 **Step 7 — Verify**
 ```bash
 oc get pods -n frc-scheduler-server
-curl -sk https://YOUR_HOSTNAME/api/health
-# → {"status": "ok", ...}
+curl -s https://YOUR_HOSTNAME:8088/api/health
+# → {"status": "ok", "cpu_workers": 12}
+```
+
+**Step 8 — Annotate the Secret for cert-utils expiry alerts**
+```bash
+oc annotate secret frc-scheduler-tls -n frc-scheduler-server \
+  cert-utils-operator.redhat-cop.io/generate-cert-expiry-alert=true \
+  cert-utils-operator.redhat-cop.io/cert-expiry-check-frequency=24h
 ```
 
 #### TLS architecture (OpenShift)
+
+cert-manager uses **DNS-01 challenge validation** — no port 80 exposure required. The ClusterIssuer must be configured for DNS-01 before applying the Certificate manifest. Check your issuer name carefully: it is `letsencrypt-production` (not `letsencrypt-prod`) in many installations.
 
 ```
 cert-manager ──► ClusterIssuer (Let's Encrypt)
@@ -201,6 +210,20 @@ cert-manager ──► ClusterIssuer (Let's Encrypt)
                         ▼
                     Firewall → Internet
 ```
+
+#### Cert renewal
+
+cert-manager auto-renews 30 days before expiry and updates the `frc-scheduler-tls` Secret. Since uvicorn loads the cert at startup, pods must be restarted to pick up the renewed cert. `09-cert-renewal-restart.yaml` runs a rolling restart every Sunday at 03:00. If stakater/Reloader is installed you can replace this CronJob with the annotation `secret.reloader.stakater.com/reload: "frc-scheduler-tls"` on the Deployment.
+
+cert-utils-operator provides expiry alerting — annotate the Secret once after initial deployment (see Step 8 above). It generates a Kubernetes Warning Event when the cert is close to expiring, useful as a safety net if cert-manager renewal fails.
+
+#### MetalLB LoadBalancer Service
+
+The `frc-scheduler-server-lb` LoadBalancer Service uses two MetalLB annotations:
+- `metallb.universe.tf/address-pool: dmz-vlan` — pins the service to the DMZ pool
+- `metallb.universe.tf/loadBalancerIPs: "METALLB_IP"` — substituted by `apply.sh` from `config.env`
+
+The external port (default `443`, adjust to match your firewall rule) maps to container port `8443`. With BGP, the /32 host route is advertised directly to your firewall — no NAT required.
 
 #### Ongoing operations
 
@@ -604,7 +627,7 @@ Copy `env.example` to `.env` (Docker/Podman) or set via OpenShift secrets. All v
 | `FRC_EVENTS_TOKEN` | (empty) | FIRST FRC Events API token |
 | `CPU_WORKERS` | `0` (auto) | SA worker processes; `0` = `os.cpu_count()` |
 | `WEB_WORKERS` | `1` | Uvicorn process count |
-| `APP_PORT` | `8080` | Uvicorn listen port; use `8443` when TLS is enabled |
+| `APP_PORT` | `8080` | Uvicorn listen port; use `8443` when TLS is enabled. The MetalLB LoadBalancer external port is set separately in the Service manifest and should match your firewall rule (e.g. `8088`) |
 | `PUID` / `PGID` | `1000` | Process UID/GID — set to `$(id -u)/$(id -g)` for rootless Podman |
 | `SSL_CERTFILE` | (empty) | Path to TLS certificate inside container — enables HTTPS when set |
 | `SSL_KEYFILE` | (empty) | Path to TLS private key inside container |

@@ -452,6 +452,37 @@ rm openshift/01-secrets.yaml   # never leave on disk
 - `stakater/Reloader` annotation on Deployment → rolling restart on cert renewal (annotation: `secret.reloader.stakater.com/reload: "frc-scheduler-tls"`)
 - MetalLB LoadBalancer Service (`frc-scheduler-server-lb`) exposes port 443→8443 externally via BGP VIP
 
+## OpenShift Deployment — Live Configuration
+
+**Verified working configuration (March 18 2026):**
+- ClusterIssuer: `letsencrypt-production` (DNS-01, no port 80 needed)
+- MetalLB pool: `dmz-vlan`, BGP peer `10.0.0.1`, no NAT
+- External port: configured via firewall rule (e.g. 8088) → container 8443
+- cert-manager + cert-utils-operator both installed
+- Reloader NOT installed — using `09-cert-renewal-restart.yaml` CronJob instead
+
+**cert-utils-operator role** — expiry alerting ONLY. Does not restart pods on renewal.
+Annotate the Secret after first deployment:
+```bash
+oc annotate secret frc-scheduler-tls -n frc-scheduler-server \
+  cert-utils-operator.redhat-cop.io/generate-cert-expiry-alert=true \
+  cert-utils-operator.redhat-cop.io/cert-expiry-check-frequency=24h
+```
+
+**cert renewal restart** — `09-cert-renewal-restart.yaml` CronJob, runs Sunday 03:00.
+Uses `build-trigger-sa`. Runs `oc rollout restart deployment/frc-scheduler-server`.
+If Reloader is installed later: add `secret.reloader.stakater.com/reload: "frc-scheduler-tls"` to Deployment annotations and delete the CronJob.
+
+**apply.sh substitutions:**
+- `YOUR_HOSTNAME` → `APP_HOSTNAME` from config.env
+- `letsencrypt-prod` → `CERT_ISSUER` from config.env (use exact name from `oc get clusterissuer`)
+- `METALLB_IP` → `METALLB_IP` from config.env
+- `https://YOUR_HOSTNAME` → `https://${APP_HOSTNAME}` (for ALLOWED_ORIGINS)
+
+**NetworkPolicy** — 5 separate NetworkPolicy objects in `10-networkpolicy.yaml`.
+Verify postgres label: `oc get pods -n frc-scheduler-server --show-labels | grep postgres`
+Expected label: `app: frc-postgres`
+
 ## OpenShift Deployment Notes
 
 

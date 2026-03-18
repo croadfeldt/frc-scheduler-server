@@ -39,7 +39,7 @@ substitute() {
     -e "s|YOUR_HOSTNAME|${APP_HOSTNAME}|g" \
     -e "s|https://YOUR_HOSTNAME|https://${APP_HOSTNAME}|g" \
     -e "s|letsencrypt-prod|${CERT_ISSUER}|g" \
-    -e "s|metallb.universe.tf/loadBalancerIPs: \"\"|metallb.universe.tf/loadBalancerIPs: \"${METALLB_IP}\"|g" \
+    -e "s|metallb.universe.tf/loadBalancerIPs: \"METALLB_IP\"|metallb.universe.tf/loadBalancerIPs: \"${METALLB_IP}\"|g" \
     "$1"
 }
 
@@ -61,6 +61,7 @@ for manifest in \
   07-build-trigger-sa.yaml \
   08-build-cronjob.yaml \
   09-certificate.yaml \
+  09-cert-renewal-restart.yaml \
   10-networkpolicy.yaml; do
 
   if [ -f "$manifest" ]; then
@@ -72,3 +73,8 @@ done
 echo ""
 echo "Done. Check cert status with:"
 echo "  oc get certificate frc-scheduler-tls -n frc-scheduler-server -w"
+echo ""
+echo "Once the cert is issued, annotate the Secret for cert-utils expiry alerts:"
+echo "  oc annotate secret frc-scheduler-tls -n frc-scheduler-server \\"
+echo "    cert-utils-operator.redhat-cop.io/generate-cert-expiry-alert=true \\"
+echo "    cert-utils-operator.redhat-cop.io/cert-expiry-check-frequency=24h"

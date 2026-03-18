@@ -318,6 +318,42 @@ Same colors applied to day row backgrounds (8% opacity tint, 31% opacity border)
 
 ---
 
+## OpenShift Deployment — Live Configuration Notes
+
+**ClusterIssuer name** — verify with `oc get clusterissuer`. The name is `letsencrypt-production` (not `letsencrypt-prod`) in many installations. `apply.sh` substitutes from `CERT_ISSUER` in `config.env`.
+
+**DNS-01 challenge** — the ClusterIssuer must be configured for DNS-01 validation. No port 80 required. Cert issues in ~60–90s once DNS resolves.
+
+**MetalLB LoadBalancer Service** (`frc-scheduler-server-lb`):
+- `metallb.universe.tf/address-pool: dmz-vlan` — pins to DMZ pool
+- `metallb.universe.tf/loadBalancerIPs: "METALLB_IP"` — substituted by `apply.sh`
+- External port → 8443 internally. External port matches firewall rule (e.g. 8088). No NAT with BGP.
+- `externalTrafficPolicy: Local` — preserves client source IP, avoids extra hop
+
+**cert-utils-operator** (`redhat-cop/cert-utils-operator` v1.3.12):
+- Does NOT handle deployment restarts on cert renewal — that requires Reloader or the CronJob
+- DOES provide expiry alerting via annotation on the Secret:
+  ```
+  cert-utils-operator.redhat-cop.io/generate-cert-expiry-alert=true
+  cert-utils-operator.redhat-cop.io/cert-expiry-check-frequency=24h
+  ```
+- Route injection (`cert-utils-operator.redhat-cop.io/certs-from-secret`) only applies to edge/reencrypt Routes — not relevant for passthrough TLS
+
+**Cert renewal restart** (`09-cert-renewal-restart.yaml`):
+- CronJob runs every Sunday 03:00 (`0 3 * * 0`)
+- Runs `oc rollout restart deployment/frc-scheduler-server`
+- Uses `build-trigger-sa` ServiceAccount (already has oc permissions)
+- Replace with Reloader annotation if stakater/Reloader is ever installed
+
+**NetworkPolicy** (`10-networkpolicy.yaml`) — 5 policies:
+1. `frc-scheduler-deny-all` — default deny ingress + egress
+2. `frc-scheduler-allow-https-ingress` — allow port 8443 inbound from anywhere
+3. `frc-scheduler-allow-postgres-egress` — allow port 5432 to `app: frc-postgres` pod only
+4. `frc-scheduler-allow-dns-egress` — allow 53/UDP+TCP to `openshift-dns` namespace
+5. `frc-scheduler-allow-internet-egress` — allow 443/TCP to internet; RFC1918 blocked
+
+Verify postgres pod label matches: `oc get pods -n frc-scheduler-server --show-labels | grep postgres`
+
 ## Security & Rate Limiting
 
 **Rate limiting** (`slowapi==0.1.9`):
