@@ -2066,6 +2066,8 @@ function applyDayConfigToUI(dc) {
 
       // Restore per-day cycle changes (skip the isStart/start-of-day row — buildDaysUI adds it)
       if (day.cycleChanges) {
+        // Clear any existing non-start cc rows first to prevent duplication on re-apply
+        Array.from(row.querySelectorAll('.day-cc-row[data-is-start="0"]')).forEach(function(r) { r.remove(); });
         day.cycleChanges.forEach(function(cc) {
           if (!cc.isStart && !isNaN(cc.afterMatch) && cc.afterMatch >= 1) {
             addDayCycleChange(row, cc.afterMatch, cc.time, false);
@@ -2116,6 +2118,8 @@ function applyUrlParams(params) {
 
   // Restore cycle time changes into per-day rows
   if (params.cc) {
+    // Clear any existing non-start cc rows first to prevent duplication
+    document.querySelectorAll('.day-cc-row[data-is-start="0"]').forEach(function(r) { r.remove(); });
     params.cc.split(',').forEach(function(token) {
       var parts = token.split(':');
       if (parts.length >= 3) {

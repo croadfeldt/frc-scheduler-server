@@ -54,6 +54,10 @@ When `numTeams × matchesPerTeam` is not evenly divisible by 6, some teams play 
 4. → assignTeams()                       [autoAssign]
 ```
 
+**Cycle change duplication on reload** — Both `applyUrlParams` (URL `?cc=` param) and `applyDayConfigToUI` (stored `day_config`) add non-start cc rows to day row DOM elements. Without a pre-clear, each reload appended duplicates. Fix: both functions now run `querySelectorAll('.day-cc-row[data-is-start="0"]').forEach(r => r.remove())` before adding saved rows. The `data-is-start="1"` start-of-day row is never removed — only its `.cc-time` value is updated.
+
+**Agenda fit overflow bar** — `renderScheduleBars()` inserts a `<div id="agendaFitOverflow">` sibling after `#agendaFitBlocks` when `window._frcFinalDayOverflow` exists and `unscheduled > 0`. The bar fills 100% width using `var(--danger)` color and shows the count of unscheduled matches and estimated additional time (`unscheduled × avgCt` from the last section). Hidden (`display:none`, empty `innerHTML`) when all matches fit or when `resetAgendaPanel()` is called.
+
 **PDF fail warning** — uses `querySelectorAll('.day-row').length` (`configuredDays`) as the day count in the warning message.
 
 ---

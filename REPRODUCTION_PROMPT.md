@@ -58,6 +58,33 @@ The `while` loop in `calcMaxMatches()` has a `_safetyLimit = 2000` iteration cap
 
 ---
 
+### Cycle Change Duplication Fix
+
+Both `applyUrlParams` and `applyDayConfigToUI` add non-start cycle change rows. Without clearing first, each reload duplicated them. Fix applied in both functions:
+
+```javascript
+// Before adding saved cc rows:
+document.querySelectorAll('.day-cc-row[data-is-start="0"]').forEach(function(r) { r.remove(); });
+```
+
+The `data-is-start="1"` row is always created by `buildDaysUI()` and is never removed — its `.cc-time` value is simply updated in place.
+
+---
+
+### Agenda Fit Overflow Bar
+
+`renderScheduleBars()` appends `<div id="agendaFitOverflow">` as a sibling of `#agendaFitBlocks` (created on first call, reused thereafter). Shown when `window._frcFinalDayOverflow.unscheduled > 0`:
+
+```javascript
+// Estimate additional time from last section's avg cycle time
+var estCt = lastSection.committed / lastSection.matchCount;
+var extraMin = Math.round(ov.unscheduled * estCt);
+```
+
+Bar fills 100% width with `background:var(--danger)`. Hidden (`display:none`) when all matches fit. `resetAgendaPanel()` also clears it.
+
+---
+
 ### Cycle Time Sync Prompt
 
 `cycleTime` `change` listener checks `anyDiffers`: if any `.day-cc-row[data-is-start="1"] .cc-time` value ≠ new ct, shows `confirm()`. On OK: pushes to all start rows + shows `cycleTimePushWarning` 4s. `input` listener: only `onParamChanged()`.
@@ -161,6 +188,33 @@ document.getElementById('numDays').addEventListener('input', function() {
 **Page break:** `opts.pageBreak` → CSS `.day-title.page-break { page-break-before: always }` added to print style. Applied to all days except first (`isFirstDay = scheduled.indexOf(day) === 0`).
 
 **Options:** `printOptCycleTimes`✓, `printOptCycleChanges`✓, `printOptBreaks`✓, `printOptDayBreaks`✓, `printOptTeamNums`✓ (disabled if no assign), `printOptRoundDividers`☐, `printOptPageBreak`☐.
+
+---
+
+### Cycle Change Duplication Fix
+
+Both `applyUrlParams` and `applyDayConfigToUI` add non-start cycle change rows. Without clearing first, each reload duplicated them. Fix applied in both functions:
+
+```javascript
+// Before adding saved cc rows:
+document.querySelectorAll('.day-cc-row[data-is-start="0"]').forEach(function(r) { r.remove(); });
+```
+
+The `data-is-start="1"` row is always created by `buildDaysUI()` and is never removed — its `.cc-time` value is simply updated in place.
+
+---
+
+### Agenda Fit Overflow Bar
+
+`renderScheduleBars()` appends `<div id="agendaFitOverflow">` as a sibling of `#agendaFitBlocks` (created on first call, reused thereafter). Shown when `window._frcFinalDayOverflow.unscheduled > 0`:
+
+```javascript
+// Estimate additional time from last section's avg cycle time
+var estCt = lastSection.committed / lastSection.matchCount;
+var extraMin = Math.round(ov.unscheduled * estCt);
+```
+
+Bar fills 100% width with `background:var(--danger)`. Hidden (`display:none`) when all matches fit. `resetAgendaPanel()` also clears it.
 
 ---
 
