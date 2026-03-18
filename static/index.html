@@ -3123,9 +3123,21 @@ function searchTbaIndex(query) {
 function calcMaxMatches() {
   var numTeams    = parseInt(document.getElementById('numTeams').value) || 0;
   var breakBuffer = parseFloat(document.getElementById('breakBuffer').value) || 0;
-  if (numTeams < 6) { showApiStatus('Enter at least 6 teams before calculating', true); return; }
-  if (!validateTimes()) { showApiStatus('Fix invalid times before calculating', true); return; }
-  if (!validateCycleChanges()) { showApiStatus('Fix cycle change fields before calculating', true); return; }
+  if (numTeams < 6) {
+    showApiStatus('Enter at least 6 teams before calculating', true);
+    _overlay.done('maxcycles'); _overlay.hide();
+    return;
+  }
+  if (!validateTimes()) {
+    showApiStatus('Fix invalid times before calculating', true);
+    _overlay.done('maxcycles'); _overlay.hide();
+    return;
+  }
+  if (!validateCycleChanges()) {
+    showApiStatus('Fix cycle change fields before calculating', true);
+    _overlay.done('maxcycles'); _overlay.hide();
+    return;
+  }
   showApiStatus('⏳ Calculating max matches…');
 
   var dayRows = document.querySelectorAll('.day-row');
@@ -3192,7 +3204,11 @@ function calcMaxMatches() {
     }
   });
 
-  if (totalSlotMatches === 0) { showApiStatus('No matches fit in the current schedule', true); return; }
+  if (totalSlotMatches === 0) {
+    showApiStatus('No matches fit in the current schedule', true);
+    _overlay.done('maxcycles'); _overlay.hide();
+    return;
+  }
 
   // Distribute player slots evenly: floor(totalSlots*6 / numTeams) matches per team
   var mpt = Math.floor(totalSlotMatches * 6 / numTeams);
@@ -5106,12 +5122,24 @@ async function generateSchedule() {
   const seed = window._pendingSeed || randomSeed();
   _currentSeed = seed;
 
-  if (numTeams < 6) { showApiStatus('Enter at least 6 teams', true); return; }
+  if (numTeams < 6) {
+    showApiStatus('Enter at least 6 teams', true);
+    _overlay.done('generate'); _overlay.hide();
+    return;
+  }
 
   const btn = document.getElementById('btnGenerate');
   if (btn.disabled) return; // already running — ignore duplicate trigger
-  if (!validateTimes()) { showApiStatus('Fix invalid times before generating', true); return; }
-  if (!validateCycleChanges()) { showApiStatus('⚠ Fill in all required cycle change fields', true); return; }
+  if (!validateTimes()) {
+    showApiStatus('Fix invalid times before generating', true);
+    _overlay.done('generate'); _overlay.hide();
+    return;
+  }
+  if (!validateCycleChanges()) {
+    showApiStatus('⚠ Fill in all required cycle change fields', true);
+    _overlay.done('generate'); _overlay.hide();
+    return;
+  }
   btn.disabled = true;
   document.getElementById('progressWrap').style.display = 'block';
   document.getElementById('stage2Panel').style.display = 'none';
