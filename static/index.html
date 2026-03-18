@@ -908,6 +908,41 @@
     </div>
   </div>
 
+  <!-- Print options modal -->
+  <div class="modal-overlay" id="modalPrint">
+    <div class="modal" style="width:min(400px,95vw);">
+      <button class="modal-close" onclick="closeModal('modalPrint')">&#x2715;</button>
+      <div class="modal-title">&#128438; Print Schedule</div>
+      <div class="modal-section">
+        <div class="modal-section-label">Include in printout</div>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;margin-top:0.25rem;">
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+            <input type="checkbox" id="printOptCycleTimes" checked> Cycle times in day header
+          </label>
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+            <input type="checkbox" id="printOptCycleChanges" checked> Cycle time changes
+          </label>
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+            <input type="checkbox" id="printOptBreaks" checked> Breaks
+          </label>
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+            <input type="checkbox" id="printOptDayBreaks" checked> Day break markers
+          </label>
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+            <input type="checkbox" id="printOptSlotNums"> Slot numbers (instead of team numbers)
+          </label>
+          <label id="printOptTeamNumsLabel" style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+            <input type="checkbox" id="printOptTeamNums" checked> Team numbers
+          </label>
+        </div>
+      </div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+        <button class="btn-sm btn-accent" onclick="printSchedule()" style="flex:1;">&#128438; Print</button>
+        <button class="btn-sm" onclick="closeModal('modalPrint')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Saved schedules modal -->
   <div class="modal-overlay" id="modalSchedules">
     <div class="modal" style="width:min(620px,95vw);">
@@ -1073,6 +1108,7 @@
         <div id="downloadBar" style="display:none;gap:0.4rem;display:none;align-items:center;">
           <button class="btn-export" id="btnDownloadCSV" onclick="downloadCSV()" title="Download schedule as CSV">&#11015; CSV</button>
           <button class="btn-export" id="btnDownloadJSON" onclick="downloadJSON()" title="Download schedule as JSON">&#11015; JSON</button>
+          <button class="btn-export" id="btnPrint" onclick="openPrintDialog()" title="Print schedule">&#128438; Print</button>
         </div>
       </div>
       <div class="stats-bar">
@@ -6666,6 +6702,132 @@ function downloadJSON() {
   a.href   = URL.createObjectURL(blob);
   a.download = 'frc_schedule.json';
   a.click();
+}
+
+function openPrintDialog() {
+  if (!window._frcScheduled) { showApiStatus('No schedule to print', true); return; }
+  // Show/hide team numbers option based on whether assignment is done
+  var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
+  var teamNumLabel = document.getElementById('printOptTeamNumsLabel');
+  if (teamNumLabel) teamNumLabel.style.display = hasAssignment ? '' : 'none';
+  openModal('modalPrint');
+}
+
+function printSchedule() {
+  var scheduled = window._frcScheduled;
+  if (!scheduled) return;
+  closeModal('modalPrint');
+
+  var opts = {
+    cycleTimes:   document.getElementById('printOptCycleTimes').checked,
+    cycleChanges: document.getElementById('printOptCycleChanges').checked,
+    breaks:       document.getElementById('printOptBreaks').checked,
+    dayBreaks:    document.getElementById('printOptDayBreaks').checked,
+    slotNums:     document.getElementById('printOptSlotNums').checked,
+    teamNums:     document.getElementById('printOptTeamNums').checked,
+  };
+
+  var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
+
+  // Resolve team number from slot
+  function teamLabel(slot) {
+    if (opts.slotNums) return 'S' + slot;
+    if (hasAssignment && opts.teamNums && _currentSlotMap[String(slot)]) return _currentSlotMap[String(slot)];
+    if (hasAssignment && opts.teamNums) return slot;
+    return slot;
+  }
+
+  var eventName = document.getElementById('eventCodeStatus') ? document.getElementById('eventCodeStatus').textContent : '';
+  var numTeams  = document.getElementById('numTeams').value;
+  var mpt       = document.getElementById('matchesPerTeam').value;
+
+  // Build print HTML
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">';
+  html += '<title>FRC Schedule' + (eventName ? ' — ' + eventName : '') + '</title>';
+  html += '<style>';
+  html += 'body{font-family:Arial,sans-serif;font-size:10pt;margin:1cm;color:#000;}';
+  html += 'h1{font-size:14pt;margin:0 0 2px 0;}';
+  html += '.meta{font-size:8pt;color:#555;margin-bottom:12px;}';
+  html += '.day-title{font-size:11pt;font-weight:bold;margin:14px 0 4px 0;border-bottom:2px solid #000;padding-bottom:2px;}';
+  html += 'table{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:9pt;}';
+  html += 'th{background:#222;color:#fff;padding:3px 6px;text-align:left;font-size:8pt;}';
+  html += 'td{padding:2px 6px;border-bottom:1px solid #ddd;}';
+  html += 'tr:nth-child(even) td{background:#f7f7f7;}';
+  html += '.red{color:#c0392b;font-weight:600;}';
+  html += '.blue{color:#1a5276;font-weight:600;}';
+  html += '.sur{font-size:7pt;background:#e67e22;color:#fff;border-radius:2px;padding:0 2px;margin-left:1px;vertical-align:super;}';
+  html += '.break-row td{color:#b7770d;font-style:italic;background:#fef9e7;font-size:8pt;}';
+  html += '.cc-row td{color:#555;font-style:italic;background:#f0f4ff;font-size:8pt;}';
+  html += '.round-row td{color:#555;font-size:7.5pt;background:#f0f0f0;text-align:center;letter-spacing:0.05em;text-transform:uppercase;}';
+  html += '@media print{@page{margin:1cm;size:portrait;}body{margin:0;}.day-title{page-break-before:auto;}}';
+  html += '</style></head><body>';
+
+  html += '<h1>FRC Match Schedule' + (eventName ? ' &mdash; ' + eventName : '') + '</h1>';
+  html += '<div class="meta">' + numTeams + ' teams &middot; ' + mpt + ' matches/team';
+  html += ' &middot; Generated ' + new Date().toLocaleString() + '</div>';
+
+  var rb = window._frcRoundBoundaries || new Map();
+  var matchNumToRound = new Map();
+  rb.forEach(function(matchIdx, round) { matchNumToRound.set(matchIdx + 1, round); });
+
+  var teamSpan = function(slot, isSur, cls) {
+    var label = teamLabel(slot);
+    var sur = isSur ? '<span class="sur">S</span>' : '';
+    return '<span class="' + cls + '">' + label + sur + '</span>';
+  };
+
+  scheduled.forEach(function(day) {
+    // Day header
+    var dayMatches = day.entries.filter(function(e) { return e.type === 'match'; });
+    var dayCCs     = day.entries.filter(function(e) { return e.type === 'cycle-change'; });
+    var ctInfo = '';
+    if (opts.cycleTimes && dayMatches.length > 0) {
+      var firstCt = (dayMatches[0].endMin || 0) - (dayMatches[0].startMin || 0);
+      if (dayCCs.length > 0 && opts.cycleChanges) {
+        var parts = [firstCt];
+        dayCCs.forEach(function(cc) { if (cc.newTime !== parts[parts.length-1]) parts.push(cc.newTime); });
+        ctInfo = ' &middot; cycle: ' + parts.map(function(t){ return (t%1===0?t:t.toFixed(1))+'min'; }).join(' &rarr; ');
+      } else {
+        ctInfo = ' &middot; ' + (firstCt%1===0?firstCt:firstCt.toFixed(1)) + 'min/match';
+      }
+    }
+    html += '<div class="day-title">Day ' + day.dayNum + ' &mdash; ' + dayMatches.length + ' matches' + ctInfo + '</div>';
+    html += '<table><thead><tr><th>#</th><th>Time</th><th>Red Alliance</th><th>Blue Alliance</th></tr></thead><tbody>';
+
+    day.entries.forEach(function(entry) {
+      if (entry.type === 'break') {
+        if (!opts.breaks) return;
+        html += '<tr class="break-row"><td colspan="4">&#9646; ' + entry.name + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.start) + ' &ndash; ' + minToTime(entry.end) + '</td></tr>';
+      } else if (entry.type === 'cycle-change') {
+        if (!opts.cycleChanges) return;
+        html += '<tr class="cc-row"><td colspan="4">&#8645; Cycle time &rarr; <strong>' + entry.newTime + ' min</strong> from match ' + (entry.afterMatch + 1) + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.atMin) + '</td></tr>';
+      } else if (entry.type === 'match') {
+        // Round boundary
+        if (matchNumToRound.has(entry.num)) {
+          var rn = matchNumToRound.get(entry.num);
+          var rnote = rn === 1 ? 'all teams guaranteed a first match' : 'approximate boundary';
+          html += '<tr class="round-row"><td colspan="4">Round ' + rn + ' &mdash; ' + rnote + '</td></tr>';
+        }
+        // Day break marker
+        if (entry.isDayBreak && !opts.dayBreaks) return;
+
+        var red  = entry.red.map(function(t,i){ return teamSpan(t, entry.redSurrogate&&entry.redSurrogate[i], 'red'); }).join(' &middot; ');
+        var blue = entry.blue.map(function(t,i){ return teamSpan(t, entry.blueSurrogate&&entry.blueSurrogate[i], 'blue'); }).join(' &middot; ');
+        html += '<tr><td>Q' + entry.num + '</td><td>' + minToTime(entry.startMin) + '</td><td>' + red + '</td><td>' + blue + '</td></tr>';
+      }
+    });
+
+    html += '</tbody></table>';
+  });
+
+  html += '</body></html>';
+
+  var w = window.open('', '_blank');
+  if (!w) { showApiStatus('Pop-up blocked — allow pop-ups to print', true); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(function() { w.print(); }, 300);
 }
 </script>
 <script type="text/plain" id="workerSrc">
