@@ -156,6 +156,8 @@
   .days-container { display: flex; flex-direction: column; gap: 0.5rem; }
   .day-row { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem; }
   .day-row-header { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent2); margin-bottom: 0.6rem; }
+  .day-label-link { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 1rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent2); cursor: pointer; transition: color 0.15s; }
+  .day-label-link:hover { color: var(--accent); }
   .day-times { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem; }
   .breaks-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.5rem; }
   .break-row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 0.4rem; align-items: end; }
@@ -1323,7 +1325,7 @@ function buildDaysUI() {
     d.dataset.day = i;
     d.innerHTML =
       '<div class="day-row-header" style="display:flex;align-items:center;justify-content:space-between;">' +
-        '<span class="day-label-link" onclick="scrollToDay(' + (i+1) + ')" title="Scroll schedule to Day ' + (i+1) + '" style="font-size:1rem;font-weight:700;letter-spacing:0.05em;cursor:pointer;transition:color 0.15s;" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'\'">Day ' + (i+1) + '</span>' +
+        '<span class="day-label-link" onclick="scrollToDay(' + (i+1) + ')" title="Scroll schedule to Day ' + (i+1) + '">Day ' + (i+1) + '</span>' +
         '<button class="btn-icon" title="Remove day" style="font-size:0.75rem;opacity:0.6;' + (i === 0 ? 'display:none;' : '') + '" onclick="removeDay(this.closest(\'.day-row\'))">&#x2715;</button>' +
       '</div>' +
       '<div class="day-times">' +
@@ -2630,10 +2632,13 @@ function renderScheduleBars() {
         committed,           // pre-summed (used by stats); render re-sums with cap
         matches:     currentMatches.slice(),
         shortBreaks: currentShortBreaks.slice(),
+        cycleChanges: currentCycleChanges.slice(),
         hasTrailingBreak: !!hasTrailingBreak,
       });
       currentMatches = []; currentShortBreaks = [];
     }
+
+    var currentCycleChanges = [];
 
     day.entries.forEach(function(entry) {
       if (entry.type === 'match') {
@@ -2643,11 +2648,14 @@ function renderScheduleBars() {
         if (dur > AGENDA_BREAK_THRESHOLD) {
           flushSection(entry.start, true);  // hasTrailingBreak = true
           slotStart = entry.end;
+          currentCycleChanges = [];
         } else {
           if (currentMatches.length) currentShortBreaks.push(entry);
         }
+      } else if (entry.type === 'cycle-change') {
+        // Collect cycle-change markers so we can show the progression
+        currentCycleChanges.push(entry);
       }
-      // cycle-change entries already baked into match endMin — skip here
     });
     flushSection(null);
   });
@@ -2682,11 +2690,28 @@ function renderScheduleBars() {
     var overage   = Math.round(committed - available);
     var dc        = dayColor(s.dayNum);
     var fillColor = (overage > 0 || fillPct > 95) ? 'var(--amber)' : dc;
-    var avgCt     = s.matchCount > 0 ? (committed / s.matchCount).toFixed(1) : '\u2014';
+    // Build cycle time progression string from cycle-change markers
+    // e.g. "9 min" or "9 → 8 min" when ct changes during the section
+    var ctLabel = (function() {
+      if (!s.cycleChanges || !s.cycleChanges.length) {
+        var singleCt = s.matchCount > 0 ? (committed / s.matchCount).toFixed(1) : '?';
+        return singleCt + '\u202fmin/match';
+      }
+      // Starting ct = duration of first match
+      var firstCt = s.matches.length > 0
+        ? ((s.matches[0].endMin || 0) - (s.matches[0].startMin || 0))
+        : null;
+      var seenCts = firstCt ? [firstCt] : [];
+      s.cycleChanges.forEach(function(cc) {
+        var last = seenCts[seenCts.length - 1];
+        if (cc.newTime !== last) seenCts.push(cc.newTime);
+      });
+      return seenCts.map(function(t) { return t % 1 === 0 ? t : t.toFixed(1); }).join('\u2192') + '\u202fmin/match';
+    })();
 
     var label = s.matchCount + ' match' + (s.matchCount !== 1 ? 'es' : '')
               + '\u2002\u00b7\u2002' + Math.round(committed) + ' / ' + Math.round(available) + '\u202fmin'
-              + '\u2002(avg ' + avgCt + '\u202fmin)';
+              + '\u2002(' + ctLabel + ')';
     if (overage > 0) label += '\u2002\u00b7\u2002+' + overage + '\u202fmin over';
 
     var ticksHtml = s.shortBreaks.map(function(brk) {
@@ -2699,7 +2724,9 @@ function renderScheduleBars() {
 
     html += '<div class="agenda-block-row">'
           + '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.25rem;">'
-          +   '<span style="font-size:0.7rem;font-weight:700;color:' + dc + ';letter-spacing:0.03em;">' + s.dayLabel + '</span>'
+          +   '<span class="day-label-link" '
+          +     'onclick="scrollToDay(' + s.dayNum + ')" '
+          +     'title="Scroll schedule to ' + s.dayLabel + '">' + s.dayLabel + '</span>'
           +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
           +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
           +   '</span>'
@@ -5847,20 +5874,26 @@ function renderSchedule() {
 
     var matchCount = day.entries.filter(function(e) { return e.type === 'match'; }).length;
     var dayMatches = day.entries.filter(function(e) { return e.type === 'match'; });
-    // Collect distinct cycle times used on this day from cycle-change markers
+    // Derive cycle time info from the actual scheduled match durations + cycle-change markers.
+    // Using getCycleTime() with global cycleChanges gives wrong results for Day 2+ because
+    // it doesn't account for per-day isStart cycle times — instead read from the schedule itself.
     var dayCycleChanges = day.entries.filter(function(e) { return e.type === 'cycle-change'; });
     var cycleTimeInfo = '';
-    if (dayCycleChanges.length > 0) {
-      // Show initial cycle time and each change
-      var firstMatchNum = dayMatches.length > 0 ? dayMatches[0].num : 1;
-      var initCt = getCycleTime(firstMatchNum, defaultCycleTime, cycleChanges);
-      var ctParts = [initCt + ' min'];
-      dayCycleChanges.forEach(function(cc) { ctParts.push(cc.newTime + ' min'); });
-      cycleTimeInfo = ' \u00b7 cycle: ' + ctParts.join(' \u2192 ');
-    } else {
-      var firstMatchNum2 = dayMatches.length > 0 ? dayMatches[0].num : 1;
-      var ct = getCycleTime(firstMatchNum2, defaultCycleTime, cycleChanges);
-      cycleTimeInfo = ' \u00b7 ' + ct + ' min/match';
+    if (dayMatches.length > 0) {
+      // Starting ct = duration of the first match on this day
+      var firstCt = (dayMatches[0].endMin || 0) - (dayMatches[0].startMin || 0);
+      if (dayCycleChanges.length > 0) {
+        // Build progression: firstCt → change1 → change2 ...
+        var ctParts = [firstCt];
+        dayCycleChanges.forEach(function(cc) {
+          if (cc.newTime !== ctParts[ctParts.length - 1]) ctParts.push(cc.newTime);
+        });
+        cycleTimeInfo = ' \u00b7 cycle: ' + ctParts.map(function(t) {
+          return (t % 1 === 0 ? t : t.toFixed(1)) + '\u202fmin';
+        }).join(' \u2192 ');
+      } else {
+        cycleTimeInfo = ' \u00b7 ' + (firstCt % 1 === 0 ? firstCt : firstCt.toFixed(1)) + '\u202fmin/match';
+      }
     }
     var title = document.createElement('div');
     title.className = 'day-title';
