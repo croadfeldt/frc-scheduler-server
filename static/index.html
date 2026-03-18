@@ -1356,7 +1356,9 @@ function buildDaysUI() {
       '<div class="breaks-list"></div>' +
       '<button class="btn-add-break btn-add-break-day">+ Add Break</button>' +
       '<div class="cc-list"></div>' +
-      '<button class="btn-add-break btn-add-cc-day" style="margin-top:0.25rem;">+ Add Cycle Time Change</button>';
+      '<button class="btn-add-break btn-add-cc-day" style="margin-top:0.25rem;">+ Add Cycle Time Change</button>' +
+      '<div class="day-earlyend-list"></div>' +
+      '<button class="btn-add-break btn-add-earlyend-day" style="margin-top:0.25rem;">+ Add Day Break (stop scheduling)</button>';
     container.appendChild(d);
 
     // Wire day start/end listeners
@@ -1373,6 +1375,9 @@ function buildDaysUI() {
     // Wire Add Cycle Time Change button
     d.querySelector('.btn-add-cc-day').addEventListener('click', function() {
       addDayCycleChange(d);
+    });
+    d.querySelector('.btn-add-earlyend-day').addEventListener('click', function() {
+      addDayEarlyEnd(d);
     });
 
     // Add default lunch break and start-of-day cycle time change
@@ -1581,19 +1586,18 @@ validateTimes();
 document.getElementById('tbaYear').value = new Date().getFullYear();
 document.getElementById('eventYear').value = new Date().getFullYear();
 loadEvents();
-// Pre-fetch TBA events for the current year so the dropdown is ready
-setTimeout(fetchTbaDropdown, 800);
+// TBA events fetched on first focus of the event input — not pre-loaded
 initAuth();
 autoRunFromUrl();
 // Pre-fetch TBA search index in background for cross-year event search
 setTimeout(ensureTbaSearchIndex, 5000); // defer — not needed until event search
-// Check CPU worker count for overlay detail
-(async function() {
+// Check CPU worker count after page is interactive — not blocking
+setTimeout(async function() {
   try {
     var h = await apiFetch('/api/health');
     window._cpuWorkers = h.cpu_workers || 1;
   } catch(e) { window._cpuWorkers = 1; }
-})();
+}, 2000);
 
 ['numTeams','matchesPerTeam','cooldown','breakBuffer'].forEach(function(id) {
   var el = document.getElementById(id);
@@ -1819,6 +1823,8 @@ function buildShareUrl() {
       return bstart && bend ? bname + '|' + bstart + '|' + bend : null;
     }).filter(Boolean);
     if (breaks.length) params.set('d' + dayNum + 'b', breaks.join(','));
+    var ee = getDayEarlyEnd(row);
+    if (ee !== null) params.set('d' + dayNum + 'e', ee);
   });
 
   // Encode cycle time changes: cc=Day:AfterMatch:Time,...
@@ -1861,13 +1867,15 @@ function parseUrlParams() {
   for (let i = 1; i <= Math.max(nd, 5); i++) {
     const dayStr   = p.get('d' + i);
     const breaksStr= p.get('d' + i + 'b');
+    const earlyEndStr = p.get('d' + i + 'e');
     if (!dayStr) continue;
     const [start, end] = dayStr.split('-');
     const breaks = breaksStr ? breaksStr.split(',').map(function(b) {
       const parts = b.split('|');
       return parts.length === 3 ? { name: parts[0], start: parts[1], end: parts[2] } : null;
     }).filter(Boolean) : [];
-    days.push({ start, end, breaks });
+    const earlyEnd = earlyEndStr ? parseInt(earlyEndStr) : null;
+    days.push({ start, end, breaks, earlyEnd: (earlyEnd >= 1 ? earlyEnd : null) });
   }
   // Parse auto flags — null means "not in URL, keep current default"
   function parseBoolFlag(name) {
@@ -1934,6 +1942,9 @@ function applyDayConfigToUI(dc) {
         });
       }
 
+      // Restore day break
+      if (day.earlyEnd != null) addDayEarlyEnd(row, day.earlyEnd);
+
       // Restore per-day cycle changes (skip the isStart/start-of-day row — buildDaysUI adds it)
       if (day.cycleChanges) {
         day.cycleChanges.forEach(function(cc) {
@@ -1979,6 +1990,7 @@ function applyUrlParams(params) {
             addBreak(row.querySelector('.btn-add-break'), b.start, b.end, b.name);
           });
         }
+        if (day.earlyEnd != null) addDayEarlyEnd(row, day.earlyEnd);
       });
     }
   }
@@ -3086,6 +3098,7 @@ function calcMaxMatches() {
     }).filter(function(b) { return b.end > b.start && b.start < dayEnd; }).sort(function(a,b){return a.start-b.start;});
 
     // Build per-day cycle change list (same as _finishGenerationInner)
+    var dayEarlyEnd = getDayEarlyEnd(row);
     var dayCycleChanges = Array.from(row.querySelectorAll('.day-cc-row')).map(function(ccRow) {
       var t = parseFloat(ccRow.querySelector('.cc-time').value);
       var afterInp = ccRow.querySelector('.cc-after');
@@ -3133,6 +3146,7 @@ function calcMaxMatches() {
       cursor += ct;
       dayMatchCount++;
       totalSlotMatches++;
+      if (dayEarlyEnd !== null && dayMatchCount >= dayEarlyEnd) break;
     }
   });
 
@@ -3438,6 +3452,60 @@ function addDayCycleChange(dayRow, afterMatch, newTime, isStart) {
       row.remove(); validateCycleChanges(); onCycleTimeChanged();
     });
   }
+}
+
+/**
+ * Add a "Day Break" row to a day — stops match scheduling after a given match count.
+ * Does NOT change the day's time slot (start/end remain); only limits how many
+ * matches are scheduled into that slot. Agenda fit will reflect the reduced commitment.
+ *
+ * @param {HTMLElement} dayRow  — the .day-row div
+ * @param {number|null} afterMatch — stop after this many matches on this day (null = prompt)
+ */
+function addDayEarlyEnd(dayRow, afterMatch) {
+  var list = dayRow.querySelector('.day-earlyend-list');
+  // Only one day break per day — remove existing before adding
+  list.innerHTML = '';
+
+  var afterVal = (afterMatch != null && afterMatch !== '') ? afterMatch : '';
+  var row = document.createElement('div');
+  row.className = 'day-earlyend-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr auto;gap:0.4rem;align-items:end;margin-top:0.3rem;';
+
+  var inputStyle = 'background:var(--bg);border:1px solid var(--border);color:var(--text-strong);' +
+    'padding:0.45rem 0.5rem;font-size:0.85rem;border-radius:4px;width:100%;';
+
+  row.innerHTML =
+    '<div class="field">' +
+      '<label style="font-size:0.65rem;">Stop scheduling after match # on this day <span style="color:var(--danger)">*</span></label>' +
+      '<input type="number" class="earlyend-after" placeholder="e.g. 44" min="1" step="1" value="' + afterVal + '" required ' +
+      'style="' + inputStyle + '">' +
+    '</div>' +
+    '<button class="btn-icon btn-remove-earlyend" title="Remove day break" style="align-self:flex-end;">&#x2715;</button>';
+
+  list.appendChild(row);
+
+  row.querySelector('.btn-remove-earlyend').addEventListener('click', function() {
+    row.remove();
+    onCycleTimeChanged();
+  });
+
+  var inp = row.querySelector('.earlyend-after');
+  inp.addEventListener('input',  function() { onCycleTimeChanged(); });
+  inp.addEventListener('change', function() { onCycleTimeChanged(); });
+
+  // Auto-focus when user clicks the button
+  if (afterMatch == null || afterMatch === '') {
+    setTimeout(function() { inp.focus(); inp.select(); }, 0);
+  }
+}
+
+/** Read the day break match limit for a .day-row (null if not set) */
+function getDayEarlyEnd(dayRow) {
+  var inp = dayRow.querySelector('.earlyend-after');
+  if (!inp || !inp.value) return null;
+  var v = parseInt(inp.value);
+  return (isNaN(v) || v < 1) ? null : v;
 }
 
 function validateCycleChanges() {
@@ -4131,7 +4199,9 @@ async function apiFetch(path, opts = {}) {
   if (opts.body) headers['Content-Type'] = 'application/json';
   const token = getToken();
   if (token) headers['Authorization'] = 'Bearer ' + token;
+  const _t0 = performance.now();
   const res = await fetch(API + path, { ...opts, method, headers });
+  console.debug('[api]', method, path, Math.round(performance.now() - _t0) + 'ms', res.status);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || res.statusText);
@@ -4494,6 +4564,21 @@ document.addEventListener('click', function(e) {
 });
 
 // Show dropdown when input is focused (if we have data)
+// Pre-fetch TBA/FRC event list on first focus of the event code input
+(function() {
+  var _prefetched = false;
+  function _prefetch() {
+    if (_prefetched) return;
+    _prefetched = true;
+    fetchTbaDropdown();
+  }
+  // Attach after DOM is ready
+  document.addEventListener('DOMContentLoaded', function() {
+    var inp = document.getElementById('eventCodeInput');
+    if (inp) inp.addEventListener('focus', _prefetch, { once: true });
+  });
+})();
+
 document.addEventListener('DOMContentLoaded', function() {
   var input = document.getElementById('eventCodeInput');
   if (input) input.addEventListener('focus', function() {
@@ -5078,6 +5163,7 @@ function collectDayConfig() {
       return {
         start:        row.querySelector('.day-start').value,
         end:          row.querySelector('.day-end').value,
+        earlyEnd:     getDayEarlyEnd(row),
         cycleChanges: dayCycleChanges,
         breaks: Array.from(row.querySelectorAll('.break-row')).map(function(br) {
           return {
@@ -5590,6 +5676,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
     return {
       start: isObj ? timeToMin(row.start) : timeToMin(row.querySelector('.day-start').value),
       end:   isObj ? timeToMin(row.end)   : timeToMin(row.querySelector('.day-end').value),
+      earlyEnd: isObj ? (row.earlyEnd || null) : getDayEarlyEnd(row),
       cycleChanges: dayCycleChanges,
       breaks: (isObj ? (row.breaks||[]) : Array.from(row.querySelectorAll('.break-row')).map(br => ({
         name: br.querySelector('.break-name').value || 'Break',
@@ -5614,6 +5701,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
     const breaks = day.breaks.map(b => Object.assign({}, b, {done: false}));
     const entries = [];
     let cursor = day.start;
+    let dayMatchCount = 0;
 
     while (matchIdx < totalMatches) {
       // Flush any breaks whose start time has passed
@@ -5695,6 +5783,8 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       });
       cursor = matchEnd;
       matchIdx++;
+      dayMatchCount++;
+      if (day.earlyEnd !== null && day.earlyEnd !== undefined && dayMatchCount >= day.earlyEnd) break;
 
       // After advancing matchIdx, check if cycle time changes for the next match
       // and inject a cycle-change marker row

@@ -100,6 +100,20 @@ FastAPI (app/main.py)              port 8080
 PostgreSQL                         port 5432 (internal)
 ```
 
+### OpenShift scaling (recommended)
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| `replicas` | `2` | Each pod on a separate node; 4 users per pod at good performance |
+| `cpu request` | `4` | Guarantees headroom on 16-CPU nodes |
+| `cpu limit` | `12` | Leaves 4 CPUs for OS/other pods per node |
+| `CPU_WORKERS` | `12` | SA workers per pod; `_gen_concurrency = CPU_WORKERS // 3 = 4` |
+| `WEB_WORKERS` | `1` | One uvicorn process owns the full pool — no contention |
+| `maxUnavailable` | `0` | Zero-downtime rolling deploys |
+| `PodDisruptionBudget` | `minAvailable: 1` | Node drain never takes both pods offline |
+
+**Concurrent user capacity:** 2 pods × 4 jobs/pod = 8 simultaneous assignment jobs. Each job gets 3 SA workers → ~10s for 1000 iterations at full load.
+
 ### Seeded RNG
 
 Both stages use deterministic seeded PRNGs:
@@ -114,78 +128,101 @@ Same seed always produces identical output. Seeds are auto-generated, stored in 
 
 ### Auto flags
 
-Three checkboxes live in one box below Match Cooldown:
+Four checkboxes in the "Auto Actions" box below Match Cooldown:
 
-| Flag | Default | Behaviour |
-|------|---------|-----------|
-| **Auto-regenerate on parameter change** | ✅ On | Regenerates Stage 1 whenever a parameter changes (1.5s debounce) |
-| **Auto-apply PDF agenda to day config** | ✅ On | Automatically fills day start/end times and breaks from the FIRST agenda PDF when an event is loaded |
-| **Auto-calculate max matches/team** | ✅ On | Runs Calc Max Matches immediately after day config is applied; sets the matches/team field to the maximum that fits the schedule |
-| **Auto-assign teams after schedule generation** | ☐ Off | Automatically runs Stage 2 team assignment after Stage 1 completes |
+| Flag | ID | Default | Behaviour |
+|------|----|---------|-----------| 
+| Regenerate on change | `autoPopulate` | ✅ On | Debounced Stage 1 regeneration on any param change (2.5s) |
+| Apply PDF agenda to day config | `autoApplyAgenda` | ✅ On | Fills day times and breaks from FIRST agenda PDF on event load |
+| Calculate max matches/team | `autoMaxCycles` | ✅ On | `calcMaxMatches()` after day config applied; writes matchesPerTeam |
+| Assign teams after generation | `autoAssign` | ☐ Off | Triggers Stage 2 automatically after Stage 1 completes |
 
-**Interaction order when an event is loaded:**
-1. Roster is fetched → `numTeams` set (generation held by `_agendaFetchPending` flag)
-2. Agenda PDF is fetched and parsed (non-blocking)
-3. If auto-apply is on → day config populated from real qual time blocks
-4. `generateSchedule()` called directly — no debounce delay (shows `⏳ Generating schedule…`)
+**Precedence order on event load** (each step gated by its own flag):
 
-The four auto-flag combinations:
+```
+1. PDF fetch → applyAgendaToSchedule()   [autoApplyAgenda]
+2. → calcMaxMatches()                    [autoMaxCycles] → writes matchesPerTeam
+3. → generateSchedule()                  [autoPopulate]  → Stage 1
+4. → assignTeams()                       [autoAssign]    → Stage 2
+```
 
-| autoApplyAgenda (default ✅) | autoMaxCycles (default ✅) | autoPopulate (default ✅) | Result |
-|---|---|---|---|
-| ✅ | ✅ | any | Apply day config → calcMaxMatches → generateSchedule |
-| ✅ | ☐ | ✅ | Apply day config → generateSchedule directly |
-| ☐ | ✅ | any | calcMaxMatches → generateSchedule |
-| ☐ | ☐ | ✅ | generateSchedule directly |
+**Auto flags are persisted** in the URL (`?autoPopulate=0` etc.) and in `day_config` JSON in the DB. Flags defaulting on are omitted from the URL when on; `autoAssign` (default off) is omitted when off.
 
-If no PDF is available, generation still fires directly from the catch block (guarded by `numTeams >= 6`).
+**`onCycleTimeChanged()`** — cycle-time inputs fire a 1.2s debounced handler that calls `calcMaxMatches()` when `autoMaxCycles` is on, then `generateSchedule()`. Debounced to avoid firing mid-keystroke.
 
-A `_agendaFetchPending` flag prevents `loadRoster` from triggering a premature generation before the PDF chain has completed.
-
-### Calc Max Matches
-
-The **⟳ Calc Max Matches** button (or auto flag) simulates the exact scheduling loop — stepping through each day accounting for breaks, break buffer, and per-segment cycle times — then divides total 6-slot capacity by team count. The result is written to Matches per Team. Also fires automatically after `applyAgendaToSchedule()` when the auto-max flag is on.
+**`_agendaFetchPending` flag** — set before the PDF fetch, cleared in `.finally()`. Prevents `onParamChanged()` from triggering a premature generate while the PDF chain is running.
 
 ### Agenda Fit panel
 
-Integrated from [github.com/phil-lopreiato/frc-schedule-builder](https://github.com/phil-lopreiato/frc-schedule-builder). Appears at the top of the results column when an event is loaded.
+Appears at the top of the results column when an event is loaded with a valid key.
 
-**What it shows (6 stats):** Time Needed · Available · Buffer/Overflow · Capacity % · Matches/Hour · Max Cycle to Fit
+**Stats row:** Time Needed · Available · Buffer/Overflow · Capacity % · Matches/Hour · Max Cycle to Fit
 
-**Fit status badge:** ✓ Comfortable (≤85%) / ⚠ Tight (≤100%) / ✗ Over Capacity (>100%)
+**Status badge:** ✓ Comfortable (≤85%) / ⚠ Tight (≤100%) / ✗ Over Capacity (>100%)
 
-**PDF source:**
-```
-https://info.firstinspires.org/hubfs/web/event/frc/{year}/{YEAR}_{EVENTCODE}_Agenda.pdf
-```
+**Section bars** — one bar per contiguous match session (split at breaks >5 min):
+- Bar always spans 100% of container width
+- Fill = actual committed match time / available slot time (with break buffer applied)
+- Short breaks (≤5 min) shown as tick marks inside the bar
+- Fill color = day color from `_DAY_COLORS` palette; switches to amber if >95% full or over
+- Bar track uses the day color at ~8% opacity
+- Day label is clickable — scrolls schedule output to the first match in that session
+- Header shows: Day label · time range · avg cycle time badge (with progression tooltip) · available minutes
 
-Times in FIRST agenda PDFs are local event time — no timezone is listed or needed. All scheduler times are implicitly local to the event venue.
+**Day color palette** (`_DAY_COLORS` — permanent 7-color set, cycles for >7 days):
 
-**Per-block timeline bars** update live as numTeams, mpt, or cycle time change.
+| Day | Hex | Color |
+|-----|-----|-------|
+| 1 | `#5b9bd5` | Steel blue |
+| 2 | `#4aab8a` | Teal green |
+| 3 | `#8b74c8` | Violet |
+| 4 | `#c48b3a` | Amber gold |
+| 5 | `#c05a6e` | Rose crimson |
+| 6 | `#5a7fa8` | Slate blue |
+| 7 | `#6a9455` | Moss green |
 
-**↓ Apply to Day Configuration** button sets day count, start/end times, and break rows from the parsed qual blocks. When `autoApplyAgenda` is on this fires automatically.
+**PDF parsing** — `normalizePDFText()` + `parseQualBlocks()` handle multiple FIRST district format variants:
+- Standard / Peachtree / Chesapeake (optional footnote markers, `~` on end time)
+- Ontario (two-column, no dash separator)
+- North Carolina (start-time-only Begin/Continue)
+- Wisconsin (`fi` ligature split)
+- Colorado (numeric date `Friday, 4/10/26`)
+- Short gaps (≤30 min) between consecutive blocks are merged
 
-**PDF.js:** loaded lazily via injected `<script type="module">` (`loadPdfJs()`). CDN: `cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379`.
+**Fallback:** when PDF is unavailable, a manual "total available minutes" input is shown.
 
-**Fallback:** when PDF is unavailable, a manual "total available minutes" input is shown instead.
+**Recalculates automatically** on changes to: numTeams, mpt, cycleTime, breakBuffer, any day start/end/break time, any cycle change row.
 
-**PDF.js** loaded lazily via injected `<script type="module">` (non-module script workaround). CDN: `cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379`.
+### Daily Schedule section
 
-### Day/Night mode
+Each day row uses the day color from `_DAY_COLORS` as a subtle background tint (8% opacity) with a matching border (31% opacity). The Day label matches the agenda fit color and is clickable to scroll the schedule output to that day.
 
-🌙/☀️ toggle in the header (`toggleTheme()`/`initTheme()` IIFE). Dark mode (default) uses Catppuccin Mocha palette. Light mode uses a matching high-contrast light palette. `[data-theme="light"]` on `<html>` overrides all CSS custom properties. Preference persisted in `localStorage` under `frc_theme`.
+### Day Break (Early End)
+
+Each day row has a `+ Add Day Break (stop scheduling)` button. Enter a match count — scheduling stops after that many matches on that day without changing the configured start/end times.
+
+Use case: a field issue, awards ceremony, or other non-time event ends match play early, but you still want to display the full agenda time slot in the fit bars.
+
+Only one day break per day. Persisted to URL (`d1e=44`), `day_config` JSON, and restored on schedule reload.
+
+### Calc Max Matches
+
+Simulates the exact scheduling loop — stepping through each day accounting for breaks, break buffer, and per-segment cycle times — then divides total 6-slot capacity by team count. Includes a 2,000-iteration safety cap and a `ct < 0.5` guard against invalid cycle time values causing infinite loops.
 
 ### TBA event dropdown
 
-- Fetches all events for the selected year from `GET /api/tba/events/{year}`, sorted by `start_date` ascending
-- No row cap — all events are rendered; filter-as-you-type limits visible rows
-- Cross-year search: when fewer than 3 local results match, augments with TBA global search index results under "Other years"
-- When fewer than 3 local results match a query (≥2 chars), the dropdown augments with results from TBA's global search index (`GET /api/tba/search_index`) under an "Other years" separator — enabling event discovery without knowing the year
-- Source badge on each row: `TBA` (blue) or `FRC` (green)
+- Year-specific fetch on demand: `GET /api/tba/events/{year}`
+- Current year + next year fetched on first focus of the event code input (not eager); cached in `localStorage` for 6 hours (key: `tba_idx_{year}`)
+- **Prior years:** not pre-loaded. Changing the year field fetches that year on demand. A warning appears in the status area when a prior year is entered. The dropdown shows a hint linking to the year field.
+- Cross-year fallback: when <3 local results match a query, augments from the pre-fetched index under "Other years"
+- Source badge per row: `TBA` (blue) or `FRC` (green)
 
-### Show Slot Numbers toggle
+### Schedule output
 
-After Stage 1 generates an abstract schedule a **👁 Show Slot Numbers** toggle appears. When on, slot indices (`S1`…`SN`) are shown instead of dashes and B2B is recalculated with those indices. Resets when Stage 1 regenerates or real teams are assigned.
+- Day headers show: day number (clickable, scrolls to that day) · match count · cycle time progression (e.g. `9→8 min`)
+- Cycle times in day headers are read from actual scheduled match durations (`endMin - startMin`), not from global cycle time — correctly reflects per-day start times
+- Match rows have `id="schedule-match-N"` for direct scroll targeting
+- `scrollToMatch(N)` and `scrollToDay(N)` both use `getBoundingClientRect()` for reliable cross-browser positioning
 
 ### URL reproducibility
 
@@ -209,14 +246,30 @@ After Stage 1 generates an abstract schedule a **👁 Show Slot Numbers** toggle
 | `d1b`–`d5b` | Per-day breaks: `Name\|start\|end`, comma-separated |
 | `cc` | Cycle time changes: `Day:AfterMatch:NewTime`, comma-separated |
 | `bb` | Break buffer minutes |
+| `autoPopulate` | Omitted=on; `=0`=off |
+| `autoApplyAgenda` | Omitted=on; `=0`=off |
+| `autoMaxCycles` | Omitted=on; `=0`=off |
+| `autoAssign` | Omitted=off; `=1`=on |
+| `sid` | Restore abstract schedule from DB |
+| `aid` | Restore assigned schedule from DB |
+| `event` | Event key to auto-load |
 
-URL restore priority: `?aid=` (assigned, fastest) → `?sid=` (abstract from DB) → `?seed=` (client-side regeneration).
+URL restore priority: `?aid=` → `?sid=` → `?seed=`
 
 ---
 
-## Removed: Timezone Selector
+## Stage 2 Algorithm (Simulated Annealing)
 
-The timezone dropdown and all associated code (`buildTimezoneSelect`, `getTimezoneAbbr`, `window._frcTzAbbr`) were removed. FIRST agenda PDFs list times in local event time only — no timezone information is present. All scheduler times are implicitly local to the event venue.
+`assign_teams()` in `scheduler.py` — incremental scoring:
+
+- **Full rescore** (`build_score_state`) called once per iteration start
+- **Incremental delta** (`delta_swap`) for each swap attempt — only rescores the ~10-20 affected matches rather than all 88
+- State rebuild only on accepted moves (majority of moves are rejected → near-zero per-step cost)
+- Budget: `num_teams` steps per iteration (reduced from `×2` — incremental scoring makes each step cheap)
+- `T0 = 500`, linear cooling; 2-swap moves
+- Score: `-(b2b×1000 + imbalance×500 + surrogates×200 + repeat_opp×15 + repeat_part×12)`
+- Performance: ~30ms/iter (vs 80ms before incremental scoring)
+- `_gen_concurrency = max(2, CPU_WORKERS // 3)` — limits simultaneous jobs; each job gets ~3 workers minimum
 
 ---
 
@@ -226,7 +279,7 @@ The timezone dropdown and all associated code (`buildTimezoneSelect`, `getTimezo
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/tba/events/{year}?search=` | Events for year, sorted by start_date |
-| GET | `/api/tba/search_index` | All TBA events across all years (global search) |
+| GET | `/api/tba/search_index` | All TBA events across all years (server-cached 6h) |
 | POST | `/api/tba/import/{event_key}` | Import event + teams from TBA |
 
 ### FRC Events API
@@ -268,8 +321,8 @@ The timezone dropdown and all associated code (`buildTimezoneSelect`, `getTimezo
 | POST | `/auth/apple/callback` | Exchange code → JWT |
 | GET | `/auth/me` | Current user from JWT |
 | GET | `/auth/providers` | Which providers are configured |
-| GET | `/api/health` | Status + CPU worker count |
-| POST | `/api/log-commit` | Receives schedule completion payload; logs to container stdout |
+| GET | `/api/health` | `{"status":"ok","cpu_workers":N}` |
+| POST | `/api/log-commit` | Logs schedule completion payload to container stdout |
 
 ---
 
@@ -277,22 +330,17 @@ The timezone dropdown and all associated code (`buildTimezoneSelect`, `getTimezo
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `postgresql+asyncpg://frc:frc@localhost:5432/frc_scheduler` | Postgres DSN |
+| `DATABASE_URL` | *(assembled from secrets)* | Postgres DSN |
 | `TBA_API_KEY` | (empty) | The Blue Alliance read key |
 | `FRC_EVENTS_USERNAME` | (empty) | FIRST FRC Events API username |
 | `FRC_EVENTS_TOKEN` | (empty) | FIRST FRC Events API token |
-| `CPU_WORKERS` | `0` (auto) | Scheduler worker processes; 0 = `os.cpu_count()` |
+| `CPU_WORKERS` | `12` (OpenShift) | SA worker processes; `0` = `os.cpu_count()` |
 | `WEB_WORKERS` | `1` | Uvicorn process count |
 | `JWT_SECRET` | (required for auth) | `openssl rand -hex 32` |
 | `BASE_URL` | `http://localhost:8080` | Public URL — used for OAuth redirect URIs |
-| `GOOGLE_CLIENT_ID` | (empty) | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | (empty) | Google OAuth client secret |
-| `APPLE_CLIENT_ID` | (empty) | Apple Service ID |
-| `APPLE_TEAM_ID` | (empty) | Apple developer team ID |
-| `APPLE_KEY_ID` | (empty) | Apple private key ID |
-| `APPLE_PRIVATE_KEY` | (empty) | Apple ES256 PEM key (newlines as `\n`) |
-| `PUID` | `1000` | Process UID (rootless container) |
-| `PGID` | `1000` | Process GID |
+| `GOOGLE_CLIENT_ID/SECRET` | (empty) | Google OAuth |
+| `APPLE_*` | (empty) | Apple OAuth |
+| `PUID` / `PGID` | `1000` | Process UID/GID (rootless container) |
 | `APP_PORT` | `8080` | Uvicorn listen port |
 
 ## FRC Events API credentials
@@ -323,24 +371,16 @@ Fresh databases are unaffected — `create_all` builds the correct schema.
 
 ---
 
-## Stage 2 Algorithm (Simulated Annealing)
-
-`assign_teams()` in `scheduler.py`:
-- Budget: `num_teams × 2` steps per iteration
-- Temperature: `T0 = 500`, linear cooling
-- Moves: 2-swap only
-- Accept worse move when `exp(Δ/T)` and `Δ/T > -10`
-- Score: `-(b2b×1000 + imbalance×500 + surrogates×200 + repeat_opp×15 + repeat_part×12)`
-- Performance: ~90ms/iter per worker; 1000 iters × 8 workers ≈ 11s wall time
-
----
-
 ## Known Behaviour
 
 **Break buffer:** Schedule a match if `breakStart - cursor ≥ breakBuffer`. The cycle time does not factor into this check — a match that clears the buffer runs even if it overlaps the break.
 
+**calcMaxMatches safety:** The simulation loop has a 2,000-iteration cap and rejects cycle times < 0.5 min to prevent browser hangs from invalid field values.
+
 **B2B in abstract mode:** Always 0 — slot indices are structural placeholders. Shows actual structure when Show Slot Numbers is on.
 
-**503 on rapid param changes:** Auto-generate debounce is 2500ms. Retry counter resets on each new `generateSchedule()` call.
+**TBA search index:** Server-cached for 6 hours (`app.state`). Client caches current+next year in `localStorage` for 6 hours. Prior years fetched on demand by changing the year field.
 
-**TBA team name length:** `teams.name`, `events.name`, `events.location` are `Text` (unlimited) to handle long TBA sponsor names.
+**503 on rapid param changes:** Auto-generate debounce is 2500ms. `onCycleTimeChanged` has a separate 1200ms debounce. `_agendaFetchPending` blocks `onParamChanged` during the PDF chain.
+
+**Page load API calls:** On first load only `GET /api/events` (DB) and `GET /auth/me` (JWT check) fire immediately. TBA dropdown fetch is deferred to first focus on the event input. Health check deferred 2s. TBA search index deferred 5s with `localStorage` caching. `apiFetch()` logs `[api] METHOD /path Nms` to the browser console for timing diagnosis.

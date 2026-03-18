@@ -1,466 +1,232 @@
 # FRC Match Scheduler — Reproduction Prompt
 
-This document contains the complete technical detail required to reproduce this project from scratch. It documents every non-obvious design decision, algorithm, and implementation detail.
+This document captures all architecture decisions, implementation details, and known pitfalls needed to reproduce or extend this codebase from scratch.
 
 ---
 
 ## Project Overview
 
-A two-stage FRC qualification match scheduler. FastAPI + PostgreSQL backend, single-file HTML/CSS/JS frontend. Deployable via Docker Compose or OpenShift.
+Single-file HTML/CSS/JS frontend (`static/index.html`, ~6400 lines) + FastAPI backend (`app/main.py`) + pure Python scheduler (`app/scheduler.py`). PostgreSQL via asyncpg/SQLAlchemy. Containerised for OpenShift.
+
+Two-stage scheduling:
+- **Stage 1:** Abstract schedule (slot indices, no team numbers) — deterministic, one pass
+- **Stage 2:** Team assignment (SA optimiser maps team numbers to slots)
 
 ---
 
-## Architecture
+## Critical Architecture Decisions
 
-### Stage 1 — Abstract Schedule (SSE stream)
+### Double-calcMaxMatches Bug (FIXED)
+`applyAgendaToSchedule()` must NOT call `calcMaxMatches()`. The chain in `fetchAndRenderAgendaFit` calls it after `applyAgendaToSchedule` returns. Having both call it caused the first `generateSchedule()` to be aborted by the second, leaving the overlay stuck.
 
-`POST /api/generate-abstract` accepts:
-```json
-{ "num_teams": 51, "matches_per_team": 11, "cooldown": 3, "seed": "a1b2c3d4", "day_config": {...} }
-```
+### _agendaFetchPending Flag
+Set to `true` in `activateEvent` before any async work. `onParamChanged()` returns early when this is true. Cleared in `.finally()` after `fetchAndRenderAgendaFit` completes. Prevents debounced generation from racing the PDF chain.
 
-Returns SSE events: `progress` (intermediate) and `complete` (final JSON with `abstract_schedule_id`).
+### Overlay show() before loadRoster()
+`_overlay.show()` and `_overlay.step('roster')` must be called **before** `await loadRoster()`. Previously they were called after, meaning overlay was always one step behind (roster already done when overlay shown).
 
-The scheduler runs in a `ProcessPoolExecutor` worker (not the event loop). Progress is piped back via `multiprocessing.Queue` polled with `asyncio.get_event_loop().run_in_executor`.
+### calcMaxMatches Infinite Loop Guard
+The `while` loop in `calcMaxMatches()` has a `_safetyLimit = 2000` iteration cap and a `ct < 0.5` guard. Without this, a blank or zero cycle-time field (mid-keystroke) causes an infinite loop that permanently hangs the browser tab.
 
-### Stage 2 — Team Assignment (SSE stream)
+### Day Break / Early End
 
-`POST /api/abstract-schedules/{id}/assign` accepts:
-```json
-{ "team_numbers": [254, 1114, ...], "iterations": 1000, "assign_seed": "cafebabe" }
-```
+`addDayEarlyEnd(dayRow, afterMatch)` — adds a `.day-earlyend-row` to the day row. Only one per day (replaces existing). Calls `onCycleTimeChanged()` on input/change/remove.
 
-Chunked: sends `progress` SSE every N iterations with best score so far.
+`getDayEarlyEnd(dayRow)` — returns the integer limit or null. Used by `calcMaxMatches` and `_finishGenerationInner`.
 
-### Database
+**`calcMaxMatches`:** reads `getDayEarlyEnd(row)` into `dayEarlyEnd`; after incrementing `dayMatchCount`, checks `if (dayEarlyEnd !== null && dayMatchCount >= dayEarlyEnd) break`.
 
-SQLAlchemy async with asyncpg. Models: `Event`, `Team`, `EventTeam`, `AbstractSchedule`, `AssignedSchedule`. `create_all` on startup. No Alembic (add for production).
+**`_finishGenerationInner`:** `earlyEnd` stored on day object (`isObj ? row.earlyEnd : getDayEarlyEnd(row)`); `dayMatchCount` counter incremented after each placed match; `if (day.earlyEnd !== null && dayMatchCount >= day.earlyEnd) break`.
 
-Required migrations for existing databases:
-```sql
-ALTER TABLE abstract_schedules ADD COLUMN IF NOT EXISTS day_config JSON;
-ALTER TABLE teams ALTER COLUMN name TYPE TEXT;
-ALTER TABLE events ALTER COLUMN name TYPE TEXT;
-ALTER TABLE events ALTER COLUMN location TYPE TEXT;
-```
+**Persistence chain:** `collectDayConfig` → `earlyEnd: getDayEarlyEnd(row)` → DB `day_config`. `applyDayConfigToUI` → `if (day.earlyEnd != null) addDayEarlyEnd(row, day.earlyEnd)`. URL: `d{N}e=M`, parsed via `p.get('d' + i + 'e')`, applied in `applyUrlParams`.
 
 ---
 
-## Frontend Architecture
+### Page Load Performance
 
-Single file: `static/index.html` (~300KB). Non-module `<script>` tag — no bundler.
+**Immediately on load:** `loadEvents()` (GET /api/events), `initAuth()` (GET /auth/me).
 
-### State variables
+**Deferred:**
+- `fetchTbaDropdown()` — on first `focus` of `#eventCodeInput` (was 800ms eager)
+- `ensureTbaSearchIndex()` — 5s after load; `localStorage` cache `tba_idx_{year}` 6h TTL
+- `/api/health` — 2s timeout (only for `_cpuWorkers` count in overlay)
+
+**Diagnosis:** `apiFetch()` logs `[api] METHOD /path Nms STATUS` to the browser console. Check this on first load to identify which call is slow.
+
+---
+
+### onCycleTimeChanged Debounce
+Cycle-time inputs call `onCycleTimeChanged()` (1.2s debounce) not `onParamChanged()` (2.5s). This calls `calcMaxMatches()` when `autoMaxCycles` is on, bypassing the plain debounce. Without the 1.2s debounce, mid-keystroke values (typing "10" → field briefly shows "1") caused rapid-fire calcMaxMatches calls.
+
+### _DAY_COLORS Must Be Defined Before buildDaysUI
+`_DAY_COLORS` must be defined at module level directly above `buildDaysUI()` — before `buildDaysUI` in the source order. `buildDaysUI()` is called at page load (line ~1565) before most of the script body is parsed. Defining `_DAY_COLORS` anywhere after `buildDaysUI` causes `TypeError: undefined is not an object (evaluating '_DAY_COLORS.length')`.
+
+### SA Incremental Scoring
+`assign_teams()` uses `build_score_state()` once per iteration start, then `delta_swap()` for each swap attempt. `delta_swap()` only rescores the ~10-20 matches containing the swapped slots. State is fully rebuilt only on accepted moves. This gives ~30ms/iter vs 80ms for full rescore.
+
+### CPU Worker Count Must Match Pod CPU Limit
+`CPU_WORKERS=0` causes `os.cpu_count()` to return the node's full CPU count (e.g. 16+) even in a container with a 2-CPU limit. The pool spawns 16 workers competing for 2 CPUs → constant context switching → minimal throughput. Always set `CPU_WORKERS` explicitly to match the pod's CPU limit.
+
+### WEB_WORKERS=1 with High CPU_WORKERS
+With `WEB_WORKERS>1`, each uvicorn process has its own `ProcessPoolExecutor`. At `WEB_WORKERS=2, CPU_WORKERS=12`, two concurrent assignment jobs could spawn 24 Python processes for 12 CPUs. Use `WEB_WORKERS=1` so one process owns the full pool.
+
+### scrollToMatch Uses getBoundingClientRect
+`offsetTop` + `offsetParent` traversal is unreliable for `<tr>` elements inside `<table>`. Both `scrollToMatch()` and `scrollToDay()` use `getBoundingClientRect()` with `output.scrollTop + (rowRect.top - outputRect.top)` for reliable cross-browser scroll positioning.
+
+### day.start / day.end Must Be Stored on _frcScheduled
+`_finishGenerationInner` must push `{dayNum, start: day.start, end: day.end, entries}` to the `scheduled` array. Without `start`/`end`, `renderScheduleBars()` falls back to first/last match timestamps, showing match-span not the full agenda slot.
+
+---
+
+## Auto Chain Precedence
+
 ```javascript
-let _currentEventId = null;
-let _currentAbstractScheduleId = null;
-let _currentAssignedScheduleId = null;
-let _abstractParams = null;           // params snapshot from Stage 1
-let _currentSlotMap = null;           // {slot_str: team_number} from Stage 2
-let _currentSeed = null;              // hex Stage 1 seed
-let _currentAssignSeed = null;        // hex Stage 2 seed
-let _agendaBlocks = null;             // [{start, end, duration, startStr, endStr, day}]
-let _tbaSearchIndex = null;           // TBA global event index (all years)
-let _tbaDropdownCache = {};           // year → events array
-let _frcDropdownCache = {};           // "frc_{year}" → events array
-let _pdfjsLib = null;                 // lazy-loaded PDF.js
-let _pdfjsLoading = null;             // dedup promise
-let _authUser = null;                 // {sub, email, provider} or null
-let _urlAutoTeams = null;             // teams from URL for Stage 2 auto-assign
-```
+// In fetchAndRenderAgendaFit success path:
+if (autoApply.checked)   applyAgendaToSchedule();  // does NOT call calcMaxMatches
+if (autoMax.checked)     calcMaxMatches();           // calls generateSchedule() if autoPopulate on
+else if (autoGen.checked) generateSchedule();        // generateSchedule() steps 'generate' overlay internally
 
-### Seeded PRNG (mulberry32)
-```javascript
-function makeRng(seed) {
-  return function() {
-    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
-    var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
+// In fetchAndRenderAgendaFit fail (PDF not found) path:
+_overlay.done('pdf');
+if (autoMax.checked)     calcMaxMatches();
+else if (autoGen.checked) generateSchedule();
+else                      _overlay.hide();
+
+// In calcMaxMatches end:
+_overlay.done('maxcycles');
+updateAgendaFit();
+if (_abstractParams !== null || autoPopulate.checked) generateSchedule();
+
+// In generateSchedule Stage 1 completion:
+_overlay.done('generate');
+if (autoAssign.checked && _currentEventId) {
+  _overlay.step('assign', '…');
+  setTimeout(assignTeams, 200);
+} else {
+  _overlay.hide();
 }
+
+// In assignTeams completion:
+_overlay.hide();
 ```
-
-### Auto flags (checkboxes)
-
-Three checkboxes in one bordered box below Match Cooldown:
-
-| ID | Default | Behaviour |
-|----|---------|-----------|
-| `autoPopulate` | `checked` | Debounced Stage 1 regeneration on param change (1.5s) |
-| `autoApplyAgenda` | `checked` | Calls `applyAgendaToSchedule()` after successful PDF parse |
-| `autoMaxCycles` | `checked` | Calls `calcMaxMatches()` after day config applied (auto or manual) |
-
-**`window._agendaFetchPending` flag** — set `true` in `activateEvent` before firing `fetchAndRenderAgendaFit`, cleared in `.finally()`. Prevents `loadRoster()` from calling `onParamChanged()` prematurely (before day config is applied from the PDF).
-
-**`loadRoster()`** — after setting `numTeams.value`, calls `onParamChanged()` only when `!window._agendaFetchPending`. This allows auto-regenerate to fire when there is no event key (and thus no PDF fetch).
-
-**Full auto-trigger chain on event load:**
-```
-activateEvent(ev)
-  → _agendaFetchPending = true
-  → loadRoster()
-      sets numTeams.value
-      _agendaFetchPending is true → skip onParamChanged()
-  → fetchAndRenderAgendaFit(ev.key)   [non-blocking]
-      [PDF fetch + parse]
-      applyAgendaToSchedule()          [if autoApplyAgenda on]
-        sets day start/end/breaks via .value
-        if autoMaxCycles on → calcMaxMatches()
-          writes matchesPerTeam.value
-          if autoPopulate on → generateSchedule()  ← TRIGGERS
-      else if autoMaxCycles on → calcMaxMatches() → generateSchedule()
-      else → onParamChanged()  ← debounced generateSchedule() if autoPopulate on
-  .finally() → _agendaFetchPending = false
-
-  [PDF fail path]:
-      shows manual minutes input
-      onParamChanged()  ← still triggers generation with numTeams from roster
-```
-
-`applyAgendaToSchedule()` also calls `calcMaxMatches()` at its end if `autoMaxCycles` is checked (covers the manual Apply button case).
-
-**Duplicate `mpr` variable** — `updateAgendaFit` had `var mpr` declared twice (once after `reqCycle`, once after). Second declaration removed.
-
-**`generateSchedule()`** — shows `⏳ Generating schedule…` in `showApiStatus()` immediately when called, before the SSE stream begins.
 
 ---
 
-## Agenda Fit Integration (from frc-schedule-builder)
+## Key Functions
 
-Ported from `github.com/phil-lopreiato/frc-schedule-builder` by Phil Lopreiato.
+**`buildDaysUI()`** — creates `.day-row` divs, applies `_DAY_COLORS[i % 7]` as background tint (`+14` hex alpha) and border (`+50`), sets day label color to the day color.
 
-### State
+**`renumberDays()`** — called after add/remove day; reapplies colors and updates `scrollToDay` onclick handlers.
+
+**`applyAgendaToSchedule()`** — groups `_agendaBlocks` by day, sets numDays, day start/end, adds breaks for gaps ≥30 min (label "Lunch") or shorter (label "Break"). Calls `validateTimes()` only — NOT `validateTimesAndRecalc()` and NOT `calcMaxMatches()`.
+
+**`calcMaxMatches()`** — simulates scheduling loop per day. Guards: `_safetyLimit=2000`, `ct < 0.5 → break`. Calls `_overlay.done('maxcycles')`, `updateAgendaFit()`, then `generateSchedule()`.
+
+**`onCycleTimeChanged()`** — 1.2s debounced; calls `calcMaxMatches()` (if autoMaxCycles on) or `onParamChanged()`. Called by all cycle-time input events.
+
+**`renderScheduleBars()`** — builds section bars from `window._frcScheduled`. Splits at breaks > `AGENDA_BREAK_THRESHOLD` (5 min). Stores `firstMatchNum` on each section. Day label calls `scrollToMatch(firstMatchNum)`.
+
+**`scrollToMatch(N)`** — `output.scrollTop + row.getBoundingClientRect().top - output.getBoundingClientRect().top - 48`
+
+**`ensureTbaSearchIndex()`** — fetches `/api/tba/events/{curYear}` + `/api/tba/events/{curYear+1}` in parallel. `localStorage` key `tba_idx_{curYear}`, TTL 6h. Called 5s after page load and on first cross-year search.
+
+**`_overlay.show(title, steps)`** — must be called before `loadRoster()` in `activateEvent`. Steps built from enabled flags only.
+
+---
+
+## Auto Flags Persistence
+
+Named booleans in URL and `day_config` JSON:
+
+| Flag | Default | URL when non-default | day_config key |
+|------|---------|---------------------|----------------|
+| `autoPopulate` | true | `?autoPopulate=0` | `autoPopulate: bool` |
+| `autoApplyAgenda` | true | `?autoApplyAgenda=0` | `autoApplyAgenda: bool` |
+| `autoMaxCycles` | true | `?autoMaxCycles=0` | `autoMaxCycles: bool` |
+| `autoAssign` | false | `?autoAssign=1` | `autoAssign: bool` |
+
+`parseBoolFlag(name)` in `parseUrlParams()`: returns `true/false/null` (null = absent = keep default).
+
+---
+
+## Agenda Fit Bar Math
+
+```
+slotStart   = day.start (morning) or break.end (afternoon)
+slotEnd     = break.start (morning) or day.end (afternoon)
+effectiveEnd = slotEnd - (hasTrailingBreak ? breakBuffer : 0)
+available    = effectiveEnd - slotStart
+committed    = Σ max(0, min(m.endMin, effectiveEnd) - m.startMin)
+fillPct      = committed / available * 100
+```
+
+`avgCt = committed / matchCount` — true weighted average, reflects actual cycle time changes.
+
+`ctProgression` built from `cycle-change` entries in `_frcScheduled`: `firstMatch.endMin - firstMatch.startMin` gives starting ct; each `cc.newTime` appended if different from previous.
+
+---
+
+## Day Color Palette
+
 ```javascript
-let _agendaBlocks = null;  // [{start, end, duration, startStr, endStr, day}] | null
+var _DAY_COLORS = [
+  '#5b9bd5', // Day 1 — steel blue
+  '#4aab8a', // Day 2 — teal green
+  '#8b74c8', // Day 3 — violet
+  '#c48b3a', // Day 4 — amber gold
+  '#c05a6e', // Day 5 — rose crimson
+  '#5a7fa8', // Day 6 — slate blue
+  '#6a9455', // Day 7 — moss green
+];
 ```
 
-### PDF.js loading (`loadPdfJs`)
-Cannot use `import()` directly in a non-module script. Solution: inject a `<script type="module">` that imports PDF.js and dispatches `pdfjsloaded` event:
-```javascript
-var s = document.createElement('script');
-s.type = 'module';
-s.textContent = `
-  import * as pdfjsLib from '${PDFJS_CDN}/pdf.min.mjs';
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '${PDFJS_CDN}/pdf.worker.min.mjs';
-  window._pdfjsLib = pdfjsLib;
-  window.dispatchEvent(new Event('pdfjsloaded'));
-`;
-document.head.appendChild(s);
-```
-Deduped via `_pdfjsLoading` promise. CDN: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379`
-
-### PDF fetch
-```
-GET https://info.firstinspires.org/hubfs/web/event/frc/{year}/{YEAR}_{EVENTCODE}_Agenda.pdf
-```
-Times in FIRST agenda PDFs are local event time — no timezone. Throws on non-200 or non-PDF content-type.
-
-### PDF parsing (`parsePDFBlocks`, `parseQualBlocks`)
-1. Extract text per page grouped by Y coordinate (PDF space), sorted Y descending, items within a line sorted X ascending
-2. Collapse PDF.js character-spacing artifacts: `\d[ \t]?\d?[ \t]*:[ \t]*\d[ \t]*\d[ \t]*[AaPp][ \t]*[Mm]` → remove internal spaces
-3. Line-by-line scan: day pattern (`Monday|Tuesday|…` + month+day), qual block pattern (`HH:MM AM/PM – HH:MM AM/PM Qualification Match`)
-4. Fallback: scan joined full text if line-by-line finds nothing
-
-### Fit calculation (`updateAgendaFit`)
-```javascript
-totalMatches = Math.ceil(numTeams * mpt / 6)
-surrogates   = totalMatches * 6 - numTeams * mpt
-timeNeeded   = totalMatches * ct
-available    = sum(agendaBlocks[i].duration)  // or agendaManualMin
-surplus      = available - timeNeeded
-pct          = timeNeeded / available * 100
-mpr          = 60 / ct                        // matches per hour
-reqCycle     = available / totalMatches       // max cycle to fit
-```
-
-### Block distribution (`distributeMatchesToBlocks`)
-Fits: floor-proportional by duration + fractional remainder sort.
-Over capacity: floor each block (`Math.floor(duration / ct)`), pour overflow into block index 1.
-
-### Auto-apply (`applyAgendaToSchedule`)
-1. Group `_agendaBlocks` by `b.day` → `dayMap` / `dayOrder`
-2. `numDays.value = dayOrder.length`; call `buildDaysUI()`
-3. Per day row: `.day-start` = `minToTimeStr(min(block.start))`, `.day-end` = `minToTimeStr(max(block.end))`
-4. Sort blocks by start; gaps → `addBreak(row.querySelector('.btn-add-break-day'), gapStart, gapEnd, "Lunch"|"Break")`
-5. `applyDayEndTimes()` → `validateTimesAndRecalc()`
-6. If `autoMaxCycles.checked` → `calcMaxMatches()`
-
-### HTML elements
-- `#agendaFitPanel` — outer container, `display:none` until event loaded
-- `#agendaFitBadge` — fit status badge in collapsible header
-- `#agendaChevron` — ▼/▶ collapse indicator
-- `#agendaFitLoading` — loading/error text
-- `#agendaFitStats` — 6-stat grid (CSS: `repeat(6, 1fr)`, mobile `repeat(3, 1fr)`)
-- `#agendaFitBlocks` — per-block rows with `#agendaBar_{start}` timeline bars
-- `#agendaApplyRow` — shown only after successful parse; contains Apply button
-- `#agendaFitManual` — shown when PDF unavailable; contains `#agendaManualMin`
-
-### Lifecycle hooks
-- `activateEvent(ev)` → `fetchAndRenderAgendaFit(ev.key).catch(() => {})` (non-blocking)
-- `fullReset()` → `resetAgendaPanel()` (hides panel, nulls `_agendaBlocks`, hides apply row)
-- `['numTeams','matchesPerTeam','cycleTime']` input → `onScheduleParamsChanged()` → `updateAgendaFit()`
+Defined at module level before `buildDaysUI`. Applied as:
+- Bar fill: full color (or amber if >95% full)
+- Bar track: `color + '22'` (~13% opacity tint)
+- Day row background: `color + '14'` (~8% opacity)
+- Day row border: `color + '50'` (~31% opacity)
+- Day label text: full color
 
 ---
 
-## Day/Night Mode
+## PDF Parsing Format Variants
 
-`[data-theme="light"]` on `<html>` overrides CSS custom properties:
-```css
-[data-theme="light"] {
-  --bg: #f4f4f8;  --surface: #ffffff;  --surface2: #eaeaf0;
-  --border: #c8c9d4;  --accent: #3b7dd8;  --accent2: #c0394e;
-  --accent3: #2a8c5a;  --text: #2c2f42;  --text-muted: #6b6e84;
-  --text-strong: #1a1c2a;  --red-team: #c0394e;  --blue-team: #3b7dd8;
-  --amber: #9a6c00;  --danger: #c0394e;
-}
-```
+`normalizePDFText()` fixes: `fi` ligature, truncated AM/PM, fragmented time tokens.
 
-`initTheme()` IIFE: reads `localStorage.getItem('frc_theme')`, applies `data-theme="light"` before render if saved. Button emoji: 🌙 (dark) / ☀️ (light). Stored as `'light'` or `'dark'`.
+`parseQualBlocks()` patterns:
+- `qualRe` — standard with optional footnote markers, `~` on end time, en/em dash
+- `qualNoSepRe` — Ontario two-column (anchored at line start)
+- `qualBeginRe` — NC Begin/Continue with `openBeginBlock` state tracking
+- `dayRe` — handles both `Month Day` and `M/D/YY` (Colorado)
+- Block merge: gap ≤30 min → merge (Wisconsin field resets)
+- Fallback: join all lines, retry with global regex
 
 ---
 
-## TBA Integration (`app/tba.py`)
+## OpenShift Deployment Notes
 
-HTTP: `httpx.AsyncClient` created per request (no singleton — module-level singleton caused event loop issues). Auth header: `X-TBA-Auth-Key: {TBA_API_KEY}`. Raises `ValueError` if key not set → HTTP 503.
+`04-deployment.yaml` key settings:
+- `replicas: 2` with `topologySpreadConstraints` (one pod per node)
+- `strategy: RollingUpdate` with `maxUnavailable: 0`
+- `PodDisruptionBudget: minAvailable: 1`
+- `CPU_WORKERS: "12"`, `WEB_WORKERS: "1"`
+- `cpu request: "4"`, `cpu limit: "12"`
+- `_gen_concurrency = max(2, CPU_WORKERS // 3)` — with `CPU_WORKERS=12`: `= 4` concurrent jobs per pod
+- **8 concurrent user capacity:** 2 pods × 4 jobs = 8 simultaneous assignments; each job gets 3 workers → ~10s at full load
 
-Key functions:
-- `get_events(year)` → `GET /events/{year}/simple`, sorted by `start_date` ascending
-- `get_event(key)` → `GET /event/{key}/simple`
-- `get_event_teams(key)` → `GET /event/{key}/teams/simple`
-- `search_events(year, q)` → `get_events(year)` filtered client-side
-- `normalise_event(tba)` → `{key, name, year, location, start_date, end_date, tba_synced}`
-- `normalise_team(tba)` → `{number, name, nickname, city, state, country, rookie_year}`
-
-
-### Auto flags — URL and DB persistence
-
-Auto flags are stored as **named booleans** in two places:
-
-**URL:** Each flag has its own param (`autoPopulate`, `autoApplyAgenda`, `autoMaxCycles`). A param is only included when it is **off** (`=0`) — all defaults are on, so omitting a param means on. This keeps share URLs clean for the common all-on case and is trivially extensible: adding a new flag never reinterprets existing URLs.
-
-```
-?autoPopulate=0              — only autoPopulate is off
-?autoApplyAgenda=0           — only autoApplyAgenda is off
-?autoMaxCycles=0&autoApplyAgenda=0  — two flags off
-(no flag params)             — all flags on (default)
-```
-
-**DB:** `day_config` JSON stores named boolean fields. `collectDayConfig()` writes `autoPopulate`, `autoApplyAgenda`, `autoMaxCycles`. `applyDayConfigToUI()` restores them; `null` (field absent) leaves the current default unchanged.
-
-**`parseBoolFlag(name)`** helper in `parseUrlParams()`: returns `true` if param present and not `"0"`, `false` if present and `"0"`, `null` if absent. Downstream code only applies the value when non-null.
-### `GET /api/tba/search_index`
-Proxies `tba_client._get("/search_index")` → returns `data["events"]` (key+name pairs, all years, all events).
-
-### Cross-year search (`filterTbaDropdown`)
-When `visibleCount < 3 && query.length >= 2 && source === 'tba'`:
-1. Calls `searchTbaIndex(query)` → filters `_tbaSearchIndex`, sort by key desc, top 20
-2. Removes stale `[data-cross-year="1"]` rows
-3. Injects separator div + cross-year rows with `data-cross-year="1"`
-4. Calls `ensureTbaSearchIndex()` to pre-fetch if not yet loaded
-
-`ensureTbaSearchIndex()`: deduped via `_tbaSearchIndexLoading` flag, pre-fetched `setTimeout(..., 2000)` on load.
+**8 concurrent user capacity:** 2 pods × 4 jobs = 8. Each job gets 3 workers → ~10s at 1000 iterations full load, ~5s at half load.
 
 ---
 
-## FRC Events API (`app/frc_events.py`)
+## Status Messages (auto chain)
 
-HTTP Basic auth: `base64(FRC_EVENTS_USERNAME:FRC_EVENTS_TOKEN)`. `ValueError` if not set → HTTP 503.
-
-Key functions:
-- `get_events(year)` → `GET /{year}/events` → `data["Events"]`, sorted by `start_date`
-- `get_event(year, code)` → same with `?eventCode=CODE` (uppercase), returns first or None
-- `get_event_teams(year, code)` → `GET /{year}/teams?eventCode=CODE`, paginates (page size 65)
-- `normalise_event(frc, year)` → `{key, name, year, location, start_date, end_date, tba_synced, _frc_code}`; `_frc_code` stripped before DB write
-- `normalise_team(frc)` → maps `teamNumber`, `nameFull/nameShort`, `city`, `stateProv`, `country`, `rookieYear`
-- `is_configured()` → bool
-
-Routes (stacked decorators for alias):
-```python
-@app.get("/api/frc/configured")
-@app.get("/api/frc/status")
-async def frc_events_status(): ...
-```
-
-Frontend: credential errors surfaced in `showApiStatus()` (visible immediately, not just in hidden dropdown).
-
----
-
-## Calc Max Matches (`calcMaxMatches`)
-
-Simulates the exact scheduling loop used by `_finishGenerationInner`:
-1. For each day row: step cursor from `dayStart` to `dayEnd`
-2. Flush breaks at or before cursor
-3. Check break buffer: if `breakStart - cursor < breakBuffer` → flush break and continue
-4. Get effective cycle time from per-day cycle change list (uses global `totalSlotMatches` for cross-day cycle changes)
-5. If `cursor + ct > dayEnd` → break
-6. Check interrupt suppression (skip if already cleared buffer)
-7. `cursor += ct; dayMatchCount++; totalSlotMatches++`
-
-Result: `mpt = floor(totalSlotMatches * 6 / numTeams)`, back off by 1 if `ceil(n * mpt / 6) > totalSlotMatches`.
-
-Writes result to `#matchesPerTeam`. Shows status message with match/slot/surrogate counts. If `autoPopulate` checked → triggers `generateSchedule()`.
-
----
-
-## Stage 2 Simulated Annealing (`scheduler.py: assign_teams`)
-
-```python
-budget = num_teams * 2
-T0 = 500.0
-for step in range(budget):
-    T = T0 * (1.0 - step / budget)   # linear cooling
-    a, b = _rng.sample(slots, 2)     # 2-swap
-    # score delta
-    if delta >= 0: accept
-    elif T > 0 and delta/T > -10 and random() < exp(delta/T): accept
-    else: revert
-```
-
-Best result across all iterations and all parallel workers is kept.
-
-Score: `-(b2b×1000 + imbalance×500 + surrogates×200 + repeat_opp×15 + repeat_part×12)`
-
-### Iteration estimate (`updateIterationEstimate`)
-- Default: `11ms/iter` wall-clock (90ms/worker ÷ 8 workers benchmark)
-- After run: `window._msPerIteration = elapsed / iterations`
-- Guard: `!== null` (not `||`) so calibrated `0` doesn't revert to default
-- Shows `(estimated)` until calibrated, then `(calibrated)`
-
----
-
-## Authentication (`app/auth.py`)
-
-JWT issued after OAuth. Payload: `{sub, email, provider, uid}`. Signed with `JWT_SECRET` (HS256, 30-day expiry). Auth is optional — all endpoints work without a token; ownership features require it.
-
-Google: standard PKCE flow. Apple: `response_mode=form_post`, client secret is a self-signed JWT using ES256 + Apple private key.
-
----
-
-## TBA Error Handling (`loadEventByCode`)
-
-Four distinct messages from `e.message` content:
-- `includes('not found')` or `404` → event key wrong
-- `includes('No TBA_API_KEY')` or `503` → server not configured
-- `includes('timed out')` or `504` → retry
-- else → raw message
-
-`showApiStatus(msg, isErr)`: errors persist (no auto-hide); success hides after 3s. Uses `clearTimeout(window._apiStatusTimer)`.
-
----
-
-## Day/Night Mode (`toggleTheme`, `initTheme`)
-
-`toggleTheme()`: sets/clears `document.documentElement.setAttribute('data-theme', 'light')`, updates `#btnTheme` emoji (🌙/☀️), saves to `localStorage('frc_theme')`.
-
-`initTheme()` IIFE: reads `localStorage.getItem('frc_theme')` synchronously before first render. If `'light'`, sets `data-theme="light"` and updates button after `DOMContentLoaded`.
-
-## CSS Architecture
-
-Single `<style>` block, CSS custom properties. Dark default (Catppuccin Mocha). Light override via `[data-theme="light"]`.
-
-Typography (all reduced from original heavy weights for readability):
-- `.stat-value` — `600` weight, `1.5rem`
-- `.panel-header` — `600` weight, `0.1em` letter-spacing
-- `.day-title` — `600` weight
-- `.teams-red/blue` — `600` weight, `0.88rem`
-- `.match-num` — `500` weight
-- All table borders use `var(--border)` (not hardcoded rgba)
-- Break row color uses `var(--amber)` (not hardcoded `#b89040`)
-
-Mobile `@media (max-width: 640px)`: iOS zoom prevention (all inputs `font-size: 16px`), event bar stacks to two rows, field rows collapse to 1-col, stats bar 2-col, schedule table horizontal scroll.
-
-Agenda fit grid: `repeat(6, 1fr)` desktop, `repeat(3, 1fr)` mobile. Stat values `font-size:1.15rem; font-weight:600` (inline override).
-
----
-
-## OpenShift Manifests
-
-| File | Purpose |
+| Step | Message |
 |------|---------|
-| `00-namespace.yaml` | Project/namespace |
-| `01-secrets.yaml` | All env vars as a Secret |
-| `02-postgres.yaml` | StatefulSet + PVC + Service |
-| `03-buildconfig.yaml` | BuildConfig (git source, `Containerfile.openshift`) |
-| `04-deployment.yaml` | Deployment (envFrom secret, liveness probe) |
-| `05-route.yaml` | HTTPS edge-terminated Route |
-| `07-build-trigger-sa.yaml` | ServiceAccount + RoleBinding for CronJob |
-| `08-build-cronjob.yaml` | CronJob: polls git, triggers build if new commits |
-| `09-hpa-optional.yaml` | HorizontalPodAutoscaler (optional) |
-| `rebuild.sh` | Full teardown + rebuild script |
-
-Two Containerfiles: `Containerfile` (generic, apt-get, Docker Hub base) and `Containerfile.openshift` (dnf/rpm, Quay base — avoids Docker Hub rate limits in OCP build pods). Both rootless-compliant with `chgrp -R 0 && chmod -R g=u`.
-
----
-
-## Removed Features
-
-**Timezone selector** — removed. FIRST agenda PDFs list times in local event time with no timezone information. All scheduler times are implicitly local to the venue. Removed: `tzSelect` field, `buildTimezoneSelect()`, `getTimezoneAbbr()`, `window._frcTzAbbr`, and the inline timezone span in schedule time cells (`window._frcTzAbbr ? '<span>...' : ''`). FIRST agenda PDFs list times in local event time with no timezone information. All scheduler times are implicitly local to the venue. The `tzSelect` field, `buildTimezoneSelect()`, `getTimezoneAbbr()`, `window._frcTzAbbr`, and the inline timezone span in schedule time cells were all removed.
-
-
-### Day section input fix
-**`onParamChanged()`** — two fixes:
-
-1. Previously only debounced `generateSchedule()` when `_abstractParams !== null`. After a reset, `_abstractParams` is `null` so nothing fired. Fixed: debounce now fires whenever `autoPopulate` is checked AND `numTeams >= 6`, regardless of `_abstractParams`. Stale-warning and btnAssign-disable logic still only runs when `_abstractParams !== null`.
-
-2. Day section `input` events were not calling `onParamChanged()` — only `change` (blur/tab-away) was. Users editing cycle time fields mid-type would see no auto-regeneration. Fixed by adding `onParamChanged()` to every `input` handler in the day section:
-
-| Input | Fixed |
-|-------|-------|
-| Per-day cycle time `.cc-time` `input` | ✓ |
-| Cycle-change after-match `.cc-after` `input` | ✓ |
-| Day-level secondary cycle-change `input` | ✓ |
-| Break name `input` | ✓ (replaced old `_abstractParams !== null` guard) |
-| Global `cycleTime` field | ✓ (added `input` listener alongside existing `change`) |
-
-All `onParamChanged()` calls go through the 2.5s debounce — rapid typing resets the timer and fires once when the user pauses.
-
-**`fetchAndRenderAgendaFit` calls `generateSchedule()` directly** (not via debounce) after the PDF work completes. This avoids a 2500ms delay and eliminates a race condition where the debounce could fire before `generateSchedule` was ready. `applyAgendaToSchedule()` uses `validateTimes()` instead of `validateTimesAndRecalc()` so it does not queue a spurious debounce — generation is entirely the caller's responsibility.
-
-**Precedence chain in `fetchAndRenderAgendaFit`** (simplified — always runs steps in order, each gated by its own flag):
-```javascript
-if (autoApplyAgenda.checked) applyAgendaToSchedule();
-if (autoMaxCycles.checked)   calcMaxMatches();   // → generateSchedule() if autoPopulate on
-else if (autoPopulate.checked) generateSchedule();
-// autoAssign fires inside Stage 1 completion hook
-```
-
-**PDF fail path:** same chain starting at `calcMaxMatches` / `generateSchedule`.
-
-### Processing overlay
-
-```javascript
-var _overlay = (function() { ... })();
-```
-IIFE module. State: `_steps = [{id, label, state}]`, `_visible`. Renders step list into `#processingSteps`. Progress bar `#processingProgressFill` advances to `idx/total * 90%` on `step()` call, 100% on `hide()`.
-
-`isVisible()` guard prevents overlay calls from manual (non-auto) triggers — e.g. `generateSchedule()` called directly by the Generate button should not advance overlay steps.
-
-`_overlay.hide()` has three call sites:
-1. After `assignTeams()` completes (chain fully done)
-2. After Stage 1 completes when `autoAssign` is off (no more steps)
-3. In PDF fail path when neither `autoMaxCycles` nor `autoPopulate` are on
-
-**`window._cpuWorkers`** — fetched from `GET /api/health` on page load, stored for display. Reflects actual `ProcessPoolExecutor` size: `CPU_WORKERS` env or `os.cpu_count()`.
-
-### Agenda fit — actual match counts
-
-`updateAgendaFit()` per-block assignment logic:
-- If `window._frcScheduled` exists: count `entry.startMin` values in `[block.start, block.end)` per block
-- If no schedule: `distributeMatchesToBlocksPerCt()` proportional estimate
-
-Summary `timeNeeded = totalMatches * effectiveCt` where `effectiveCt` = capacity-weighted average of per-block cycle times.
-
-**`getBlockCycleTime(blockIndex)`** — reads `.day-cc-row[data-is-start="1"] .cc-time` from the nth day row. Falls back to global `#cycleTime` if not found.
-
-**`distributeMatchesToBlocksPerCt(totalMatches, blocks, blockCts)`** — replaces single-ct `distributeMatchesToBlocks`. Uses each block's own capacity (`duration / blockCts[i]`) for proportional distribution. When over capacity, fills each block to floor capacity and puts overflow in the last block. `distributeMatchesToBlocks` is kept as a legacy wrapper.
-
-**`updateAgendaFit()`** now called from:
-- `finishGeneration` end (after `renderSchedule()`) — syncs timeline with rendered schedule
-- `calcMaxMatches` before triggering `generateSchedule` — syncs after mpt update
-- `onScheduleParamsChanged` — on numTeams/matchesPerTeam/cycleTime input events
-- `fetchAndRenderAgendaFit` success and fail paths
-
-**Duplicate `mpr` variable** — `updateAgendaFit` had `var mpr` declared twice (once after `reqCycle`, once after). Second declaration removed.
-
-**`generateSchedule()`** — shows `⏳ Generating schedule…` in `showApiStatus()` immediately on entry, before the SSE stream begins.
+| Event load | `⏳ Loading team roster…` → `✓ Roster loaded — N teams` |
+| PDF | `⏳ Fetching agenda PDF…` (in agenda panel) |
+| Apply | `⏳ Applying agenda to day config…` |
+| Max cycles | `⏳ Calculating max matches…` → `✓ Max N matches/team — ...` |
+| Stage 1 | `⏳ Generating schedule…` + progress bar → `Stage 1 complete` |
+| Auto-assign | `⏳ Auto-assigning teams…` |
+| Stage 2 | progress bar with iterations/ETA/score |
+| Done | `Teams assigned — review the schedule then click Commit to activate` |
