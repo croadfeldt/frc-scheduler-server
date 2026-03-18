@@ -5576,7 +5576,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       entries.push({type:'break', name:b.name, start:b.start, end:b.end});
     });
 
-    scheduled.push({dayNum: d+1, entries});
+    scheduled.push({dayNum: d+1, start: day.start, end: day.end, entries});
   }
 
   // Update stats
