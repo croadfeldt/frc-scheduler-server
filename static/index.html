@@ -549,8 +549,8 @@
   .agenda-block-list { display: flex; flex-direction: column; gap: 0; }
   .agenda-block-row { padding: 0.6rem 1.25rem; border-bottom: 1px solid var(--border); font-size: 0.8rem; display: flex; flex-direction: column; gap: 0.35rem; }
   .agenda-block-row:last-child { border-bottom: none; }
-  .agenda-timeline-bar { height: 28px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; position: relative; }
-  .agenda-timeline-fill { height: 100%; border-radius: 3px; display: flex; align-items: center; padding-left: 0.5rem; font-size: 0.72rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; transition: width 0.3s ease; }
+  .agenda-timeline-bar { height: 32px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; position: relative; }
+  .agenda-timeline-fill { height: 100%; border-radius: 3px; display: flex; align-items: center; padding-left: 0.6rem; padding-right: 0.4rem; font-size: 0.71rem; font-weight: 600; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.55); white-space: nowrap; overflow: hidden; transition: width 0.3s ease; }
   .agenda-fit-ok    { color: var(--accent3); }
   .agenda-fit-tight { color: var(--amber); }
   .agenda-fit-over  { color: var(--danger); }
@@ -2627,7 +2627,8 @@ function renderScheduleBars() {
         slotStart: (slotStart != null) ? slotStart : currentMatches[0].startMin,
         slotEnd,
         matchCount:  currentMatches.length,
-        committed,
+        committed,           // pre-summed (used by stats); render re-sums with cap
+        matches:     currentMatches.slice(),
         shortBreaks: currentShortBreaks.slice(),
         hasTrailingBreak: !!hasTrailingBreak,
       });
@@ -2656,53 +2657,60 @@ function renderScheduleBars() {
     return;
   }
 
-  // ── Proportional bar widths ──────────────────────────────────────────────────
-  var maxSlotDur = 0;
-  allSections.forEach(function(s) { var d = s.slotEnd - s.slotStart; if (d > maxSlotDur) maxSlotDur = d; });
+  var bb = parseFloat(document.getElementById('breakBuffer').value) || 0;
 
   // ── Render ──────────────────────────────────────────────────────────────────
+  // All bars span 100% of the container width — no proportional scaling.
+  // Fill = committed match time / available slot time.
+  // "Committed" caps each match at min(endMin, effectiveSlotEnd) so a match
+  // that runs into break time only counts as far as the break buffer allows.
   var html = '';
   allSections.forEach(function(s) {
-    var slotDur     = s.slotEnd - s.slotStart;
-    // Subtract break buffer if this section is followed by a large break
-    var bb = parseFloat(document.getElementById('breakBuffer').value) || 0;
-    var effectiveSlot = slotDur - (s.hasTrailingBreak ? bb : 0);
-    var barWidthPct = maxSlotDur > 0 ? (slotDur / maxSlotDur * 100) : 100;
-    var committed   = s.committed;
-    var fillPct     = effectiveSlot > 0 ? Math.min(committed / effectiveSlot * 100, 100) : 0;
-    var overage     = Math.round(committed - effectiveSlot);
-    var dc          = dayColor(s.dayNum);
-    var fillColor   = (overage > 0 || fillPct > 90) ? 'var(--amber)' : dc;
-    var avgCt       = s.matchCount > 0 ? (committed / s.matchCount).toFixed(1) : '\u2014';
+    var slotDur      = s.slotEnd - s.slotStart;
+    // Available time = slot duration minus break buffer if this slot is followed by a large break
+    var effectiveEnd = s.slotEnd - (s.hasTrailingBreak ? bb : 0);
+    var available    = effectiveEnd - s.slotStart;
+
+    // Re-sum committed time, capping each match at effectiveEnd
+    var committed = s.matches.reduce(function(sum, m) {
+      var end = Math.min(m.endMin || 0, effectiveEnd);
+      var dur = Math.max(0, end - (m.startMin || 0));
+      return sum + dur;
+    }, 0);
+
+    var fillPct   = available > 0 ? Math.min(committed / available * 100, 100) : 0;
+    var overage   = Math.round(committed - available);
+    var dc        = dayColor(s.dayNum);
+    var fillColor = (overage > 0 || fillPct > 95) ? 'var(--amber)' : dc;
+    var avgCt     = s.matchCount > 0 ? (committed / s.matchCount).toFixed(1) : '\u2014';
 
     var label = s.matchCount + ' match' + (s.matchCount !== 1 ? 'es' : '')
-              + ' \u00b7 ' + Math.round(committed) + '\u202fmin'
-              + ' (avg ' + avgCt + '\u202fmin/match)';
-    if (overage > 0) label += ' \u00b7 +' + overage + ' over';
-    else             label += ' / ' + Math.round(effectiveSlot) + '\u202fmin avail';
+              + '\u2002\u00b7\u2002' + Math.round(committed) + ' / ' + Math.round(available) + '\u202fmin'
+              + '\u2002(avg ' + avgCt + '\u202fmin)';
+    if (overage > 0) label += '\u2002\u00b7\u2002+' + overage + '\u202fmin over';
 
     var ticksHtml = s.shortBreaks.map(function(brk) {
       var pos = slotDur > 0 ? ((brk.start - s.slotStart) / slotDur * 100) : 0;
-      return '<div title="' + (brk.name || 'Break') + ' (' + Math.round((brk.end||0)-(brk.start||0)) + '\u202fmin)" '
+      var brkDur = Math.round((brk.end||0) - (brk.start||0));
+      return '<div title="' + (brk.name || 'Break') + ' (' + brkDur + '\u202fmin)" '
            + 'style="position:absolute;top:0;bottom:0;left:' + pos.toFixed(1) + '%;'
-           + 'width:2px;background:rgba(0,0,0,0.25);pointer-events:auto;cursor:default;"></div>';
+           + 'width:2px;background:rgba(255,255,255,0.4);pointer-events:auto;cursor:default;"></div>';
     }).join('');
 
     html += '<div class="agenda-block-row">'
-          + '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.2rem;">'
-          +   '<span style="font-size:0.7rem;font-weight:700;color:var(--text-muted);letter-spacing:0.04em;">' + s.dayLabel + '</span>'
+          + '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.25rem;">'
+          +   '<span style="font-size:0.7rem;font-weight:700;color:' + dc + ';letter-spacing:0.03em;">' + s.dayLabel + '</span>'
           +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
           +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
           +   '</span>'
-          +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(slotDur) + '\u202fmin</span>'
+          +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(available) + '\u202fmin avail</span>'
           + '</div>'
-          + '<div style="width:' + barWidthPct.toFixed(1) + '%;min-width:60px;">'
-          +   '<div class="agenda-timeline-bar" style="position:relative;border-color:' + dc + ';background:color-mix(in srgb,' + dc + ' 12%,var(--bg));">'
-          +     '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + fillColor + ';">'
-          +       label
-          +     '</div>'
-          +     ticksHtml
+          // Bar always fills full container width
+          + '<div class="agenda-timeline-bar" style="position:relative;border-color:' + dc + ';background:color-mix(in srgb,' + dc + ' 10%,var(--bg));">'
+          +   '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + fillColor + ';">'
+          +     label
           +   '</div>'
+          +   ticksHtml
           + '</div>'
           + '</div>';
   });
