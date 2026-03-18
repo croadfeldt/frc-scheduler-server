@@ -928,11 +928,8 @@
           <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
             <input type="checkbox" id="printOptDayBreaks" checked> Day break markers
           </label>
-          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptSlotNums"> Slot numbers (instead of team numbers)
-          </label>
           <label id="printOptTeamNumsLabel" style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptTeamNums" checked> Team numbers
+            <input type="checkbox" id="printOptTeamNums" checked> Team numbers (requires Stage 2 assignment)
           </label>
           <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
             <input type="checkbox" id="printOptRoundDividers" checked> Round dividers
@@ -6731,10 +6728,16 @@ function downloadJSON() {
 
 function openPrintDialog() {
   if (!window._frcScheduled) { showApiStatus('No schedule to print', true); return; }
-  // Show/hide team numbers option based on whether assignment is done
+  // Grey out team numbers checkbox if no assignment done
   var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
-  var teamNumLabel = document.getElementById('printOptTeamNumsLabel');
-  if (teamNumLabel) teamNumLabel.style.display = hasAssignment ? '' : 'none';
+  var teamNumsCb = document.getElementById('printOptTeamNums');
+  if (teamNumsCb) {
+    teamNumsCb.disabled = !hasAssignment;
+    if (!hasAssignment) teamNumsCb.checked = false;
+    var lbl = document.getElementById('printOptTeamNumsLabel');
+    if (lbl) lbl.style.opacity = hasAssignment ? '' : '0.45';
+    if (lbl) lbl.title = hasAssignment ? '' : 'Run Stage 2 assignment to enable team numbers';
+  }
   openModal('modalPrint');
 }
 
@@ -6748,23 +6751,40 @@ function printSchedule() {
     cycleChanges:   document.getElementById('printOptCycleChanges').checked,
     breaks:         document.getElementById('printOptBreaks').checked,
     dayBreaks:      document.getElementById('printOptDayBreaks').checked,
-    slotNums:       document.getElementById('printOptSlotNums').checked,
     teamNums:       document.getElementById('printOptTeamNums').checked,
     roundDividers:  document.getElementById('printOptRoundDividers').checked,
   };
 
   var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
+  var showTeamNums  = hasAssignment && opts.teamNums;
 
-  // Resolve team number from slot
+  // Active schedule filters — used to skip non-matching matches in print
+  var activeFilters = window._frcFilters || { teams: [], alliance: null };
+  var hasTeamFilter = activeFilters.teams && activeFilters.teams.length > 0;
+
+  // Resolve display label for a slot position
+  // Returns team number string if assigned+enabled, otherwise '—'
   function teamLabel(slot) {
-    if (opts.slotNums) return 'S' + slot;
-    if (hasAssignment && opts.teamNums) {
+    if (showTeamNums) {
       var real = _currentSlotMap[String(slot)];
-      return real != null ? real : slot;
+      return real != null ? String(real) : '—';
     }
-    // No assignment and slot numbers off — show slot as number (best we have)
-    // If Stage 2 hasn't been run, slot indices ARE the only identifiers
-    return slot;
+    return '—';
+  }
+
+  // Resolve the real team number for a slot (for filter comparison)
+  function slotToRealTeam(slot) {
+    if (!hasAssignment) return null;
+    var real = _currentSlotMap[String(slot)];
+    return real != null ? real : null;
+  }
+
+  // Check if a match passes the active team filter (for print)
+  // Returns true if no filter, or if filter team appears in the match
+  function matchPassesPrintFilter(entry) {
+    if (!hasTeamFilter) return true;
+    var matchTeams = entry.red.concat(entry.blue).map(slotToRealTeam).filter(function(t){ return t !== null; });
+    return activeFilters.teams.some(function(ft) { return matchTeams.indexOf(ft) !== -1; });
   }
 
   var eventName = document.getElementById('eventCodeStatus') ? document.getElementById('eventCodeStatus').textContent : '';
@@ -6841,8 +6861,18 @@ function printSchedule() {
         // Day break marker
         if (entry.isDayBreak && !opts.dayBreaks) return;
 
-        var red  = entry.red.map(function(t,i){ return teamSpan(t, entry.redSurrogate&&entry.redSurrogate[i], 'red'); }).join(' &middot; ');
-        var blue = entry.blue.map(function(t,i){ return teamSpan(t, entry.blueSurrogate&&entry.blueSurrogate[i], 'blue'); }).join(' &middot; ');
+        // Apply team filter — skip matches that don't include filtered teams
+        if (!matchPassesPrintFilter(entry)) return;
+
+        // Only show surrogate badge when team numbers are visible (slot position may change)
+        var red  = entry.red.map(function(t,i){
+          var isSur = showTeamNums && entry.redSurrogate && entry.redSurrogate[i];
+          return teamSpan(t, isSur, 'red');
+        }).join(' &middot; ');
+        var blue = entry.blue.map(function(t,i){
+          var isSur = showTeamNums && entry.blueSurrogate && entry.blueSurrogate[i];
+          return teamSpan(t, isSur, 'blue');
+        }).join(' &middot; ');
         html += '<tr><td>Q' + entry.num + '</td><td>' + minToTime(entry.startMin) + '</td><td>' + red + '</td><td>' + blue + '</td></tr>';
       }
     });
