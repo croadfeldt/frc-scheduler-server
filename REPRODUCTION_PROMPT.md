@@ -92,6 +92,26 @@ Client: `loadAdhocEvent()` → `apiFetch('/api/events/adhoc')` → `activateEven
 
 ---
 
+### numDays ↔ Day Rows Sync
+
+Bidirectional, always in sync. `syncDayRowsToNumDays()` is the single source of truth for numDays → rows:
+```javascript
+// Triggered by both 'change' and 'input' (input guarded: !isNaN(n) && n >= 1 && n <= 5)
+document.getElementById('numDays').addEventListener('change', syncDayRowsToNumDays);
+document.getElementById('numDays').addEventListener('input', function() {
+  var n = parseInt(this.value);
+  if (!isNaN(n) && n >= 1 && n <= 5) syncDayRowsToNumDays();
+});
+```
+
+`addDay()` → increments `numDays.value` then calls `buildDaysUI()`.
+`removeDay(el)` → removes row, sets `numDays.value = querySelectorAll('.day-row').length`.
+`buildDaysUI()` → sets `numDays.value` to actual row count after add/remove.
+
+**PDF fail warning** — `configuredDays = querySelectorAll('.day-row').length`. Warning says "Schedule is configured for N qual days" using actual row count, not date estimate.
+
+---
+
 ### onCycleTimeChanged Debounce
 Cycle-time inputs call `onCycleTimeChanged()` (1.2s debounce) not `onParamChanged()` (2.5s). This calls `calcMaxMatches()` when `autoMaxCycles` is on, bypassing the plain debounce. Without the 1.2s debounce, mid-keystroke values (typing "10" → field briefly shows "1") caused rapid-fire calcMaxMatches calls.
 

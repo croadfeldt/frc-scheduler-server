@@ -197,6 +197,13 @@ Appears at the top of the results column when an event is loaded with a valid ke
 
 Each day row uses the day color from `_DAY_COLORS` as a subtle background tint (8% opacity) with a matching border (31% opacity). The Day label matches the agenda fit color and is clickable to scroll the schedule output to that day.
 
+### Number of Days sync
+
+The **Number of Days** field and the daily schedule rows are always kept in sync:
+- Typing or changing the field immediately adds or removes day rows to match
+- Clicking **+ Add Day** increments the field and adds a row
+- Clicking **✕** on a day row removes it and decrements the field
+
 ### Day Break (Early End)
 
 Each day row has a `+ Add Day Break (stop scheduling)` button. Enter a match count — scheduling stops after that many matches on that day without changing the configured start/end times.

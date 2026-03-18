@@ -1411,6 +1411,8 @@ function buildDaysUI() {
   // Remove extra rows if numDays decreased
   const rows = container.querySelectorAll('.day-row');
   for (let i = n; i < rows.length; i++) rows[i].remove();
+  // Keep numDays field in sync with actual row count
+  document.getElementById('numDays').value = document.querySelectorAll('.day-row').length;
   // Apply correct end times (last day=noon, others=18:00)
   applyDayEndTimes();
 }
@@ -1562,14 +1564,14 @@ function validateTimesAndRecalc() {
 
 // numDays is now managed by addDay/removeDay buttons, not a field
 // Keep a no-op listener in case something still triggers it
-document.getElementById('numDays').addEventListener('change', function() {
-  var n = parseInt(this.value) || 1;
-  if (n < 1) { this.value = 1; n = 1; }
-  if (n > 5) { this.value = 5; n = 5; }
-  // Add or remove day rows to match
+function syncDayRowsToNumDays() {
+  var el = document.getElementById('numDays');
+  var n = parseInt(el.value) || 1;
+  if (n < 1) { el.value = 1; n = 1; }
+  if (n > 5) { el.value = 5; n = 5; }
   var current = document.querySelectorAll('.day-row').length;
   if (n > current) {
-    buildDaysUI(); // adds missing rows
+    buildDaysUI();            // adds missing rows
   } else if (n < current) {
     var rows = document.querySelectorAll('.day-row');
     for (var i = n; i < rows.length; i++) rows[i].remove();
@@ -1581,6 +1583,12 @@ document.getElementById('numDays').addEventListener('change', function() {
   validateTimes();
   refreshCycleDayLabels();
   onParamChanged();
+}
+document.getElementById('numDays').addEventListener('change', syncDayRowsToNumDays);
+document.getElementById('numDays').addEventListener('input', function() {
+  // Live sync on input — only fire when value is a valid integer in range
+  var n = parseInt(this.value);
+  if (!isNaN(n) && n >= 1 && n <= 5) syncDayRowsToNumDays();
 });
 
 // cycleTime field: push value down to all day start-of-day rows (one-way only)
@@ -2581,31 +2589,29 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     var pdfMsg = e.message || '';
     var isNotFound = pdfMsg.includes('404') || pdfMsg.includes('not found') || pdfMsg.includes('not a PDF');
 
-    // Use start/end dates from event data to estimate number of qual days
-    var eventDays = 2; // default: 2 qual days if no date info
-    if (startDate && endDate) {
+    // Use the actual number of configured day rows as the authoritative source.
+    // Fall back to date-based estimate only if day config hasn't been set up yet (still at default).
+    var configuredDays = document.querySelectorAll('.day-row').length;
+    var eventDays = configuredDays || 2;
+    if (!configuredDays && startDate && endDate) {
       var d0 = new Date(startDate), d1 = new Date(endDate);
-      // +1 for inclusive day count: Sat→Sun = 2 days, Thu→Sat = 3 days
       var diff = Math.round((d1 - d0) / 86400000) + 1;
-      // FRC events: district events are typically 2 qual days, regionals 2-3.
-      // start_date from TBA/FRC Events is the first competition day (not practice).
-      // Clamp to 1-3: single-day scrimmages exist, max 3 qual days in practice.
       eventDays = Math.max(1, Math.min(3, diff));
     }
 
-    var daysHint = ' Event appears to span ' + eventDays + ' qual day' + (eventDays !== 1 ? 's' : '') + '.';
+    var daysHint = ' Schedule is configured for ' + eventDays + ' qual day' + (eventDays !== 1 ? 's' : '') + '.';
     var notFoundText = isNotFound
       ? '\u26a0\ufe0f No agenda PDF found for this event.' + daysHint + ' Enter available minutes manually below.'
       : '\u26a0\ufe0f Could not load agenda PDF: ' + pdfMsg + '. Enter available minutes manually below.';
 
     loading.textContent = notFoundText;
 
-    // Always apply the event-date-based day count on a fresh event load
-    // (removed the currentDays===1 guard — after reset, numDays defaults to 2
-    // which would always block the update)
+    // Only apply event-date-based day count if user hasn't configured days yet
+    // (numDays still at default of 2 and no start/end times customized).
+    // Never override a day config the user has already set up.
     var numDaysEl = document.getElementById('numDays');
     var currentDays = parseInt(numDaysEl.value) || 1;
-    if (eventDays !== currentDays) {
+    if (!configuredDays && startDate && endDate && eventDays !== currentDays) {
       numDaysEl.value = eventDays;
       buildDaysUI();
       applyDayEndTimes();
@@ -4713,12 +4719,25 @@ async function activateEvent(ev) {
   }
 
   // Fetch FIRST agenda PDF and render fit analysis (non-blocking)
-  if (ev.key) {
+  // Skip for ad-hoc event — it has no real PDF; agenda fit uses day config directly.
+  if (ev.key && ev.key !== 'adhoc') {
     fetchAndRenderAgendaFit(ev.key, ev.start_date, ev.end_date).catch(function() {}).finally(function() {
       window._agendaFetchPending = false;
     });
   } else {
     window._agendaFetchPending = false;
+    // Show agenda fit from day config immediately
+    var panel = document.getElementById('agendaFitPanel');
+    var loading = document.getElementById('agendaFitLoading');
+    var statsEl = document.getElementById('agendaFitStats');
+    var blocksEl = document.getElementById('agendaFitBlocks');
+    if (panel) panel.style.display = 'block';
+    if (loading) loading.textContent = '';
+    if (statsEl) statsEl.style.display = 'grid';
+    if (blocksEl) blocksEl.style.display = 'block';
+    updateAgendaFit();
+    renderScheduleBars();
+    _overlay.done('pdf');
   }
 }
 

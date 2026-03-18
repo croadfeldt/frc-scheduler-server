@@ -54,6 +54,14 @@ When `numTeams × matchesPerTeam` is not evenly divisible by 6, some teams play 
 4. → assignTeams()                       [autoAssign]
 ```
 
+**`numDays` ↔ day rows sync** — bidirectional, always in sync:
+- `numDays` `change` + `input` events → `syncDayRowsToNumDays()` — adds or removes `.day-row` elements to match. `input` is guarded (`!isNaN(n) && n >= 1 && n <= 5`) so it only fires on valid integers.
+- `addDay()` → increments `numDays.value` before calling `buildDaysUI()`
+- `removeDay(el)` → removes the row, then sets `numDays.value = querySelectorAll('.day-row').length`
+- `buildDaysUI()` → after adding/removing rows, sets `numDays.value` to actual row count
+
+**PDF fail warning** uses `querySelectorAll('.day-row').length` (actual configured days) rather than estimating from event start/end dates. Falls back to date-based estimate only if zero rows exist.
+
 **`onCycleTimeChanged()`** — all cycle-time inputs (start-of-day and after-match rows) call this instead of `onParamChanged()`. Applies a 1.2s debounce then calls `calcMaxMatches()` if `autoMaxCycles` is on, bypassing the plain 2.5s debounce. Prevents mid-keystroke fires that caused infinite loops.
 
 **`calcMaxMatches()` safety guards** — the simulation loop has a `_safetyLimit = 2000` iteration cap and a `ct < 0.5 → break` guard. Without these, a blank or zero cycle-time field (e.g. mid-keystroke) causes an infinite loop that permanently hangs the browser tab.
