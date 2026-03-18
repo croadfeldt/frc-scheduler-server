@@ -2977,6 +2977,48 @@ function renderScheduleBars() {
   });
 
   container.innerHTML = html;
+
+  // ── Overflow bar — unscheduled matches that didn't fit ────────────────────
+  // If _frcFinalDayOverflow is set, some matches couldn't be placed before the
+  // last day's end time. Show a 100%-wide danger bar with the count and estimated
+  // extra time so the user knows how much time needs to be added.
+  var overflowEl = document.getElementById('agendaFitOverflow');
+  if (!overflowEl) {
+    overflowEl = document.createElement('div');
+    overflowEl.id = 'agendaFitOverflow';
+    container.parentNode.insertBefore(overflowEl, container.nextSibling);
+  }
+
+  if (window._frcFinalDayOverflow && window._frcFinalDayOverflow.unscheduled > 0) {
+    var ov = window._frcFinalDayOverflow;
+    // Estimate additional time: use the average cycle time from the last scheduled section
+    var lastSection = allSections[allSections.length - 1];
+    var estCt = lastSection && lastSection.matchCount > 0
+      ? (lastSection.committed / lastSection.matchCount)
+      : (parseFloat(document.getElementById('cycleTime').value) || 8);
+    var extraMin = Math.round(ov.unscheduled * estCt);
+    var extraH   = Math.floor(extraMin / 60);
+    var extraM   = extraMin % 60;
+    var extraStr = extraH > 0 ? extraH + 'h ' + extraM + 'min' : extraM + 'min';
+
+    overflowEl.innerHTML =
+      '<div class="agenda-block-row" style="margin-top:0.35rem;">'
+      + '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.25rem;">'
+      +   '<span style="font-size:0.72rem;font-weight:700;color:var(--danger);">&#9888; Unscheduled</span>'
+      +   '<span style="font-size:0.68rem;color:var(--text-muted);">matches that didn\'t fit before end of last day</span>'
+      + '</div>'
+      + '<div class="agenda-timeline-bar" style="position:relative;border-color:var(--danger);background:rgba(243,139,168,0.1);">'
+      +   '<div class="agenda-timeline-fill" style="width:100%;background:var(--danger);">'
+      +     ov.unscheduled + ' match' + (ov.unscheduled !== 1 ? 'es' : '') + ' unscheduled'
+      +     '\u2002\u00b7\u2002~' + extraStr + ' additional time needed'
+      +   '</div>'
+      + '</div>'
+      + '</div>';
+    overflowEl.style.display = '';
+  } else {
+    overflowEl.innerHTML = '';
+    overflowEl.style.display = 'none';
+  }
 }
 
 function getBlockCycleTime(blockIndex) {
@@ -3113,6 +3155,8 @@ function resetAgendaPanel() {
   if (panel) panel.style.display = 'none';
   var applyRow = document.getElementById('agendaApplyRow');
   if (applyRow) applyRow.style.display = 'none';
+  var overflowEl = document.getElementById('agendaFitOverflow');
+  if (overflowEl) { overflowEl.innerHTML = ''; overflowEl.style.display = 'none'; }
 }
 
 function onScheduleParamsChanged() {
