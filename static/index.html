@@ -932,7 +932,10 @@
             <input type="checkbox" id="printOptTeamNums" checked> Team numbers (requires Stage 2 assignment)
           </label>
           <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptRoundDividers" checked> Round dividers
+            <input type="checkbox" id="printOptRoundDividers"> Round dividers
+          </label>
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+            <input type="checkbox" id="printOptPageBreak"> Page break between days
           </label>
         </div>
       </div>
@@ -6753,6 +6756,7 @@ function printSchedule() {
     dayBreaks:      document.getElementById('printOptDayBreaks').checked,
     teamNums:       document.getElementById('printOptTeamNums').checked,
     roundDividers:  document.getElementById('printOptRoundDividers').checked,
+    pageBreak:      document.getElementById('printOptPageBreak').checked,
   };
 
   var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
@@ -6762,28 +6766,18 @@ function printSchedule() {
   var activeFilters = window._frcFilters || { teams: [], alliance: null };
   var hasTeamFilter = activeFilters.teams && activeFilters.teams.length > 0;
 
-  // Resolve display label for a slot position
-  // Returns team number string if assigned+enabled, otherwise '—'
-  function teamLabel(slot) {
-    if (showTeamNums) {
-      var real = _currentSlotMap[String(slot)];
-      return real != null ? String(real) : '—';
-    }
-    return '—';
-  }
-
-  // Resolve the real team number for a slot (for filter comparison)
-  function slotToRealTeam(slot) {
-    if (!hasAssignment) return null;
-    var real = _currentSlotMap[String(slot)];
-    return real != null ? real : null;
+  // After Stage 2 assignment, entry.red/blue already contain real team numbers
+  // (the server resolves slot indices → team numbers in the API response).
+  // teamLabel just controls display: show the value or a dash.
+  function teamLabel(val) {
+    return showTeamNums ? String(val) : '—';
   }
 
   // Check if a match passes the active team filter (for print)
-  // Returns true if no filter, or if filter team appears in the match
+  // entry.red/blue are real team numbers when assigned, slot indices otherwise
   function matchPassesPrintFilter(entry) {
     if (!hasTeamFilter) return true;
-    var matchTeams = entry.red.concat(entry.blue).map(slotToRealTeam).filter(function(t){ return t !== null; });
+    var matchTeams = entry.red.concat(entry.blue);
     return activeFilters.teams.some(function(ft) { return matchTeams.indexOf(ft) !== -1; });
   }
 
@@ -6798,7 +6792,7 @@ function printSchedule() {
   html += 'body{font-family:Arial,sans-serif;font-size:10pt;margin:1cm;color:#000;}';
   html += 'h1{font-size:14pt;margin:0 0 2px 0;}';
   html += '.meta{font-size:8pt;color:#555;margin-bottom:12px;}';
-  html += '.day-title{font-size:11pt;font-weight:bold;margin:14px 0 4px 0;border-bottom:2px solid #000;padding-bottom:2px;}';
+  html += '.day-title{font-size:11pt;font-weight:bold;margin:14px 0 4px 0;border-bottom:2px solid #000;padding-bottom:2px;}' + (opts.pageBreak ? '.day-title.page-break{page-break-before:always;margin-top:0;}' : '');
   html += 'table{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:9pt;}';
   html += 'th{background:#222;color:#fff;padding:3px 6px;text-align:left;font-size:8pt;}';
   html += 'td{padding:2px 6px;border-bottom:1px solid #ddd;}';
@@ -6841,7 +6835,8 @@ function printSchedule() {
         ctInfo = ' &middot; ' + (firstCt%1===0?firstCt:firstCt.toFixed(1)) + 'min/match';
       }
     }
-    html += '<div class="day-title">Day ' + day.dayNum + ' &mdash; ' + dayMatches.length + ' matches' + ctInfo + '</div>';
+    var isFirstDay = (scheduled.indexOf(day) === 0);
+    html += '<div class="day-title' + (opts.pageBreak && !isFirstDay ? ' page-break' : '') + '">Day ' + day.dayNum + ' &mdash; ' + dayMatches.length + ' matches' + ctInfo + '</div>';
     html += '<table><thead><tr><th>#</th><th>Time</th><th>Red Alliance</th><th>Blue Alliance</th></tr></thead><tbody>';
 
     day.entries.forEach(function(entry) {
