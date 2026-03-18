@@ -42,6 +42,43 @@ The `while` loop in `calcMaxMatches()` has a `_safetyLimit = 2000` iteration cap
 
 ---
 
+### Ad-hoc Event
+
+`GET /api/events/adhoc` — upserts a `Team`-less event with `key='adhoc'` on first call:
+```python
+ADHOC_KEY = "adhoc"
+event = await db.execute(select(Event).where(Event.key == ADHOC_KEY))
+# if not found: create with current year, empty location, tba_synced=False
+```
+Returns same shape as `get_event` — `activateEvent(ev)` works unchanged. No migration needed; creates on demand.
+
+Client: `loadAdhocEvent()` → `apiFetch('/api/events/adhoc')` → `activateEvent(ev)`. Button `#btnAdhoc` hides in `activateEvent` (`adhocBtn.style.display = 'none'`), reappears in `fullReset`.
+
+---
+
+### Team List Import
+
+**`parseTeamListText(text)`** — auto-detects format, no dependencies:
+- JSON: `t.startsWith('[')` → `JSON.parse` → integers
+- YAML/bullets: `/^\s*[-*]\s+\d/m` → extract from `- N` lines
+- Generic fallback: `text.match(/\d+/g)` → filter 1–99999
+- Returns sorted, deduped array. Non-numbers silently skipped.
+
+**`_bulkAddTeams(numbers)`** — sequential `POST /api/events/{id}/teams` (avoids server overload). Skips existing numbers via DOM query on `#teamRoster .team-num`. Single `loadRoster()` after all adds. Fires `enrichTeamFromTba(n)` for each new number.
+
+**`enrichTeamFromTba(teamNumber)`** — completely non-blocking, all failures silent:
+1. `GET /api/tba/team/{n}` → server calls `tba_client.get_team(f"frc{n}")` → `normalise_team()`
+2. Updates `.team-name` span in existing row (no full re-render)
+3. `PATCH /api/events/{id}/teams/{n}` → updates `Team.nickname`/`Team.name` in DB
+
+**Server endpoints added:**
+- `GET /api/tba/team/{team_number}` — wraps `tba_client.get_team()`, returns 404 on any error
+- `PATCH /api/events/{event_id}/teams/{team_number}` — updates `Team.nickname`/`Team.name`, 200 response
+
+**Input methods:** textarea paste, `#teamImportFile` FileReader, `ondrop` on textarea.
+
+---
+
 ### Page Load Performance
 
 **Immediately on load:** `loadEvents()` (GET /api/events), `initAuth()` (GET /auth/me).

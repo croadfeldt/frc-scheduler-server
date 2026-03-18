@@ -209,6 +209,35 @@ Only one day break per day. Persisted to URL (`d1e=44`), `day_config` JSON, and 
 
 Simulates the exact scheduling loop — stepping through each day accounting for breaks, break buffer, and per-segment cycle times — then divides total 6-slot capacity by team count. Includes a 2,000-iteration safety cap and a `ct < 0.5` guard against invalid cycle time values causing infinite loops.
 
+### Ad-hoc Schedule
+
+The **✎ Ad-hoc** button in the event bar creates (or loads) a persistent `adhoc` event in the database — no TBA or FRC Events import required. Once activated it behaves exactly like any named event:
+
+- Teams are added/removed via the Teams modal and persist across sessions
+- Schedule generation, Stage 2 assignment, and schedule history all work normally
+- Each schedule gets a unique `?aid=N` / `?sid=N` URL for individual recall
+- The Schedules modal shows full version history under the ad-hoc event
+- The button hides once any event is loaded and reappears on Reset
+
+### Team roster import
+
+The Teams modal has an **Import** section that accepts team lists in any format — auto-detected, no configuration needed:
+
+| Format | Example |
+|--------|---------|
+| JSON array | `[254, 1114, 2056]` |
+| CSV | `254, 1114, 2056` |
+| One per line | `254
+1114
+2056` |
+| YAML list | `- 254
+- 1114` |
+| Plain text | any whitespace/comma separated numbers |
+
+Input methods: **Paste** into the textarea · **📁 File** button (`.csv .json .yaml .yml .txt`) · **Drag and drop** a file onto the textarea.
+
+Non-numbers are silently skipped. Duplicates ignored. After import, TBA is queried non-blockingly for each team's name/nickname — enriched in-place in the roster and persisted to the DB. Failures (TBA unavailable, unknown team) are silently ignored.
+
 ### TBA event dropdown
 
 - Year-specific fetch on demand: `GET /api/tba/events/{year}`
@@ -280,6 +309,7 @@ URL restore priority: `?aid=` → `?sid=` → `?seed=`
 |--------|------|-------------|
 | GET | `/api/tba/events/{year}?search=` | Events for year, sorted by start_date |
 | GET | `/api/tba/search_index` | All TBA events across all years (server-cached 6h) |
+| GET | `/api/tba/team/{number}` | Single team lookup by number (for roster enrichment) |
 | POST | `/api/tba/import/{event_key}` | Import event + teams from TBA |
 
 ### FRC Events API
@@ -295,9 +325,11 @@ URL restore priority: `?aid=` → `?sid=` → `?seed=`
 |--------|------|-------------|
 | GET | `/api/events` | List events |
 | POST | `/api/events` | Create event |
+| GET | `/api/events/adhoc` | Get or create the persistent ad-hoc event (upsert by fixed key) |
 | GET | `/api/events/{id}` | Event + team roster |
 | DELETE | `/api/events/{id}` | Delete event |
 | GET/POST | `/api/events/{id}/teams` | List / add teams |
+| PATCH | `/api/events/{id}/teams/{num}` | Update team name/nickname (TBA enrichment) |
 | DELETE | `/api/events/{id}/teams/{num}` | Remove team |
 
 ### Scheduling
@@ -382,5 +414,9 @@ Fresh databases are unaffected — `create_all` builds the correct schema.
 **TBA search index:** Server-cached for 6 hours (`app.state`). Client caches current+next year in `localStorage` for 6 hours. Prior years fetched on demand by changing the year field.
 
 **503 on rapid param changes:** Auto-generate debounce is 2500ms. `onCycleTimeChanged` has a separate 1200ms debounce. `_agendaFetchPending` blocks `onParamChanged` during the PDF chain.
+
+**Ad-hoc event key:** Fixed as `adhoc` in the DB. `GET /api/events/adhoc` upserts on first call — no migration needed for existing databases.
+
+**Team TBA enrichment:** `PATCH /api/events/{id}/teams/{num}` updates `nickname`/`name` on the shared `Team` record — visible across all events that reference the same team number.
 
 **Page load API calls:** On first load only `GET /api/events` (DB) and `GET /auth/me` (JWT check) fire immediately. TBA dropdown fetch is deferred to first focus on the event input. Health check deferred 2s. TBA search index deferred 5s with `localStorage` caching. `apiFetch()` logs `[api] METHOD /path Nms` to the browser console for timing diagnosis.

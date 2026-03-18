@@ -24,9 +24,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FRC Match Scheduler</title>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500&display=swap" rel="stylesheet">
-<style>
-  :root {
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500&display=swap"></noscript>
+<style>  :root {
     --bg: #13151f;
     --surface: #1e2235;
     --surface2: #252b42;
@@ -416,11 +418,11 @@
   }
   .event-bar-label { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; }
   .event-select { flex: 1; min-width: 180px; background: var(--bg); border: 1px solid var(--border); color: var(--text-strong);
-    padding: 0.4rem 0.6rem; border-radius: 4px; font-family: 'Barlow',sans-serif; font-size: 0.85rem; }
+    padding: 0.4rem 0.6rem; border-radius: 4px; font-family: 'Barlow', sans-serif; font-size: 0.85rem; }
   .event-select:focus { outline: none; border-color: var(--accent); }
   .btn-sm {
     background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted);
-    padding: 0.38rem 0.75rem; border-radius: 4px; font-family: 'Barlow Condensed',sans-serif;
+    padding: 0.38rem 0.75rem; border-radius: 4px; font-family: 'Barlow Condensed', sans-serif;
     font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
     transition: all 0.15s; white-space: nowrap;
   }
@@ -441,7 +443,7 @@
     position: relative;
   }
   .modal-title {
-    font-family: 'Barlow Condensed',sans-serif; font-weight: 700; font-size: 1.1rem;
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 1.1rem;
     letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-strong);
     margin-bottom: 1rem;
   }
@@ -464,7 +466,7 @@
     padding: 0.35rem 0.6rem; background: var(--bg); border: 1px solid var(--border);
     border-radius: 4px; font-size: 0.8rem;
   }
-  .team-num { font-family: 'Barlow Condensed',sans-serif; font-weight: 700; color: var(--accent); min-width: 3rem; }
+  .team-num { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; color: var(--accent); min-width: 3rem; }
   .team-name { color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .team-remove { margin-left: auto; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.8rem; padding: 0 0.2rem; }
   .team-remove:hover { color: var(--danger); }
@@ -475,7 +477,7 @@
     border-radius: 4px; cursor: pointer; transition: border-color 0.15s;
   }
   .tba-result:hover { border-color: var(--accent); }
-  .tba-result-key { font-family: 'Barlow Condensed',sans-serif; font-weight: 700; color: var(--accent); font-size: 0.8rem; min-width: 6rem; }
+  .tba-result-key { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; color: var(--accent); font-size: 0.8rem; min-width: 6rem; }
   .tba-result-name { font-size: 0.8rem; color: var(--text); }
   .tba-result-date { font-size: 0.7rem; color: var(--text-muted); margin-left: auto; }
 
@@ -491,13 +493,13 @@
   .saved-sched-meta { font-size: 0.68rem; color: var(--text-muted); }
   .btn-promote {
     background: var(--accent); color: #0e1320; border: none; border-radius: 4px;
-    padding: 0.35rem 0.8rem; font-family: 'Barlow Condensed',sans-serif; font-weight: 700;
+    padding: 0.35rem 0.8rem; font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
     font-size: 0.78rem; letter-spacing: 0.04em; cursor: pointer; white-space: nowrap;
     text-transform: uppercase;
   }
   .btn-promote:hover { background: #93b8f5; }
   .version-badge {
-    font-size: 0.6rem; font-family: 'Barlow Condensed',sans-serif; font-weight: 700;
+    font-size: 0.6rem; font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
     letter-spacing: 0.08em; text-transform: uppercase; padding: 0.1rem 0.4rem;
     border-radius: 3px; margin-left: 0.4rem; vertical-align: middle;
   }
@@ -799,6 +801,7 @@
       </div>
       <button class="btn-sm btn-accent" onclick="loadEventByCode()" id="btnLoadEvent">Load</button>
       <div id="eventCodeStatus" style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;"></div>
+      <button class="btn-sm" id="btnAdhoc" onclick="loadAdhocEvent()" title="Build a schedule without importing an event from TBA or FRC Events" style="opacity:0.75;white-space:nowrap;">&#9998; Ad-hoc</button>
     </div>
     <div class="event-bar-actions" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
       <div style="height:1.5rem;width:1px;background:var(--border);flex-shrink:0;" class="event-bar-divider"></div>
@@ -861,7 +864,7 @@
 
   <!-- Team roster modal -->
   <div class="modal-overlay" id="modalTeams">
-    <div class="modal">
+    <div class="modal" style="width:min(520px,95vw);">
       <button class="modal-close" onclick="closeModal('modalTeams')">&#x2715;</button>
       <div class="modal-title">Team Roster</div>
       <div class="modal-section">
@@ -871,6 +874,27 @@
           <input type="number" id="addTeamNum" placeholder="Team number" min="1"
             style="width:130px;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.4rem 0.6rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.85rem;">
           <button class="btn-sm btn-accent" onclick="addTeam()">+ Add Team</button>
+        </div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-label">Import team list</div>
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem;">
+          Paste or drop a list of team numbers — CSV, JSON array, YAML list, or one number per line.
+          Duplicates and non-numbers are silently skipped.
+        </div>
+        <textarea id="teamImportText" rows="5" placeholder="254, 1114, 2056&#10;or&#10;- 254&#10;- 1114&#10;or&#10;[254, 1114, 2056]"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);
+                 color:var(--text-strong);padding:0.4rem 0.6rem;border-radius:4px;
+                 font-family:monospace;font-size:0.82rem;resize:vertical;"
+          ondrop="handleTeamImportDrop(event)" ondragover="event.preventDefault()"></textarea>
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.4rem;">
+          <button class="btn-sm btn-accent" onclick="importTeamList()">&#8659; Import</button>
+          <label class="btn-sm" style="cursor:pointer;" title="Import from file">
+            &#128193; File
+            <input type="file" id="teamImportFile" accept=".csv,.json,.yaml,.yml,.txt" style="display:none;"
+              onchange="handleTeamImportFile(event)">
+          </label>
+          <span id="teamImportStatus" style="font-size:0.72rem;color:var(--text-muted);flex:1;"></span>
         </div>
       </div>
     </div>
@@ -1006,7 +1030,7 @@
 
     <div class="panel results-panel">
       <!-- Agenda Fit panel — shown when an event with a FIRST agenda PDF is loaded -->
-      <div id="agendaFitPanel" style="display:none;margin-bottom:0;border-bottom:1px solid var(--border);">
+      <div id="agendaFitPanel" style="display:block;margin-bottom:0;border-bottom:1px solid var(--border);">
         <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;" onclick="toggleAgendaPanel()">
           <span>&#128197; Agenda Fit</span>
           <span id="agendaFitBadge" style="font-size:0.72rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:3px;"></span>
@@ -1014,8 +1038,8 @@
         </div>
         <div id="agendaFitBody">
           <div id="agendaFitLoading" style="padding:0.75rem 1.25rem;font-size:0.78rem;color:var(--text-muted);">&#8203;</div>
-          <div id="agendaFitStats" class="agenda-fit-grid" style="display:none;"></div>
-          <div id="agendaFitBlocks" class="agenda-block-list" style="display:none;"></div>
+          <div id="agendaFitStats" class="agenda-fit-grid"></div>
+          <div id="agendaFitBlocks" class="agenda-block-list"></div>
           <div id="agendaApplyRow" style="display:none;padding:0.5rem 1.25rem;border-top:1px solid var(--border);">
             <button class="btn-sm btn-accent" onclick="applyAgendaToSchedule()" style="font-size:0.75rem;">
               &#8615; Apply to Day Configuration
@@ -1070,7 +1094,6 @@
 <script>
 // ── API base URL — must be declared before any function that references it ────
 const API = window.location.origin;
-const _PAGE_T0 = performance.now();
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let _currentEventId = null;
@@ -1583,6 +1606,19 @@ document.getElementById('cycleTime').addEventListener('change', function() {
 });
 buildDaysUI();
 validateTimes();
+// Show agenda fit from day config immediately on page load
+(function() {
+  var panel = document.getElementById('agendaFitPanel');
+  var loading = document.getElementById('agendaFitLoading');
+  var statsEl = document.getElementById('agendaFitStats');
+  var blocksEl = document.getElementById('agendaFitBlocks');
+  if (panel) panel.style.display = 'block';
+  if (loading) loading.textContent = '';
+  if (statsEl) statsEl.style.display = 'grid';
+  if (blocksEl) blocksEl.style.display = 'block';
+  updateAgendaFit();
+  renderScheduleBars();
+})();
 
 document.getElementById('tbaYear').value = new Date().getFullYear();
 document.getElementById('eventYear').value = new Date().getFullYear();
@@ -2029,11 +2065,9 @@ function applyUrlParams(params) {
 
 // Auto-run from URL params on load
 async function autoRunFromUrl() {
-  const _auto0 = performance.now();
   const params = parseUrlParams();
   if (!params.seed && !params.n && !params.days && !params.sid && !params.aid) return;
   applyUrlParams(params);
-  console.debug('[timing] params+UI applied', Math.round(performance.now() - _PAGE_T0) + 'ms from page start');
 
   // If we have a server-side ID, load directly from DB (faster, exact match)
   if (params.aid) {
@@ -2840,8 +2874,13 @@ function updateAgendaFit() {
     if (totalCap > 0) effectiveCt = weightedCt / totalCap;
     timeNeeded = totalMatches * effectiveCt;
   } else {
-    var manEl = document.getElementById('agendaManualMin');
-    availableMin = manEl ? (parseInt(manEl.value) || 360) : 360;
+    // No schedule and no PDF — derive from the day configuration directly
+    availableMin = _availFromDayConfig();
+    if (availableMin <= 0) {
+      // Final fallback: manual minutes input
+      var manEl = document.getElementById('agendaManualMin');
+      availableMin = manEl ? (parseInt(manEl.value) || 360) : 360;
+    }
     timeNeeded = totalMatches * ct;
   }
 
@@ -4202,9 +4241,7 @@ async function apiFetch(path, opts = {}) {
   if (opts.body) headers['Content-Type'] = 'application/json';
   const token = getToken();
   if (token) headers['Authorization'] = 'Bearer ' + token;
-  const _t0 = performance.now();
   const res = await fetch(API + path, { ...opts, method, headers });
-  console.debug('[api]', method, path, Math.round(performance.now() - _t0) + 'ms', res.status);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || res.statusText);
@@ -4260,6 +4297,18 @@ async function onEventSelectChange() {
 }
 
 // Primary workflow: type event code, press Enter or Load
+async function loadAdhocEvent() {
+  // Get or create the persistent ad-hoc event, then activate it like any other event.
+  // The ad-hoc event key is 'adhoc' — teams and schedules persist across sessions.
+  try {
+    showApiStatus('⏳ Loading ad-hoc event…');
+    const ev = await apiFetch('/api/events/adhoc');
+    await activateEvent(ev);
+  } catch(e) {
+    showApiStatus('Could not load ad-hoc event: ' + e.message, true);
+  }
+}
+
 async function loadEventByCode() {
   const raw   = document.getElementById('eventCodeInput').value.trim();
   if (!raw) return;
@@ -4614,6 +4663,8 @@ async function activateEvent(ev) {
   document.getElementById('btnManageTeams').disabled    = false;
   document.getElementById('btnSavedSchedules').disabled = false;
   document.getElementById('btnDeleteEvent').disabled    = false;
+  var adhocBtn = document.getElementById('btnAdhoc');
+  if (adhocBtn) adhocBtn.style.display = 'none';
 
   // Build overlay step list based on which auto flags are on — BEFORE any async work
   if (ev.key) {
@@ -4686,6 +4737,8 @@ async function deleteEvent() {
     document.getElementById('eventCodeInput').className = '';
     document.getElementById('eventCodeStatus').textContent = '';
     document.getElementById('btnManageTeams').disabled    = true;
+  var adhocBtn2 = document.getElementById('btnAdhoc');
+  if (adhocBtn2) adhocBtn2.style.display = '';
     document.getElementById('btnSavedSchedules').disabled = true;
     document.getElementById('btnDeleteEvent').disabled    = true;
     document.getElementById('numTeams').disabled          = false;
@@ -4738,7 +4791,6 @@ async function loadRoster() {
   try {
     showApiStatus('⏳ Loading team roster…');
     const teams = await apiFetch('/api/events/' + _currentEventId + '/teams');
-    // Sync numTeams with roster count — but keep input editable
     document.getElementById('numTeams').value = teams.length;
     document.getElementById('rosterCount').textContent = teams.length;
     const roster = document.getElementById('teamRoster');
@@ -4753,12 +4805,7 @@ async function loadRoster() {
     });
     showApiStatus('✓ Roster loaded — ' + teams.length + ' team' + (teams.length !== 1 ? 's' : ''));
     _overlay.done('roster');
-    // Notify param changed so auto-generate can fire after roster loads.
-    // Suppressed when an agenda PDF fetch is about to start — that fetch will
-    // call onParamChanged itself once day config has been applied.
-    if (!window._agendaFetchPending) {
-      onParamChanged();
-    }
+    if (!window._agendaFetchPending) onParamChanged();
   } catch(e) { showApiStatus(e.message, true); }
 }
 
@@ -4772,7 +4819,171 @@ async function addTeam() {
     });
     document.getElementById('addTeamNum').value = '';
     await loadRoster();
+    // Non-blocking TBA lookup — enriches name/nickname after team is already added.
+    // Silently ignored if TBA is unavailable or team not found.
+    enrichTeamFromTba(num);
   } catch(e) { showApiStatus(e.message, true); }
+}
+
+/**
+ * Look up a team number on TBA and update the team record on the server
+ * with its nickname/name. Fires after addTeam and is fully non-critical —
+ * failures are silently swallowed. Refreshes the roster row in-place
+ * without re-fetching the full list.
+ */
+async function enrichTeamFromTba(teamNumber) {
+  if (!_currentEventId) return;
+  try {
+    const team = await apiFetch('/api/tba/team/' + teamNumber);
+    if (!team || (!team.nickname && !team.name)) return;
+    // Update the name shown in the already-rendered roster row
+    const roster = document.getElementById('teamRoster');
+    if (roster) {
+      Array.from(roster.querySelectorAll('.team-row')).forEach(function(row) {
+        var numEl = row.querySelector('.team-num');
+        if (numEl && parseInt(numEl.textContent) === teamNumber) {
+          var nameEl = row.querySelector('.team-name');
+          if (nameEl) nameEl.textContent = team.nickname || team.name || '';
+        }
+      });
+    }
+    // Persist the enriched name to the server (PATCH team record)
+    await apiFetch('/api/events/' + _currentEventId + '/teams/' + teamNumber, {
+      method: 'PATCH',
+      body: JSON.stringify({ nickname: team.nickname || '', name: team.name || '' }),
+    }).catch(function() {}); // silently ignore if PATCH not supported
+  } catch(e) {
+    // Non-critical — TBA unavailable or team not found. Silently ignore.
+  }
+}
+
+
+/**
+ * Parse a string in any of the supported team list formats and return
+ * an array of unique valid team numbers (integers ≥ 1).
+ *
+ * Supported formats (auto-detected):
+ *   JSON array:   [254, 1114, 2056]
+ *   CSV row(s):   254, 1114, 2056  or  254\n1114\n2056
+ *   YAML list:    - 254\n  - 1114
+ *   Plain text:   one number per line, or space/comma separated
+ *
+ * Non-numeric tokens are silently skipped. Duplicates are removed.
+ */
+function parseTeamListText(text) {
+  if (!text || !text.trim()) return [];
+  var t = text.trim();
+  var nums = [];
+
+  // JSON array: starts with [
+  if (t.startsWith('[')) {
+    try {
+      var arr = JSON.parse(t);
+      if (Array.isArray(arr)) {
+        arr.forEach(function(v) {
+          var n = parseInt(String(v).replace(/\D/g, ''));
+          if (n >= 1) nums.push(n);
+        });
+        return [...new Set(nums)].sort(function(a,b){return a-b;});
+      }
+    } catch(e) {} // fall through to generic parse
+  }
+
+  // YAML list: lines starting with - or * (common bullet markers)
+  if (/^\s*[-*]\s+\d/m.test(t)) {
+    t.split('\n').forEach(function(line) {
+      var m = line.match(/^\s*[-*]\s+(\d+)/);
+      if (m) { var n = parseInt(m[1]); if (n >= 1) nums.push(n); }
+    });
+    if (nums.length) return [...new Set(nums)].sort(function(a,b){return a-b;});
+  }
+
+  // Generic: extract all runs of digits, filter valid team numbers
+  var matches = t.match(/\d+/g) || [];
+  matches.forEach(function(s) {
+    var n = parseInt(s);
+    if (n >= 1 && n <= 99999) nums.push(n);  // FRC team numbers are 1-99999
+  });
+  return [...new Set(nums)].sort(function(a,b){return a-b;});
+}
+
+async function importTeamList() {
+  if (!_currentEventId) { showApiStatus('Load an event first', true); return; }
+  var text = document.getElementById('teamImportText').value;
+  var numbers = parseTeamListText(text);
+  if (!numbers.length) {
+    document.getElementById('teamImportStatus').textContent = 'No valid team numbers found.';
+    document.getElementById('teamImportStatus').style.color = 'var(--danger)';
+    return;
+  }
+  await _bulkAddTeams(numbers);
+}
+
+async function _bulkAddTeams(numbers) {
+  var statusEl = document.getElementById('teamImportStatus');
+  statusEl.textContent = 'Adding ' + numbers.length + ' teams…';
+  statusEl.style.color = 'var(--text-muted)';
+
+  // Get existing team numbers to skip duplicates without a server round-trip
+  var existing = new Set();
+  document.querySelectorAll('#teamRoster .team-num').forEach(function(el) {
+    existing.add(parseInt(el.textContent));
+  });
+
+  var toAdd   = numbers.filter(function(n) { return !existing.has(n); });
+  var skipped = numbers.length - toAdd.length;
+  var added   = 0, failed = 0;
+
+  // Add sequentially to avoid overwhelming the server
+  for (var i = 0; i < toAdd.length; i++) {
+    try {
+      await apiFetch('/api/events/' + _currentEventId + '/teams', {
+        method: 'POST', body: JSON.stringify({ number: toAdd[i] })
+      });
+      added++;
+    } catch(e) { failed++; }
+    // Update progress
+    statusEl.textContent = 'Added ' + added + ' / ' + toAdd.length + '…';
+  }
+
+  // Refresh roster once after all adds
+  await loadRoster();
+
+  // Non-blocking TBA enrichment for all newly added teams
+  toAdd.forEach(function(n) { enrichTeamFromTba(n); });
+
+  // Clear textarea and show result
+  document.getElementById('teamImportText').value = '';
+  var msg = '\u2713 Added ' + added;
+  if (skipped) msg += ', ' + skipped + ' already present';
+  if (failed)  msg += ', ' + failed + ' failed';
+  statusEl.textContent = msg;
+  statusEl.style.color = added > 0 ? 'var(--accent3)' : 'var(--text-muted)';
+}
+
+function handleTeamImportFile(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('teamImportText').value = e.target.result;
+    // Auto-trigger import after file loads
+    importTeamList();
+  };
+  reader.readAsText(file);
+  // Reset file input so same file can be re-selected
+  event.target.value = '';
+}
+
+function handleTeamImportDrop(event) {
+  event.preventDefault();
+  var file = event.dataTransfer.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('teamImportText').value = e.target.result;
+  };
+  reader.readAsText(file);
 }
 
 async function removeTeam(teamNumber) {
@@ -5509,7 +5720,6 @@ async function assignTeams() {
 
 // Load and display an assigned schedule (Stage 2 result)
 async function loadAssignedSchedule(scheduleId, dayConfig) {
-  const _las0 = performance.now();
   window._frcAbstractMode  = false; // real team numbers are now available
   window._frcShowFakeTeams = false;
   var fakeBtn3 = document.getElementById('btnShowFakeTeams');
@@ -5534,12 +5744,8 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
     const roundBoundaries = new Map(
       Object.entries(sched.round_boundaries || {}).map(function(e) { return [parseInt(e[0]), e[1]]; })
     );
-    window._frcAbstractMode = false;
-    console.debug('[timing] data fetched+mapped', Math.round(performance.now() - _las0) + 'ms');
-    finishGeneration(matches, roundBoundaries, sched.surrogate_count,
-      0, 0, dayConfig || sched.day_config);
-    console.debug('[timing] loadAssignedSchedule total', Math.round(performance.now() - _las0) + 'ms');
-    showApiStatus('Schedule loaded');
+    window._frcAbstractMode = false;    finishGeneration(matches, roundBoundaries, sched.surrogate_count,
+      0, 0, dayConfig || sched.day_config);    showApiStatus('Schedule loaded');
   } catch(e) { showApiStatus(e.message, true); }
 }
 
@@ -5631,11 +5837,8 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
 
 
 function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride) {
-  const _fg0 = performance.now();
   try {
-    const result = _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride);
-    console.debug('[timing] finishGeneration total', Math.round(performance.now() - _fg0) + 'ms');
-    return result;
+    return _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride);
   } catch(e) {
     console.error('finishGeneration error:', e);
     showApiStatus('Schedule render error: ' + e.message, true);
@@ -5703,7 +5906,6 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   const totalMatches = matches.length;
   const scheduled = [];
   let matchIdx = 0;
-  const _loop0 = performance.now();
 
   for (let d = 0; d < days.length && matchIdx < totalMatches; d++) {
     const day = days[d];
@@ -5832,9 +6034,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   }
 
   // Update stats
-  const _b2b0 = performance.now();
   const b2bRaw = countBackToBacks(matches);
-  console.debug('[timing] countBackToBacks', Math.round(performance.now() - _b2b0) + 'ms');
   // In abstract mode slot indices are not real teams — B2B count is meaningless.
   // Only show it when real teams are assigned or fake teams are being displayed.
   const b2b = window._frcAbstractMode ? 0 : b2bRaw;
@@ -5888,7 +6088,6 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   if (dlBar) dlBar.style.display = 'flex';
 
   // Store scheduled globally for filter re-application
-  console.debug('[timing] placement loop', Math.round(performance.now() - _loop0) + 'ms');
   window._frcScheduled = scheduled;
   refreshCycleDayLabels(); // update day labels on cycle change rows
   window._frcRoundBoundaries = roundBoundaries;
@@ -5916,11 +6115,8 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   // Sync agenda fit panel with the freshly rendered schedule
   if (document.getElementById('agendaFitPanel') &&
       document.getElementById('agendaFitPanel').style.display !== 'none') {
-    const _af0 = performance.now();
     updateAgendaFit();
-    console.debug('[timing] updateAgendaFit', Math.round(performance.now() - _af0) + 'ms');
   }
-  console.debug('[timing] page interactive', Math.round(performance.now() - _PAGE_T0) + 'ms from page start');
 }
 
 // ── Filter state ─────────────────────────────────────────────────────────────
@@ -6076,7 +6272,6 @@ function renderTeam(team, isSurrogate, isB2B, colorClass) {
 }
 
 function renderSchedule() {
-  const _rs0 = performance.now();
   var scheduled = window._frcScheduled;
   if (!scheduled) return;
   if (!window._frcFilters) window._frcFilters = { teams: [], alliance: null, day: null, b2b: false, surrogate: false };
@@ -6216,7 +6411,6 @@ function renderSchedule() {
     block.appendChild(table);
     output.appendChild(block);
   });
-  console.debug('[timing] renderSchedule', Math.round(performance.now() - _rs0) + 'ms');
 }
 
 function downloadCSV() {

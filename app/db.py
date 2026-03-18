@@ -35,7 +35,18 @@ DATABASE_URL = os.getenv(
     "postgresql+asyncpg://frc:frc@localhost:5432/frc_scheduler"
 )
 
-engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=5,          # keep 5 connections open permanently
+    max_overflow=10,      # allow up to 10 more under load
+    pool_timeout=30,
+    connect_args={
+        "server_settings": {"application_name": "frc-scheduler"},
+        "command_timeout": 60,
+    },
+)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 

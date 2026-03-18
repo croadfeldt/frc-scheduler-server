@@ -64,6 +64,10 @@ def get_pool() -> ProcessPoolExecutor:
         _pool = ProcessPoolExecutor(max_workers=CPU_WORKERS)
     return _pool
 
+def _noop(_: None = None) -> None:
+    """Trivial function submitted to pre-spawn pool workers."""
+    pass
+
 # Semaphore limits concurrent schedule generations so the ProcessPoolExecutor
 # is never completely saturated by a single user, preventing 503s for others.
 # With WEB_WORKERS=1, the pool is shared by all requests in this process.
@@ -101,10 +105,36 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.on_event("startup")
 async def startup():
+    import time
+    t0 = time.monotonic()
     await init_db()
+    log.info("DB init done in %.2fs", time.monotonic() - t0)
+
+    # Pre-warm the connection pool so the first user request doesn't pay
+    # the TCP handshake + asyncpg negotiation cost (~2-3s cold).
+    # Fire-and-forget: failures are non-fatal.
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(__import__('sqlalchemy').text("SELECT 1"))
+        log.info("DB pool warmed in %.2fs", time.monotonic() - t0)
+    except Exception as e:
+        log.warning("DB pool warm-up failed (non-fatal): %s", e)
+
     get_pool()
     actual = CPU_WORKERS or (os.cpu_count() or 4)
-    log.info("Started with %d CPU workers (CPU_WORKERS=%s)", actual, CPU_WORKERS)
+    log.info("Started with %d CPU workers (CPU_WORKERS=%s) in %.2fs total",
+             actual, CPU_WORKERS, time.monotonic() - t0)
+
+    # Pre-spawn all pool workers so the first assignment request doesn't pay
+    # the subprocess fork cost (~1-2s per worker × 12 workers = 12-24s cold).
+    loop = asyncio.get_event_loop()
+    n_workers = CPU_WORKERS or (os.cpu_count() or 4)
+    try:
+        futures = [loop.run_in_executor(get_pool(), _noop) for _ in range(n_workers)]
+        await asyncio.gather(*futures)
+        log.info("Pool workers pre-spawned in %.2fs total", time.monotonic() - t0)
+    except Exception as e:
+        log.warning("Worker pre-spawn failed (non-fatal): %s", e)
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -188,6 +218,44 @@ async def list_events(db: AsyncSession = Depends(get_session)):
     ]
 
 
+@app.get("/api/events/adhoc")
+async def get_or_create_adhoc_event(db: AsyncSession = Depends(get_session)):
+    """Return the persistent ad-hoc event, creating it on first call.
+    The ad-hoc event lets users build schedules without importing from TBA/FRC Events.
+    It uses a fixed key ('adhoc') so it is always the same record across sessions.
+    Teams and saved schedules persist normally under this event."""
+    import datetime
+    ADHOC_KEY = "adhoc"
+    result = await db.execute(select(Event).where(Event.key == ADHOC_KEY))
+    event = result.scalar_one_or_none()
+    if not event:
+        event = Event(
+            key=ADHOC_KEY,
+            name="Ad-hoc Schedule",
+            year=datetime.date.today().year,
+            location="",
+            tba_synced=False,
+        )
+        db.add(event)
+        await db.commit()
+        await db.refresh(event)
+    # Return same shape as get_event so activateEvent works unchanged
+    result2 = await db.execute(
+        select(Event)
+        .options(selectinload(Event.teams).selectinload(EventTeam.team))
+        .where(Event.id == event.id)
+    )
+    ev = result2.scalar_one()
+    return {
+        "id": ev.id, "key": ev.key, "name": ev.name, "year": ev.year,
+        "location": ev.location, "tba_synced": ev.tba_synced,
+        "teams": [
+            {"number": et.team.number, "nickname": et.team.nickname, "name": et.team.name}
+            for et in sorted(ev.teams, key=lambda x: x.team.number)
+        ],
+    }
+
+
 @app.post("/api/events", status_code=201)
 async def create_event(body: EventCreate, db: AsyncSession = Depends(get_session)):
     existing = await db.execute(select(Event).where(Event.key == body.key))
@@ -245,6 +313,19 @@ async def tba_events(year: int, search: str = Query("", max_length=100)):
     except Exception as e:
         log.error("TBA events error: %s", e)
         raise HTTPException(502, f"TBA API error: {e}")
+
+
+@app.get("/api/tba/team/{team_number}")
+async def tba_team_lookup(team_number: int):
+    """Look up a single team by number from TBA. Used for non-blocking name enrichment
+    when a team is added manually. Returns 404 if not found or TBA is unavailable."""
+    try:
+        raw = await tba_client.get_team(f"frc{team_number}")
+        return tba_client.normalise_team(raw)
+    except ValueError as e:
+        raise HTTPException(503, str(e))
+    except Exception:
+        raise HTTPException(404, f"Team {team_number} not found")
 
 
 @app.get("/api/tba/search_index")
@@ -469,6 +550,21 @@ async def remove_team(event_id: int, team_number: int, db: AsyncSession = Depend
     if not link:
         raise HTTPException(404, "Team not in event")
     await db.delete(link); await db.commit()
+
+
+@app.patch("/api/events/{event_id}/teams/{team_number}", status_code=200)
+async def enrich_team(event_id: int, team_number: int, body: dict, db: AsyncSession = Depends(get_session)):
+    """Update team name/nickname — called non-blockingly after TBA lookup enriches a manually-added team."""
+    t = await db.execute(select(Team).where(Team.number == team_number))
+    team = t.scalar_one_or_none()
+    if not team:
+        raise HTTPException(404, "Team not found")
+    if "nickname" in body and body["nickname"]:
+        team.nickname = body["nickname"]
+    if "name" in body and body["name"]:
+        team.name = body["name"]
+    await db.commit()
+    return {"number": team_number, "nickname": team.nickname, "name": team.name}
 
 
 # ── Stage 1: Abstract Schedule Generation ────────────────────────────────────

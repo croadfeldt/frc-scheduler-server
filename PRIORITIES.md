@@ -80,6 +80,40 @@ A per-day match count limit that stops scheduling after N matches on a given day
 
 ---
 
+## Ad-hoc Event
+
+A persistent event with `key='adhoc'` is created on demand via `GET /api/events/adhoc`. This upserts the record on first call — subsequent calls return the same row.
+
+- Fixed key: `"adhoc"`, name: `"Ad-hoc Schedule"`, year: current year
+- Activated client-side via the `✎ Ad-hoc` button in the event bar
+- Button hides when any event is activated; reappears on `fullReset()`
+- `loadAdhocEvent()` → `GET /api/events/adhoc` → `activateEvent(ev)` — identical path to any named event
+- All team management, schedule generation, Stage 2 assignment, history, and URL recall work identically
+
+---
+
+## Team List Import
+
+`parseTeamListText(text)` — pure client-side parser, no external libraries. Auto-detects format:
+
+1. **JSON array** — `t.startsWith('[')` → `JSON.parse` → extract integers
+2. **YAML/bullet list** — `/^\s*[-*]\s+\d/m` regex → extract from `- N` or `* N` lines
+3. **Generic** — `text.match(/\d+/g)` → filter 1–99999
+
+Returns sorted, deduplicated array of valid FRC team numbers (1–99999). Non-numbers silently skipped.
+
+`_bulkAddTeams(numbers)` — adds teams sequentially (not concurrent) to avoid overwhelming the server. Skips numbers already in the roster (DOM-based check, no extra API call). After all adds: calls `loadRoster()` once, then fires `enrichTeamFromTba(n)` for each new number.
+
+`enrichTeamFromTba(teamNumber)` — non-blocking TBA enrichment:
+1. `GET /api/tba/team/{number}` → `tba_client.get_team("frc{N}")` → `normalise_team()`
+2. Updates `.team-name` span in the existing roster row (no re-render)
+3. `PATCH /api/events/{id}/teams/{number}` → updates `Team.nickname`/`Team.name` in DB
+4. All failures silently swallowed — enrichment is purely cosmetic
+
+Input methods: paste into textarea, `📁 File` button (FileReader), drag-and-drop onto textarea.
+
+---
+
 ## Page Load Performance
 
 **API calls on first load (sequential):**

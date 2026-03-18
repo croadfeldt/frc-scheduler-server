@@ -103,11 +103,22 @@ spec:
               drop: ["ALL"]
             readOnlyRootFilesystem: false
 
+          # startupProbe runs once at startup — gives the app up to 60s to
+          # initialise (DB, pool, worker spawn) without triggering restarts.
+          # Once it passes, readinessProbe takes over with tight intervals.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 20   # 5s + 20×3s = up to 65s before restart
+
           readinessProbe:
             httpGet:
               path: /api/health
               port: 8080
-            initialDelaySeconds: 10
+            initialDelaySeconds: 0
             periodSeconds: 5
             failureThreshold: 3
 
@@ -115,7 +126,7 @@ spec:
             httpGet:
               path: /api/health
               port: 8080
-            initialDelaySeconds: 30
+            initialDelaySeconds: 0
             periodSeconds: 15
             failureThreshold: 3
 
