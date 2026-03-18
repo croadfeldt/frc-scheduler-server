@@ -154,7 +154,7 @@
   input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(122,164,240,0.18); }
 
   .days-container { display: flex; flex-direction: column; gap: 0.5rem; }
-  .day-row { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem; }
+  .day-row { border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem; }
   .day-row-header { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent2); margin-bottom: 0.6rem; }
   .day-label-link { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 1rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent2); cursor: pointer; transition: color 0.15s; }
   .day-label-link:hover { color: var(--accent); }
@@ -1273,10 +1273,14 @@ function pruneAfterEndTime(row) {
 // Renumber all day row headers and update dataset.day
 function renumberDays() {
   document.querySelectorAll('.day-row').forEach(function(row, i) {
+    var dc = _DAY_COLORS[i % _DAY_COLORS.length];
+    row.style.background   = dc + '14';
+    row.style.borderColor  = dc + '50';
     var label = row.querySelector('.day-row-header .day-label-link');
     if (label) {
-      label.textContent = 'Day ' + (i + 1);
-      label.title = 'Scroll schedule to Day ' + (i + 1);
+      label.textContent  = 'Day ' + (i + 1);
+      label.title        = 'Scroll schedule to Day ' + (i + 1);
+      label.style.color  = dc;
       label.onclick = (function(dn) { return function() { scrollToDay(dn); }; })(i + 1);
     }
     row.dataset.day = i;
@@ -1320,12 +1324,16 @@ function buildDaysUI() {
   const container = document.getElementById('daysContainer');
   const existing = container.querySelectorAll('.day-row');
   for (let i = existing.length; i < n; i++) {
+    const dc = _DAY_COLORS[i % _DAY_COLORS.length];
     const d = document.createElement('div');
     d.className = 'day-row';
     d.dataset.day = i;
+    // Muted day color: low-opacity tint on background, matching border accent
+    d.style.background = dc + '14';   // ~8% opacity tint
+    d.style.borderColor = dc + '50';  // ~31% opacity border
     d.innerHTML =
       '<div class="day-row-header" style="display:flex;align-items:center;justify-content:space-between;">' +
-        '<span class="day-label-link" onclick="scrollToDay(' + (i+1) + ')" title="Scroll schedule to Day ' + (i+1) + '">Day ' + (i+1) + '</span>' +
+        '<span class="day-label-link" style="color:' + dc + ';" onclick="scrollToDay(' + (i+1) + ')" title="Scroll schedule to Day ' + (i+1) + '">Day ' + (i+1) + '</span>' +
         '<button class="btn-icon" title="Remove day" style="font-size:0.75rem;opacity:0.6;' + (i === 0 ? 'display:none;' : '') + '" onclick="removeDay(this.closest(\'.day-row\'))">&#x2715;</button>' +
       '</div>' +
       '<div class="day-times">' +
@@ -2584,6 +2592,19 @@ function renderAgendaBlocks() {
 // Large breaks (> BREAK_THRESHOLD) split the session into separate bars.
 var AGENDA_BREAK_THRESHOLD = 5; // minutes — breaks <= this are shown as ticks inside the bar
 
+// Permanent day color palette — 7 distinct, readable colors with good white-text contrast.
+// Hardcoded hex so they are identical across every browser, theme, and execution.
+// Cycles if more than 7 days are ever scheduled.
+var _DAY_COLORS = [
+  '#5b9bd5', // Day 1 — steel blue
+  '#4aab8a', // Day 2 — teal green
+  '#8b74c8', // Day 3 — violet
+  '#c48b3a', // Day 4 — amber gold
+  '#c05a6e', // Day 5 — rose crimson
+  '#5a7fa8', // Day 6 — slate blue
+  '#6a9455', // Day 7 — moss green
+];
+
 function renderScheduleBars() {
   var container = document.getElementById('agendaFitBlocks');
   if (!container) return;
@@ -2594,14 +2615,8 @@ function renderScheduleBars() {
   }
 
   // Day color palette — one distinct color per day number
-  var DAY_COLORS = [
-    'var(--accent)',   // Day 1 — blue
-    'var(--accent3)',  // Day 2 — green
-    '#cba6f7',         // Day 3 — mauve/purple
-    '#f38ba8',         // Day 4 — red/pink
-    '#fab387',         // Day 5 — peach
-  ];
-  function dayColor(n) { return DAY_COLORS[(n - 1) % DAY_COLORS.length] || DAY_COLORS[0]; }
+  // DAY_COLORS defined at module level — see below renderScheduleBars
+  function dayColor(n) { return _DAY_COLORS[(n - 1) % _DAY_COLORS.length]; }
 
   // ── Build sections from schedule ────────────────────────────────────────────
   // committed = sum of actual match durations (endMin - startMin), which already
@@ -2709,7 +2724,8 @@ function renderScheduleBars() {
     })();
 
     var label = s.matchCount + ' match' + (s.matchCount !== 1 ? 'es' : '')
-              + '\u2002\u00b7\u2002' + Math.round(committed) + ' / ' + Math.round(available) + '\u202fmin';
+              + '\u2002\u00b7\u2002' + Math.round(committed) + ' / ' + Math.round(available) + '\u202fmin'
+              + '\u2002(avg ' + ctProgression + ')';
     if (overage > 0) label += '\u2002\u00b7\u2002+' + overage + '\u202fmin over';
 
     var ticksHtml = s.shortBreaks.map(function(brk) {
@@ -2732,7 +2748,7 @@ function renderScheduleBars() {
           +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(available) + '\u202fmin avail</span>'
           + '</div>'
           // Bar always fills full container width
-          + '<div class="agenda-timeline-bar" style="position:relative;border-color:' + dc + ';background:color-mix(in srgb,' + dc + ' 10%,var(--bg));">'
+          + '<div class="agenda-timeline-bar" style="position:relative;border-color:' + dc + ';background:' + dc + '22;">'
           +   '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + fillColor + ';">'
           +     label
           +   '</div>'
