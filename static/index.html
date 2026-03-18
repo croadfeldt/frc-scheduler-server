@@ -3019,7 +3019,10 @@ function updateAgendaFit() {
       row.querySelectorAll('.break-row').forEach(function(br) {
         var bs = timeStrToMin(br.querySelector('.break-start').value);
         var be = timeStrToMin(br.querySelector('.break-end').value);
-        if (be > bs) avail -= (be - bs);
+        // Only subtract the portion of the break that falls within the day window
+        var overlapStart = Math.max(s, bs);
+        var overlapEnd   = Math.min(e, be);
+        if (overlapEnd > overlapStart) avail -= (overlapEnd - overlapStart);
       });
     });
     return avail;

@@ -54,7 +54,41 @@ When `numTeams × matchesPerTeam` is not evenly divisible by 6, some teams play 
 4. → assignTeams()                       [autoAssign]
 ```
 
-**PDF fail warning** — uses `querySelectorAll('.day-row').length` (`configuredDays`) as the day count in the warning message. Falls back to date-based estimate only if `configuredDays === 0`. The message reads *"Schedule is configured for N qual day(s)"* — reflecting the user's actual day setup, not an estimate from event dates.
+**PDF fail warning** — uses `querySelectorAll('.day-row').length` (`configuredDays`) as the day count in the warning message.
+
+---
+
+## Print Schedule
+
+`openPrintDialog()` — checks if Stage 2 assignment is done (`hasAssignment`). If not, disables and unchecks the Team numbers checkbox (opacity 0.45, tooltip explains why). Always calls `openModal('modalPrint')`.
+
+`printSchedule()` — builds a self-contained HTML string and opens it in a new tab via `window.open('', '_blank')`, then calls `window.print()` after 300ms.
+
+**Key logic:**
+- `hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0`
+- `showTeamNums = hasAssignment && opts.teamNums`
+- `teamLabel(val)` — returns `String(val)` if `showTeamNums`, else `'—'`. **Critical:** after Stage 2, `entry.red/blue` already contain real team numbers (server resolves slot→team in the API response). Do NOT look up `_currentSlotMap[val]` — that's slot-keyed and would fail.
+- `matchPassesPrintFilter(entry)` — checks `entry.red.concat(entry.blue)` against `_frcFilters.teams`. No mapping needed since entries already have real team numbers after assignment.
+- Surrogate badge only shown when `showTeamNums` (slot position may change on reassignment).
+- Page break: `opts.pageBreak` adds CSS `page-break-before:always` to `.day-title.page-break` (all days except first).
+
+**Print options & defaults:**
+
+| id | Default | Description |
+|----|---------|-------------|
+| `printOptCycleTimes` | ✓ on | Cycle time in day header |
+| `printOptCycleChanges` | ✓ on | Inline cycle-change rows |
+| `printOptBreaks` | ✓ on | Break rows |
+| `printOptDayBreaks` | ✓ on | Day break markers |
+| `printOptTeamNums` | ✓ on | Team numbers (disabled if no assignment) |
+| `printOptRoundDividers` | ☐ off | Round boundary rows |
+| `printOptPageBreak` | ☐ off | Page break between days |
+
+---
+
+## Cycle Time Sync Prompt
+
+When the global `cycleTime` field fires `change`, it checks `anyDiffers` — whether any `.day-cc-row[data-is-start="1"] .cc-time` has a different value. If so, prompts with `confirm()`: *"Apply N min cycle time to all day start-of-day rows?"*. OK updates all; Cancel leaves them unchanged. If all already match, pushes silently. Falls back to date-based estimate only if `configuredDays === 0`. The message reads *"Schedule is configured for N qual day(s)"* — reflecting the user's actual day setup, not an estimate from event dates.
 
 **`numDays` ↔ day rows sync** — bidirectional, always in sync:
 - `numDays` `change` + `input` events → `syncDayRowsToNumDays()` — adds or removes `.day-row` elements to match. `input` is guarded (`!isNaN(n) && n >= 1 && n <= 5`) so it only fires on valid integers.
@@ -65,6 +99,8 @@ When `numTeams × matchesPerTeam` is not evenly divisible by 6, some teams play 
 **PDF fail warning** uses `querySelectorAll('.day-row').length` (actual configured days) rather than estimating from event start/end dates. Falls back to date-based estimate only if zero rows exist.
 
 **`onCycleTimeChanged()`** — all cycle-time inputs (start-of-day and after-match rows) call this instead of `onParamChanged()`. Applies a 1.2s debounce then calls `calcMaxMatches()` if `autoMaxCycles` is on, bypassing the plain 2.5s debounce. Prevents mid-keystroke fires that caused infinite loops.
+
+**`fullReset()` event state cleanup** — clears `_currentEventId = null`, event code input value/class, event status label, event select dropdown value, disables `btnManageTeams` and `btnDeleteEvent`, shows `btnAdhoc`. Runs after URL cleanup.
 
 **`calcMaxMatches()` safety guards** — the simulation loop has a `_safetyLimit = 2000` iteration cap and a `ct < 0.5 → break` guard. Without these, a blank or zero cycle-time field (e.g. mid-keystroke) causes an infinite loop that permanently hangs the browser tab.
 

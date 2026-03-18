@@ -148,6 +148,47 @@ document.getElementById('numDays').addEventListener('input', function() {
 
 ---
 
+### Print Schedule
+
+`openPrintDialog()` — disables/unchecks `printOptTeamNums` if no assignment (`!hasAssignment`). `openModal('modalPrint')`.
+
+`printSchedule()` — reads opts from checkboxes, builds HTML string, opens in new tab, calls `window.print()` after 300ms.
+
+**`teamLabel(val)` — CRITICAL:** `entry.red/blue` already contain real team numbers after Stage 2 (server resolves slot→team). Return `String(val)` if `showTeamNums`, else `'—'`. Never look up `_currentSlotMap[val]` — slot map is keyed by slot index, not team number.
+
+**`matchPassesPrintFilter(entry)`** — `entry.red.concat(entry.blue)` checked against `_frcFilters.teams`. No slot→team mapping needed.
+
+**Page break:** `opts.pageBreak` → CSS `.day-title.page-break { page-break-before: always }` added to print style. Applied to all days except first (`isFirstDay = scheduled.indexOf(day) === 0`).
+
+**Options:** `printOptCycleTimes`✓, `printOptCycleChanges`✓, `printOptBreaks`✓, `printOptDayBreaks`✓, `printOptTeamNums`✓ (disabled if no assign), `printOptRoundDividers`☐, `printOptPageBreak`☐.
+
+---
+
+### Cycle Time Sync Prompt
+
+On `cycleTime` `change` event:
+1. `var dayStartInputs = Array.from(querySelectorAll('.day-cc-row[data-is-start="1"] .cc-time'))`
+2. `var anyDiffers = dayStartInputs.some(inp => parseFloat(inp.value) !== newCt)`
+3. If `anyDiffers`: `confirm('Apply N min cycle time to all day start-of-day rows?')` — OK pushes to all, Cancel skips
+4. If all match or no rows: push silently
+
+---
+
+### fullReset Event State Cleanup
+
+After URL cleanup, `fullReset()` now also clears:
+```javascript
+_currentEventId = null;
+codeInput.value = ''; codeInput.className = '';
+codeStatus.textContent = '';
+eventSel.value = '';
+btnManageTeams.disabled = true;
+btnDeleteEvent.disabled = true;
+btnAdhoc.style.display = '';
+```
+
+---
+
 ### onCycleTimeChanged Debounce
 Cycle-time inputs call `onCycleTimeChanged()` (1.2s debounce) not `onParamChanged()` (2.5s). This calls `calcMaxMatches()` when `autoMaxCycles` is on, bypassing the plain debounce. Without the 1.2s debounce, mid-keystroke values (typing "10" → field briefly shows "1") caused rapid-fire calcMaxMatches calls.
 

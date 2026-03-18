@@ -219,6 +219,24 @@ A **🖨 Print** button appears in the Schedule Output download bar alongside CS
 - If a team filter is active in the schedule view, only matches containing the filtered teams are printed
 - Pop-up blocked warning shown if browser prevents the new tab
 
+### Printable Schedule
+
+The **🖨 Print** button appears in the download bar once a schedule is generated. It opens a dialog with these options:
+
+| Option | Default | Notes |
+|--------|---------|-------|
+| Cycle times in day header | On | Shows `cycle: 9min → 8min` in each day heading |
+| Cycle time changes | On | Inline `⇅ Cycle time → N min` rows |
+| Breaks | On | Lunch and other breaks |
+| Day break markers | On | Early-end markers |
+| Team numbers | On* | *Only enabled when Stage 2 assignment is done. Shows `—` otherwise |
+| Round dividers | Off | `Round N — ...` boundary rows |
+| Page break between days | Off | Forces each day to start on a new printed page |
+
+**Filter-aware:** If a team filter is active in the schedule view, only matches involving those teams are included in the printout.
+
+**Surrogates:** The surrogate `S` badge is only printed when team numbers are shown (surrogate position is a slot property that could change if reassigned).
+
 ### Number of Days sync
 
 The **Number of Days** field and the daily schedule rows are always kept in sync:
@@ -454,6 +472,8 @@ Fresh databases are unaffected — `create_all` builds the correct schema.
 **Single-day end time:** `applyDayEndTimes()` only applies noon (`12:00`) to the last day of a multi-day event. When there is exactly one day, it uses `18:00` — noon as a default makes no sense for a full-day event.
 
 **Cycle time sync prompt:** When the global Cycle Time field is changed and any day's start-of-day row has a different value, a `confirm()` asks whether to apply the new value to all days. If all days already match the new value, it silently updates.
+
+**`fullReset()` clears event state** — resets `_currentEventId = null`, clears the event code input and status label, deselects the event dropdown, disables Teams/Delete buttons, and shows the Ad-hoc button again. The URL is also cleaned.
 
 **Ad-hoc event key:** Fixed as `adhoc` in the DB. `GET /api/events/adhoc` upserts on first call — no migration needed for existing databases.
 
