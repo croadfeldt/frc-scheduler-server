@@ -935,7 +935,7 @@
             <input type="checkbox" id="printOptRoundDividers"> Round dividers
           </label>
           <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptPageBreak"> Page break between days
+            <input type="checkbox" id="printOptPageBreak" checked> Page break between days
           </label>
         </div>
       </div>
@@ -2165,6 +2165,31 @@ async function autoRunFromUrl() {
       _abstractParams    = { numTeams: absResp.num_teams, matchesPerTeam: absResp.matches_per_team, cooldown: absResp.cooldown };
       updateSeedDisplay(_currentSeed, _currentAssignSeed);
       updateUrlFromState();
+      // Restore event UI state (code input + status label + event select)
+      if (adResp.event_id) {
+        _currentEventId = adResp.event_id;
+        document.getElementById('btnManageTeams').disabled    = false;
+        document.getElementById('btnSavedSchedules').disabled = false;
+        document.getElementById('btnDeleteEvent').disabled    = false;
+        var adhocBtn3 = document.getElementById('btnAdhoc');
+        if (adhocBtn3) adhocBtn3.style.display = 'none';
+        try {
+          const evResp = await apiFetch('/api/events/' + adResp.event_id);
+          var codeInp = document.getElementById('eventCodeInput');
+          if (codeInp) { codeInp.value = evResp.key || ''; codeInp.className = 'valid'; }
+          var codeStat = document.getElementById('eventCodeStatus');
+          if (codeStat) codeStat.textContent = evResp.name ? evResp.name + ' (' + evResp.year + ')' : '';
+          // Add to recent events dropdown
+          var sel = document.getElementById('eventSelect');
+          if (sel && ![...sel.options].some(function(o){ return o.value == evResp.id; })) {
+            var opt = document.createElement('option');
+            opt.value = evResp.id; opt.textContent = evResp.key + ' — ' + evResp.name + ' (' + evResp.year + ')';
+            opt.selected = true; sel.appendChild(opt);
+          } else if (sel) {
+            [...sel.options].forEach(function(o){ if (o.value == evResp.id) o.selected = true; });
+          }
+        } catch(e2) { /* event fetch failed — skip UI restore */ }
+      }
       const dayConfig = adResp.day_config || collectDayConfig();
       await loadAssignedSchedule(adResp.id, dayConfig);
       showStage2Panel(_abstractParams.numTeams);
@@ -2189,6 +2214,30 @@ async function autoRunFromUrl() {
       const dayConfig = absResp.day_config || collectDayConfig();
       if (absResp.day_config) applyDayConfigToUI(absResp.day_config);
       updateUrlFromState();
+      // Restore event UI state
+      if (absResp.event_id) {
+        _currentEventId = absResp.event_id;
+        document.getElementById('btnManageTeams').disabled    = false;
+        document.getElementById('btnSavedSchedules').disabled = false;
+        document.getElementById('btnDeleteEvent').disabled    = false;
+        var adhocBtn4 = document.getElementById('btnAdhoc');
+        if (adhocBtn4) adhocBtn4.style.display = 'none';
+        try {
+          const evResp2 = await apiFetch('/api/events/' + absResp.event_id);
+          var codeInp2 = document.getElementById('eventCodeInput');
+          if (codeInp2) { codeInp2.value = evResp2.key || ''; codeInp2.className = 'valid'; }
+          var codeStat2 = document.getElementById('eventCodeStatus');
+          if (codeStat2) codeStat2.textContent = evResp2.name ? evResp2.name + ' (' + evResp2.year + ')' : '';
+          var sel2 = document.getElementById('eventSelect');
+          if (sel2 && ![...sel2.options].some(function(o){ return o.value == evResp2.id; })) {
+            var opt2 = document.createElement('option');
+            opt2.value = evResp2.id; opt2.textContent = evResp2.key + ' — ' + evResp2.name + ' (' + evResp2.year + ')';
+            opt2.selected = true; sel2.appendChild(opt2);
+          } else if (sel2) {
+            [...sel2.options].forEach(function(o){ if (o.value == evResp2.id) o.selected = true; });
+          }
+        } catch(e3) { /* skip */ }
+      }
       window._frcAbstractMode = true;
       displayAbstractSchedule(absResp, dayConfig);
       showStage2Panel(_abstractParams.numTeams);
@@ -3631,6 +3680,8 @@ function addDayCycleChange(dayRow, afterMatch, newTime, isStart) {
     row.querySelector('.btn-remove-cc').addEventListener('click', function() {
       row.remove(); validateCycleChanges(); onCycleTimeChanged();
     });
+    // If restoring a saved value, clear the error class immediately
+    if (afterVal !== '') checkAfter();
   }
 }
 

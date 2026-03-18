@@ -42,6 +42,42 @@ The `while` loop in `calcMaxMatches()` has a `_safetyLimit = 2000` iteration cap
 
 ---
 
+### Print Schedule
+
+`openPrintDialog()` — disables `#printOptTeamNums` if `hasAssignment` is false (opacity 0.45, `disabled`, tooltip). Calls `openModal('modalPrint')`.
+
+`printSchedule()` — reads opts, builds HTML string, opens `window.open('', '_blank')`, calls `w.print()` after 300ms.
+
+**CRITICAL — teamLabel:** `entry.red/blue` are already real team numbers after Stage 2 (server resolves in API). `teamLabel(val)` = `showTeamNums ? String(val) : '—'`. Do NOT look up `_currentSlotMap[val]` — keys are slot indices, not team numbers.
+
+**matchPassesPrintFilter(entry):** `entry.red.concat(entry.blue)` checked against `_frcFilters.teams`. No mapping needed — values are already team numbers.
+
+**Page break:** `opts.pageBreak` → day title gets class `page-break` on days after the first → CSS `page-break-before: always`.
+
+**Opts:** `cycleTimes`(on), `cycleChanges`(on), `breaks`(on), `dayBreaks`(on), `teamNums`(on), `roundDividers`(off), `pageBreak`(off).
+
+---
+
+### Cycle Time Sync Prompt
+
+`cycleTime` `change` listener checks `anyDiffers`: if any `.day-cc-row[data-is-start="1"] .cc-time` value ≠ new ct, shows `confirm()`. On OK: pushes to all start rows + shows `cycleTimePushWarning` 4s. `input` listener: only `onParamChanged()`.
+
+---
+
+### Team List Clear / Export
+
+`clearTeamList()` — DOM-reads team nums, `confirm()`, sequential `DELETE` calls, `loadRoster()`, `numTeams=0`, `onParamChanged()`.
+
+`exportTeamList()` — `#teamRoster .team-row` → CSV rows, Blob URL download as `teams-event-{id}.csv`.
+
+---
+
+### Single-Day End Time
+
+`applyDayEndTimes()`: `isLast = (i === total - 1) && (total > 1)`. Single day → `18:00`. Multi-day last → `12:00`.
+
+---
+
 ### Ad-hoc Event
 
 `GET /api/events/adhoc` — upserts a `Team`-less event with `key='adhoc'` on first call:

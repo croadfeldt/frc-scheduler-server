@@ -92,6 +92,46 @@ A per-day match count limit that stops scheduling after N matches on a given day
 
 ---
 
+## Print Schedule
+
+`openPrintDialog()` — checks for assignment, disables the Team numbers checkbox (opacity 45%) if `hasAssignment` is false, then opens `modalPrint`.
+
+`printSchedule()` — builds a standalone HTML page in a string and opens it via `window.open('', '_blank')` then calls `w.print()` after 300ms.
+
+**Key architecture decision:** after Stage 2, `entry.red` and `entry.blue` in `_frcScheduled` already contain **real team numbers** (the server resolves slot indices → team numbers in `GET /api/assigned-schedules/{id}`). Therefore `teamLabel(val)` simply does `showTeamNums ? String(val) : '—'` — no slot map lookup needed. The old code incorrectly did `_currentSlotMap[String(val)]` which always returned `undefined` because `_currentSlotMap` is keyed by slot index (`"1"`, `"2"`…), not by team number.
+
+**`showTeamNums`** = `hasAssignment && opts.teamNums`. When false, all team positions print as `—` and the surrogate badge is suppressed (surrogate position is a slot property that may change on reassignment).
+
+**Filter in print:** `matchPassesPrintFilter(entry)` checks `entry.red.concat(entry.blue)` against `_frcFilters.teams`. Since these are already real team numbers after assignment, no mapping is needed. Returns `true` when no filter is active.
+
+**Print options read:** `opts.cycleTimes`, `opts.cycleChanges`, `opts.breaks`, `opts.dayBreaks`, `opts.teamNums`, `opts.roundDividers`, `opts.pageBreak`. Defaults: everything on except roundDividers and pageBreak.
+
+**Page break between days:** when `opts.pageBreak`, every day title after the first gets CSS class `page-break` → `page-break-before: always` in the print stylesheet.
+
+---
+
+## Cycle Time Sync Prompt
+
+`cycleTime` `change` listener: reads `dayStartInputs = querySelectorAll('.day-cc-row[data-is-start="1"] .cc-time')`. If `anyDiffers` (any row value ≠ new ct), shows `confirm()` asking whether to apply to all days. If user accepts (or all already match), silently pushes the value to all start-of-day rows. Shows `cycleTimePushWarning` for 4s.
+
+`cycleTime` `input` listener: only calls `onParamChanged()` — no push (avoids mid-keystroke flicker).
+
+---
+
+## Team List Clear / Export
+
+`clearTeamList()` — collects team numbers from `#teamRoster .team-num` DOM, shows `confirm()`, deletes each via `DELETE /api/events/{id}/teams/{num}` sequentially, calls `loadRoster()`, resets `numTeams` to 0, fires `onParamChanged()`.
+
+`exportTeamList()` — maps `#teamRoster .team-row` elements to `number,name` CSV rows (commas in names are double-quoted), creates a Blob URL, triggers download as `teams-event-{id}.csv`, revokes the URL.
+
+---
+
+## Single-Day End Time
+
+`applyDayEndTimes()` — `isLast = (i === total - 1) && (total > 1)`. When `total === 1`, `isLast` is always false so the single day gets `18:00` end time. Noon is only applied as the last-day default in multi-day events.
+
+---
+
 ## Ad-hoc Event
 
 A persistent event with `key='adhoc'` is created on demand via `GET /api/events/adhoc`. This upserts the record on first call — subsequent calls return the same row.

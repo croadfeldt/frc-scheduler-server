@@ -197,6 +197,28 @@ Appears at the top of the results column when an event is loaded with a valid ke
 
 Each day row uses the day color from `_DAY_COLORS` as a subtle background tint (8% opacity) with a matching border (31% opacity). The Day label matches the agenda fit color and is clickable to scroll the schedule output to that day.
 
+### Print Schedule
+
+A **🖨 Print** button appears in the Schedule Output download bar alongside CSV and JSON. Clicking it opens a print options dialog then generates a clean printable page in a new browser tab and triggers `window.print()` automatically.
+
+**Print options (with defaults):**
+
+| Option | Default | Notes |
+|--------|---------|-------|
+| Cycle times in day header | ✅ On | Shows cycle time progression in each day title |
+| Cycle time changes | ✅ On | Shows inline cycle-change rows |
+| Breaks | ✅ On | Shows lunch and other break rows |
+| Day break markers | ✅ On | Shows early-end day break markers |
+| Team numbers | ✅ On | Disabled/greyed if Stage 2 not run; shows `—` when off |
+| Round dividers | ☐ Off | Round boundary rows |
+| Page break between days | ☐ Off | Each day starts on a new page |
+
+**Key behaviours:**
+- When no Stage 2 assignment exists, team numbers option is greyed out and all positions print as `—`
+- Surrogate badge only shows when team numbers are visible (position may change on reassignment)
+- If a team filter is active in the schedule view, only matches containing the filtered teams are printed
+- Pop-up blocked warning shown if browser prevents the new tab
+
 ### Number of Days sync
 
 The **Number of Days** field and the daily schedule rows are always kept in sync:
@@ -225,6 +247,13 @@ The **✎ Ad-hoc** button in the event bar creates (or loads) a persistent `adho
 - Each schedule gets a unique `?aid=N` / `?sid=N` URL for individual recall
 - The Schedules modal shows full version history under the ad-hoc event
 - The button hides once any event is loaded and reappears on Reset
+
+### Team roster actions
+
+The Teams modal header row has two action buttons:
+
+- **⬇ Export** — downloads the current roster as `teams-event-{id}.csv` with `number,name` columns. Names with commas are properly quoted.
+- **✕ Clear** — removes all teams from the event after a `confirm()` prompt. Resets `numTeams` to 0 and triggers `onParamChanged`.
 
 ### Team roster import
 
@@ -421,6 +450,10 @@ Fresh databases are unaffected — `create_all` builds the correct schema.
 **TBA search index:** Server-cached for 6 hours (`app.state`). Client caches current+next year in `localStorage` for 6 hours. Prior years fetched on demand by changing the year field.
 
 **503 on rapid param changes:** Auto-generate debounce is 2500ms. `onCycleTimeChanged` has a separate 1200ms debounce. `_agendaFetchPending` blocks `onParamChanged` during the PDF chain.
+
+**Single-day end time:** `applyDayEndTimes()` only applies noon (`12:00`) to the last day of a multi-day event. When there is exactly one day, it uses `18:00` — noon as a default makes no sense for a full-day event.
+
+**Cycle time sync prompt:** When the global Cycle Time field is changed and any day's start-of-day row has a different value, a `confirm()` asks whether to apply the new value to all days. If all days already match the new value, it silently updates.
 
 **Ad-hoc event key:** Fixed as `adhoc` in the DB. `GET /api/events/adhoc` upserts on first call — no migration needed for existing databases.
 
