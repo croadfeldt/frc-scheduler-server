@@ -249,10 +249,20 @@ async def tba_events(year: int, search: str = Query("", max_length=100)):
 
 @app.get("/api/tba/search_index")
 async def tba_search_index():
-    """Proxy the TBA search index (all events, all years) for cross-year event search."""
+    """Proxy the TBA search index (all events, all years) for cross-year event search.
+    Cached for 6 hours server-side — the index changes rarely."""
+    import time
+    cache = app.state  # use app.state as a simple namespace
+    now = time.monotonic()
+    if getattr(cache, '_search_index_data', None) is not None:
+        if now - getattr(cache, '_search_index_ts', 0) < 21600:  # 6 hours
+            return cache._search_index_data
     try:
         data = await tba_client._get("/search_index")
-        return data.get("events", []) if isinstance(data, dict) else data
+        result = data.get("events", []) if isinstance(data, dict) else data
+        cache._search_index_data = result
+        cache._search_index_ts   = now
+        return result
     except ValueError as e:
         raise HTTPException(503, str(e))
     except Exception as e:

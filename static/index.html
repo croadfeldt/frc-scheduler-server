@@ -1586,7 +1586,7 @@ setTimeout(fetchTbaDropdown, 800);
 initAuth();
 autoRunFromUrl();
 // Pre-fetch TBA search index in background for cross-year event search
-setTimeout(ensureTbaSearchIndex, 2000);
+setTimeout(ensureTbaSearchIndex, 5000); // defer — not needed until event search
 // Check CPU worker count for overlay detail
 (async function() {
   try {
@@ -2900,23 +2900,27 @@ function onDayConfigChanged() {
   onScheduleParamsChanged();
 }
 
+var _cycleTimeChangeTimeout = null;
 function onCycleTimeChanged() {
   // Called when any cycle time value changes (start-of-day ct, or after-match ct).
-  // 1. Update agenda fit immediately
+  // 1. Update agenda fit immediately (lightweight, safe to run on every keystroke)
   onScheduleParamsChanged();
-  // 2. If autoMaxCycles is on and we're not in the middle of the agenda chain,
-  //    recalculate max matches (which then triggers generateSchedule if autoPopulate on).
-  if (window._agendaFetchPending) return;
-  if (window._assigningTeams) return;
-  var autoMax = document.getElementById('autoMaxCycles');
-  if (autoMax && autoMax.checked) {
-    clearTimeout(_autoPopulateTimeout);  // cancel any queued plain generate
-    _autoPopulateTimeout = null;
-    var numTeams = parseInt(document.getElementById('numTeams').value) || 0;
-    if (numTeams >= 6) calcMaxMatches();  // calcMaxMatches calls generateSchedule internally
-  } else {
-    onParamChanged();  // fall back to plain debounced regenerate
-  }
+  // 2. Debounce the heavy work (calcMaxMatches + generateSchedule) — don't fire
+  //    mid-keystroke when user is typing e.g. "10" and field briefly shows "1"
+  clearTimeout(_cycleTimeChangeTimeout);
+  _cycleTimeChangeTimeout = setTimeout(function() {
+    if (window._agendaFetchPending) return;
+    if (window._assigningTeams) return;
+    var autoMax = document.getElementById('autoMaxCycles');
+    if (autoMax && autoMax.checked) {
+      clearTimeout(_autoPopulateTimeout);
+      _autoPopulateTimeout = null;
+      var numTeams = parseInt(document.getElementById('numTeams').value) || 0;
+      if (numTeams >= 6) calcMaxMatches();
+    } else {
+      onParamChanged();
+    }
+  }, 1200); // 1.2s — long enough for user to finish typing a number
 }
 
 // ── Auto-populate day config from agenda PDF blocks ───────────────────────────
@@ -3011,12 +3015,40 @@ var _tbaSearchIndex = null;
 var _tbaSearchIndexLoading = false;
 
 async function ensureTbaSearchIndex() {
+  // Fetches current year + next year events for cross-year search fallback.
+  // We don't need historical years — schedules are for upcoming events.
   if (_tbaSearchIndex !== null) return;
   if (_tbaSearchIndexLoading) return;
   _tbaSearchIndexLoading = true;
+  var curYear = new Date().getFullYear();
+  var cacheKey = 'tba_idx_' + curYear;
   try {
-    const data = await apiFetch('/api/tba/search_index');
-    _tbaSearchIndex = Array.isArray(data) ? data : (data.events || []);
+    // localStorage cache — valid for 6 hours
+    try {
+      var cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        var obj = JSON.parse(cached);
+        if (obj && obj.ts && (Date.now() - obj.ts) < 21600000 && Array.isArray(obj.data)) {
+          _tbaSearchIndex = obj.data;
+          return;
+        }
+      }
+    } catch(e2) {}
+    // Fetch current year + next year in parallel — much smaller than full index
+    var years = [curYear, curYear + 1];
+    var results = await Promise.allSettled(years.map(function(y) {
+      return apiFetch('/api/tba/events/' + y);
+    }));
+    var events = [];
+    results.forEach(function(r) {
+      if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+        events = events.concat(r.value.map(function(e) {
+          return { key: e.key || '', name: e.name || '' };
+        }));
+      }
+    });
+    _tbaSearchIndex = events;
+    try { localStorage.setItem(cacheKey, JSON.stringify({ts: Date.now(), data: events})); } catch(e3) {}
   } catch(e) {
     _tbaSearchIndex = [];
   } finally {
@@ -3064,7 +3096,9 @@ function calcMaxMatches() {
     // Local match counter for this day (for cycle time lookup)
     var dayMatchCount = 0;
 
-    while (true) {
+    var _safetyLimit = 2000; // max matches per day — prevents infinite loop on bad ct values
+    var _safetyCount = 0;
+    while (_safetyCount++ < _safetyLimit) {
       // Flush breaks at or before cursor
       var flushed = true;
       while (flushed) {
@@ -3088,6 +3122,7 @@ function calcMaxMatches() {
         });
         return t;
       })();
+      if (!ct || ct < 0.5) break; // guard: invalid cycle time — stop rather than loop forever
       if (cursor + ct > dayEnd) break;
       // Interrupt suppression: if match start already cleared the buffer, don't
       // interrupt it even if the cycle time overlaps the break start
@@ -4262,6 +4297,16 @@ function onEventSourceChange() {
 }
 
 function onEventYearInput() {
+  var curYear = new Date().getFullYear();
+  var entered = parseInt(document.getElementById('eventYear').value) || curYear;
+  var statusEl = document.getElementById('eventCodeStatus');
+  if (entered < curYear && statusEl) {
+    statusEl.style.color = 'var(--amber)';
+    statusEl.textContent = '⚠ Prior year selected — event data will be fetched on demand.';
+  } else if (statusEl && statusEl.textContent.startsWith('⚠ Prior year')) {
+    statusEl.style.color = '';
+    statusEl.textContent = '';
+  }
   // Debounce event fetch when year changes
   clearTimeout(_tbaDropdownTimeout);
   _tbaDropdownTimeout = setTimeout(fetchTbaDropdown, 600);
@@ -4375,7 +4420,9 @@ function filterTbaDropdown(query) {
     var list = document.getElementById('tbaDropdownList');
     // Remove any previously injected cross-year rows
     Array.from(list.querySelectorAll('[data-cross-year]')).forEach(function(r) { r.remove(); });
+
     if (crossResults.length) {
+      // Show current/next year matches under "Other years" separator
       var sep = document.createElement('div');
       sep.setAttribute('data-cross-year', '1');
       sep.style.cssText = 'padding:0.25rem 0.7rem;font-size:0.65rem;color:var(--text-muted);' +
@@ -4401,7 +4448,19 @@ function filterTbaDropdown(query) {
         list.appendChild(row);
       });
     }
-    // Pre-fetch the index in background for future use
+
+    // Always show a "prior years" hint at the bottom so users know they can search back
+    var hint = document.createElement('div');
+    hint.setAttribute('data-cross-year', '1');
+    hint.style.cssText = 'padding:0.3rem 0.7rem;font-size:0.7rem;color:var(--text-muted);' +
+      'border-top:1px solid var(--border);display:flex;align-items:center;gap:0.4rem;';
+    hint.innerHTML = '⚠️ Prior years not pre-loaded — '
+      + '<span style="color:var(--accent);cursor:pointer;text-decoration:underline;" '
+      + 'onmousedown="event.preventDefault();var y=document.getElementById(\'eventYear\');if(y){y.focus();y.select();}">'
+      + 'change the year field</span> to search a specific past year.';
+    list.appendChild(hint);
+
+    // Pre-fetch current+next year index in background
     ensureTbaSearchIndex();
   }
 }
