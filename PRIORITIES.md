@@ -140,11 +140,6 @@ A per-day match count limit that stops scheduling after N matches on a given day
 
 ---
 
-## Print Schedule
-
-`openPrintDialog()` — checks for assignment, disables the Team numbers checkbox (opacity 45%) if `hasAssignment` is false, then opens `modalPrint`.
-
-`printSchedule()` — builds a standalone HTML page in a string and opens it via `window.open('', '_blank')` then calls `w.print()` after 300ms.
 
 **Key architecture decision:** after Stage 2, `entry.red` and `entry.blue` in `_frcScheduled` already contain **real team numbers** (the server resolves slot indices → team numbers in `GET /api/assigned-schedules/{id}`). Therefore `teamLabel(val)` simply does `showTeamNums ? String(val) : '—'` — no slot map lookup needed. The old code incorrectly did `_currentSlotMap[String(val)]` which always returned `undefined` because `_currentSlotMap` is keyed by slot index (`"1"`, `"2"`…), not by team number.
 
@@ -158,11 +153,6 @@ A per-day match count limit that stops scheduling after N matches on a given day
 
 ---
 
-## Cycle Time Sync Prompt
-
-`cycleTime` `change` listener: reads `dayStartInputs = querySelectorAll('.day-cc-row[data-is-start="1"] .cc-time')`. If `anyDiffers` (any row value ≠ new ct), shows `confirm()` asking whether to apply to all days. If user accepts (or all already match), silently pushes the value to all start-of-day rows. Shows `cycleTimePushWarning` for 4s.
-
-`cycleTime` `input` listener: only calls `onParamChanged()` — no push (avoids mid-keystroke flicker).
 
 ---
 
@@ -327,6 +317,42 @@ Same colors applied to day row backgrounds (8% opacity tint, 31% opacity border)
 - **Prior years:** not pre-loaded. User changes the year field; `fetchTbaDropdown()` fetches on demand. Warning shown in status area when year < current year. Dropdown hint links to year field.
 
 ---
+
+## Security & Rate Limiting
+
+**Rate limiting** (`slowapi==0.1.9`):
+- `Limiter(key_func=get_remote_address, default_limits=["200/minute"])` applied globally via `SlowAPIMiddleware`
+- All endpoints share the default; add `@limiter.limit("N/minute")` to tighten specific routes
+- Returns HTTP 429 on breach
+
+**CORS** — `ALLOWED_ORIGINS` env var (comma-separated). Defaults to `*` when unset (local dev only). In production set to your public hostname. Applied via `CORSMiddleware` with `allow_credentials=True`.
+
+**Auth** — all endpoints are open (no `require_auth` enforced). Auth system (JWT + Google/Apple OAuth) exists for optional user ownership of schedules. Rate limiting is the primary DoS protection.
+
+## Deployment Variants
+
+**Containerfile** (Docker/Podman) — standard OCI build, `python:3.12-slim` base. Used by `docker compose` and `podman-compose`.
+
+**Containerfile.openshift** — uses `quay.io/sclorg/python-312-c10s` base to avoid Docker Hub rate limits in OpenShift build pods. Referenced by `openshift/03-buildconfig.yaml`.
+
+**entrypoint.sh** TLS support:
+```sh
+# Reads SSL_CERTFILE and SSL_KEYFILE env vars at startup
+# Both must be set AND files must exist — otherwise falls back to plain HTTP
+SSL_ARGS="--ssl-certfile ${SSL_CERTFILE} --ssl-keyfile ${SSL_KEYFILE}"
+exec uvicorn app.main:app --host 0.0.0.0 --port "${APP_PORT}" --workers "${WEB_WORKERS}" ${SSL_ARGS}
+```
+
+**Gitignored files** (never commit):
+- `.env` — local Docker/Podman environment
+- `openshift/config.env` — site-specific hostnames/URLs
+- `openshift/01-secrets.yaml` — real credentials
+- `*.key`, `*.pem`, `*.crt` — TLS certificates
+
+**Committed templates** (safe to track):
+- `env.example` → copy to `.env`
+- `openshift/config.env.example` → copy to `openshift/config.env`
+- `openshift/01-secrets.yaml.example` → copy to `openshift/01-secrets.yaml`, apply, delete
 
 ## URL Parameters
 

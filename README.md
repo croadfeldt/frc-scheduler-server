@@ -635,6 +635,25 @@ Fresh databases are unaffected — `create_all` builds the correct schema.
 
 ---
 
+## Repository Layout
+
+| File/Dir | Purpose | Committed |
+|----------|---------|-----------|
+| `Containerfile` | Docker/Podman image build | ✓ |
+| `Containerfile.openshift` | OpenShift image build (quay.io base) | ✓ |
+| `docker-compose.yml` | Docker/Podman Compose stack | ✓ |
+| `env.example` | Environment variable template | ✓ |
+| `.env` | Your real env vars (Docker/Podman) | ✗ gitignored |
+| `entrypoint.sh` | Container startup, TLS wiring | ✓ |
+| `openshift/` | OpenShift manifests | ✓ |
+| `openshift/config.env.example` | Site config template | ✓ |
+| `openshift/config.env` | Your real hostnames/URLs | ✗ gitignored |
+| `openshift/01-secrets.yaml.example` | Secrets template | ✓ |
+| `openshift/01-secrets.yaml` | Your real credentials | ✗ gitignored |
+| `openshift/apply.sh` | Substitutes config and applies manifests | ✓ |
+| `static/index.html` | Full single-file frontend | ✓ |
+| `app/` | FastAPI backend | ✓ |
+
 ## Known Behaviour
 
 **Break buffer:** Schedule a match if `breakStart - cursor ≥ breakBuffer`. The cycle time does not factor into this check — a match that clears the buffer runs even if it overlaps the break.

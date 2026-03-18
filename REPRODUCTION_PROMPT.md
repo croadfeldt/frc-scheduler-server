@@ -409,7 +409,51 @@ Defined at module level before `buildDaysUI`. Applied as:
 
 ---
 
+## Repo & Deployment Hygiene
+
+**Containerfiles:**
+- `Containerfile` — Docker/Podman builds (`python:3.12-slim` base)
+- `Containerfile.openshift` — OpenShift builds (`quay.io/sclorg/python-312-c10s`, avoids Docker Hub rate limits)
+- No `Dockerfile` — removed. Never re-add.
+
+**Gitignored (never commit real values):**
+- `.env`, `openshift/config.env`, `openshift/01-secrets.yaml`
+- `*.key`, `*.pem`, `*.crt`, `*.p12`
+
+**Template pattern:** `*.example` files are committed. User copies them, fills in real values, the real files are gitignored.
+
+**apply.sh substitution:** Uses `sed` to replace placeholders (`YOUR_HOSTNAME`, `YOUR_ORG/YOUR_REPO`, `letsencrypt-prod`) from `config.env` values at apply time. Never embeds real values in committed manifests.
+
+**`01-secrets.yaml` workflow:**
+```sh
+cp openshift/01-secrets.yaml.example openshift/01-secrets.yaml
+# fill in real values
+oc apply -f openshift/01-secrets.yaml
+rm openshift/01-secrets.yaml   # never leave on disk
+```
+
+## Security
+
+**Rate limiting** — `slowapi==0.1.9`, `Limiter(key_func=get_remote_address, default_limits=["200/minute"])`, `SlowAPIMiddleware`. Returns 429 on breach. All endpoints open (no `require_auth`) — rate limiting is the DoS protection.
+
+**CORS** — `ALLOWED_ORIGINS` env var. `*` in dev, hostname in prod. `CORSMiddleware(allow_credentials=True)`.
+
+**TLS** — `entrypoint.sh` reads `SSL_CERTFILE` and `SSL_KEYFILE`. If both set and files exist, passes `--ssl-certfile`/`--ssl-keyfile` to uvicorn. Falls back to plain HTTP if unset.
+
+**NetworkPolicy** (`10-networkpolicy.yaml`) — deny-all default + allow:
+- Inbound 8443 from anywhere
+- Outbound 5432 to postgres pod (same namespace only)
+- Outbound 53 to `openshift-dns` namespace
+- Outbound 443 to internet with RFC1918 blocked (pod cannot reach cluster internals)
+
+**cert-manager TLS flow (OpenShift):**
+- `09-certificate.yaml` → cert-manager issues cert via ClusterIssuer → stores in Secret `frc-scheduler-tls`
+- Secret mounted at `/certs` in pod → `SSL_CERTFILE=/certs/tls.crt`, `SSL_KEYFILE=/certs/tls.key`
+- `stakater/Reloader` annotation on Deployment → rolling restart on cert renewal (annotation: `secret.reloader.stakater.com/reload: "frc-scheduler-tls"`)
+- MetalLB LoadBalancer Service (`frc-scheduler-server-lb`) exposes port 443→8443 externally via BGP VIP
+
 ## OpenShift Deployment Notes
+
 
 `04-deployment.yaml` key settings:
 - `replicas: 2` with `topologySpreadConstraints` (one pod per node)
