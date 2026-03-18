@@ -218,6 +218,24 @@ Bar fills 100% width with `background:var(--danger)`. Hidden (`display:none`) wh
 
 ---
 
+### Global Cycle Time Field Routing
+
+`#cycleTime` `input` → `onCycleTimeChanged()` (was `onParamChanged()` — wrong, skipped calcMaxMatches).
+`#cycleTime` `change` → push to day start rows (with confirm if differs) → `onCycleTimeChanged()`.
+
+Both must go through `onCycleTimeChanged()` so the 1.2s debounce fires `calcMaxMatches()` when autoMaxCycles is on.
+
+---
+
+### Agenda Fit Fill Bar Label
+
+Format: `N matches · X / Y min · Z min/match avg`
+- `Z = avgCtStr` = `committed / matchCount`, rounded: `avgCt % 1 < 0.05 ? Math.round(avgCt) : avgCt.toFixed(1)`
+- Cycle change progression (`9→8 min/match`) shown as `title` tooltip on the bar track, not inline
+- `ctBadge` header element removed entirely
+
+---
+
 ### Cycle Time Sync Prompt
 
 On `cycleTime` `change` event:

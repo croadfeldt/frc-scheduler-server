@@ -1645,7 +1645,7 @@ document.getElementById('numDays').addEventListener('input', function() {
 
 // cycleTime field: push value down to all day start-of-day rows (one-way only)
 document.getElementById('cycleTime').addEventListener('input', function() {
-  onParamChanged();
+  onCycleTimeChanged();
 });
 document.getElementById('cycleTime').addEventListener('change', function() {
   var newCt = parseFloat(this.value);
@@ -1684,7 +1684,7 @@ document.getElementById('cycleTime').addEventListener('change', function() {
     });
   }
   validateCycleChanges();
-  onParamChanged();
+  onCycleTimeChanged();
 });
 buildDaysUI();
 validateTimes();
@@ -2927,7 +2927,7 @@ function renderScheduleBars() {
     var avgCt = s.matchCount > 0 ? (committed / s.matchCount) : 0;
     var avgCtStr = avgCt % 1 < 0.05 ? Math.round(avgCt) : avgCt.toFixed(1);
 
-    // Cycle time progression for tooltip: e.g. "9→8 min/match"
+    // Cycle time progression for tooltip on the bar: e.g. "9→8 min/match"
     var ctProgression = (function() {
       if (!s.cycleChanges || !s.cycleChanges.length) return avgCtStr + '\u202fmin/match';
       var firstCt = s.matches.length > 0
@@ -2939,17 +2939,29 @@ function renderScheduleBars() {
       return seenCts.map(function(t) { return t % 1 === 0 ? t : t.toFixed(1); }).join('\u2192') + '\u202fmin/match';
     })();
 
+    // Fill label: match count · committed/available · cycle progression · avg ct
+    var ctInBar = s.matchCount > 0 ? (function() {
+      if (!s.cycleChanges || !s.cycleChanges.length) {
+        // No changes — just avg
+        return avgCtStr + '\u202fmin/match avg';
+      }
+      // Has changes — show progression then avg
+      var firstCt = s.matches.length > 0
+        ? ((s.matches[0].endMin || 0) - (s.matches[0].startMin || 0)) : null;
+      var seenCts = firstCt ? [firstCt] : [];
+      s.cycleChanges.forEach(function(cc) {
+        if (cc.newTime !== seenCts[seenCts.length - 1]) seenCts.push(cc.newTime);
+      });
+      var progression = seenCts.map(function(t) { return t % 1 === 0 ? t : t.toFixed(1); }).join('\u2192') + '\u202fmin/match';
+      return progression + '\u2002\u00b7\u2002' + avgCtStr + '\u202fmin/match avg';
+    })() : '';
+
     var label = s.matchCount > 0
       ? s.matchCount + ' match' + (s.matchCount !== 1 ? 'es' : '')
               + '\u2002\u00b7\u2002' + Math.round(committed) + ' / ' + Math.round(available) + '\u202fmin'
-              + '\u2002(avg ' + ctProgression + ')'
+              + '\u2002\u00b7\u2002' + ctInBar
       : 'No matches scheduled \u00b7 ' + Math.round(available) + '\u202fmin available';
     if (overage > 0) label += '\u2002\u00b7\u2002+' + overage + '\u202fmin over';
-
-    // Suppress avg cycle time badge for empty days
-    var ctBadge = s.matchCount > 0
-      ? '<span style="font-size:0.65rem;color:var(--text-muted);border:1px solid var(--border);border-radius:3px;padding:0 0.3rem;line-height:1.6;" title="' + ctProgression + '">' + avgCtStr + '\u202fmin/match</span>'
-      : '';
 
     var ticksHtml = s.shortBreaks.map(function(brk) {
       var pos = slotDur > 0 ? ((brk.start - s.slotStart) / slotDur * 100) : 0;
@@ -2967,11 +2979,10 @@ function renderScheduleBars() {
           +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
           +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
           +   '</span>'
-          +   ctBadge
           +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(available) + '\u202fmin avail</span>'
           + '</div>'
-          // Bar always fills full container width
-          + '<div class="agenda-timeline-bar" style="position:relative;border-color:' + dc + ';background:' + dc + '22;">'
+          // Bar always fills full container width; tooltip shows ct progression if changes exist
+          + '<div class="agenda-timeline-bar" style="position:relative;border-color:' + dc + ';background:' + dc + '22;" title="' + ctProgression + '">'
           +   '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + fillColor + ';">'
           +     label
           +   '</div>'
