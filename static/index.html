@@ -2705,7 +2705,7 @@ function renderScheduleBars() {
     var fillPct   = available > 0 ? Math.min(committed / available * 100, 100) : 0;
     var overage   = Math.round(committed - available);
     var dc        = dayColor(s.dayNum);
-    var fillColor = (overage > 0 || fillPct > 95) ? 'var(--amber)' : dc;
+    var fillColor = overage > 0 ? 'var(--amber)' : dc;
 
     // Average cycle time = committed / matches (actual weighted average from schedule)
     var avgCt = s.matchCount > 0 ? (committed / s.matchCount) : 0;
@@ -2738,13 +2738,12 @@ function renderScheduleBars() {
 
     html += '<div class="agenda-block-row">'
           + '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.25rem;">'
-          +   '<span class="day-label-link" '
+          +   '<span class="day-label-link" style="color:' + dc + ';" '
           +     'onclick="' + (s.firstMatchNum ? 'scrollToMatch(' + s.firstMatchNum + ')' : 'scrollToDay(' + s.dayNum + ')') + '" '
           +     'title="Scroll to match ' + (s.firstMatchNum || 1) + ' · ' + s.dayLabel + '">' + s.dayLabel + '</span>'
           +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
           +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
           +   '</span>'
-          +   '<span style="font-size:0.65rem;color:var(--text-muted);border:1px solid var(--border);border-radius:3px;padding:0 0.3rem;line-height:1.6;" title="' + ctProgression + '">' + avgCtStr + '\u202fmin/match</span>'
           +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(available) + '\u202fmin avail</span>'
           + '</div>'
           // Bar always fills full container width
