@@ -2268,6 +2268,19 @@ function fullReset() {
   // Clean URL
   try { window.history.replaceState(null, '', window.location.pathname); } catch(e) {}
 
+  // Clear event state — reset to no-event-loaded condition
+  _currentEventId = null;
+  var codeInput = document.getElementById('eventCodeInput');
+  if (codeInput) { codeInput.value = ''; codeInput.className = ''; }
+  var codeStatus = document.getElementById('eventCodeStatus');
+  if (codeStatus) codeStatus.textContent = '';
+  var eventSel = document.getElementById('eventSelect');
+  if (eventSel) eventSel.value = '';
+  document.getElementById('btnManageTeams').disabled  = true;
+  document.getElementById('btnDeleteEvent').disabled  = true;
+  var adhocBtn = document.getElementById('btnAdhoc');
+  if (adhocBtn) adhocBtn.style.display = '';
+
   showApiStatus('Reset complete \u2014 ready to build a new schedule');
 }
 
