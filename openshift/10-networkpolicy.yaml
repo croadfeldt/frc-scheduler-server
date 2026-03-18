@@ -1,0 +1,127 @@
+# NetworkPolicy — locks down pod-to-pod and pod-to-cluster traffic.
+#
+# Rules implemented:
+#   INGRESS:
+#     - Port 8443 (HTTPS) from anywhere (MetalLB VIP traffic enters here)
+#     - Port 8443 from OpenShift ingress router pods (for Route passthrough)
+#   EGRESS:
+#     - Port 5432 to the postgres pod in this namespace only
+#     - Port 53 (DNS) to kube-dns — required for all DNS resolution
+#     - Port 443 (HTTPS) to the internet — TBA API, FRC Events API, Google/Apple OAuth
+#     - DENY everything else (no lateral movement to other pods/namespaces)
+#
+# This means the scheduler pod CAN:
+#   - Accept HTTPS from the internet via MetalLB
+#   - Talk to its own postgres
+#   - Resolve DNS
+#   - Call TBA / FRC Events / OAuth providers (outbound 443)
+#
+# This means the scheduler pod CANNOT:
+#   - Reach any other pod in the cluster
+#   - Reach any other namespace
+#   - Reach the Kubernetes API server
+#   - Reach node services or the host network
+---
+# Deny all ingress and egress by default for this app's pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frc-scheduler-deny-all
+  namespace: frc-scheduler-server
+spec:
+  podSelector:
+    matchLabels:
+      app: frc-scheduler-server
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Allow HTTPS ingress from anywhere (MetalLB external traffic)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frc-scheduler-allow-https-ingress
+  namespace: frc-scheduler-server
+spec:
+  podSelector:
+    matchLabels:
+      app: frc-scheduler-server
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8443
+          protocol: TCP
+---
+# Allow egress to postgres only (within namespace)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frc-scheduler-allow-postgres-egress
+  namespace: frc-scheduler-server
+spec:
+  podSelector:
+    matchLabels:
+      app: frc-scheduler-server
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: frc-postgres   # must match your postgres pod label
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+# Allow egress to kube-dns (required for all DNS resolution)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frc-scheduler-allow-dns-egress
+  namespace: frc-scheduler-server
+spec:
+  podSelector:
+    matchLabels:
+      app: frc-scheduler-server
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+        - port: 5353
+          protocol: UDP
+---
+# Allow egress to the internet on 443 (TBA, FRC Events, Google/Apple OAuth)
+# This uses ipBlock to allow all external IPs while blocking RFC1918 private ranges,
+# preventing the pod from reaching other cluster nodes or internal services.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frc-scheduler-allow-internet-egress
+  namespace: frc-scheduler-server
+spec:
+  podSelector:
+    matchLabels:
+      app: frc-scheduler-server
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8        # RFC1918 — cluster pod/service networks
+              - 172.16.0.0/12     # RFC1918
+              - 192.168.0.0/16    # RFC1918 — home/office LANs
+              - 169.254.0.0/16    # link-local
+      ports:
+        - port: 443
+          protocol: TCP

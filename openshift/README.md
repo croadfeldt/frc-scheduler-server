@@ -1,83 +1,77 @@
-# OpenShift Deployment — frc-scheduler-server
+# OpenShift Deployment
 
-## Namespace
-`frc-scheduler-server`
+## Prerequisites
+- `oc` CLI logged in to your cluster
+- cert-manager operator installed with a ClusterIssuer configured
+- MetalLB configured with a BGP address pool
+- DNS for your hostname pointing at the MetalLB VIP
 
-## Apply order
+## First-time setup
 
-```bash
-# 1. Project should already exist. If not:
-oc new-project frc-scheduler-server
-
-# 2. Populate secrets first (edit values before applying)
-#    - 01-secrets.yaml: set POSTGRES_PASSWORD, TBA_API_KEY, git-contents-token
-oc apply -f openshift/01-secrets.yaml
-
-# 3. Postgres
-oc apply -f openshift/02-postgres.yaml
-oc rollout status deployment/frc-postgres -n frc-scheduler-server
-
-# 4. ImageStream + BuildConfig
-oc apply -f openshift/03-buildconfig.yaml
-
-# 5. Trigger first build manually
-oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
-
-# 6. Deploy app + service
-oc apply -f openshift/04-deployment.yaml
-oc rollout status deployment/frc-scheduler-server -n frc-scheduler-server
-
-# 7. Route (external HTTPS access)
-oc apply -f openshift/05-route.yaml
-oc get route frc-scheduler-server -n frc-scheduler-server -o jsonpath='{.spec.host}'
-
-# 8. Build trigger RBAC + CronJob (polls GitHub every 5 min)
-oc apply -f openshift/07-build-trigger-sa.yaml
-oc apply -f openshift/08-build-cronjob.yaml
-
-# Optional: HPA (auto-scales 1-4 replicas at 70% CPU)
-# oc apply -f openshift/09-hpa-optional.yaml
+### 1. Configure site-specific values
+```sh
+cp config.env.example config.env
+# Edit config.env — fill in GIT_REPO_URL, APP_HOSTNAME, CERT_ISSUER, METALLB_IP
 ```
 
-## Apply everything at once (after editing secrets)
-```bash
-oc apply -f openshift/
+### 2. Create secrets (once — never committed to git)
+```sh
+cp 01-secrets.yaml.example 01-secrets.yaml
+# Edit 01-secrets.yaml — fill in real passwords, API keys, JWT secret
+oc apply -f 01-secrets.yaml
+rm 01-secrets.yaml   # do not leave real secrets on disk
+```
+
+### 3. Apply all manifests
+```sh
+./apply.sh
+```
+
+### 4. Wait for cert issuance
+```sh
+oc get certificate frc-scheduler-tls -n frc-scheduler-server -w
+```
+
+### 5. Trigger first build
+```sh
 oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
 ```
 
-## File reference
-| File | Contents |
-|------|----------|
-| 00-namespace.yaml | Project namespace |
-| 01-secrets.yaml | DB creds, TBA key, GitHub PAT |
-| 02-postgres.yaml | PVC + Deployment + Service for Postgres |
-| 03-buildconfig.yaml | ImageStream + BuildConfig (GitHub source, Containerfile) |
-| 04-deployment.yaml | App Deployment + ClusterIP Service |
-| 05-route.yaml | HTTPS Route (edge TLS termination) |
-| 07-build-trigger-sa.yaml | ServiceAccount + RBAC for CronJob |
-| 08-build-cronjob.yaml | git-commit-hash ConfigMap + polling CronJob |
-| 09-hpa-optional.yaml | HorizontalPodAutoscaler (optional) |
+## Files
 
-## Build trigger
-Builds are triggered by the `git-poll-trigger` CronJob every 5 minutes.
-It compares the latest GitHub commit hash against the `git-commit-hash` ConfigMap
-and calls `oc start-build` only when a change is detected.
+| File | Purpose | Committed? |
+|------|---------|-----------|
+| `config.env.example` | Template — copy to `config.env` | ✓ yes |
+| `config.env` | Your real hostnames/URLs | ✗ gitignored |
+| `01-secrets.yaml.example` | Template — copy to `01-secrets.yaml` | ✓ yes |
+| `01-secrets.yaml` | Your real secrets | ✗ gitignored |
+| `apply.sh` | Substitutes config values and applies manifests | ✓ yes |
+| `00-namespace.yaml` | Namespace | ✓ yes |
+| `02-postgres.yaml` | PostgreSQL StatefulSet | ✓ yes |
+| `03-buildconfig.yaml` | ImageStream + BuildConfig | ✓ yes |
+| `04-deployment.yaml` | Deployment + ClusterIP + LoadBalancer + PDB | ✓ yes |
+| `05-route.yaml` | OpenShift Route (passthrough TLS) | ✓ yes |
+| `07-build-trigger-sa.yaml` | ServiceAccount for build CronJob | ✓ yes |
+| `08-build-cronjob.yaml` | Git-poll CronJob for auto-builds | ✓ yes |
+| `09-certificate.yaml` | cert-manager Certificate (Let's Encrypt) | ✓ yes |
+| `09-hpa-optional.yaml` | HorizontalPodAutoscaler (optional) | ✓ yes |
+| `10-networkpolicy.yaml` | Pod network isolation | ✓ yes |
 
-Manual trigger:
-```bash
-oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
+## TLS flow
+
+```
+cert-manager → issues cert → stores in Secret 'frc-scheduler-tls'
+                                        ↓
+Deployment mounts Secret at /certs/tls.crt + tls.crt.key
+                                        ↓
+entrypoint.sh passes --ssl-certfile/--ssl-keyfile to uvicorn
+                                        ↓
+stakater/Reloader restarts pods on cert renewal (automatic)
 ```
 
-## Naming conventions (matches OpenShift web console generated names)
-- ImageStream: `frc-scheduler-server-git`
-- BuildConfig: `frc-scheduler-server-git`
-- Deployment:  `frc-scheduler-server`
-- Service:     `frc-scheduler-server`
-- Route:       `frc-scheduler-server`
+## Rebuilding after code changes
 
-## Secrets to populate before applying
-| Secret | Key | Value |
-|--------|-----|-------|
-| frc-db-secret | POSTGRES_PASSWORD | Choose a strong password |
-| frc-app-secret | TBA_API_KEY | From https://www.thebluealliance.com/account |
-| git-contents-token | token | GitHub PAT with read:contents scope |
+Builds are triggered automatically every 5 minutes by the CronJob if new commits are detected. To trigger manually:
+```sh
+oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
+```

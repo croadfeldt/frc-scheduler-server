@@ -26,35 +26,215 @@ Copyright (C) 2025 FRC Match Scheduler Contributors.
 
 ---
 
-## Quick Start (Docker Compose)
+## Deployment
+
+The scheduler ships as an OCI container image built from `Containerfile` (Docker/Podman) or `Containerfile.openshift` (OpenShift). All three runtimes share the same application code and environment variable schema.
+
+---
+
+### Docker
+
+**Requirements:** Docker Engine 20+ with Docker Compose v2.
 
 ```bash
-git clone https://github.com/croadfeldt/frc-scheduler-server.git
+git clone https://github.com/YOUR_ORG/YOUR_REPO.git
 cd frc-scheduler-server
+
+# 1. Configure
 cp env.example .env
-# Edit .env — set TBA_API_KEY and/or FRC_EVENTS_USERNAME/TOKEN, plus auth secrets
-docker compose up --build
-# App is at http://localhost:8080
+#    Edit .env — at minimum set TBA_API_KEY and JWT_SECRET
+
+# 2. Build and run
+docker compose up --build -d
+
+# 3. Open
+open http://localhost:8080
 ```
 
-## Quick Start (OpenShift)
+**With TLS (HTTPS):**
+```bash
+# Generate a self-signed cert for local dev
+mkdir tls
+openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
+  -keyout tls/server.key -out tls/server.crt -subj "/CN=localhost"
 
+# Add to .env:
+echo "SSL_CERTFILE=/certs/tls.crt"  >> .env
+echo "SSL_KEYFILE=/certs/tls.key"   >> .env
+echo "TLS_DIR=./tls"                >> .env
+echo "APP_PORT=8443"                >> .env
+
+docker compose up --build -d
+# App is at https://localhost:8443
+```
+
+**Useful commands:**
+```bash
+docker compose logs -f app          # tail logs
+docker compose restart app          # restart app only
+docker compose down -v              # stop and remove volumes
+docker compose pull                 # update base images
+```
+
+---
+
+### Podman
+
+The same `Containerfile` and `docker-compose.yml` work with Podman. Use `podman-compose` as a drop-in replacement for `docker compose`.
+
+**Requirements:** Podman 4+ and `podman-compose` (`pip install podman-compose`).
+
+```bash
+git clone https://github.com/YOUR_ORG/YOUR_REPO.git
+cd frc-scheduler-server
+
+# 1. Configure
+cp env.example .env
+#    Edit .env — set TBA_API_KEY, JWT_SECRET, and UID/GID for rootless
+echo "PUID=$(id -u)" >> .env
+echo "PGID=$(id -g)" >> .env
+
+# 2. Build and run (rootless)
+podman-compose up --build -d
+
+# 3. Open
+open http://localhost:8080
+```
+
+**Rootless note:** Podman runs containers as your user by default. Setting `PUID=$(id -u)` and `PGID=$(id -g)` in `.env` aligns the container process UID with your host user so mounted volumes have correct permissions.
+
+**Building the image manually:**
+```bash
+podman build -t frc-scheduler-server:latest -f Containerfile .
+podman run -d --name frc-scheduler \
+  --env-file .env \
+  -p 8080:8080 \
+  frc-scheduler-server:latest
+```
+
+---
+
+### OpenShift
+
+OpenShift uses `Containerfile.openshift` (based on `quay.io/sclorg/python-312-c10s` to avoid Docker Hub rate limits in build pods) and a set of manifests in `openshift/`.
+
+**Requirements:** `oc` CLI, cert-manager operator, MetalLB operator, a ClusterIssuer for Let's Encrypt.
+
+#### First-time setup
+
+**Step 1 — Create namespace**
 ```bash
 oc new-project frc-scheduler-server
-vi openshift/01-secrets.yaml   # set passwords, TBA key, auth credentials
-oc apply -f openshift/01-secrets.yaml
-oc apply -f openshift/02-postgres.yaml
-oc rollout status deployment/frc-postgres -n frc-scheduler-server
-oc apply -f openshift/03-buildconfig.yaml
-oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
-oc apply -f openshift/04-deployment.yaml
-oc apply -f openshift/05-route.yaml
-oc apply -f openshift/07-build-trigger-sa.yaml
-oc apply -f openshift/08-build-cronjob.yaml
-oc get route frc-scheduler-server -n frc-scheduler-server -o jsonpath='{.spec.host}'
 ```
 
-See `openshift/README.md` for full details.
+**Step 2 — Configure site-specific values**
+```bash
+cp openshift/config.env.example openshift/config.env
+# Edit config.env:
+#   GIT_REPO_URL  — your fork of this repo
+#   APP_HOSTNAME  — the public FQDN (must have DNS → MetalLB VIP)
+#   CERT_ISSUER   — your ClusterIssuer name (oc get clusterissuer)
+#   METALLB_IP    — optional specific IP from your MetalLB pool
+```
+
+**Step 3 — Create secrets (never committed to git)**
+```bash
+cp openshift/01-secrets.yaml.example openshift/01-secrets.yaml
+# Edit 01-secrets.yaml:
+#   POSTGRES_PASSWORD  — strong random password
+#   TBA_API_KEY        — from https://www.thebluealliance.com/account
+#   JWT_SECRET         — openssl rand -hex 32
+#   BASE_URL           — https://your-hostname
+#   GOOGLE_CLIENT_ID/SECRET  — from Google Cloud Console (optional)
+#   APPLE_*            — from Apple Developer (optional)
+
+oc apply -f openshift/01-secrets.yaml
+rm openshift/01-secrets.yaml   # remove from disk — never commit real secrets
+```
+
+**Step 4 — Apply all manifests**
+```bash
+./openshift/apply.sh
+# Substitutes config.env values into manifests and applies them all
+```
+
+**Step 5 — Wait for TLS cert issuance**
+```bash
+oc get certificate frc-scheduler-tls -n frc-scheduler-server -w
+# Ready condition should become True within ~60s once DNS is live
+```
+
+**Step 6 — Trigger first build**
+```bash
+oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
+```
+
+**Step 7 — Verify**
+```bash
+oc get pods -n frc-scheduler-server
+curl -sk https://YOUR_HOSTNAME/api/health
+# → {"status": "ok", ...}
+```
+
+#### TLS architecture (OpenShift)
+
+```
+cert-manager ──► ClusterIssuer (Let's Encrypt)
+                        │
+                        ▼
+              Certificate 'frc-scheduler-tls'
+                        │ stores cert in
+                        ▼
+              Secret 'frc-scheduler-tls'  ◄── stakater/Reloader watches
+                        │ mounted at             (restarts pods on renewal)
+                        ▼
+              /certs/tls.crt + tls.key
+                        │ passed to
+                        ▼
+              uvicorn --ssl-certfile --ssl-keyfile
+                        │
+                        ▼
+              HTTPS on port 8443
+                        │
+                  MetalLB LoadBalancer
+                        │ BGP advertises VIP to
+                        ▼
+                    Firewall → Internet
+```
+
+#### Ongoing operations
+
+```bash
+# Rebuild after pushing new commits (also runs automatically every 5 min)
+oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
+
+# Restart pods (e.g. after secret change)
+oc rollout restart deployment/frc-scheduler-server -n frc-scheduler-server
+
+# Update a secret value
+oc patch secret frc-app-secret -n frc-scheduler-server --type=merge \
+  -p '{"stringData": {"TBA_API_KEY": "new-key"}}'
+oc rollout restart deployment/frc-scheduler-server -n frc-scheduler-server
+
+# View logs
+oc logs -f deployment/frc-scheduler-server -n frc-scheduler-server
+
+# Check cert renewal status
+oc describe certificate frc-scheduler-tls -n frc-scheduler-server
+```
+
+#### Network security (OpenShift)
+
+`10-networkpolicy.yaml` isolates scheduler pods:
+
+| Direction | Allowed | Blocked |
+|-----------|---------|---------|
+| Inbound | Port 8443 from anywhere | Everything else |
+| Outbound | Port 5432 to postgres pod only | All other pods/namespaces |
+| Outbound | Port 53 to kube-dns | Kubernetes API server |
+| Outbound | Port 443 to public internet | RFC1918 ranges (10/8, 172.16/12, 192.168/16) |
+
+This means a compromised container cannot reach other cluster services or internal network segments — only its own database and public APIs.
 
 ---
 
@@ -414,30 +594,28 @@ URL restore priority: `?aid=` → `?sid=` → `?seed=`
 
 ## Environment Variables
 
+Copy `env.example` to `.env` (Docker/Podman) or set via OpenShift secrets. All variables are optional unless marked required.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | *(assembled from secrets)* | Postgres DSN |
-| `TBA_API_KEY` | (empty) | The Blue Alliance read key |
+| `DATABASE_URL` | *(assembled)* | Postgres DSN — auto-assembled in Docker Compose and OpenShift |
+| `TBA_API_KEY` | (empty) | The Blue Alliance read key — free at thebluealliance.com/account |
 | `FRC_EVENTS_USERNAME` | (empty) | FIRST FRC Events API username |
 | `FRC_EVENTS_TOKEN` | (empty) | FIRST FRC Events API token |
-| `CPU_WORKERS` | `12` (OpenShift) | SA worker processes; `0` = `os.cpu_count()` |
+| `CPU_WORKERS` | `0` (auto) | SA worker processes; `0` = `os.cpu_count()` |
 | `WEB_WORKERS` | `1` | Uvicorn process count |
-| `JWT_SECRET` | (required for auth) | `openssl rand -hex 32` |
+| `APP_PORT` | `8080` | Uvicorn listen port; use `8443` when TLS is enabled |
+| `PUID` / `PGID` | `1000` | Process UID/GID — set to `$(id -u)/$(id -g)` for rootless Podman |
+| `SSL_CERTFILE` | (empty) | Path to TLS certificate inside container — enables HTTPS when set |
+| `SSL_KEYFILE` | (empty) | Path to TLS private key inside container |
+| `ALLOWED_ORIGINS` | `*` | Comma-separated CORS allowed origins — restrict in production |
+| `JWT_SECRET` | `change-me` | **Required for auth** — `openssl rand -hex 32` |
 | `BASE_URL` | `http://localhost:8080` | Public URL — used for OAuth redirect URIs |
-| `GOOGLE_CLIENT_ID/SECRET` | (empty) | Google OAuth |
-| `APPLE_*` | (empty) | Apple OAuth |
-| `PUID` / `PGID` | `1000` | Process UID/GID (rootless container) |
-| `APP_PORT` | `8080` | Uvicorn listen port |
-
-## FRC Events API credentials
-
-Register free at `frc-events.firstinspires.org/services/API`, then:
-
-```bash
-oc patch secret frc-app-secret -n frc-scheduler-server --type=merge \
-  -p '{"stringData": {"FRC_EVENTS_USERNAME": "user", "FRC_EVENTS_TOKEN": "token"}}'
-oc rollout restart deployment/frc-scheduler-server -n frc-scheduler-server
-```
+| `GOOGLE_CLIENT_ID/SECRET` | (empty) | Google OAuth credentials |
+| `APPLE_CLIENT_ID` | (empty) | Apple Sign In service ID |
+| `APPLE_TEAM_ID` | (empty) | Apple Developer Team ID |
+| `APPLE_KEY_ID` | (empty) | Apple Sign In key ID |
+| `APPLE_PRIVATE_KEY` | (empty) | Apple Sign In private key (PEM, `\n` for newlines) |
 
 ---
 

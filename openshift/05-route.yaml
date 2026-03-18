@@ -1,4 +1,7 @@
 ---
+# OpenShift Route — used for in-cluster access and OpenShift console integration.
+# TLS termination is 'passthrough' because the pod now speaks HTTPS directly.
+# The MetalLB LoadBalancer Service (in 04-deployment.yaml) handles external access.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -15,8 +18,8 @@ spec:
     kind: Service
     name: frc-scheduler-server
   port:
-    targetPort: http
+    targetPort: https
   tls:
-    termination: edge
+    termination: passthrough
     insecureEdgeTerminationPolicy: Redirect
   wildcardPolicy: None

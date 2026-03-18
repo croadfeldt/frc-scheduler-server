@@ -42,7 +42,7 @@ spec:
               imagePullPolicy: IfNotPresent
               env:
                 - name: GIT_REPO_URL
-                  value: "github.com/croadfeldt/frc-scheduler-server.git"
+                  value: "github.com/YOUR_ORG/YOUR_REPO.git"
                 - name: GIT_BRANCH
                   value: "main"
                 - name: BUILD_CONFIG_NAME

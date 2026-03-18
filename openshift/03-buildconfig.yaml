@@ -5,7 +5,7 @@ kind: ImageStream
 metadata:
   annotations:
     app.openshift.io/vcs-ref: ""
-    app.openshift.io/vcs-uri: https://github.com/croadfeldt/frc-scheduler-server.git
+    app.openshift.io/vcs-uri: https://github.com/YOUR_ORG/YOUR_REPO.git
   labels:
     app: frc-scheduler-server-git
     app.kubernetes.io/component: frc-scheduler-server-git
@@ -29,7 +29,7 @@ kind: BuildConfig
 metadata:
   annotations:
     app.openshift.io/vcs-ref: ""
-    app.openshift.io/vcs-uri: https://github.com/croadfeldt/frc-scheduler-server.git
+    app.openshift.io/vcs-uri: https://github.com/YOUR_ORG/YOUR_REPO.git
   labels:
     app: frc-scheduler-server-git
     app.kubernetes.io/component: frc-scheduler-server-git
@@ -46,7 +46,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/croadfeldt/frc-scheduler-server.git
+      uri: https://github.com/YOUR_ORG/YOUR_REPO.git
       ref: refs/heads/main
     contextDir: /
   strategy:

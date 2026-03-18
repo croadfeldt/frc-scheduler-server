@@ -1,16 +1,31 @@
+# FRC Match Scheduler — Docker Compose / Podman Compose
+#
+# Usage:
+#   cp env.example .env && edit .env
+#   docker compose up -d          # Docker
+#   podman-compose up -d          # Podman
+#
+# TLS (optional):
+#   Set SSL_CERTFILE and SSL_KEYFILE in .env pointing to your cert/key files,
+#   then mount them via the volume below. For local dev, generate a self-signed
+#   cert: openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
+#            -keyout tls/server.key -out tls/server.crt -subj "/CN=localhost"
+#
+# For production on OpenShift, use the openshift/ manifests instead.
+
 services:
 
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER:     frc
-      POSTGRES_PASSWORD: frc
-      POSTGRES_DB:       frc_scheduler
+      POSTGRES_USER:     ${POSTGRES_USER:-frc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-frc}
+      POSTGRES_DB:       ${POSTGRES_DB:-frc_scheduler}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U frc"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-frc}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -23,18 +38,36 @@ services:
     ports:
       - "${APP_PORT:-8080}:${APP_PORT:-8080}"
     environment:
-      DATABASE_URL: postgresql+asyncpg://frc:frc@db:5432/frc_scheduler
-      TBA_API_KEY:  ${TBA_API_KEY:-}        # set in .env
-      CPU_WORKERS:  ${CPU_WORKERS:-0}       # 0 = auto-detect (os.cpu_count())
-      APP_PORT:     ${APP_PORT:-8080}
-      PUID:         ${PUID:-1000}
-      PGID:         ${PGID:-1000}
+      DATABASE_URL:      postgresql+asyncpg://${POSTGRES_USER:-frc}:${POSTGRES_PASSWORD:-frc}@db:5432/${POSTGRES_DB:-frc_scheduler}
+      TBA_API_KEY:       ${TBA_API_KEY:-}
+      FRC_EVENTS_USERNAME: ${FRC_EVENTS_USERNAME:-}
+      FRC_EVENTS_TOKEN:  ${FRC_EVENTS_TOKEN:-}
+      CPU_WORKERS:       ${CPU_WORKERS:-0}
+      APP_PORT:          ${APP_PORT:-8080}
+      WEB_WORKERS:       ${WEB_WORKERS:-1}
+      PUID:              ${PUID:-1000}
+      PGID:              ${PGID:-1000}
+      JWT_SECRET:        ${JWT_SECRET:-change-me-in-production}
+      BASE_URL:          ${BASE_URL:-http://localhost:8080}
+      GOOGLE_CLIENT_ID:  ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      APPLE_CLIENT_ID:   ${APPLE_CLIENT_ID:-}
+      APPLE_TEAM_ID:     ${APPLE_TEAM_ID:-}
+      APPLE_KEY_ID:      ${APPLE_KEY_ID:-}
+      APPLE_PRIVATE_KEY: ${APPLE_PRIVATE_KEY:-}
+      ALLOWED_ORIGINS:   ${ALLOWED_ORIGINS:-*}
+      # TLS — set both to enable HTTPS
+      SSL_CERTFILE:      ${SSL_CERTFILE:-}
+      SSL_KEYFILE:       ${SSL_KEYFILE:-}
+    volumes:
+      # Static files — mount for live frontend edits without rebuild
+      - ./static:/app/static:ro
+      # TLS certificates — mount your cert/key directory here
+      # Example: set TLS_DIR=./tls in .env, then:
+      - ${TLS_DIR:-/dev/null}:/certs:ro
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      # Mount static files so you can update the frontend without rebuilding
-      - ./static:/app/static:ro
 
   # Optional: pgAdmin for inspecting the database
   # Uncomment to enable, then visit http://localhost:5050

@@ -1,0 +1,27 @@
+# cert-manager Certificate — requests a Let's Encrypt cert for the scheduler.
+# cert-manager stores the issued cert in Secret 'frc-scheduler-tls' with keys
+# tls.crt and tls.key, and auto-renews before expiry.
+#
+# Prerequisites:
+#   - cert-manager operator installed in the cluster
+#   - A ClusterIssuer named 'letsencrypt-prod' already configured
+#   - DNS for the hostname pointing at the MetalLB VIP
+#
+# Apply once:
+#   oc apply -f openshift/09-certificate.yaml
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: frc-scheduler-tls
+  namespace: frc-scheduler-server
+spec:
+  secretName: frc-scheduler-tls
+  issuerRef:
+    name: letsencrypt-prod   # your existing ClusterIssuer — adjust if named differently
+    kind: ClusterIssuer
+  dnsNames:
+    - YOUR_HOSTNAME
+  # cert-manager renews 30 days before expiry by default.
+  # The stakater/Reloader annotation on the Deployment triggers a rolling
+  # restart automatically when the Secret is updated with the new cert.

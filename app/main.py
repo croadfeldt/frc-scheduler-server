@@ -84,9 +84,30 @@ def get_generation_semaphore() -> asyncio.Semaphore:
 
 
 # ── App setup ─────────────────────────────────────────────────────────────────
-app = FastAPI(title="FRC Match Scheduler", version="2.0.0")
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Rate limiter — keyed by client IP.
+# Limits are intentionally conservative since this is a public endpoint.
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
+app = FastAPI(title="FRC Match Scheduler", version="2.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+# Restrict CORS to same origin in production — wildcard only for local dev
+_ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",")
+if not any(_ALLOWED_ORIGINS):
+    _ALLOWED_ORIGINS = ["*"]   # local dev fallback
+app.add_middleware(CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    allow_credentials=True,
+)
 
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
