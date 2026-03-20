@@ -802,7 +802,7 @@
       <button class="btn-sm btn-accent" onclick="loadEventByCode()" id="btnLoadEvent">Load</button>
       <div id="eventCodeStatus" style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;"></div>
       <button class="btn-sm" id="btnAdhoc" onclick="loadAdhocEvent()"
-        title="Create an ad-hoc schedule without importing an event.&#10;&#10;• Creates a persistent event in the database&#10;• Starts with 12 teams — add or remove via the Teams button&#10;• Generates a working schedule immediately&#10;• All schedules are saved and recallable via URL&#10;• Use Stage 2 to assign real team numbers"
+        title="Create an ad-hoc schedule without importing an event.&#10;&#10;• Creates a persistent event in the database&#10;• Starts with 12 teams — add or remove via the Teams button&#10;• Generates a working schedule immediately&#10;• All schedules are saved and recallable via URL&#10;• Use Assign Teams to map real team numbers onto the schedule"
         style="white-space:nowrap;">&#9998; Ad-hoc</button>
     </div>
     <div class="event-bar-actions" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
@@ -929,7 +929,7 @@
             <input type="checkbox" id="printOptDayBreaks" checked> Day break markers
           </label>
           <label id="printOptTeamNumsLabel" style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptTeamNums" checked> Team numbers (requires Stage 2 assignment)
+            <input type="checkbox" id="printOptTeamNums" checked> Team numbers (requires team assignment)
           </label>
           <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
             <input type="checkbox" id="printOptRoundDividers"> Round dividers
@@ -991,45 +991,33 @@
             <label>Number of Days</label>
             <input type="number" id="numDays" value="2" min="1" max="5">
           </div>
-          <div class="field" title="Minimum minutes remaining before a break or end of day to still schedule one more match.">
-            <label>Break Buffer (min)</label>
-            <input type="number" id="breakBuffer" value="5" min="0" max="60" step="any">
-          </div>
         </div>
         <div id="cycleTimePushWarning" style="display:none;background:rgba(137,180,250,0.1);border:1px solid rgba(137,180,250,0.3);border-radius:4px;padding:0.4rem 0.7rem;margin-bottom:0.3rem;font-size:0.72rem;color:var(--accent);">
           &#9432; Start-of-day cycle time updated for all days. Secondary cycle time changes are not affected.
         </div>
-        <div class="field-row single">
-          <div class="field">
-            <label>Match Cooldown (matches between appearances)</label>
-            <input type="number" id="cooldown" value="3" min="1" max="20">
+        <details style="margin-bottom:0.5rem;">
+          <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Advanced</summary>
+          <div class="field-row" style="margin-top:0.5rem;">
+            <div class="field" title="Minimum matches that must pass before a team can play again. Higher = fewer back-to-backs.">
+              <label>Match Cooldown</label>
+              <input type="number" id="cooldown" value="3" min="1" max="20">
+            </div>
+            <div class="field" title="Minimum minutes remaining before a break or end of day to still schedule one more match.">
+              <label>Break Buffer (min)</label>
+              <input type="number" id="breakBuffer" value="5" min="0" max="60" step="any">
+            </div>
           </div>
-        </div>
-        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:-0.25rem;margin-bottom:0.5rem;">
-          Minimum matches that must pass before a team can play again. Higher = fewer back-to-backs but harder to satisfy with small team counts.
-        </div>
+        </details>
 
-        <div style="display:flex;flex-direction:column;gap:0.2rem;margin-top:0.5rem;margin-bottom:0.75rem;padding:0.4rem 0.6rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;">
-          <div style="font-size:0.62rem;color:var(--text-muted);letter-spacing:0.07em;text-transform:uppercase;margin-bottom:0.15rem;">Auto Actions</div>
-          <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;font-size:0.75rem;color:var(--text);user-select:none;" title="Regenerates Stage 1 whenever a parameter changes (2.5s debounce)">
-            <input type="checkbox" id="autoPopulate" checked style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
-            Regenerate on change
-          </label>
-          <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;font-size:0.75rem;color:var(--text);user-select:none;" title="Fills day start/end times and breaks from the FIRST agenda PDF when an event is loaded">
-            <input type="checkbox" id="autoApplyAgenda" checked style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
-            Apply PDF agenda to day config
-          </label>
-          <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;font-size:0.75rem;color:var(--text);user-select:none;" title="Recalculates matches/team to maximise use of available schedule time">
-            <input type="checkbox" id="autoMaxCycles" checked style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
-            Calculate max matches/team
-          </label>
-          <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;font-size:0.75rem;color:var(--text);user-select:none;" title="Automatically runs Stage 2 team assignment after Stage 1 completes">
-            <input type="checkbox" id="autoAssign" style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
-            Assign teams after generation
-          </label>
-        </div>
+        <!-- autoPopulate and autoMaxCycles are always on; hidden to reduce UI noise -->
+        <input type="checkbox" id="autoPopulate" checked style="display:none;">
+        <input type="checkbox" id="autoMaxCycles" checked style="display:none;">
+        <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0.5rem 0 0.75rem;font-size:0.75rem;color:var(--text);user-select:none;" title="Automatically runs team assignment after generating the schedule structure">
+          <input type="checkbox" id="autoAssign" style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
+          Auto-assign teams after generating
+        </label>
         <div id="paramChangedWarning" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.75rem;color:var(--amber);">
-          &#9888; Parameters changed — the current schedule structure is stale. Regenerate Stage 1 before assigning teams.
+          &#9888; Parameters changed — regenerate the schedule before assigning teams.
         </div>
 
         <div class="section-label">Daily Schedule</div>
@@ -1041,35 +1029,38 @@
           <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill"></div></div>
           <div class="progress-label" id="progressLabel">Running iteration 0 / 0&hellip;</div>
         </div>
-        <button class="btn-generate" id="btnGenerate" onclick="generateSchedule()">&#9889; Stage 1: Generate Structure</button>
+        <button class="btn-generate" id="btnGenerate" onclick="generateSchedule()">&#9889; Generate Schedule</button>
 
-        <!-- Stage 2: shown after Stage 1 completes -->
+        <!-- Assign Teams panel: shown after schedule generation completes -->
         <div id="stage2Panel" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
-          <div class="section-label" style="margin-top:0;">Stage 2: Assign Teams</div>
+          <div class="section-label" style="margin-top:0;">Assign Teams</div>
           <div id="loadFromDbBanner" style="display:none;background:rgba(122,164,240,0.1);border:1px solid var(--accent);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.6rem;font-size:0.75rem;">
-            <div style="color:var(--accent);font-weight:600;margin-bottom:0.25rem;">&#128190; Saved schedule found</div>
+            <div style="color:var(--accent);font-weight:600;margin-bottom:0.25rem;">&#128190; Saved assignment found</div>
             <div id="loadFromDbInfo" style="color:var(--text-muted);margin-bottom:0.4rem;"></div>
-            <button class="btn-sm btn-accent" onclick="loadSavedAssignment()" style="font-size:0.72rem;">Load Saved Schedule</button>
+            <button class="btn-sm btn-accent" onclick="loadSavedAssignment()" style="font-size:0.72rem;">Load Saved</button>
             <button class="btn-sm" onclick="document.getElementById('loadFromDbBanner').style.display='none'" style="font-size:0.72rem;margin-left:0.3rem;">Dismiss</button>
           </div>
           <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.6rem;">
-            Abstract schedule ready. Select an event with a matching team count to assign real team numbers.
+            Schedule structure ready. Select an event with a matching team count to assign real team numbers.
           </div>
           <div id="stage2Status" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
-          <div class="field-row single" style="margin-bottom:0.25rem;">
-            <div class="field">
-              <label>Assignment Iterations</label>
-              <input type="number" id="assignIterations" value="1000" min="1"
-                oninput="updateIterationEstimate()" onchange="updateIterationEstimate()">
+          <details style="margin-bottom:0.5rem;">
+            <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Advanced</summary>
+            <div class="field-row single" style="margin-top:0.5rem;margin-bottom:0.25rem;">
+              <div class="field">
+                <label>Assignment Iterations</label>
+                <input type="number" id="assignIterations" value="1000" min="1"
+                  oninput="updateIterationEstimate()" onchange="updateIterationEstimate()">
+              </div>
             </div>
-          </div>
-          <div id="iterationEstimate" style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
+            <div id="iterationEstimate" style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
+          </details>
           <div class="progress-wrap" id="progressWrap2" style="display:none;">
             <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill2"></div></div>
             <div class="progress-label" id="progressLabel2">Assigning teams&hellip;</div>
           </div>
-          <button class="btn-generate" id="btnAssign" onclick="assignTeams()" style="background:var(--accent3);margin-top:0.5rem;" disabled>&#9654; Assign Teams to Schedule</button>
-          <button class="btn-generate" id="btnCommit" onclick="commitSchedule()" style="background:var(--accent);margin-top:0.4rem;display:none;">&#10003; Commit Schedule as Active</button>
+          <button class="btn-generate" id="btnAssign" onclick="assignTeams()" style="background:var(--accent3);margin-top:0.5rem;" disabled>&#9654; Assign Teams</button>
+          <button class="btn-generate" id="btnCommit" onclick="commitSchedule()" style="background:var(--accent);margin-top:0.4rem;display:none;">&#10003; Save as Active Schedule</button>
         </div>
       </div>
     </div>
@@ -1086,14 +1077,7 @@
           <div id="agendaFitLoading" style="padding:0.75rem 1.25rem;font-size:0.78rem;color:var(--text-muted);">&#8203;</div>
           <div id="agendaFitStats" class="agenda-fit-grid"></div>
           <div id="agendaFitBlocks" class="agenda-block-list"></div>
-          <div id="agendaApplyRow" style="display:none;padding:0.5rem 1.25rem;border-top:1px solid var(--border);">
-            <button class="btn-sm btn-accent" onclick="applyAgendaToSchedule()" style="font-size:0.75rem;">
-              &#8615; Apply to Day Configuration
-            </button>
-            <span style="font-size:0.7rem;color:var(--text-muted);margin-left:0.6rem;">
-              Fills day start/end times and lunch breaks from the agenda PDF
-            </span>
-          </div>
+
           <div id="agendaFitManual" class="agenda-manual" style="display:none;">
             No agenda PDF available.
             <label style="display:flex;align-items:center;gap:0.4rem;color:var(--text-muted);font-size:0.78rem;">
@@ -1916,11 +1900,9 @@ function buildShareUrl() {
   if (bb) params.set('bb', bb);
   // Encode auto flags — only include a param when it differs from its default (all on)
   var urlAP = document.getElementById('autoPopulate');
-  var urlAA = document.getElementById('autoApplyAgenda');
   var urlAM = document.getElementById('autoMaxCycles');
   var urlAS = document.getElementById('autoAssign');
   if (urlAP && !urlAP.checked) params.set('autoPopulate',    '0');
-  if (urlAA && !urlAA.checked) params.set('autoApplyAgenda', '0');
   if (urlAM && !urlAM.checked) params.set('autoMaxCycles',   '0');
   if (urlAS &&  urlAS.checked) params.set('autoAssign',      '1');  // default off \u2014 store when on
   if (_currentSeed)                params.set('seed',  _currentSeed);
@@ -2017,7 +1999,6 @@ function parseUrlParams() {
     sid:             p.get('sid')   ? parseInt(p.get('sid'))  : null,
     aid:             p.get('aid')   ? parseInt(p.get('aid'))  : null,
     autoPopulate:    parseBoolFlag('autoPopulate'),
-    autoApplyAgenda: parseBoolFlag('autoApplyAgenda'),
     autoMaxCycles:   parseBoolFlag('autoMaxCycles'),
     autoAssign:      parseBoolFlag('autoAssign'),
   };
@@ -2031,11 +2012,9 @@ function applyDayConfigToUI(dc) {
   if (dc.breakBuffer != null) document.getElementById('breakBuffer').value = dc.breakBuffer;
   // Restore auto flags if stored (named booleans; undefined = leave as current default)
   var dcAP = document.getElementById('autoPopulate');
-  var dcAA = document.getElementById('autoApplyAgenda');
   var dcAM = document.getElementById('autoMaxCycles');
   var dcAS = document.getElementById('autoAssign');
   if (dc.autoPopulate    != null && dcAP) dcAP.checked = !!dc.autoPopulate;
-  if (dc.autoApplyAgenda != null && dcAA) dcAA.checked = !!dc.autoApplyAgenda;
   if (dc.autoMaxCycles   != null && dcAM) dcAM.checked = !!dc.autoMaxCycles;
   if (dc.autoAssign      != null && dcAS) dcAS.checked = !!dc.autoAssign;
 
@@ -2134,11 +2113,9 @@ function applyUrlParams(params) {
 
   // Restore auto flags from URL if present (null = not in URL, leave as default)
   var urlApplyAP = document.getElementById('autoPopulate');
-  var urlApplyAA = document.getElementById('autoApplyAgenda');
   var urlApplyAM = document.getElementById('autoMaxCycles');
   var urlApplyAS = document.getElementById('autoAssign');
   if (params.autoPopulate    != null && urlApplyAP) urlApplyAP.checked = params.autoPopulate;
-  if (params.autoApplyAgenda != null && urlApplyAA) urlApplyAA.checked = params.autoApplyAgenda;
   if (params.autoMaxCycles   != null && urlApplyAM) urlApplyAM.checked = params.autoMaxCycles;
   if (params.autoAssign      != null && urlApplyAS) urlApplyAS.checked = params.autoAssign;
 
@@ -2684,13 +2661,10 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     loading.textContent = '';
     statsEl.style.display = 'grid';
     blocksEl.style.display = 'flex';
-    var applyRow = document.getElementById('agendaApplyRow');
-    if (applyRow) applyRow.style.display = 'block';
     renderAgendaBlocks();
     updateAgendaFit();
 
-    // Always sync numDays from the parsed blocks — even when autoApplyAgenda is off,
-    // the day count from the official PDF is authoritative
+    // Always sync numDays from the parsed blocks — PDF day count is authoritative
     var distinctDays = [...new Set(blocks.map(function(b){return b.day;}))].length;
     if (distinctDays > 0) {
       var numDaysEl2 = document.getElementById('numDays');
@@ -2702,16 +2676,13 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
       }
     }
 
-    // Enforce precedence: apply day config → calc max → generate → assign
-    // Each step only runs if its flag is on; later steps depend on earlier ones.
-    var autoApply  = document.getElementById('autoApplyAgenda');
+    // Always apply PDF agenda to day config, then chain: calc max → generate → assign
+    _overlay.step('apply', 'Applying agenda to day configuration…');
+    showApiStatus('⏳ Applying agenda to day config…');
+    applyAgendaToSchedule();
+
     var autoMaxCyc = document.getElementById('autoMaxCycles');
     var autoGen    = document.getElementById('autoPopulate');
-    if (autoApply && autoApply.checked) {
-      _overlay.step('apply', 'Applying agenda to day configuration…');
-      showApiStatus('⏳ Applying agenda to day config…');
-      applyAgendaToSchedule();
-    }
     if (autoMaxCyc && autoMaxCyc.checked) {
       _overlay.step('maxcycles', 'Calculating max matches/team…');
       calcMaxMatches();  // calls generateSchedule() if autoPopulate on
@@ -3168,8 +3139,6 @@ function resetAgendaPanel() {
   _agendaBlocks = null;
   var panel = document.getElementById('agendaFitPanel');
   if (panel) panel.style.display = 'none';
-  var applyRow = document.getElementById('agendaApplyRow');
-  if (applyRow) applyRow.style.display = 'none';
   var overflowEl = document.getElementById('agendaFitOverflow');
   if (overflowEl) { overflowEl.innerHTML = ''; overflowEl.style.display = 'none'; }
 }
@@ -4969,21 +4938,19 @@ async function activateEvent(ev) {
   if (adhocBtn) adhocBtn.style.display = 'none';
 
   // Build overlay step list based on which auto flags are on — BEFORE any async work.
-  // For ad-hoc, skip the 'apply' step — there is no PDF to apply from.
   var isAdhoc = (ev.key === 'adhoc');
   if (ev.key) {
-    var hasAgenda = !isAdhoc && !!(document.getElementById('autoApplyAgenda') && document.getElementById('autoApplyAgenda').checked);
     var hasMax    = !!(document.getElementById('autoMaxCycles')   && document.getElementById('autoMaxCycles').checked);
     var hasGen    = !!(document.getElementById('autoPopulate')    && document.getElementById('autoPopulate').checked);
     var hasAssign = !!(document.getElementById('autoAssign')      && document.getElementById('autoAssign').checked);
 
-    if (hasAgenda || hasMax || hasGen) {
-      var chainSteps = [{ id: 'roster',    label: 'Load team roster' },
-                        { id: 'pdf',       label: 'Fetch agenda PDF' }];
-      if (hasAgenda) chainSteps.push({ id: 'apply',     label: 'Apply day configuration' });
+    if (hasMax || hasGen) {
+      var chainSteps = [{ id: 'roster',    label: 'Load team roster' }];
+      if (!isAdhoc)  chainSteps.push({ id: 'pdf',       label: 'Fetch agenda PDF' });
+      if (!isAdhoc)  chainSteps.push({ id: 'apply',     label: 'Apply day configuration' });
       if (hasMax)    chainSteps.push({ id: 'maxcycles', label: 'Calculate max matches/team' });
-      if (hasGen)    chainSteps.push({ id: 'generate',  label: 'Generate schedule (Stage 1)' });
-      if (hasAssign) chainSteps.push({ id: 'assign',    label: 'Assign teams (Stage 2)' });
+      if (hasGen)    chainSteps.push({ id: 'generate',  label: 'Generate schedule' });
+      if (hasAssign) chainSteps.push({ id: 'assign',    label: 'Assign teams' });
       _overlay.show('Loading Event', chainSteps);
       _overlay.step('roster', 'Fetching team roster\u2026');
     }
@@ -5466,7 +5433,7 @@ async function generateSchedule() {
   document.getElementById('paramChangedWarning').style.display = 'none';
   showApiStatus('\u23f3 Generating schedule\u2026');
   if (_overlay.isVisible()) {
-    _overlay.step('generate', 'Stage 1: building match structure\u2026');
+    _overlay.step('generate', 'Building match structure\u2026');
   }
   // Hide fake teams button and reset mode while regenerating
   var fakeBtn2 = document.getElementById('btnShowFakeTeams');
@@ -5601,18 +5568,18 @@ async function generateSchedule() {
         fakeBtn.style.outline  = '';
         fakeBtn.style.color    = '';
       }
-      showApiStatus('Stage 1 complete \u2014 abstract schedule ready');
+      showApiStatus('Schedule structure ready');
       _overlay.done('generate');
       // Auto-assign: url-auto-teams takes priority, then autoAssign flag
       if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
         _urlAutoTeams = null;
-        _overlay.step('assign', 'Assigning teams (Stage 2)\u2026');
+        _overlay.step('assign', 'Assigning teams\u2026');
         setTimeout(assignTeams, 200);
       } else {
         var autoAssignEl = document.getElementById('autoAssign');
         if (autoAssignEl && autoAssignEl.checked && _currentEventId) {
           showApiStatus('\u23f3 Auto-assigning teams\u2026');
-          _overlay.step('assign', 'Assigning teams (Stage 2)\u2026');
+          _overlay.step('assign', 'Assigning teams\u2026');
           setTimeout(assignTeams, 200);
         } else {
           _overlay.hide();
@@ -5696,7 +5663,6 @@ function updateUrlFromState() {
 function collectDayConfig() {
   var defaultCt = parseFloat(document.getElementById('cycleTime').value) || 8;
   var elAP = document.getElementById('autoPopulate');
-  var elAA = document.getElementById('autoApplyAgenda');
   var elAM = document.getElementById('autoMaxCycles');
   var elAS = document.getElementById('autoAssign');
   return {
@@ -5704,7 +5670,6 @@ function collectDayConfig() {
     breakBuffer:      parseFloat(document.getElementById('breakBuffer').value) || 5,
     numDays:          parseInt(document.getElementById('numDays').value),
     autoPopulate:     elAP ? elAP.checked : true,
-    autoApplyAgenda:  elAA ? elAA.checked : true,
     autoMaxCycles:    elAM ? elAM.checked : true,
     autoAssign:       elAS ? elAS.checked : false,
     cycleChanges: getCycleTimeChanges(),
@@ -5914,7 +5879,7 @@ async function assignTeams() {
     commitBtn.textContent = '\u2713 Commit Schedule as Active';
   }
   document.getElementById('progressWrap2').style.display = 'block';
-  if (_overlay.isVisible()) _overlay.step('assign', 'Running Stage 2 team assignment…');
+  if (_overlay.isVisible()) _overlay.step('assign', 'Assigning teams\u2026');
 
   const iterations  = Math.max(1, parseInt(document.getElementById('assignIterations').value) || 1000);
   const assignSeed  = randomSeed();
@@ -6852,7 +6817,7 @@ function openPrintDialog() {
     if (!hasAssignment) teamNumsCb.checked = false;
     var lbl = document.getElementById('printOptTeamNumsLabel');
     if (lbl) lbl.style.opacity = hasAssignment ? '' : '0.45';
-    if (lbl) lbl.title = hasAssignment ? '' : 'Run Stage 2 assignment to enable team numbers';
+    if (lbl) lbl.title = hasAssignment ? '' : 'Assign teams to enable team numbers';
   }
   openModal('modalPrint');
 }
