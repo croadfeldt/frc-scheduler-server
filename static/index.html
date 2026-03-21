@@ -744,23 +744,25 @@
   </header>
   <!-- Share/seed bar — shown after schedule is generated -->
   <div id="shareBar" style="display:none;background:var(--surface);border-bottom:1px solid var(--border);padding:0.4rem 1.25rem;display:none;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-    <div class="seed-row" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
-      <!-- Schedule ID (abstract) -->
-      <span style="color:var(--text-muted);font-size:0.68rem;">Schedule&nbsp;ID:</span>
-      <span class="seed-val" id="displayAbstractId" title="Click to copy — use this ID to reload this exact schedule from the server" onclick="copyAbstractId()" style="font-family:monospace;letter-spacing:0.03em;"></span>
-      <!-- Seed (re-generates same schedule from scratch) -->
-      <span style="color:var(--text-muted);font-size:0.68rem;margin-left:0.25rem;">seed:</span>
-      <span class="seed-val" id="displaySeed" title="Click to copy — the seed reproduces this schedule layout from scratch (without server)" onclick="copySeed()" style="font-size:0.68rem;opacity:0.75;"></span>
-      <!-- Assignment ID + assign seed -->
-      <span id="assignSeedDisplay" style="display:none;align-items:center;gap:0.4rem;margin-left:0.25rem;">
-        <span style="color:var(--text-muted);font-size:0.68rem;">· Assignment&nbsp;ID:</span>
-        <span class="seed-val" id="displayAssignedId" title="Click to copy — use this ID to reload this specific team assignment from the server" onclick="copyAssignedId()" style="font-family:monospace;letter-spacing:0.03em;"></span>
-        <span style="color:var(--text-muted);font-size:0.68rem;">assign&nbsp;seed:</span>
-        <span class="seed-val" id="displayAssignSeed" title="Click to copy assign seed" onclick="copyAssignSeed()" style="font-size:0.68rem;opacity:0.75;"></span>
-      </span>
-    </div>
+    <details style="font-size:0.68rem;color:var(--text-muted);">
+      <summary style="cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:0.35rem;">
+        <span style="font-size:0.65rem;opacity:0.6;">&#9432;</span> Schedule IDs &amp; seeds
+      </summary>
+      <div class="seed-row" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;margin-top:0.3rem;">
+        <span style="color:var(--text-muted);font-size:0.68rem;">Schedule&nbsp;ID:</span>
+        <span class="seed-val" id="displayAbstractId" title="Click to copy — use this ID to reload this exact schedule from the server" onclick="copyAbstractId()" style="font-family:monospace;letter-spacing:0.03em;"></span>
+        <span style="color:var(--text-muted);font-size:0.68rem;margin-left:0.25rem;">seed:</span>
+        <span class="seed-val" id="displaySeed" title="Click to copy — the seed reproduces this schedule layout from scratch (without server)" onclick="copySeed()" style="font-size:0.68rem;opacity:0.75;"></span>
+        <span id="assignSeedDisplay" style="display:none;align-items:center;gap:0.4rem;margin-left:0.25rem;">
+          <span style="color:var(--text-muted);font-size:0.68rem;">· Assignment&nbsp;ID:</span>
+          <span class="seed-val" id="displayAssignedId" title="Click to copy — use this ID to reload this specific team assignment from the server" onclick="copyAssignedId()" style="font-family:monospace;letter-spacing:0.03em;"></span>
+          <span style="color:var(--text-muted);font-size:0.68rem;">assign&nbsp;seed:</span>
+          <span class="seed-val" id="displayAssignSeed" title="Click to copy assign seed" onclick="copyAssignSeed()" style="font-size:0.68rem;opacity:0.75;"></span>
+        </span>
+      </div>
+    </details>
     <div style="margin-left:auto;display:flex;gap:0.5rem;">
-      <button class="btn-share" onclick="shareSchedule()" title="Copy shareable URL">&#128279; Share</button>
+      <button class="btn-share" onclick="shareSchedule()" title="Copy a shareable URL for this schedule">&#128279; Share URL</button>
       <button class="btn-duplicate" id="btnDuplicate" onclick="duplicateSchedule()" style="display:none;" title="Duplicate this schedule as your own">&#10560; Duplicate</button>
       <button class="btn-share" onclick="fullReset()" title="Clear everything and start fresh" style="border-color:var(--danger);color:var(--danger);">&#10006; Reset</button>
     </div>
@@ -803,7 +805,7 @@
       <div id="eventCodeStatus" style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;"></div>
       <button class="btn-sm" id="btnAdhoc" onclick="loadAdhocEvent()"
         title="Create an ad-hoc schedule without importing an event.&#10;&#10;• Creates a persistent event in the database&#10;• Starts with 12 teams — add or remove via the Teams button&#10;• Generates a working schedule immediately&#10;• All schedules are saved and recallable via URL&#10;• Use Assign Teams to map real team numbers onto the schedule"
-        style="white-space:nowrap;">&#9998; Ad-hoc</button>
+        style="white-space:nowrap;">&#9998; Quick Schedule</button>
     </div>
     <div class="event-bar-actions" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
       <div style="height:1.5rem;width:1px;background:var(--border);flex-shrink:0;" class="event-bar-divider"></div>
@@ -960,6 +962,29 @@
     </div>
   </div>
 
+  <!-- Workflow step indicator -->
+  <div id="workflowSteps" style="display:flex;align-items:center;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0.5rem 1.25rem;font-family:'Barlow Condensed',sans-serif;font-size:0.78rem;letter-spacing:0.06em;text-transform:uppercase;overflow-x:auto;">
+    <div class="wf-step" id="wfStep1" style="display:flex;align-items:center;gap:0.4rem;opacity:1;font-weight:700;color:var(--accent);">
+      <span style="background:var(--accent);color:#0a0e1a;border-radius:50%;width:1.2rem;height:1.2rem;display:inline-flex;align-items:center;justify-content:center;font-size:0.7rem;flex-shrink:0;">1</span>
+      Load Event
+    </div>
+    <span style="margin:0 0.6rem;color:var(--border);font-size:0.9rem;">›</span>
+    <div class="wf-step" id="wfStep2" style="display:flex;align-items:center;gap:0.4rem;opacity:0.35;font-weight:600;color:var(--text-muted);">
+      <span style="background:var(--surface2);color:var(--text-muted);border:1px solid var(--border);border-radius:50%;width:1.2rem;height:1.2rem;display:inline-flex;align-items:center;justify-content:center;font-size:0.7rem;flex-shrink:0;">2</span>
+      Generate Schedule
+    </div>
+    <span style="margin:0 0.6rem;color:var(--border);font-size:0.9rem;">›</span>
+    <div class="wf-step" id="wfStep3" style="display:flex;align-items:center;gap:0.4rem;opacity:0.35;font-weight:600;color:var(--text-muted);">
+      <span style="background:var(--surface2);color:var(--text-muted);border:1px solid var(--border);border-radius:50%;width:1.2rem;height:1.2rem;display:inline-flex;align-items:center;justify-content:center;font-size:0.7rem;flex-shrink:0;">3</span>
+      Assign Teams
+    </div>
+    <span style="margin:0 0.6rem;color:var(--border);font-size:0.9rem;">›</span>
+    <div class="wf-step" id="wfStep4" style="display:flex;align-items:center;gap:0.4rem;opacity:0.35;font-weight:600;color:var(--text-muted);">
+      <span style="background:var(--surface2);color:var(--text-muted);border:1px solid var(--border);border-radius:50%;width:1.2rem;height:1.2rem;display:inline-flex;align-items:center;justify-content:center;font-size:0.7rem;flex-shrink:0;">4</span>
+      Save &amp; Done
+    </div>
+  </div>
+
   <div class="layout">
     <div class="panel">
       <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;">
@@ -979,13 +1004,12 @@
           </div>
         </div>
         <div style="display:flex;gap:0.4rem;margin-top:-0.25rem;margin-bottom:0.5rem;">
-          <button class="btn-sm" id="btnCalcMaxMatches" onclick="calcMaxMatches()" title="Calculate the maximum matches each team can get given the current schedule parameters">&#128260; Calc Max Matches</button>
           <button class="btn-sm" id="btnShowFakeTeams" onclick="toggleFakeTeams()" style="display:none;" title="Toggle display of slot numbers in abstract schedule">&#128065; Show Slot Numbers</button>
         </div>
         <div class="field-row">
           <div class="field">
-            <label>Default Cycle Time (min)</label>
-            <input type="number" id="cycleTime" value="8" min="0.1" max="60" step="any" title="Sets the start-of-day cycle time for each day. Secondary cycle time changes are not affected.">
+            <label>Minutes per Match</label>
+            <input type="number" id="cycleTime" value="8" min="0.1" max="60" step="any" title="How long each match takes from start to start, including field reset time.">
           </div>
           <div class="field">
             <label>Number of Days</label>
@@ -993,7 +1017,7 @@
           </div>
         </div>
         <div id="cycleTimePushWarning" style="display:none;background:rgba(137,180,250,0.1);border:1px solid rgba(137,180,250,0.3);border-radius:4px;padding:0.4rem 0.7rem;margin-bottom:0.3rem;font-size:0.72rem;color:var(--accent);">
-          &#9432; Start-of-day cycle time updated for all days. Secondary cycle time changes are not affected.
+          &#9432; Minutes per match updated for all days. Per-day overrides are not affected.
         </div>
         <details style="margin-bottom:0.5rem;">
           <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Advanced</summary>
@@ -1040,7 +1064,7 @@
             <button class="btn-sm btn-accent" onclick="loadSavedAssignment()" style="font-size:0.72rem;">Load Saved</button>
             <button class="btn-sm" onclick="document.getElementById('loadFromDbBanner').style.display='none'" style="font-size:0.72rem;margin-left:0.3rem;">Dismiss</button>
           </div>
-          <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.6rem;">
+          <div id="stage2Hint" style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.6rem;">
             Schedule structure ready. Select an event with a matching team count to assign real team numbers.
           </div>
           <div id="stage2Status" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
@@ -1060,7 +1084,7 @@
             <div class="progress-label" id="progressLabel2">Assigning teams&hellip;</div>
           </div>
           <button class="btn-generate" id="btnAssign" onclick="assignTeams()" style="background:var(--accent3);margin-top:0.5rem;" disabled>&#9654; Assign Teams</button>
-          <button class="btn-generate" id="btnCommit" onclick="commitSchedule()" style="background:var(--accent);margin-top:0.4rem;display:none;">&#10003; Save as Active Schedule</button>
+          <button class="btn-generate" id="btnCommit" onclick="commitSchedule()" style="background:var(--accent);margin-top:0.4rem;display:none;" title="Marks this assignment as the official active schedule for the event. It will appear as the default when the event is loaded in future sessions.">&#10003; Save as Active Schedule</button>
         </div>
       </div>
     </div>
@@ -1103,8 +1127,8 @@
         <div class="stat"><div class="stat-value" id="statTeams">&#8212;</div><div class="stat-label">Teams</div></div>
         <div class="stat"><div class="stat-value" id="statPerTeam">&#8212;</div><div class="stat-label">Matches/Team</div></div>
         <div class="stat"><div class="stat-value" id="statDays">&#8212;</div><div class="stat-label">Days</div></div>
-        <div class="stat stat-clickable" id="statB2BContainer" onclick="toggleStatFilter('b2b')" title="Click to filter back-to-back matches"><div class="stat-value" id="statB2B" style="color:var(--text-muted)">&#8212;</div><div class="stat-label">Back-to-Backs &#9660;</div></div>
-        <div class="stat stat-clickable" id="statSurrogatesContainer" onclick="toggleStatFilter('surrogate')" title="Click to filter surrogate matches"><div class="stat-value" id="statSurrogates" style="color:var(--text-muted)">&#8212;</div><div class="stat-label">Surrogates &#9660;</div><div id="statSurrogatesMin" style="font-size:0.65rem;font-weight:700;font-family:'Barlow Condensed',sans-serif;letter-spacing:0.04em;margin-top:0.2rem;" title=""></div></div>
+        <div class="stat stat-clickable" id="statB2BContainer" onclick="toggleStatFilter('b2b')" title="A back-to-back is when a team plays two matches in a row with no break. Lower is better. Click to filter."><div class="stat-value" id="statB2B" style="color:var(--text-muted)">&#8212;</div><div class="stat-label">Back-to-Backs &#9660;</div></div>
+        <div class="stat stat-clickable" id="statSurrogatesContainer" onclick="toggleStatFilter('surrogate')" title="A surrogate plays an extra match to fill a structural gap in the schedule. Click to filter surrogate matches."><div class="stat-value" id="statSurrogates" style="color:var(--text-muted)">&#8212;</div><div class="stat-label">Surrogate Plays &#9660;</div><div id="statSurrogatesMin" style="font-size:0.65rem;font-weight:700;font-family:'Barlow Condensed',sans-serif;letter-spacing:0.04em;margin-top:0.2rem;" title=""></div></div>
       </div>
       <div class="filter-bar" id="filterBar" style="display:none">
         <span class="filter-bar-label">Filters:</span>
@@ -1115,7 +1139,7 @@
       <div class="schedule-output" id="scheduleOutput">
         <div class="empty-state">
           <div class="empty-icon">&#127942;</div>
-          <p>Configure your competition parameters<br>and click Generate Schedule</p>
+          <p>Load an event or enter your team count,<br>then click <strong>Generate Schedule</strong></p>
         </div>
       </div>
     </div>
@@ -1869,6 +1893,39 @@ function updateIterationEstimate() {
 }
 // Estimate is shown when stage2Panel opens via showStage2Panel → updateIterationEstimate()
 
+// ── Workflow step indicator ───────────────────────────────────────────────────
+function updateWorkflowSteps(step) {
+  // step: 1=load event, 2=schedule generated, 3=teams assigned, 4=saved/active
+  var steps = [
+    document.getElementById('wfStep1'),
+    document.getElementById('wfStep2'),
+    document.getElementById('wfStep3'),
+    document.getElementById('wfStep4'),
+  ];
+  steps.forEach(function(el, i) {
+    if (!el) return;
+    var num = el.querySelector('span');
+    var active = (i + 1) === step;
+    var done   = (i + 1) < step;
+    if (done) {
+      el.style.opacity = '1';
+      el.style.color = 'var(--accent3)';
+      el.style.fontWeight = '600';
+      if (num) { num.style.background = 'var(--accent3)'; num.style.color = '#0a0e1a'; num.style.border = 'none'; num.textContent = '✓'; }
+    } else if (active) {
+      el.style.opacity = '1';
+      el.style.color = 'var(--accent)';
+      el.style.fontWeight = '700';
+      if (num) { num.style.background = 'var(--accent)'; num.style.color = '#0a0e1a'; num.style.border = 'none'; num.textContent = i + 1; }
+    } else {
+      el.style.opacity = '0.35';
+      el.style.color = 'var(--text-muted)';
+      el.style.fontWeight = '600';
+      if (num) { num.style.background = 'var(--surface2)'; num.style.color = 'var(--text-muted)'; num.style.border = '1px solid var(--border)'; num.textContent = i + 1; }
+    }
+  });
+}
+
 function updateDuplicateButton() {
   const btn = document.getElementById('btnDuplicate');
   if (!btn) return;
@@ -2371,6 +2428,7 @@ function fullReset() {
   document.getElementById('btnDeleteEvent').disabled  = true;
   var adhocBtn = document.getElementById('btnAdhoc');
   if (adhocBtn) adhocBtn.style.display = '';
+  updateWorkflowSteps(1);  // back to step 1
 
   showApiStatus('Reset complete \u2014 ready to build a new schedule');
 }
@@ -4961,6 +5019,7 @@ async function activateEvent(ev) {
 
   await loadRoster();
   await loadSavedSchedules();
+  updateWorkflowSteps(2);  // event loaded — next step is generate
 
   // Re-evaluate btnAssign if a schedule is already displayed (e.g. restored from URL)
   if (_abstractParams !== null) {
@@ -5569,6 +5628,7 @@ async function generateSchedule() {
         fakeBtn.style.color    = '';
       }
       showApiStatus('Schedule structure ready');
+      updateWorkflowSteps(3);  // schedule generated — next step is assign teams
       _overlay.done('generate');
       // Auto-assign: url-auto-teams takes priority, then autoAssign flag
       if (_urlAutoTeams && _urlAutoTeams.length === numTeams && _currentEventId) {
@@ -5745,26 +5805,28 @@ async function loadSavedAssignment() {
   showApiStatus('Loaded saved schedule from database');
 }
 
-// Show Stage 2 panel after Stage 1 completes
+// Show the Assign Teams panel after schedule generation completes
 function showStage2Panel(numTeams) {
   document.getElementById('stage2Panel').style.display = 'block';
-  const status  = document.getElementById('stage2Status');
+  const status    = document.getElementById('stage2Status');
+  const hint      = document.getElementById('stage2Hint');
   const btnAssign = document.getElementById('btnAssign');
   const rosterCount = parseInt(document.getElementById('numTeams').value);
   if (_currentEventId && rosterCount === numTeams) {
     status.textContent = '\u2713 Event loaded with ' + numTeams + ' teams \u2014 ready to assign';
     status.style.color = 'var(--accent3)';
+    if (hint) hint.style.display = 'none';
     btnAssign.disabled = false;
   } else if (_currentEventId) {
     status.textContent = '\u26a0 Event has ' + rosterCount + ' teams but schedule needs ' + numTeams;
     status.style.color = 'var(--amber)';
+    if (hint) { hint.textContent = 'Load an event with exactly ' + numTeams + ' teams to assign real team numbers.'; hint.style.display = ''; }
     btnAssign.disabled = true;
   } else {
-    status.textContent = 'Select an event with ' + numTeams + ' teams to assign real numbers';
-    status.style.color = 'var(--text-muted)';
+    status.textContent = '';
+    if (hint) { hint.textContent = 'Load an event with ' + numTeams + ' teams to assign real team numbers.'; hint.style.display = ''; }
     btnAssign.disabled = true;
   }
-  // Show iteration time estimate now that the panel is visible
   updateIterationEstimate();
 }
 
@@ -5849,9 +5911,10 @@ async function commitSchedule() {
     updateUrlFromState();
 
     btn.style.background = 'var(--accent3)';
-    btn.textContent = '✓ Committed';
+    btn.textContent = '✓ Saved';
     btn.disabled = true;
-    showApiStatus('✓ Schedule committed as active — ID ' + sched.id);
+    showApiStatus('✓ Schedule saved as active — ID ' + sched.id);
+    updateWorkflowSteps(4);
 
   } catch(e) {
     btn.disabled = false;
@@ -5876,7 +5939,7 @@ async function assignTeams() {
     commitBtn.style.display = 'none';
     commitBtn.disabled = false;
     commitBtn.style.background = 'var(--accent)';
-    commitBtn.textContent = '\u2713 Commit Schedule as Active';
+    commitBtn.textContent = '\u2713 Save as Active Schedule';
   }
   document.getElementById('progressWrap2').style.display = 'block';
   if (_overlay.isVisible()) _overlay.step('assign', 'Assigning teams\u2026');
@@ -5994,7 +6057,8 @@ async function assignTeams() {
       document.getElementById('loadFromDbBanner').style.display = 'none';
       window._stage2Retried = false;
       document.getElementById('btnCommit').style.display = 'block';
-      showApiStatus('Teams assigned — review the schedule then click Commit to activate');
+      showApiStatus('Teams assigned — review the schedule then click Save as Active Schedule');
+      updateWorkflowSteps(4);  // teams assigned — final step is save
       _overlay.hide();
       // Calibrate: store wall-clock ms per iteration (elapsed already reflects parallelism)
       var elapsed2 = performance.now() - startTime;
