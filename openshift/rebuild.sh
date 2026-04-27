@@ -9,7 +9,33 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG="$SCRIPT_DIR/config.env"
 NS=frc-scheduler-server
+
+if [ ! -f "$CONFIG" ]; then
+  echo "ERROR: $CONFIG not found. Copy config.env.example and fill in your values."
+  exit 1
+fi
+
+source "$CONFIG"
+
+: "${APP_HOSTNAME:?Set APP_HOSTNAME in config.env}"
+: "${GIT_REPO_URL:?Set GIT_REPO_URL in config.env}"
+: "${CERT_ISSUER:?Set CERT_ISSUER in config.env}"
+
+METALLB_IP="${METALLB_IP:-}"
+
+# Shared substitution function — same as apply.sh
+apply_manifest() {
+  local file="$1"
+  sed \
+    -e "s|YOUR_HOSTNAME|${APP_HOSTNAME}|g" \
+    -e "s|https://YOUR_HOSTNAME|https://${APP_HOSTNAME}|g" \
+    -e "s|https://github.com/YOUR_ORG/YOUR_REPO.git|${GIT_REPO_URL}|g" \
+    -e "s|letsencrypt-prod|${CERT_ISSUER}|g" \
+    -e "s|METALLB_IP|${METALLB_IP}|g" \
+    "$file" | oc apply -f -
+}
 
 # Helper: refresh image registry credentials (NooBaa S3)
 refresh_registry() {
@@ -95,13 +121,21 @@ oc apply -f "$SCRIPT_DIR/01-secrets.yaml"
 # ── 4. Postgres ───────────────────────────────────────────────────────────────
 echo ""
 echo "==> [2/6] Deploying Postgres..."
+<<<<<<< HEAD
 oc apply -f "$SCRIPT_DIR/02-postgres.yaml"
+=======
+apply_manifest "$SCRIPT_DIR/02-postgres.yaml"
+>>>>>>> 1df6f67 (Use the correct namespace and use a subdirectory in the postgres pvc. Allow build pods network access. Ensure rebuild.sh uses config.env)
 oc rollout status deployment/frc-postgres -n "$NS" --timeout=120s
 
 # ── 5. Build ──────────────────────────────────────────────────────────────────
 echo ""
 echo "==> [3/6] Applying BuildConfig..."
+<<<<<<< HEAD
 oc apply -f "$SCRIPT_DIR/03-buildconfig.yaml"
+=======
+apply_manifest "$SCRIPT_DIR/03-buildconfig.yaml"
+>>>>>>> 1df6f67 (Use the correct namespace and use a subdirectory in the postgres pvc. Allow build pods network access. Ensure rebuild.sh uses config.env)
 
 echo "    Waiting for builder service account registry secret..."
 for i in $(seq 1 24); do
@@ -134,19 +168,32 @@ wait_for_build "$BUILD_NAME"
 # ── 6. Deploy app ─────────────────────────────────────────────────────────────
 echo ""
 echo "==> [4/6] Deploying application..."
+<<<<<<< HEAD
 oc apply -f "$SCRIPT_DIR/04-deployment.yaml"
+=======
+apply_manifest "$SCRIPT_DIR/04-deployment.yaml"
+>>>>>>> 1df6f67 (Use the correct namespace and use a subdirectory in the postgres pvc. Allow build pods network access. Ensure rebuild.sh uses config.env)
 oc rollout status deployment/frc-scheduler-server -n "$NS" --timeout=300s
 
 # ── 7. Route ──────────────────────────────────────────────────────────────────
 echo ""
 echo "==> [5/6] Applying route..."
+<<<<<<< HEAD
 oc apply -f "$SCRIPT_DIR/05-route.yaml"
+=======
+apply_manifest "$SCRIPT_DIR/05-route.yaml"
+>>>>>>> 1df6f67 (Use the correct namespace and use a subdirectory in the postgres pvc. Allow build pods network access. Ensure rebuild.sh uses config.env)
 
 # ── 8. CronJob + RBAC ─────────────────────────────────────────────────────────
 echo ""
 echo "==> [6/6] Applying build CronJob and RBAC..."
+<<<<<<< HEAD
 oc apply -f "$SCRIPT_DIR/07-build-trigger-sa.yaml"
 oc apply -f "$SCRIPT_DIR/08-build-cronjob.yaml"
+=======
+apply_manifest "$SCRIPT_DIR/07-build-trigger-sa.yaml"
+apply_manifest "$SCRIPT_DIR/08-build-cronjob.yaml"
+>>>>>>> 1df6f67 (Use the correct namespace and use a subdirectory in the postgres pvc. Allow build pods network access. Ensure rebuild.sh uses config.env)
 
 # ── 9. Verify ─────────────────────────────────────────────────────────────────
 echo ""
