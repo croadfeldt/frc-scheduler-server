@@ -46,11 +46,8 @@ spec:
                 secretKeyRef:
                   name: frc-db-secret
                   key: POSTGRES_DB
-            # PGDATA must point to a subdirectory of the mount — the PVC root
-            # contains a lost+found directory which prevents initdb from running.
-            # If existing data is already at /var/lib/postgresql/data/pgdata
-            # (the postgres:16 image default) this is a no-op.
-            # If existing data is at the PVC root, see migration note below.
+            # PGDATA must point to a subdirectory — PVC root contains lost+found
+            # which prevents initdb. postgres:16 defaults to this path anyway.
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           ports:
@@ -58,11 +55,19 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+          # Readiness probe verifies the actual app database exists, not just
+          # that the postgres process is accepting connections. This prevents
+          # the deployment from reporting Ready before initdb has finished
+          # creating the POSTGRES_DB database.
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "frc"]
+              command:
+                - /bin/sh
+                - -c
+                - psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1" -q --no-align -t
             initialDelaySeconds: 5
             periodSeconds: 5
+            failureThreshold: 12
           livenessProbe:
             exec:
               command: ["pg_isready", "-U", "frc"]

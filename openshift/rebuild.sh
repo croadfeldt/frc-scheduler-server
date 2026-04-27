@@ -30,22 +30,8 @@ WEB_WORKERS="${WEB_WORKERS:-1}"
 
 NS="$NAMESPACE"
 
-apply_manifest() {
-  local file="$1"
-  sed \
-    -e "s|NAMESPACE_PLACEHOLDER|${NAMESPACE}|g" \
-    -e "s|YOUR_HOSTNAME|${APP_HOSTNAME}|g" \
-    -e "s|https://YOUR_HOSTNAME|https://${APP_HOSTNAME}|g" \
-    -e "s|https://github.com/YOUR_ORG/YOUR_REPO.git|${GIT_REPO_URL}|g" \
-    -e "s|GIT_BRANCH_PLACEHOLDER|${GIT_BRANCH}|g" \
-    -e "s|letsencrypt-prod|${CERT_ISSUER}|g" \
-    -e "s|METALLB_IP_PLACEHOLDER|${METALLB_IP}|g" \
-    -e "s|K8S_SERVICE_CIDR_PLACEHOLDER|${K8S_SERVICE_CIDR}|g" \
-    -e "s|APP_PORT_PLACEHOLDER|${APP_PORT}|g" \
-    -e "s|CPU_WORKERS_PLACEHOLDER|${CPU_WORKERS}|g" \
-    -e "s|WEB_WORKERS_PLACEHOLDER|${WEB_WORKERS}|g" \
-    "$file" | oc apply -f -
-}
+source "$SCRIPT_DIR/common.sh"
+
 
 refresh_registry() {
   echo "    Refreshing image registry operator (NooBaa credential reconcile)..."
@@ -85,6 +71,11 @@ wait_for_build() {
   done
 }
 
+# Wait for the POSTGRES_DB database to actually exist and accept queries.
+# pg_isready returns success as soon as postgres accepts connections — before
+# initdb has finished creating the POSTGRES_DB database. This explicit check
+# prevents the app deployment from racing postgres initialization.
+
 # ── 1. Tear down ──────────────────────────────────────────────────────────────
 echo "==> Tearing down all resources in namespace: $NS"
 oc delete all         --all -n "$NS" --ignore-not-found
@@ -109,7 +100,14 @@ echo ""
 echo "==> [1/6] Applying secrets..."
 oc apply -f "$SCRIPT_DIR/01-secrets.yaml"
 
-# ── 4. Network policy (apply early so build pods aren't blocked) ──────────────
+# Read the DB credentials from the secret we just applied so we can
+# pass them to wait_for_postgres_db below.
+PG_USER=$(oc get secret frc-db-secret -n "$NS" \
+  -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
+PG_DB=$(oc get secret frc-db-secret -n "$NS" \
+  -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
+
+# ── 4. Network policy ─────────────────────────────────────────────────────────
 echo ""
 echo "==> [1b/6] Applying network policies..."
 apply_manifest "$SCRIPT_DIR/10-networkpolicy.yaml"
@@ -118,7 +116,14 @@ apply_manifest "$SCRIPT_DIR/10-networkpolicy.yaml"
 echo ""
 echo "==> [2/6] Deploying Postgres..."
 apply_manifest "$SCRIPT_DIR/02-postgres.yaml"
+
+# Wait for the pod to be running first
 oc rollout status deployment/frc-postgres -n "$NS" --timeout=120s
+
+# Then wait for the actual database to exist — rollout status returns as soon
+# as the readiness probe passes, which now verifies the DB exists. But we also
+# do an explicit check here as a belt-and-suspenders guard.
+wait_for_postgres_db "$PG_USER" "$PG_DB"
 
 # ── 6. Build ──────────────────────────────────────────────────────────────────
 echo ""

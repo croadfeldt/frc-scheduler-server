@@ -14,6 +14,7 @@ if [ ! -f "$CONFIG" ]; then
 fi
 
 source "$CONFIG"
+source "$SCRIPT_DIR/common.sh"
 
 : "${NAMESPACE:?Set NAMESPACE in config.env}"
 : "${APP_HOSTNAME:?Set APP_HOSTNAME in config.env}"
@@ -27,27 +28,21 @@ APP_PORT="${APP_PORT:-8443}"
 CPU_WORKERS="${CPU_WORKERS:-12}"
 WEB_WORKERS="${WEB_WORKERS:-1}"
 
-apply_manifest() {
-  local file="$1"
-  sed \
-    -e "s|NAMESPACE_PLACEHOLDER|${NAMESPACE}|g" \
-    -e "s|YOUR_HOSTNAME|${APP_HOSTNAME}|g" \
-    -e "s|https://YOUR_HOSTNAME|https://${APP_HOSTNAME}|g" \
-    -e "s|https://github.com/YOUR_ORG/YOUR_REPO.git|${GIT_REPO_URL}|g" \
-    -e "s|GIT_BRANCH_PLACEHOLDER|${GIT_BRANCH}|g" \
-    -e "s|letsencrypt-prod|${CERT_ISSUER}|g" \
-    -e "s|METALLB_IP_PLACEHOLDER|${METALLB_IP}|g" \
-    -e "s|K8S_SERVICE_CIDR_PLACEHOLDER|${K8S_SERVICE_CIDR}|g" \
-    -e "s|APP_PORT_PLACEHOLDER|${APP_PORT}|g" \
-    -e "s|CPU_WORKERS_PLACEHOLDER|${CPU_WORKERS}|g" \
-    -e "s|WEB_WORKERS_PLACEHOLDER|${WEB_WORKERS}|g" \
-    "$file" | oc apply -f -
-}
-
 echo "Applying manifests to namespace: ${NAMESPACE}"
 for manifest in "$SCRIPT_DIR"/[0-9]*.yaml; do
   echo "  -> $(basename "$manifest")"
   apply_manifest "$manifest"
+  # After applying postgres, wait for the database to be ready before
+  # continuing — prevents the app deployment from racing initdb on a
+  # fresh install or after a PVC wipe.
+  if [[ "$(basename "$manifest")" == "02-postgres.yaml" ]]; then
+    oc rollout status deployment/frc-postgres -n "$NAMESPACE" --timeout=120s
+    PG_USER=$(oc get secret frc-db-secret -n "$NAMESPACE" \
+      -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
+    PG_DB=$(oc get secret frc-db-secret -n "$NAMESPACE" \
+      -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
+    wait_for_postgres_db "$PG_USER" "$PG_DB"
+  fi
 done
 
 echo ""
