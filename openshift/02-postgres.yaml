@@ -46,6 +46,13 @@ spec:
                 secretKeyRef:
                   name: frc-db-secret
                   key: POSTGRES_DB
+            # PGDATA must point to a subdirectory of the mount — the PVC root
+            # contains a lost+found directory which prevents initdb from running.
+            # If existing data is already at /var/lib/postgresql/data/pgdata
+            # (the postgres:16 image default) this is a no-op.
+            # If existing data is at the PVC root, see migration note below.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           ports:
             - containerPort: 5432
           volumeMounts:
@@ -56,6 +63,12 @@ spec:
               command: ["pg_isready", "-U", "frc"]
             initialDelaySeconds: 5
             periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "frc"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
       volumes:
         - name: data
           persistentVolumeClaim:

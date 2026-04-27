@@ -14,13 +14,13 @@ metadata:
   name: frc-scheduler-hpa
   namespace: frc-scheduler-server
   labels:
-    app: frc-scheduler
+    app: frc-scheduler-server-git
     app.kubernetes.io/part-of: frc-scheduler
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: frc-scheduler
+    name: frc-scheduler-server
   minReplicas: 1
   maxReplicas: 4
   metrics:
