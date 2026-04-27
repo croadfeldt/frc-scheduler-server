@@ -112,9 +112,10 @@ PG_PASS=$(oc get secret frc-db-secret -n "$NS" \
 # not work when the referenced var comes from valueFrom: secretKeyRef.
 # We patch it here from the component values so it's always consistent.
 DB_URL="postgresql+asyncpg://${PG_USER}:${PG_PASS}@frc-postgres:5432/${PG_DB}"
-oc patch secret frc-db-secret -n "$NS" \
-  --type=merge \
-  -p "{"stringData":{"DATABASE_URL":"${DB_URL}"}}"
+_TMP=$(mktemp /tmp/db-url-patch-XXXXXX.yaml)
+printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: frc-db-secret\n  namespace: %s\nstringData:\n  DATABASE_URL: "%s"\n' "${NS}" "${DB_URL}" > "$_TMP"
+oc apply -f "$_TMP"
+rm -f "$_TMP"
 echo "    DATABASE_URL patched into frc-db-secret"
 
 # ── 4. Network policy ─────────────────────────────────────────────────────────

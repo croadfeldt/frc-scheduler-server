@@ -35,7 +35,10 @@ if oc get secret frc-db-secret -n "$NAMESPACE" > /dev/null 2>&1; then
   PG_PASS=$(oc get secret frc-db-secret -n "$NAMESPACE"     -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
   PG_DB=$(oc get secret frc-db-secret -n "$NAMESPACE"     -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
   DB_URL="postgresql+asyncpg://${PG_USER}:${PG_PASS}@frc-postgres:5432/${PG_DB}"
-  oc patch secret frc-db-secret -n "$NAMESPACE"     --type=merge     -p "{"stringData":{"DATABASE_URL":"${DB_URL}"}}"
+  _TMP=$(mktemp /tmp/db-url-patch-XXXXXX.yaml)
+  printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: frc-db-secret\n  namespace: %s\nstringData:\n  DATABASE_URL: "%s"\n' "${NAMESPACE}" "${DB_URL}" > "$_TMP"
+  oc apply -f "$_TMP"
+  rm -f "$_TMP"
   echo "  DATABASE_URL patched into frc-db-secret"
 fi
 
