@@ -1,48 +1,26 @@
 ---
-# ImageStream — matches the name OpenShift web console created: frc-scheduler-server-git
 apiVersion: image.openshift.io/v1
 kind: ImageStream
 metadata:
-  annotations:
-    app.openshift.io/vcs-ref: ""
-    app.openshift.io/vcs-uri: https://github.com/YOUR_ORG/YOUR_REPO.git
-  labels:
-    app: frc-scheduler-server-git
-    app.kubernetes.io/component: frc-scheduler-server-git
-    app.kubernetes.io/instance: frc-scheduler-server-git
-    app.kubernetes.io/name: frc-scheduler-server-git
-    app.kubernetes.io/part-of: frc-scheduler-server-git-app
   name: frc-scheduler-server-git
   namespace: frc-scheduler-server
+  labels:
+    app: frc-scheduler-server-git
 spec:
   lookupPolicy:
     local: true
 ---
-# BuildConfig — pulls from GitHub, built with Containerfile, no webhooks.
-# Builds are triggered by the git-poll-trigger CronJob (see 07-build-cronjob.yaml).
-#
-# Trigger a manual build:
-#   oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
-#
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
 metadata:
-  annotations:
-    app.openshift.io/vcs-ref: ""
-    app.openshift.io/vcs-uri: https://github.com/YOUR_ORG/YOUR_REPO.git
-  labels:
-    app: frc-scheduler-server-git
-    app.kubernetes.io/component: frc-scheduler-server-git
-    app.kubernetes.io/instance: frc-scheduler-server-git
-    app.kubernetes.io/name: frc-scheduler-server-git
-    app.kubernetes.io/part-of: frc-scheduler-server-git-app
   name: frc-scheduler-server-git
   namespace: frc-scheduler-server
+  labels:
+    app: frc-scheduler-server-git
 spec:
   failedBuildsHistoryLimit: 5
   successfulBuildsHistoryLimit: 5
   runPolicy: Serial
-  nodeSelector: null
   source:
     type: Git
     git:
@@ -57,8 +35,5 @@ spec:
     to:
       kind: ImageStreamTag
       name: frc-scheduler-server-git:latest
-  postCommit: {}
-  resources: {}
   triggers:
-    # Only ConfigChange — no webhooks, polling handled by CronJob
     - type: ConfigChange

@@ -1,68 +1,38 @@
 ---
-# Service account the CronJob runs as
+# ServiceAccount for the build-trigger CronJob
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: build-trigger-sa
   namespace: frc-scheduler-server
-  labels:
-    app.kubernetes.io/part-of: frc-scheduler-server-git-app
 ---
-# Role — permissions needed by the poll script
+# Role: permission to start builds and restart deployments
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: build-trigger-role
   namespace: frc-scheduler-server
-  labels:
-    app.kubernetes.io/part-of: frc-scheduler-server-git-app
 rules:
   - apiGroups: ["build.openshift.io"]
-    resources:
-      - builds
-      - buildconfigs
-      - builds/log
-      - buildconfigs/instantiate
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["list", "watch"]
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "update", "patch"]
+    resources: ["buildconfigs/instantiate"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["apps.openshift.io"]
+    resources: ["deploymentconfigs"]
+    verbs: ["get", "patch"]
 ---
-# Bind role to service account
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: build-trigger-binding
   namespace: frc-scheduler-server
-  labels:
-    app.kubernetes.io/part-of: frc-scheduler-server-git-app
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: build-trigger-role
 subjects:
   - kind: ServiceAccount
     name: build-trigger-sa
     namespace: frc-scheduler-server
----
-# Allow unauthenticated webhook calls (matches your existing setup)
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: webhook-access-unauthenticated
-  namespace: frc-scheduler-server
-  annotations:
-    rbac.authorization.kubernetes.io/autoupdate: "true"
-  labels:
-    app.kubernetes.io/part-of: frc-scheduler-server-git-app
 roleRef:
-  apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: "system:webhook"
-subjects:
-  - apiGroup: rbac.authorization.k8s.io
-    kind: Group
-    name: "system:unauthenticated"
+  name: build-trigger-role
+  apiGroup: rbac.authorization.k8s.io

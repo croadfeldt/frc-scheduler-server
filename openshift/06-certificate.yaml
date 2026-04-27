@@ -1,0 +1,15 @@
+---
+# cert-manager Certificate — DNS-01 challenge (no port 80 required).
+# Requires a ClusterIssuer configured for DNS-01 validation.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: frc-scheduler-tls
+  namespace: frc-scheduler-server
+spec:
+  secretName: frc-scheduler-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - YOUR_HOSTNAME

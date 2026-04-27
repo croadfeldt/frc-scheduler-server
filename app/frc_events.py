@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# FRC Match Scheduler
+# Copyright (C) 2025 FRC Match Scheduler Contributors
+#
+# NOTE: This file was substantially generated with the assistance of Claude,
+# an AI assistant by Anthropic, and reviewed/modified by human contributors.
+# See LICENSE for full terms.
+
 """
-FIRST FRC Events API client.
-Docs: https://frc-api-docs.firstinspires.org/
+FIRST FRC Events API client — https://frc-api-docs.firstinspires.org/
 Base: https://frc-api.firstinspires.org/v3.0/
-
-Authentication: HTTP Basic — base64("username:token")
+Authentication: HTTP Basic (base64 username:token)
 Register at: https://frc-events.firstinspires.org/services/API
-
-Set FRC_EVENTS_USERNAME and FRC_EVENTS_TOKEN environment variables.
 """
 
 import os
@@ -28,20 +31,16 @@ def _auth_header() -> str:
     if not FRC_USERNAME or not FRC_TOKEN:
         raise ValueError(
             "FRC Events API credentials are not configured. "
-            "Set FRC_EVENTS_USERNAME and FRC_EVENTS_TOKEN in your environment "
-            "or OpenShift secret. Register free at https://frc-events.firstinspires.org/services/API"
+            "Set FRC_EVENTS_USERNAME and FRC_EVENTS_TOKEN in your environment. "
+            "Register free at https://frc-events.firstinspires.org/services/API"
         )
-    raw = f"{FRC_USERNAME}:{FRC_TOKEN}"
-    return "Basic " + base64.b64encode(raw.encode()).decode()
+    return "Basic " + base64.b64encode(f"{FRC_USERNAME}:{FRC_TOKEN}".encode()).decode()
 
 
 async def _get(path: str, params: dict | None = None) -> Any:
     async with httpx.AsyncClient(
         base_url=FRC_BASE,
-        headers={
-            "Authorization": _auth_header(),
-            "Accept": "application/json",
-        },
+        headers={"Authorization": _auth_header(), "Accept": "application/json"},
         timeout=15.0,
     ) as client:
         resp = await client.get(path, params=params)
@@ -49,24 +48,18 @@ async def _get(path: str, params: dict | None = None) -> Any:
         return resp.json()
 
 
-# ── Public API calls ──────────────────────────────────────────────────────────
-
 async def get_events(year: int) -> list[dict]:
-    """All events for a given year."""
     data = await _get(f"/{year}/events")
     return data.get("Events", [])
 
 
 async def get_event(year: int, event_code: str) -> dict | None:
-    """Single event by code (e.g. 'MNMI'). Returns None if not found."""
     data = await _get(f"/{year}/events", params={"eventCode": event_code.upper()})
     events = data.get("Events", [])
     return events[0] if events else None
 
 
 async def get_event_teams(year: int, event_code: str) -> list[dict]:
-    """All teams registered for an event."""
-    # FRC Events API paginates teams — fetch all pages
     teams: list[dict] = []
     page = 1
     while True:
@@ -78,7 +71,6 @@ async def get_event_teams(year: int, event_code: str) -> list[dict]:
         if not page_teams:
             break
         teams.extend(page_teams)
-        # Stop if we got fewer than a full page (default page size is 65)
         if len(page_teams) < 65:
             break
         page += 1
@@ -86,23 +78,16 @@ async def get_event_teams(year: int, event_code: str) -> list[dict]:
 
 
 async def search_events(year: int, search: str) -> list[dict]:
-    """Filter events by name/code substring."""
     events = await get_events(year)
     s = search.lower()
-    return [
-        e for e in events
-        if s in e.get("code", "").lower() or s in e.get("name", "").lower()
-    ]
+    return [e for e in events if s in e.get("code", "").lower() or s in e.get("name", "").lower()]
 
 
 def is_configured() -> bool:
     return bool(FRC_USERNAME and FRC_TOKEN)
 
 
-# ── Normalise FRC Events responses to our schema ──────────────────────────────
-
 def normalise_team(frc: dict) -> dict:
-    """Convert FRC Events team dict to our Team schema."""
     return {
         "number":      frc.get("teamNumber", 0),
         "name":        frc.get("nameFull") or frc.get("nameShort"),
@@ -115,9 +100,7 @@ def normalise_team(frc: dict) -> dict:
 
 
 def normalise_event(frc: dict, year: int) -> dict:
-    """Convert FRC Events event dict to our Event schema."""
     code = frc.get("code", "")
-    # FRC Events uses short codes like "MNMI"; build a TBA-style key for consistency
     key = f"{year}{code.lower()}"
     location = ", ".join(filter(None, [
         frc.get("city"),
@@ -132,6 +115,5 @@ def normalise_event(frc: dict, year: int) -> dict:
         "start_date": frc.get("dateStart", "")[:10] if frc.get("dateStart") else None,
         "end_date":   frc.get("dateEnd", "")[:10] if frc.get("dateEnd") else None,
         "tba_synced": True,
-        # Store original code so we can look up teams later
         "_frc_code":  code,
     }

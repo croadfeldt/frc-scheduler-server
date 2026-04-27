@@ -15,15 +15,13 @@
 FRC Qualification Match Scheduler
 Pure Python port of the JS algorithm — no I/O, no dependencies beyond stdlib.
 Safe to run in a ProcessPoolExecutor worker.
-
-Scheduling priorities (P1-P10) are identical to the browser version.
 """
 
 import math
 import random
 from typing import NamedTuple
 
-# ── Weights (mirror JS constants) ────────────────────────────────────────────
+# ── Weights ───────────────────────────────────────────────────────────────────
 W_BALANCE  = 50
 W_GAP      = 10
 W_COUNT    = 5
@@ -33,29 +31,21 @@ W_SUR_RPT  = 200
 
 
 class Match(NamedTuple):
-    red:           tuple[int, ...]   # 3 team numbers
-    blue:          tuple[int, ...]   # 3 team numbers
-    red_surrogate: tuple[bool, ...]
+    red:            tuple[int, ...]
+    blue:           tuple[int, ...]
+    red_surrogate:  tuple[bool, ...]
     blue_surrogate: tuple[bool, ...]
 
 
 class ScheduleResult(NamedTuple):
     matches:          list[Match]
-    surrogate_count:  list[int]        # index 0 unused; [1..numTeams]
-    round_boundaries: dict[int, int]   # round_number -> match_index (0-based)
+    surrogate_count:  list[int]
+    round_boundaries: dict[int, int]
     score:            float
 
 
-# ── Bits for C(6,3) mask enumeration ─────────────────────────────────────────
 _MASKS_3_OF_6 = [m for m in range(64) if bin(m).count('1') == 3]
 
-
-def _popcount3(mask: int) -> list[int]:
-    """Return indices of the 3 set bits in a 6-bit mask."""
-    return [i for i in range(6) if (mask >> i) & 1]
-
-
-# Pre-compute all valid (red_indices, blue_indices) pairs
 _SPLITS = [
     ([i for i in range(6) if (m >> i) & 1],
      [i for i in range(6) if not (m >> i) & 1])
@@ -65,47 +55,35 @@ _SPLITS = [
 
 def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                      seed: int | None = None) -> ScheduleResult:
-    """
-    Run one iteration of the two-phase greedy scheduler.
-    If seed is provided, the schedule is fully deterministic and reproducible.
-    """
     ideal_gap = max(1, ideal_gap)
     rng = random.Random(seed)
 
-    # ── Step 1: Determine match count (pure math) ────────────────────────────
-    # total_matches = ceil(N * MPT / 6) — minimum 6-team matches to give every
-    # team exactly MPT plays. Any remainder is structural surplus (surrogates).
-    # matches_per_round = ceil(N/6) — Phase 1 size and cosmetic marker only.
     total_matches     = math.ceil(num_teams * matches_per_team / 6)
     matches_per_round = math.ceil(num_teams / 6)
     total_sur_slots   = total_matches * 6 - num_teams * matches_per_team
     phase1_surplus    = matches_per_round * 6 - num_teams
     fair_sur_cap      = math.ceil(total_sur_slots / num_teams) + 1 if num_teams > 0 else 1
 
-    # Shuffle team order — deterministic if seed provided
     teams = list(range(1, num_teams + 1))
     rng.shuffle(teams)
 
-    # Per-team state (1-indexed; index 0 unused)
-    mc  = [0] * (num_teams + 1)   # match counts
-    lp  = [-999] * (num_teams + 1) # last played (match index)
-    sc  = [0] * (num_teams + 1)   # surrogate count
-    rc  = [0] * (num_teams + 1)   # red count
-    bc  = [0] * (num_teams + 1)   # blue count
+    mc  = [0] * (num_teams + 1)
+    lp  = [-999] * (num_teams + 1)
+    sc  = [0] * (num_teams + 1)
+    rc  = [0] * (num_teams + 1)
+    bc  = [0] * (num_teams + 1)
 
-    opp = [[0] * (num_teams + 1) for _ in range(num_teams + 1)]  # opponents[a][b]
-    par = [[0] * (num_teams + 1) for _ in range(num_teams + 1)]  # partners[a][b]
+    opp = [[0] * (num_teams + 1) for _ in range(num_teams + 1)]
+    par = [[0] * (num_teams + 1) for _ in range(num_teams + 1)]
 
     matches: list[Match] = []
 
-    # Round boundaries are cosmetic markers every matches_per_round matches
     total_rounds = math.ceil(total_matches / matches_per_round)
     round_boundaries: dict[int, int] = {
         r: (r - 1) * matches_per_round
         for r in range(1, total_rounds + 1)
     }
 
-    # ── Scoring helpers ───────────────────────────────────────────────────────
     def team_score(t: int, now: int) -> float:
         gap = now - lp[t]
         if gap < ideal_gap:
@@ -147,7 +125,6 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         return (best_r, best_b) if best_r is not None else None
 
     def assign_alliances_r1(six: list[int]) -> tuple[list[int], list[int]] | None:
-        """Round-1 last match: also penalise imbalanced second-timer distribution."""
         if len(six) != 6 or len(set(six)) != 6:
             return None
         best_score = -float('inf')
@@ -180,16 +157,13 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
             bc[t] += 1
         for r in red:
             for b in blue:
-                opp[r][b] += 1
-                opp[b][r] += 1
+                opp[r][b] += 1; opp[b][r] += 1
         for i in range(len(red)):
             for j in range(i + 1, len(red)):
-                par[red[i]][red[j]] += 1
-                par[red[j]][red[i]] += 1
+                par[red[i]][red[j]] += 1; par[red[j]][red[i]] += 1
         for i in range(len(blue)):
             for j in range(i + 1, len(blue)):
-                par[blue[i]][blue[j]] += 1
-                par[blue[j]][blue[i]] += 1
+                par[blue[i]][blue[j]] += 1; par[blue[j]][blue[i]] += 1
 
     def best_of_attempts(
         first_pool: list[int], first_slots: int,
@@ -210,7 +184,6 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         if cands:
             cands.sort(key=lambda x: -x[0])
             return cands[0][1], cands[0][2]
-        # Fallback
         six = first_pool[:first_slots] + second_pool[:extra_slots]
         res = assign_alliances_r1(six) if is_last else assign_alliances(six)
         if res:
@@ -221,7 +194,6 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
     for m in range(matches_per_round):
         now      = len(matches)
         is_last  = (m == matches_per_round - 1)
-        phase1_surplus = matches_per_round * 6 - num_teams
         extra    = phase1_surplus if is_last else 0
         first_s  = 6 - extra
 
@@ -245,11 +217,7 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         ))
         commit_match(red, blue, now)
 
-    # ── Phase 2: Open scheduling — quota-driven, no round constraints ────────
-    # Pick the 6 best-scoring eligible teams per match.
-    # W_COUNT in team_score penalises higher mc, so under-played teams naturally
-    # score higher and get picked first — keeping play counts balanced.
-    # Surrogates only appear when structurally unavoidable (< 6 under-quota teams left).
+    # ── Phase 2: Open scheduling ──────────────────────────────────────────────
     for i in range(total_matches - matches_per_round):
         now = len(matches)
 
@@ -276,13 +244,9 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                              red_surrogate=red_sur, blue_surrogate=blue_sur))
         commit_match(red, blue, now)
 
-    # ── Post-generation sweeps ────────────────────────────────────────────────────
-    # Rule 1: No surrogate in last match (swap block below)
-    # Rule 2: No surrogate as a team's first appearance (guard in swap search)
-    # Rule 3: No surrogate as a team's last appearance (flag reassignment sweep)
+    # ── Post-generation sweeps ────────────────────────────────────────────────
 
     def build_appearance_map():
-        """Return {team: first_match_idx} and {team: last_match_idx}."""
         first: dict[int, int] = {}
         last_a: dict[int, int] = {}
         for idx, m in enumerate(matches):
@@ -292,7 +256,7 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                 last_a[t] = idx
         return first, last_a
 
-    # ── Rule 1+2: move last-match surrogates to earlier matches ──────────────────
+    # Rule 1+2: move last-match surrogates earlier
     if matches:
         last_idx = len(matches) - 1
         last = matches[last_idx]
@@ -307,7 +271,6 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
 
         for alliance, pos, sur_team in sur_slots:
             first_app, _ = build_appearance_map()
-
             swap_a, swap_p, swap_t = None, -1, -1
             for i, t in enumerate(last_red):
                 if not last_rs[i] and t != sur_team:
@@ -325,7 +288,6 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                 all_t = list(m.red) + list(m.blue)
                 if swap_t in all_t:
                     continue
-                # Rule 2 guard: skip if this is sur_team's first appearance
                 if m_idx <= first_app.get(sur_team, -1):
                     continue
                 if sur_team in m.red:
@@ -340,7 +302,7 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
             eb = list(em.blue); ebs = list(em.blue_surrogate)
 
             if early_a == 'red':   er[early_p]  = swap_t; ers[early_p]  = False
-            else:                  eb[early_p]  = swap_t; ebs[early_p]  = False
+            else:                  eb[early_p]   = swap_t; ebs[early_p]  = False
 
             if alliance == 'red':  last_red[pos]  = swap_t; last_rs[pos]  = False
             else:                  last_blue[pos] = swap_t; last_bs[pos]  = False
@@ -363,8 +325,7 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
             last_red  = list(last.red);  last_rs = list(last.red_surrogate)
             last_blue = list(last.blue); last_bs = list(last.blue_surrogate)
 
-    # ── Rule 3: no surrogate as a team's last appearance ─────────────────────────
-    # Move the surrogate flag to an earlier appearance — no teams change matches.
+    # Rule 3: no surrogate as last appearance
     for _pass in range(3):
         first_app, last_app = build_appearance_map()
         changed = False
@@ -380,8 +341,6 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                      (b_pos != -1 and lm.blue_surrogate[b_pos])
             if not is_sur:
                 continue
-
-            # Find an earlier non-first appearance to receive the flag
             for m_idx in range(last_m_idx - 1, first_app.get(team, -1), -1):
                 em = matches[m_idx]
                 er_idx = list(em.red).index(team)  if team in em.red  else -1
@@ -418,7 +377,6 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
 
 
 def score_schedule(matches: list[Match], num_teams: int) -> float:
-    """Composite score — higher is better (all terms are penalties subtracted)."""
     if not matches:
         return -float('inf')
 
@@ -443,40 +401,28 @@ def score_schedule(matches: list[Match], num_teams: int) -> float:
             blue_counts[t] += 1
         for r in m.red:
             for b in m.blue:
-                if opp[r][b] > 0:
-                    repeat_opp += 1
+                if opp[r][b] > 0: repeat_opp += 1
                 opp[r][b] += 1; opp[b][r] += 1
         rl = list(m.red); bl = list(m.blue)
         for a in range(len(rl)):
             for b in range(a + 1, len(rl)):
-                if par[rl[a]][rl[b]] > 0:
-                    repeat_part += 1
+                if par[rl[a]][rl[b]] > 0: repeat_part += 1
                 par[rl[a]][rl[b]] += 1; par[rl[b]][rl[a]] += 1
         for a in range(len(bl)):
             for b in range(a + 1, len(bl)):
-                if par[bl[a]][bl[b]] > 0:
-                    repeat_part += 1
+                if par[bl[a]][bl[b]] > 0: repeat_part += 1
                 par[bl[a]][bl[b]] += 1; par[bl[b]][bl[a]] += 1
 
     max_imbalance = max(abs(red_counts[t] - blue_counts[t]) for t in range(1, num_teams + 1))
-    # Priority: P1 back-to-backs, P2 alliance balance, P3 surrogates, P4/P5 diversity
     return -(b2b * 1000 + max_imbalance * 500 + surrogates * 200 +
              repeat_opp * 15 + repeat_part * 12)
 
 
 def run_iterations_worker(args: tuple) -> dict:
-    """
-    Worker function for ProcessPoolExecutor.
-    Receives (num_teams, matches_per_team, ideal_gap, n_iterations, worker_id, seed).
-    If seed is provided and n_iterations==1, uses it directly for reproducibility.
-    For multiple iterations, each uses seed+iteration_index so results are still
-    deterministic given the same seed.
-    """
     num_teams, matches_per_team, ideal_gap, n_iterations, worker_id, seed = args
     best: ScheduleResult | None = None
 
     for i in range(n_iterations):
-        # Each iteration gets a derived seed: seed XOR (worker_id * 1000 + i)
         iter_seed = (seed ^ (worker_id * 1000 + i)) if seed is not None else None
         result = generate_matches(num_teams, matches_per_team, ideal_gap, iter_seed)
         if best is None or result.score > best.score:
@@ -492,9 +438,9 @@ def run_iterations_worker(args: tuple) -> dict:
         'round_boundaries': best.round_boundaries,
         'matches': [
             {
-                'red':           list(m.red),
-                'blue':          list(m.blue),
-                'red_surrogate': list(m.red_surrogate),
+                'red':            list(m.red),
+                'blue':           list(m.blue),
+                'red_surrogate':  list(m.red_surrogate),
                 'blue_surrogate': list(m.blue_surrogate),
             }
             for m in best.matches
@@ -512,170 +458,86 @@ def assign_teams(
     n_iterations: int = 100,
     seed: int | None = None,
 ) -> dict:
-    """
-    Stage 2: find the best mapping of real team numbers onto slot indices 1..N.
-
-    Uses simulated annealing with INCREMENTAL scoring — only affected matches
-    are rescored on each swap, giving ~10x speedup over full rescore per step.
-    """
     if len(team_numbers) != num_teams:
         raise ValueError(f"team_numbers length {len(team_numbers)} != num_teams {num_teams}")
 
     ideal_gap = max(1, ideal_gap)
     slots = list(range(1, num_teams + 1))
 
-    # ── Precompute per-slot match index lists ──────────────────────────────────
-    # slot_matches[s] = sorted list of match indices containing slot s
     slot_matches: dict[int, list[int]] = {s: [] for s in slots}
     for i, m in enumerate(abstract_matches):
         for s in m['red']:  slot_matches[s].append(i)
         for s in m['blue']: slot_matches[s].append(i)
 
-    # Surrogates are fixed regardless of assignment — precompute once
     total_surrogates = sum(
         sum(m['red_surrogate']) + sum(m['blue_surrogate'])
         for m in abstract_matches
     )
 
-    # ── Full score build (called once per iteration start) ────────────────────
     def build_score_state(slot_map: dict[int, int]) -> tuple:
-        """
-        Returns (score, b2b, opp, par, red_counts, blue_counts, prev_teams_list).
-        opp/par are Counter-like dicts of pair → count.
-        prev_teams_list[i] = frozenset of teams in match i (for B2B lookup).
-        """
         b2b = 0
-        repeat_opp = 0
-        repeat_part = 0
-        red_counts: dict[int, int] = {}
-        blue_counts: dict[int, int] = {}
-        opp:  dict[tuple, int] = {}
-        par:  dict[tuple, int] = {}
-        teams_by_match: list[frozenset] = []
+        opp: dict[tuple[int, int], int] = {}
+        par: dict[tuple[int, int], int] = {}
+        rc: dict[int, int] = {t: 0 for t in team_numbers}
+        bc: dict[int, int] = {t: 0 for t in team_numbers}
+        tbm: list[set[int]] = []
 
-        prev: frozenset = frozenset()
-        for m in abstract_matches:
-            rt = tuple(slot_map[s] for s in m['red'])
-            bt = tuple(slot_map[s] for s in m['blue'])
-            at = frozenset(rt + bt)
-            if prev and (at & prev):
+        for i, m in enumerate(abstract_matches):
+            red  = [slot_map[s] for s in m['red']]
+            blue = [slot_map[s] for s in m['blue']]
+            cur  = set(red + blue)
+            tbm.append(cur)
+            if i > 0 and cur & tbm[i - 1]:
                 b2b += 1
-            prev = at
-            teams_by_match.append(at)
+            for t in red:  rc[t] += 1
+            for t in blue: bc[t] += 1
+            for r in red:
+                for b in blue:
+                    opp[(min(r,b), max(r,b))] = opp.get((min(r,b), max(r,b)), 0) + 1
+            for j in range(len(red)):
+                for k in range(j + 1, len(red)):
+                    p = (min(red[j],red[k]), max(red[j],red[k]))
+                    par[p] = par.get(p, 0) + 1
+            for j in range(len(blue)):
+                for k in range(j + 1, len(blue)):
+                    p = (min(blue[j],blue[k]), max(blue[j],blue[k]))
+                    par[p] = par.get(p, 0) + 1
 
-            for t in rt: red_counts[t]  = red_counts.get(t, 0)  + 1
-            for t in bt: blue_counts[t] = blue_counts.get(t, 0) + 1
+        max_imbal = max(abs(rc[t] - bc[t]) for t in team_numbers) if team_numbers else 0
+        ro = sum(max(0, v - 1) for v in opp.values())
+        rp = sum(max(0, v - 1) for v in par.values())
+        score = -(b2b * 1000 + max_imbal * 500 + total_surrogates * 200 + ro * 15 + rp * 12)
+        return score, b2b, opp, par, rc, bc, tbm
 
-            for r in rt:
-                for b_t in bt:
-                    k = (min(r, b_t), max(r, b_t))
-                    old = opp.get(k, 0)
-                    if old > 0: repeat_opp += 1
-                    opp[k] = old + 1
+    def delta_swap(slot_map, sa, sb, b2b, opp, par, rc, bc, tbm):
+        ta = slot_map[sa]; tb = slot_map[sb]
+        affected = set(slot_matches[sa]) | set(slot_matches[sb])
 
-            for lst in (rt, bt):
-                for i in range(3):
-                    for j in range(i + 1, 3):
-                        k = (min(lst[i], lst[j]), max(lst[i], lst[j]))
-                        old = par.get(k, 0)
-                        if old > 0: repeat_part += 1
-                        par[k] = old + 1
+        old_b2b = 0; new_b2b = 0
+        old_imbal = max(abs(rc[t] - bc[t]) for t in team_numbers)
 
-        all_t = set(red_counts) | set(blue_counts)
-        max_imbalance = max(
-            abs(red_counts.get(t, 0) - blue_counts.get(t, 0)) for t in all_t
-        ) if all_t else 0
-
-        score = -(b2b * 1000 + max_imbalance * 500 + total_surrogates * 200 +
-                  repeat_opp * 15 + repeat_part * 12)
-        return score, b2b, opp, par, red_counts, blue_counts, teams_by_match
-
-    # ── Incremental delta score for a 2-swap ──────────────────────────────────
-    def delta_swap(slot_map, sa, sb, b2b, opp, par, rc, bc, tbm) -> float:
-        """
-        Compute the score change if we swap slot_map[sa] ↔ slot_map[sb].
-        Only rescores the union of matches containing sa or sb.
-        Returns new_score - old_score (positive = improvement).
-        """
-        ta = slot_map[sa]
-        tb = slot_map[sb]
-        if ta == tb:
-            return 0.0
-
-        affected = sorted(set(slot_matches[sa]) | set(slot_matches[sb]))
-        if not affected:
-            return 0.0
-
-        # For imbalance: only ta and tb's red/blue counts change
-        old_imbal = max(abs(rc.get(t, 0) - bc.get(t, 0)) for t in (ta, tb))
-
-        # Simulate the swap temporarily
-        slot_map[sa], slot_map[sb] = slot_map[sb], slot_map[sa]
-
-        d_b2b = 0
-        d_ro  = 0
-        d_rp  = 0
-        d_rc: dict[int, int] = {}
-        d_bc: dict[int, int] = {}
-
+        new_rc = dict(rc); new_bc = dict(bc)
         for idx in affected:
             m = abstract_matches[idx]
-            # Old teams at this match
-            old_rt = tuple(slot_map[s] if s != sa and s != sb else (tb if slot_map[s] == ta else ta)
-                           for s in m['red'])
-            old_bt = tuple(slot_map[s] if s != sa and s != sb else (tb if slot_map[s] == ta else ta)
-                           for s in m['blue'])
-            # New teams (swap already applied)
-            new_rt = tuple(slot_map[s] for s in m['red'])
-            new_bt = tuple(slot_map[s] for s in m['blue'])
+            red  = [slot_map[s] for s in m['red']]
+            blue = [slot_map[s] for s in m['blue']]
+            for t in red:  new_rc[t] -= 1
+            for t in blue: new_bc[t] -= 1
+            new_red  = [tb if t == ta else (ta if t == tb else t) for t in red]
+            new_blue = [tb if t == ta else (ta if t == tb else t) for t in blue]
+            for t in new_red:  new_rc[t] += 1
+            for t in new_blue: new_bc[t] += 1
 
-            # B2B delta: check prev and next match
-            for sign, rt, bt in ((-1, old_rt, old_bt), (+1, new_rt, new_bt)):
-                at_f = frozenset(rt + bt)
-                if idx > 0 and (at_f & tbm[idx - 1]): d_b2b += sign
-                if idx < len(abstract_matches) - 1 and (at_f & tbm[idx + 1]): d_b2b += sign
+        new_imbal = max(abs(new_rc[t] - new_bc[t]) for t in team_numbers)
 
-            # opp/par delta
-            for sign, rt, bt in ((-1, old_rt, old_bt), (+1, new_rt, new_bt)):
-                for r in rt:
-                    for b_t in bt:
-                        k = (min(r, b_t), max(r, b_t))
-                        cur = opp.get(k, 0) + d_ro  # rough — fine for delta direction
-                        if sign == -1 and cur > 1: d_ro -= 1
-                        elif sign == +1 and cur > 0: d_ro += 1
-                for lst in (rt, bt):
-                    for i in range(3):
-                        for j in range(i + 1, 3):
-                            k = (min(lst[i], lst[j]), max(lst[i], lst[j]))
-                            cur = par.get(k, 0)
-                            if sign == -1 and cur > 1: d_rp -= 1
-                            elif sign == +1 and cur > 0: d_rp += 1
+        w_imbal = new_imbal - old_imbal
 
-            # red/blue count delta
-            for t in old_rt: d_rc[t] = d_rc.get(t, 0) - 1
-            for t in new_rt: d_rc[t] = d_rc.get(t, 0) + 1
-            for t in old_bt: d_bc[t] = d_bc.get(t, 0) - 1
-            for t in new_bt: d_bc[t] = d_bc.get(t, 0) + 1
+        return -(w_imbal * 500)
 
-        # Undo the temporary swap
-        slot_map[sa], slot_map[sb] = slot_map[sb], slot_map[sa]
-
-        # Imbalance delta for ta and tb only
-        new_rc_ta = rc.get(ta, 0) + d_rc.get(ta, 0)
-        new_bc_ta = bc.get(ta, 0) + d_bc.get(ta, 0)
-        new_rc_tb = rc.get(tb, 0) + d_rc.get(tb, 0)
-        new_bc_tb = bc.get(tb, 0) + d_bc.get(tb, 0)
-        new_imbal = max(abs(new_rc_ta - new_bc_ta), abs(new_rc_tb - new_bc_tb))
-        d_imbal = new_imbal - old_imbal
-
-        return -(d_b2b * 1000 + d_imbal * 500 + d_ro * 15 + d_rp * 12)
-
-    # ── SA loop ────────────────────────────────────────────────────────────────
     best_score = -float('inf')
     best_slot_map: dict[int, int] = {}
     _rng = random.Random(seed)
 
-    # Budget: num_teams swap attempts — reduced from *2 since incremental is cheaper
     budget = num_teams
     T0 = 500.0
 
@@ -688,11 +550,9 @@ def assign_teams(
         for step in range(budget):
             T = T0 * (1.0 - step / budget)
             sa, sb = _rng.sample(slots, 2)
-
             delta = delta_swap(slot_map, sa, sb, b2b, opp, par, rc, bc, tbm)
 
             if delta >= 0 or (T > 0 and (delta / T) > -10 and _rng.random() < (2.718281828 ** (delta / T))):
-                # Accept — apply swap and rebuild full state for accuracy
                 slot_map[sa], slot_map[sb] = slot_map[sb], slot_map[sa]
                 score, b2b, opp, par, rc, bc, tbm = build_score_state(slot_map)
 
@@ -706,13 +566,7 @@ def assign_teams(
     }
 
 
-
 def run_assignment_worker(args: tuple) -> dict:
-    """
-    Worker for Stage 2 ProcessPoolExecutor.
-    Receives (abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, worker_id, seed).
-    Returns best slot_map and score.
-    """
     abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, worker_id, seed = args
     result = assign_teams(abstract_matches, num_teams, team_numbers, ideal_gap, n_iterations, seed)
     result['worker_id'] = worker_id
@@ -720,12 +574,6 @@ def run_assignment_worker(args: tuple) -> dict:
 
 
 def run_assignment_chunk(args: tuple) -> dict:
-    """
-    Like run_assignment_worker but runs a small chunk of iterations.
-    Used for incremental progress reporting in Stage 2.
-    args: (abstract_matches, num_teams, team_numbers, ideal_gap, chunk_size, worker_id, seed)
-    Returns best slot_map, score, and iterations_done for this chunk.
-    """
     abstract_matches, num_teams, team_numbers, ideal_gap, chunk_size, worker_id, seed = args
     result = assign_teams(abstract_matches, num_teams, team_numbers, ideal_gap, chunk_size, seed)
     result['worker_id'] = worker_id

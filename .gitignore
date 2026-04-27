@@ -1,33 +1,26 @@
-# ── Python ────────────────────────────────────────────────────────────────────
+# Python
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
 *.egg-info/
 dist/
 build/
-.eggs/
-*.egg
 venv/
 .venv/
 env/
 .env
 
-# ── Environment / secrets ─────────────────────────────────────────────────────
-# Never commit real credentials.
-# Copy the .example files and fill in your values locally.
+# Environment / secrets
 .env
 .env.*
 !.env.example
 *.local
 
-# ── OpenShift site-specific config ────────────────────────────────────────────
-# config.env and secrets.yaml hold real credentials — never commit them.
-# Commit only the .example templates.
+# OpenShift site-specific config
 openshift/config.env
 openshift/01-secrets.yaml
 
-# ── TLS certificates and keys ─────────────────────────────────────────────────
+# TLS
 *.key
 *.pem
 *.p12
@@ -36,7 +29,7 @@ openshift/01-secrets.yaml
 *.cer
 tls/
 
-# ── Editor / OS ───────────────────────────────────────────────────────────────
+# Editor / OS
 .DS_Store
 Thumbs.db
 .idea/
@@ -45,10 +38,7 @@ Thumbs.db
 *.swo
 *~
 
-# ── Docker / Podman local artifacts ───────────────────────────────────────────
-.dockerignore.local
-
-# ── Test / coverage ───────────────────────────────────────────────────────────
+# Test / coverage
 .pytest_cache/
 htmlcov/
 .coverage

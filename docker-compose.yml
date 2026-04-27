@@ -2,16 +2,7 @@
 #
 # Usage:
 #   cp env.example .env && edit .env
-#   docker compose up -d          # Docker
-#   podman-compose up -d          # Podman
-#
-# TLS (optional):
-#   Set SSL_CERTFILE and SSL_KEYFILE in .env pointing to your cert/key files,
-#   then mount them via the volume below. For local dev, generate a self-signed
-#   cert: openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
-#            -keyout tls/server.key -out tls/server.crt -subj "/CN=localhost"
-#
-# For production on OpenShift, use the openshift/ manifests instead.
+#   docker compose up -d
 
 services:
 
@@ -56,30 +47,14 @@ services:
       APPLE_KEY_ID:      ${APPLE_KEY_ID:-}
       APPLE_PRIVATE_KEY: ${APPLE_PRIVATE_KEY:-}
       ALLOWED_ORIGINS:   ${ALLOWED_ORIGINS:-*}
-      # TLS — set both to enable HTTPS
       SSL_CERTFILE:      ${SSL_CERTFILE:-}
       SSL_KEYFILE:       ${SSL_KEYFILE:-}
     volumes:
-      # Static files — mount for live frontend edits without rebuild
       - ./static:/app/static:ro
-      # TLS certificates — mount your cert/key directory here
-      # Example: set TLS_DIR=./tls in .env, then:
       - ${TLS_DIR:-/dev/null}:/certs:ro
     depends_on:
       db:
         condition: service_healthy
-
-  # Optional: pgAdmin for inspecting the database
-  # Uncomment to enable, then visit http://localhost:5050
-  # pgadmin:
-  #   image: dpage/pgadmin4:latest
-  #   environment:
-  #     PGADMIN_DEFAULT_EMAIL: admin@frc.local
-  #     PGADMIN_DEFAULT_PASSWORD: admin
-  #   ports:
-  #     - "5050:80"
-  #   depends_on:
-  #     - db
 
 volumes:
   pgdata:

@@ -1,7 +1,4 @@
 ---
-# OpenShift Route — used for in-cluster access and OpenShift console integration.
-# TLS termination is 'passthrough' because the pod now speaks HTTPS directly.
-# The MetalLB LoadBalancer Service (in 04-deployment.yaml) handles external access.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -9,9 +6,7 @@ metadata:
   namespace: frc-scheduler-server
   labels:
     app: frc-scheduler-server-git
-    app.kubernetes.io/part-of: frc-scheduler-server-git-app
   annotations:
-    # Allow long-running SSE streams and slow schedule generation
     haproxy.router.openshift.io/timeout: 120s
 spec:
   to:
