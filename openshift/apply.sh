@@ -28,6 +28,17 @@ APP_PORT="${APP_PORT:-8443}"
 CPU_WORKERS="${CPU_WORKERS:-12}"
 WEB_WORKERS="${WEB_WORKERS:-1}"
 
+# Ensure DATABASE_URL is consistent with the component credentials in the secret.
+# Kubernetes $(VAR) interpolation does not work with valueFrom: secretKeyRef sources.
+if oc get secret frc-db-secret -n "$NAMESPACE" > /dev/null 2>&1; then
+  PG_USER=$(oc get secret frc-db-secret -n "$NAMESPACE"     -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
+  PG_PASS=$(oc get secret frc-db-secret -n "$NAMESPACE"     -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
+  PG_DB=$(oc get secret frc-db-secret -n "$NAMESPACE"     -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
+  DB_URL="postgresql+asyncpg://${PG_USER}:${PG_PASS}@frc-postgres:5432/${PG_DB}"
+  oc patch secret frc-db-secret -n "$NAMESPACE"     --type=merge     -p "{"stringData":{"DATABASE_URL":"${DB_URL}"}}"
+  echo "  DATABASE_URL patched into frc-db-secret"
+fi
+
 echo "Applying manifests to namespace: ${NAMESPACE}"
 for manifest in "$SCRIPT_DIR"/[0-9]*.yaml; do
   echo "  -> $(basename "$manifest")"
@@ -37,10 +48,8 @@ for manifest in "$SCRIPT_DIR"/[0-9]*.yaml; do
   # fresh install or after a PVC wipe.
   if [[ "$(basename "$manifest")" == "02-postgres.yaml" ]]; then
     oc rollout status deployment/frc-postgres -n "$NAMESPACE" --timeout=120s
-    PG_USER=$(oc get secret frc-db-secret -n "$NAMESPACE" \
-      -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
-    PG_DB=$(oc get secret frc-db-secret -n "$NAMESPACE" \
-      -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
+    PG_USER=$(oc get secret frc-db-secret -n "$NAMESPACE"       -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
+    PG_DB=$(oc get secret frc-db-secret -n "$NAMESPACE"       -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
     wait_for_postgres_db "$PG_USER" "$PG_DB"
   fi
 done

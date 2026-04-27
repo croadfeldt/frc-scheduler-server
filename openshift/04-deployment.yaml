@@ -52,23 +52,30 @@ spec:
               mountPath: /certs
               readOnly: true
           env:
-            - name: PGUSER
+            - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: frc-db-secret
                   key: POSTGRES_USER
-            - name: PGPASSWORD
+            - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: frc-db-secret
                   key: POSTGRES_PASSWORD
-            - name: PGDB
+            - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
                   name: frc-db-secret
                   key: POSTGRES_DB
+            - name: POSTGRES_HOST
+              value: "frc-postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
             - name: DATABASE_URL
-              value: "postgresql+asyncpg://$(PGUSER):$(PGPASSWORD)@frc-postgres:5432/$(PGDB)"
+              valueFrom:
+                secretKeyRef:
+                  name: frc-db-secret
+                  key: DATABASE_URL
             - name: TBA_API_KEY
               valueFrom:
                 secretKeyRef:

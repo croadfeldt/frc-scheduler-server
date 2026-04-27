@@ -100,12 +100,22 @@ echo ""
 echo "==> [1/6] Applying secrets..."
 oc apply -f "$SCRIPT_DIR/01-secrets.yaml"
 
-# Read the DB credentials from the secret we just applied so we can
-# pass them to wait_for_postgres_db below.
+# Read the DB credentials from the secret we just applied.
 PG_USER=$(oc get secret frc-db-secret -n "$NS" \
   -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
 PG_DB=$(oc get secret frc-db-secret -n "$NS" \
   -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
+PG_PASS=$(oc get secret frc-db-secret -n "$NS" \
+  -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
+
+# Ensure DATABASE_URL is in the secret — Kubernetes $(VAR) interpolation does
+# not work when the referenced var comes from valueFrom: secretKeyRef.
+# We patch it here from the component values so it's always consistent.
+DB_URL="postgresql+asyncpg://${PG_USER}:${PG_PASS}@frc-postgres:5432/${PG_DB}"
+oc patch secret frc-db-secret -n "$NS" \
+  --type=merge \
+  -p "{"stringData":{"DATABASE_URL":"${DB_URL}"}}"
+echo "    DATABASE_URL patched into frc-db-secret"
 
 # ── 4. Network policy ─────────────────────────────────────────────────────────
 echo ""
