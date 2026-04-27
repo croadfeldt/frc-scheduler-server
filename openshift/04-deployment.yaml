@@ -2,15 +2,15 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frc-scheduler-server
-  namespace: frc-scheduler-server
+  name: NAMESPACE_PLACEHOLDER
+  namespace: NAMESPACE_PLACEHOLDER
   labels:
-    app: frc-scheduler-server-git
+    app: NAMESPACE_PLACEHOLDER-git
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: frc-scheduler-server-git
+      app: NAMESPACE_PLACEHOLDER-git
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -19,7 +19,7 @@ spec:
   template:
     metadata:
       labels:
-        app: frc-scheduler-server-git
+        app: NAMESPACE_PLACEHOLDER-git
     spec:
       topologySpreadConstraints:
         - maxSkew: 1
@@ -27,7 +27,7 @@ spec:
           whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
-              app: frc-scheduler-server-git
+              app: NAMESPACE_PLACEHOLDER-git
       securityContext:
         runAsNonRoot: true
       volumes:
@@ -44,8 +44,8 @@ spec:
             capabilities:
               drop: ["ALL"]
       containers:
-        - name: frc-scheduler-server
-          image: image-registry.openshift-image-registry.svc:5000/frc-scheduler-server/frc-scheduler-server-git:latest
+        - name: NAMESPACE_PLACEHOLDER
+          image: image-registry.openshift-image-registry.svc:5000/NAMESPACE_PLACEHOLDER/NAMESPACE_PLACEHOLDER-git:latest
           imagePullPolicy: Always
           volumeMounts:
             - name: tls-certs
@@ -137,13 +137,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: frc-scheduler-server
-  namespace: frc-scheduler-server
+  name: NAMESPACE_PLACEHOLDER
+  namespace: NAMESPACE_PLACEHOLDER
   labels:
-    app: frc-scheduler-server-git
+    app: NAMESPACE_PLACEHOLDER-git
 spec:
   selector:
-    app: frc-scheduler-server-git
+    app: NAMESPACE_PLACEHOLDER-git
   ports:
     - name: https
       port: 8443
@@ -152,10 +152,10 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: frc-scheduler-server-pdb
-  namespace: frc-scheduler-server
+  name: NAMESPACE_PLACEHOLDER-pdb
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   minAvailable: 1
   selector:
     matchLabels:
-      app: frc-scheduler-server-git
+      app: NAMESPACE_PLACEHOLDER-git

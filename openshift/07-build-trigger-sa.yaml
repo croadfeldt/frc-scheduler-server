@@ -4,14 +4,14 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: build-trigger-sa
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 ---
 # Role: permission to start builds and restart deployments
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: build-trigger-role
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 rules:
   - apiGroups: ["build.openshift.io"]
     resources: ["buildconfigs/instantiate"]
@@ -27,11 +27,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: build-trigger-binding
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 subjects:
   - kind: ServiceAccount
     name: build-trigger-sa
-    namespace: frc-scheduler-server
+    namespace: NAMESPACE_PLACEHOLDER
 roleRef:
   kind: Role
   name: build-trigger-role

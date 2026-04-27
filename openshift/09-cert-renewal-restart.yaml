@@ -5,7 +5,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: cert-renewal-restart
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   schedule: "0 3 * * 0"
   concurrencyPolicy: Forbid
@@ -21,4 +21,4 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - oc rollout restart deployment/frc-scheduler-server -n frc-scheduler-server
+                - oc rollout restart deployment/NAMESPACE_PLACEHOLDER -n NAMESPACE_PLACEHOLDER

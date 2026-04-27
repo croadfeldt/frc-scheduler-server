@@ -14,7 +14,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: frc-scheduler-tls
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   secretName: frc-scheduler-tls
   issuerRef:

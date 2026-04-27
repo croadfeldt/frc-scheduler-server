@@ -12,15 +12,15 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: frc-scheduler-hpa
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
   labels:
-    app: frc-scheduler-server-git
+    app: NAMESPACE_PLACEHOLDER-git
     app.kubernetes.io/part-of: frc-scheduler
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: frc-scheduler-server
+    name: NAMESPACE_PLACEHOLDER
   minReplicas: 1
   maxReplicas: 4
   metrics:

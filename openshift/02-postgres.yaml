@@ -3,7 +3,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: frc-postgres-data
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   accessModes: [ReadWriteOnce]
   resources:
@@ -14,7 +14,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frc-postgres
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
   labels:
     app: frc-postgres
 spec:
@@ -78,7 +78,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: frc-postgres
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
   labels:
     app: frc-postgres
 spec:

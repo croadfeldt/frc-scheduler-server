@@ -4,7 +4,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: git-poll-trigger
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   schedule: "*/5 * * * *"
   concurrencyPolicy: Forbid
@@ -19,21 +19,29 @@ spec:
           containers:
             - name: git-poll
               image: registry.redhat.io/openshift4/ose-cli:latest
+              env:
+                - name: GIT_REPO_URL
+                  value: "https://github.com/YOUR_ORG/YOUR_REPO.git"
+                - name: GIT_BRANCH
+                  value: "GIT_BRANCH_PLACEHOLDER"
+                - name: NAMESPACE
+                  value: "NAMESPACE_PLACEHOLDER"
+                - name: BUILD_CONFIG
+                  value: "frc-scheduler-server-git"  # this is the fixed BuildConfig name, not the namespace
               command:
                 - /bin/sh
                 - -c
                 - |
                   set -e
-                  REPO="https://github.com/YOUR_ORG/YOUR_REPO.git"
-                  REMOTE_HEAD=$(git ls-remote "$REPO" refs/heads/main | cut -f1)
-                  LAST_BUILD=$(oc get bc frc-scheduler-server-git -n frc-scheduler-server \
+                  REMOTE_HEAD=$(git ls-remote "$GIT_REPO_URL" "refs/heads/${GIT_BRANCH}" | cut -f1)
+                  LAST_BUILD=$(oc get bc "$BUILD_CONFIG" -n "$NAMESPACE" \
                     -o jsonpath='{.status.lastVersion}' 2>/dev/null || echo "0")
-                  LAST_COMMIT=$(oc get build frc-scheduler-server-git-${LAST_BUILD} \
-                    -n frc-scheduler-server \
+                  LAST_COMMIT=$(oc get build "${BUILD_CONFIG}-${LAST_BUILD}" \
+                    -n "$NAMESPACE" \
                     -o jsonpath='{.spec.revision.git.commit}' 2>/dev/null || echo "")
                   if [ "$REMOTE_HEAD" != "$LAST_COMMIT" ]; then
                     echo "New commit detected: $REMOTE_HEAD (was: $LAST_COMMIT)"
-                    oc start-build frc-scheduler-server-git -n frc-scheduler-server
+                    oc start-build "$BUILD_CONFIG" -n "$NAMESPACE"
                   else
                     echo "No change at $REMOTE_HEAD"
                   fi

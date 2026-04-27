@@ -2,10 +2,10 @@
 apiVersion: image.openshift.io/v1
 kind: ImageStream
 metadata:
-  name: frc-scheduler-server-git
-  namespace: frc-scheduler-server
+  name: NAMESPACE_PLACEHOLDER-git
+  namespace: NAMESPACE_PLACEHOLDER
   labels:
-    app: frc-scheduler-server-git
+    app: NAMESPACE_PLACEHOLDER-git
 spec:
   lookupPolicy:
     local: true
@@ -13,10 +13,10 @@ spec:
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
 metadata:
-  name: frc-scheduler-server-git
-  namespace: frc-scheduler-server
+  name: NAMESPACE_PLACEHOLDER-git
+  namespace: NAMESPACE_PLACEHOLDER
   labels:
-    app: frc-scheduler-server-git
+    app: NAMESPACE_PLACEHOLDER-git
 spec:
   failedBuildsHistoryLimit: 5
   successfulBuildsHistoryLimit: 5
@@ -25,7 +25,7 @@ spec:
     type: Git
     git:
       uri: https://github.com/YOUR_ORG/YOUR_REPO.git
-      ref: refs/heads/main
+      ref: refs/heads/GIT_BRANCH_PLACEHOLDER
     contextDir: /
   strategy:
     type: Docker
@@ -34,6 +34,6 @@ spec:
   output:
     to:
       kind: ImageStreamTag
-      name: frc-scheduler-server-git:latest
+      name: NAMESPACE_PLACEHOLDER-git:latest
   triggers:
     - type: ConfigChange

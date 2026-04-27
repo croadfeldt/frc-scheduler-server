@@ -1,25 +1,24 @@
 ---
 # Default deny all ingress and egress for the namespace.
-# Specific policies below selectively open what's needed.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: frc-scheduler-deny-all
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
 ---
-# Allow HTTPS ingress to the app pods from anywhere (HAProxy route)
+# Allow HTTPS ingress to app pods from anywhere (HAProxy route)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: frc-scheduler-allow-https-ingress
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   podSelector:
     matchLabels:
-      app: frc-scheduler-server-git
+      app: NAMESPACE_PLACEHOLDER-git
   policyTypes: [Ingress]
   ingress:
     - ports:
@@ -31,11 +30,11 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: frc-scheduler-allow-postgres-egress
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   podSelector:
     matchLabels:
-      app: frc-scheduler-server-git
+      app: NAMESPACE_PLACEHOLDER-git
   policyTypes: [Egress]
   egress:
     - to:
@@ -46,12 +45,12 @@ spec:
         - port: 5432
           protocol: TCP
 ---
-# Allow DNS for all pods (required for any hostname resolution)
+# Allow DNS resolution for all pods
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: frc-scheduler-allow-dns-egress
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   podSelector: {}
   policyTypes: [Egress]
@@ -66,17 +65,16 @@ spec:
         - port: 53
           protocol: TCP
 ---
-# Allow app pods to reach the internet on 443 (TBA, FRC Events, OAuth)
-# Excludes RFC1918 ranges to prevent lateral movement — Postgres is handled above.
+# Allow app pods to reach the internet on 443 (TBA, FRC Events, Google/Apple OAuth)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: frc-scheduler-allow-internet-egress
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   podSelector:
     matchLabels:
-      app: frc-scheduler-server-git
+      app: NAMESPACE_PLACEHOLDER-git
   policyTypes: [Egress]
   egress:
     - to:
@@ -90,16 +88,21 @@ spec:
         - port: 443
           protocol: TCP
 ---
-# Allow build pods to reach GitHub (443) and the OpenShift API server (172.30.0.1:443).
-# Build pods have label openshift.io/build.name set but NOT app: frc-scheduler-server-git,
-# so they are blocked by deny-all without this explicit policy.
-# The Kubernetes service CIDR (172.30.0.0/16) must be reachable so the build pod
-# can report build status back to the API server.
+# Allow build pods full egress — they need:
+#   - GitHub (443) to clone the repo
+#   - The OpenShift API server (K8S_SERVICE_CIDR, typically 172.30.0.0/16) to
+#     report build status. This range falls inside 172.16.0.0/12 which is blocked
+#     by the app internet egress rule above, so we must explicitly permit it here.
+#   - The internal image registry (also in K8S_SERVICE_CIDR) to push the built image.
+#
+# Build pods are selected by the openshift.io/build.name label that OpenShift
+# automatically applies. We grant them unrestricted egress rather than trying to
+# enumerate every IP range the build process touches.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: frc-scheduler-allow-build-egress
-  namespace: frc-scheduler-server
+  namespace: NAMESPACE_PLACEHOLDER
 spec:
   podSelector:
     matchExpressions:
@@ -107,31 +110,5 @@ spec:
         operator: Exists
   policyTypes: [Egress]
   egress:
-    # GitHub and other external hosts (port 443)
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 192.168.0.0/16
-      ports:
-        - port: 443
-          protocol: TCP
-    # OpenShift API server — lives in 172.30.0.0/16 (Kubernetes service CIDR)
-    # Must be explicitly allowed since we excluded 172.16.0.0/12 above
-    - to:
-        - ipBlock:
-            cidr: 172.30.0.0/16
-      ports:
-        - port: 443
-          protocol: TCP
-    # Git over SSH (optional — only needed if using SSH git URLs)
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 192.168.0.0/16
-      ports:
-        - port: 22
-          protocol: TCP
+    # Allow all egress from build pods — cloning, API server, image registry push
+    - {}

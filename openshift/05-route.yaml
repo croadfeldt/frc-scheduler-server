@@ -2,16 +2,16 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: frc-scheduler-server
-  namespace: frc-scheduler-server
+  name: NAMESPACE_PLACEHOLDER
+  namespace: NAMESPACE_PLACEHOLDER
   labels:
-    app: frc-scheduler-server-git
+    app: NAMESPACE_PLACEHOLDER-git
   annotations:
     haproxy.router.openshift.io/timeout: 120s
 spec:
   to:
     kind: Service
-    name: frc-scheduler-server
+    name: NAMESPACE_PLACEHOLDER
   port:
     targetPort: https
   tls:
