@@ -56,5 +56,16 @@ if oc get deployment frc-scheduler-server -n "$NAMESPACE" > /dev/null 2>&1; then
   oc rollout restart deployment/frc-scheduler-server -n "$NAMESPACE"
 fi
 
-echo ""
-echo "Done. Monitor build: oc start-build frc-scheduler-server-git --follow -n ${NAMESPACE}"
+# If --build flag passed, refresh registry credentials and trigger a build.
+if [[ "${1:-}" == "--build" ]]; then
+  echo ""
+  echo "==> Triggering build..."
+  refresh_registry
+  link_builder_registry_secret "$NAMESPACE"
+  oc start-build frc-scheduler-server-git -n "$NAMESPACE" --follow
+else
+  echo ""
+  echo "Done."
+  echo "To trigger a build: oc start-build frc-scheduler-server-git --follow -n ${NAMESPACE}"
+  echo "Or run:             ./apply.sh --build"
+fi

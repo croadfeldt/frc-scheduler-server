@@ -59,3 +59,28 @@ wait_for_postgres_db() {
   oc logs -n "$NAMESPACE" deployment/frc-postgres --tail=30 2>/dev/null || true
   return 1
 }
+
+refresh_registry() {
+  echo "    Refreshing image registry operator (NooBaa credential reconcile)..."
+  oc patch configs.imageregistry.operator.openshift.io cluster \
+    --type merge --patch '{"spec":{"managementState":"Removed"}}' 2>/dev/null || true
+  sleep 15
+  oc patch configs.imageregistry.operator.openshift.io cluster \
+    --type merge --patch '{"spec":{"managementState":"Managed"}}' 2>/dev/null || true
+  echo "    Waiting for registry rollout..."
+  oc rollout status deployment/image-registry \
+    -n openshift-image-registry --timeout=120s 2>/dev/null || true
+  echo "    Registry ready."
+}
+
+link_builder_registry_secret() {
+  local ns="$1"
+  local secret
+  secret=$(oc get secret -n "$ns" -o name 2>/dev/null \
+    | grep builder-dockercfg | head -1 | sed 's|secret/||')
+  if [ -n "$secret" ]; then
+    oc secrets link builder "$secret" --for=mount -n "$ns" 2>/dev/null || true
+    oc secrets link default  "$secret" --for=pull  -n "$ns" 2>/dev/null || true
+    echo "    Linked registry secret $secret to builder/default SAs"
+  fi
+}

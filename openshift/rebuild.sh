@@ -31,26 +31,6 @@ WEB_WORKERS="${WEB_WORKERS:-1}"
 
 NS="$NAMESPACE"
 
-refresh_registry() {
-  echo "    Refreshing image registry operator (NooBaa credential reconcile)..."
-  oc patch configs.imageregistry.operator.openshift.io cluster \
-    --type merge --patch '{"spec":{"managementState":"Removed"}}' 2>/dev/null || true
-  sleep 15
-  oc patch configs.imageregistry.operator.openshift.io cluster \
-    --type merge --patch '{"spec":{"managementState":"Managed"}}' 2>/dev/null || true
-  echo "    Waiting for registry deployment to be available..."
-  for i in $(seq 1 24); do
-    if oc get deployment image-registry -n openshift-image-registry > /dev/null 2>&1; then
-      break
-    fi
-    echo "    attempt $i/24 — waiting 5s..."
-    sleep 5
-  done
-  echo "    Waiting for registry rollout..."
-  oc rollout status deployment/image-registry \
-    -n openshift-image-registry --timeout=120s 2>/dev/null || true
-  echo "    Registry ready."
-}
 
 wait_for_build() {
   local BUILD="$1"
@@ -146,6 +126,14 @@ oc policy add-role-to-user \
   system:image-builder \
   system:serviceaccount:"$NS":builder \
   -n "$NS"
+
+link_builder_registry_secret "$NS"
+
+# Refresh registry credentials immediately before starting the build.
+# The credentials from the initial refresh may have rotated by the time
+# the build pod is ready to push, causing authentication failures.
+echo "    Refreshing registry credentials before build push..."
+refresh_registry
 
 echo ""
 echo "==> Starting build..."
