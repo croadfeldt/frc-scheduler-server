@@ -22,7 +22,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://www.thebluealliance.com https://frc-api.firstinspires.org https://info.firstinspires.org https://appleid.apple.com https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com; frame-ancestors 'none';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FRC Match Scheduler</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1018,6 +1017,45 @@
           </div>
         </div>
         <!-- ── Practice Day ────────────────────────────────────────────── -->
+        <div id="practiceDaySection" style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.6rem;background:rgba(93,175,120,0.08);border-bottom:1px solid transparent;" id="practiceDayHeader">
+            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.78rem;font-weight:600;color:var(--text);user-select:none;">
+              <input type="checkbox" id="practiceDayEnabled" onchange="togglePracticeDay()" style="accent-color:#5daf78;width:13px;height:13px;flex-shrink:0;">
+              <span style="color:#5daf78;">&#9654; Practice Day</span>
+            </label>
+            <span id="practiceDayPDFBadge" style="display:none;font-size:0.65rem;font-weight:600;padding:0.1rem 0.45rem;border-radius:3px;background:rgba(93,175,120,0.18);color:#5daf78;">PDF ✓</span>
+          </div>
+          <div id="practiceDayBody" style="display:none;padding:0.5rem 0.6rem 0.6rem;border-top:1px solid var(--border);">
+            <div class="field-row" style="margin-bottom:0.4rem;">
+              <div class="field">
+                <label>Start Time</label>
+                <input type="time" id="practiceStart" value="08:00" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
+              </div>
+              <div class="field">
+                <label>End Time</label>
+                <input type="time" id="practiceEnd" value="17:00" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
+              </div>
+            </div>
+            <div class="field-row" style="margin-bottom:0.4rem;">
+              <div class="field" title="Guaranteed matches every team plays (3 for most regionals)">
+                <label>Guaranteed Matches/Team</label>
+                <input type="number" id="practiceGuaranteed" value="3" min="1" max="20" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
+              </div>
+              <div class="field" title="Additional filler matches to fill remaining time. 99 = fill all available time.">
+                <label>Max Filler Matches/Team</label>
+                <input type="number" id="practiceFiller" value="99" min="0" max="99" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field" title="Minutes per practice match. Practice often runs slower than qual.">
+                <label>Minutes per Practice Match</label>
+                <input type="number" id="practiceCycleTime" value="9" min="0.5" max="60" step="any" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
+              </div>
+            </div>
+            <div id="practiceDayStatus" style="font-size:0.7rem;color:var(--text-muted);margin-top:0.3rem;"></div>
+          </div>
+        </div>
+
         <!-- Practice Day panel -->
         <div id="practiceDaySection" style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
           <div id="practiceDayHeader" style="display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.6rem;background:rgba(93,175,120,0.08);border-bottom:1px solid transparent;">
@@ -1200,6 +1238,7 @@ let _currentAssignSeed = null;           // hex Stage 2 seed
 let _urlAutoTeams = null;                // teams from URL for Stage 2 auto-assign
 let _agendaBlocks = null;
 window._practicePDFBlocks = null;
+window._practicePDFBlocks = null;                // parsed qual time blocks from FIRST agenda PDF
 
 // ── Processing Overlay ────────────────────────────────────────────────────────
 // Shows a modal overlay with step-by-step status during multi-step auto operations.
@@ -1789,11 +1828,10 @@ async function initAuth() {
   const hash = window.location.hash;
   if (hash && hash.includes('token=')) {
     const m = hash.match(/token=([^&]+)/);
-    if (m) { setToken(decodeURIComponent(m[1])); window.location.hash = ''; history.replaceState(null, '', window.location.pathname + window.location.search); }
+    if (m) { setToken(m[1]); window.location.hash = ''; }
   }
   // Listen for postMessage from OAuth popup
   window.addEventListener('message', function(e) {
-    if (e.origin !== window.location.origin) return;  // reject cross-origin messages
     if (e.data && e.data.token) { setToken(e.data.token); refreshAuthUI(); }
   });
   await refreshAuthUI();
@@ -2643,7 +2681,7 @@ async function parsePDFBlocks(buf) {
     }
   }
   const normalized = normalizePDFText(allText);
-  try { window._practicePDFBlocks = parsePracticeBlocks(normalized); } catch(e) { console.warn('parsePracticeBlocks error:', e); window._practicePDFBlocks = []; }
+  window._practicePDFBlocks = parsePracticeBlocks(normalized);
   return parseQualBlocks(normalized);
 }
 
@@ -2841,6 +2879,82 @@ function parsePracticeBlocks(text) {
  * Parse practice match time blocks from normalised agenda PDF text.
  * Mirrors parseQualBlocks but targets "Practice Match" label.
  */
+function parsePracticeBlocks(text) {
+  var blocks = [];
+  var lines = text.replace(/\r/g, '').split('\n');
+  var dayRe = /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b\s*[,]?\s+(\w+\s+\d{1,2}|\d+\/\d+\/\d+)/i;
+  // Standard dash-separator format
+  var practiceRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z*~]{1,2})?\s*[-\u2013\u2014]\s*~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z0-9*~]{1,2})?\s+Practice\s+Match/i;
+  // Ontario two-column format (no dash)
+  var practiceNoSepRe = /^(\d{1,2}:\d{2}\s*[AaPp][Mm])[ \t]+(\d{1,2}:\d{2}\s*[AaPp][Mm])[ \t*]+Practice\s+Match/i;
+  // NC Begin/Continue format
+  var practiceBeginRe = /^~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])[ \t]+Practice\s+Match(?:es?)?[ \t]+(?:Begin|Continue)/i;
+  var leadTimeRe = /^~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])/;
+  var currentDay = '', blockNum = 0, openBeginBlock = null;
+
+  function hasBlock(s) {
+    return blocks.some(function(b) { return Math.abs(b.start - s) < 20; });
+  }
+  function closeOpenBlock(endStr, endTime) {
+    if (!openBeginBlock) return;
+    if (endTime !== null && endTime > openBeginBlock.start && !hasBlock(openBeginBlock.start)) {
+      blockNum++;
+      blocks.push({ start: openBeginBlock.start, end: endTime,
+        duration: endTime - openBeginBlock.start,
+        startStr: openBeginBlock.startStr, endStr: endStr, day: openBeginBlock.day });
+    }
+    openBeginBlock = null;
+  }
+
+  for (var _i = 0; _i < lines.length; _i++) {
+    var line = lines[_i];
+    var dm = dayRe.exec(line);
+    if (dm) currentDay = dm[1].substring(0, 3) + ' ' + dm[2];
+    var pm = practiceRe.exec(line) || practiceNoSepRe.exec(line);
+    if (pm) {
+      var pS = parseTime12agenda(pm[1]), pE = parseTime12agenda(pm[2]);
+      if (pS !== null && pE !== null && pE > pS) {
+        if (openBeginBlock) {
+          if (Math.abs(openBeginBlock.start - pS) >= 20) closeOpenBlock(pm[1].trim(), pS);
+          else openBeginBlock = null;
+        }
+        blockNum++;
+        blocks.push({ start: pS, end: pE, duration: pE - pS,
+          startStr: pm[1].trim(), endStr: pm[2].trim(), day: currentDay || ('Block ' + blockNum) });
+      }
+      continue;
+    }
+    var bm2 = practiceBeginRe.exec(line.trim());
+    if (bm2) {
+      var bt = parseTime12agenda(bm2[1]);
+      if (bt !== null) {
+        if (openBeginBlock && bt > openBeginBlock.start) closeOpenBlock(bm2[1].trim(), bt);
+        openBeginBlock = { start: bt, startStr: bm2[1].trim(), day: currentDay || '' };
+      }
+      continue;
+    }
+    if (openBeginBlock) {
+      var ltm = leadTimeRe.exec(line.trim());
+      if (ltm) {
+        var lt = parseTime12agenda(ltm[1]);
+        if (lt && lt > openBeginBlock.start && (lt - openBeginBlock.start) >= 30) closeOpenBlock(ltm[1].trim(), lt);
+      }
+    }
+  }
+
+  // Fallback: single-line scan
+  if (blocks.length === 0) {
+    var fullText = text.replace(/\n/g, ' ');
+    var reG = /(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z*~]{1,2})?\s*[-\u2013\u2014]\s*~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z0-9*~]{1,2})?\s+Practice\s+Match/gi;
+    var fm;
+    while ((fm = reG.exec(fullText)) !== null) {
+      var fs = parseTime12agenda(fm[1]), fe = parseTime12agenda(fm[2]); blockNum++;
+      if (fs !== null && fe !== null && fe > fs)
+        blocks.push({ start: fs, end: fe, duration: fe - fs, startStr: fm[1].trim(), endStr: fm[2].trim(), day: 'Block ' + blockNum });
+    }
+  }
+  return blocks;
+}
 
 function distributeMatchesToBlocks(totalMatches, blocks, cycleTime) {
   // Legacy: single cycle time — wrap to per-ct version
@@ -2903,6 +3017,11 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     updateAgendaFit();
 
     // Auto-fill practice day from PDF if practice blocks found
+    if (window._practicePDFBlocks && window._practicePDFBlocks.length > 0) {
+      applyPracticePDFBlocks(window._practicePDFBlocks);
+    }
+
+    // Auto-fill practice day from PDF if practice blocks were found
     if (window._practicePDFBlocks && window._practicePDFBlocks.length > 0) {
       applyPracticePDFBlocks(window._practicePDFBlocks);
     }
@@ -3025,7 +3144,7 @@ function renderScheduleBars() {
 
   // Day color palette — one distinct color per day number
   // DAY_COLORS defined at module level — see below renderScheduleBars
-  function dayColor(n) { return n === 0 ? '#5daf78' : _DAY_COLORS[(n - 1) % _DAY_COLORS.length]; }
+  function dayColor(n) { return _DAY_COLORS[(n - 1) % _DAY_COLORS.length]; }
 
   // ── Build sections from schedule ────────────────────────────────────────────
   // committed = sum of actual match durations (endMin - startMin), which already
@@ -3034,8 +3153,8 @@ function renderScheduleBars() {
 
   window._frcScheduled.forEach(function(day) {
     if (!day.entries || !day.entries.length) return;
-    var dayNum   = (day.dayNum != null) ? day.dayNum : 1;
-    var dayLabel = day.isPracticeDay ? 'Practice' : ('Day ' + dayNum);
+    var dayNum   = day.dayNum || 1;
+    var dayLabel = 'Day ' + dayNum;
     var currentMatches     = [];
     var currentShortBreaks = [];
     var slotStart = (day.start != null) ? day.start : null;
@@ -3506,6 +3625,61 @@ function applyAgendaToSchedule() {
   // calcMaxMatches (and then generateSchedule) after applyAgendaToSchedule returns.
 }
 
+// ── Practice Day ──────────────────────────────────────────────────────────────
+
+function togglePracticeDay() {
+  var enabled = document.getElementById('practiceDayEnabled').checked;
+  document.getElementById('practiceDayBody').style.display = enabled ? '' : 'none';
+  document.getElementById('practiceDayHeader').style.borderBottomColor = enabled ? 'var(--border)' : 'transparent';
+  onCycleTimeChanged();
+}
+
+function getPracticeConfig() {
+  var enabled = document.getElementById('practiceDayEnabled');
+  if (!enabled || !enabled.checked) return null;
+  var start = document.getElementById('practiceStart').value;
+  var end   = document.getElementById('practiceEnd').value;
+  var guaranteed = parseInt(document.getElementById('practiceGuaranteed').value) || 3;
+  var filler = parseInt(document.getElementById('practiceFiller').value);
+  if (isNaN(filler)) filler = 99;
+  var ct = parseFloat(document.getElementById('practiceCycleTime').value) || 9;
+  if (!start || !end) return null;
+  var startMin = timeToMin(start), endMin = timeToMin(end);
+  if (endMin <= startMin) return null;
+  return { start, end, startMin, endMin, guaranteed, filler, ct };
+}
+
+function applyPracticePDFBlocks(practiceBlocks) {
+  if (!practiceBlocks || !practiceBlocks.length) return;
+  var allStart = Math.min.apply(null, practiceBlocks.map(function(b){return b.start;}));
+  var allEnd   = Math.max.apply(null, practiceBlocks.map(function(b){return b.end;}));
+  var enabledCb = document.getElementById('practiceDayEnabled');
+  if (enabledCb && !enabledCb.checked) { enabledCb.checked = true; togglePracticeDay(); }
+  var startEl = document.getElementById('practiceStart');
+  var endEl   = document.getElementById('practiceEnd');
+  if (startEl) startEl.value = minToTimeStr(allStart);
+  if (endEl)   endEl.value   = minToTimeStr(allEnd);
+  var badge = document.getElementById('practiceDayPDFBadge');
+  if (badge) badge.style.display = '';
+  var status = document.getElementById('practiceDayStatus');
+  if (status) status.textContent = '✓ Practice time loaded from PDF: ' + fmtTime12(allStart) + ' – ' + fmtTime12(allEnd);
+}
+
+function calcPracticeMatches(numTeams, practiceConfig) {
+  if (!practiceConfig || numTeams < 6) return null;
+  var pc = practiceConfig;
+  var available = pc.endMin - pc.startMin;
+  var guaranteedMatchCount = Math.ceil(numTeams * pc.guaranteed / 6);
+  var guaranteedTime = guaranteedMatchCount * pc.ct;
+  var remainingTime = available - guaranteedTime;
+  var fillerByTime  = remainingTime > 0 ? Math.floor(remainingTime / pc.ct) : 0;
+  var fillerByMpt   = Math.ceil(numTeams * pc.filler / 6);
+  var fillerMatches = Math.min(fillerByTime, fillerByMpt);
+  var totalMatches  = guaranteedMatchCount + Math.max(0, fillerMatches);
+  var totalMpt      = totalMatches > 0 ? Math.round((totalMatches * 6) / numTeams * 10) / 10 : 0;
+  return { guaranteed: guaranteedMatchCount, fillerFit: fillerMatches, total: totalMatches, mpt: totalMpt, availMin: available, usedMin: totalMatches * pc.ct };
+}
+
 // ── Practice Day ──────────────────────────────────────────────────────────────────────
 
 function togglePracticeDay() {
@@ -3559,17 +3733,6 @@ function calcPracticeMatches(numTeams, pc) {
   var mpt   = total > 0 ? Math.round(total * 6 / numTeams * 10) / 10 : 0;
   return { guaranteed: guaranteedCount, fillerFit: fillerCount, total: total,
            mpt: mpt, availMin: available, usedMin: total * pc.ct };
-}
-
-// ── Security: HTML escape utility ──────────────────────────────────────────
-function escHtml(s) {
-  if (s == null) return '';
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
 }
 
 // ── Day/Night mode ────────────────────────────────────────────────────────────
@@ -3652,7 +3815,7 @@ function searchTbaIndex(query) {
     .slice(0, 20);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 function calcMaxMatches() {
   var numTeams    = parseInt(document.getElementById('numTeams').value) || 0;
   var breakBuffer = parseFloat(document.getElementById('breakBuffer').value) || 0;
@@ -3718,7 +3881,7 @@ function calcMaxMatches() {
         var t = dayCycleChanges.length > 0 ? dayCycleChanges[0].time : (parseFloat(document.getElementById('cycleTime').value) || 8);
         dayCycleChanges.forEach(function(cc) {
           if (cc.isStart) { t = cc.time; }
-          else if (!isNaN(cc.afterMatch) && totalSlotMatches >= cc.afterMatch) { t = cc.time; }
+          else if (!isNaN(cc.afterMatch) && totalSlotMatches + 1 > cc.afterMatch) { t = cc.time; }
         });
         return t;
       })();
@@ -4512,7 +4675,7 @@ function generateMatches(numTeams, matchesPerTeam, idealGap, seed) {
     for (let i = 0; i < blue.length; i++) for (let j = i+1; j < blue.length; j++) { partners[blue[i]][blue[j]]++; partners[blue[j]][blue[i]]++; }
   }
 
-  // ── Post-generation sweeps ──────────────────────────────────────────────────
+  // ── Post-generation sweeps ───────────────────────────────────────────────────
   //
   // Three rules enforced after greedy scheduling:
   //   Rule 1: No surrogate in the last match (already handled by swap below)
@@ -5079,7 +5242,7 @@ async function fetchTbaDropdown() {
     const list = document.getElementById('tbaDropdownList');
     if (list) {
       list.innerHTML = '<div style="padding:0.5rem 0.7rem;font-size:0.75rem;color:var(--danger);">'
-        + (escHtml(e.message) || 'TBA unavailable') + '</div>';
+        + (e.message || 'TBA unavailable') + '</div>';
       document.getElementById('tbaDropdown').style.display = 'block';
     }
   }
@@ -5109,10 +5272,10 @@ function populateTbaDropdown(events) {
 
     row.style.cssText = 'display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.7rem;cursor:pointer;border-bottom:1px solid var(--border);font-size:0.8rem;';
     row.innerHTML =
-      '<span style="font-family:Barlow Condensed,sans-serif;font-weight:700;color:var(--accent);min-width:5rem;flex-shrink:0;">' + escHtml(ev.key) + '</span>' +
-      '<span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(ev.name || '') + '</span>' +
-      (ev.location ? '<span style="color:var(--text-muted);font-size:0.68rem;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;" title="' + escHtml(ev.location) + '">' + escHtml(ev.location) + '</span>' : '') +
-      '<span style="color:var(--text-muted);font-size:0.7rem;flex-shrink:0;">' + escHtml(ev.start_date || '') + '</span>' +
+      '<span style="font-family:Barlow Condensed,sans-serif;font-weight:700;color:var(--accent);min-width:5rem;flex-shrink:0;">' + ev.key + '</span>' +
+      '<span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (ev.name || '') + '</span>' +
+      (ev.location ? '<span style="color:var(--text-muted);font-size:0.68rem;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;" title="' + ev.location + '">' + ev.location + '</span>' : '') +
+      '<span style="color:var(--text-muted);font-size:0.7rem;flex-shrink:0;">' + (ev.start_date || '') + '</span>' +
       '<span style="font-size:0.58rem;font-family:Barlow Condensed,sans-serif;font-weight:700;letter-spacing:0.06em;' +
         'color:' + srcColor + ';background:' + srcBg + ';border:1px solid ' + srcColor + ';' +
         'border-radius:3px;padding:1px 4px;flex-shrink:0;">' + srcLabel + '</span>';
@@ -5391,18 +5554,18 @@ async function searchTBA() {
     events.slice(0, 30).forEach(e => {
       const row = document.createElement('div');
       row.className = 'tba-result';
-      row.innerHTML = '<span class="tba-result-key">' + escHtml(e.key) + '</span>' +
-        '<span class="tba-result-name">' + escHtml(e.name) + '</span>' +
-        '<span class="tba-result-date">' + escHtml(e.start_date || '') + '</span>';
+      row.innerHTML = '<span class="tba-result-key">' + e.key + '</span>' +
+        '<span class="tba-result-name">' + e.name + '</span>' +
+        '<span class="tba-result-date">' + (e.start_date || '') + '</span>';
       row.onclick = () => importFromTBA(e.key);
       list.appendChild(row);
     });
-  } catch(e) { list.innerHTML = '<div style="color:var(--danger);font-size:0.78rem;">' + escHtml(e.message) + '</div>'; }
+  } catch(e) { list.innerHTML = '<div style="color:var(--danger);font-size:0.78rem;">' + e.message + '</div>'; }
 }
 
 async function importFromTBA(eventKey) {
   const list = document.getElementById('tbaResults');
-  list.innerHTML = '<div style="color:var(--text-muted);font-size:0.78rem;">Importing ' + escHtml(eventKey) + '…</div>';
+  list.innerHTML = '<div style="color:var(--text-muted);font-size:0.78rem;">Importing ' + eventKey + '…</div>';
   try {
     const result = await apiFetch('/api/tba/import/' + eventKey, { method: 'POST' });
     showApiStatus('Imported ' + result.name + ' with ' + result.teams_imported + ' teams');
@@ -5414,7 +5577,7 @@ async function importFromTBA(eventKey) {
     const ev = await apiFetch('/api/events/' + result.id);
     activateEvent(ev);
   } catch(e) {
-    list.innerHTML = '<div style="color:var(--danger);font-size:0.78rem;">' + escHtml(e.message) + '</div>';
+    list.innerHTML = '<div style="color:var(--danger);font-size:0.78rem;">' + e.message + '</div>';
   }
 }
 
@@ -5432,7 +5595,7 @@ async function loadRoster() {
       const row = document.createElement('div');
       row.className = 'team-row';
       row.innerHTML = '<span class="team-num">' + t.number + '</span>' +
-        '<span class="team-name">' + escHtml(t.nickname || t.name || '') + '</span>' +
+        '<span class="team-name">' + (t.nickname || t.name || '') + '</span>' +
         '<button class="team-remove" onclick="removeTeam(' + t.number + ')" title="Remove">&#x2715;</button>';
       roster.appendChild(row);
     });
@@ -6115,7 +6278,7 @@ function showStage2Panel(numTeams) {
   updateIterationEstimate();
 }
 
-// ── Commit: mark the current assigned schedule as active ────────────────────
+// ── Commit: mark the current assigned schedule as active ─────────────────────
 async function commitSchedule() {
   if (!_currentAssignedScheduleId) {
     showApiStatus('No assigned schedule to commit', true);
@@ -6612,6 +6775,40 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
 
 
 
+  // ── Practice Day (prepended before qual days) ─────────────────────────────
+  var _practiceConfig = getPracticeConfig();
+  var _numTeamsForPractice = parseInt(document.getElementById('numTeams').value) || 0;
+  if (_practiceConfig && _numTeamsForPractice >= 6) {
+    var _practiceCalc = calcPracticeMatches(_numTeamsForPractice, _practiceConfig);
+    if (_practiceCalc && _practiceCalc.total > 0) {
+      var _practiceSeed = (_currentSeed || '00000000') + 'p';
+      var _practiceMpt  = Math.ceil(_practiceCalc.total * 6 / _numTeamsForPractice);
+      if (_practiceMpt < 1) _practiceMpt = 1;
+      var _practiceMatches = generateMatches(_numTeamsForPractice, _practiceMpt, 3, parseInt(_practiceSeed, 16) || Math.floor(Math.random() * 0xFFFFFFFF));
+      var _pEntries = [];
+      var _pCursor  = _practiceConfig.startMin;
+      var _pCt      = _practiceConfig.ct;
+      var _pMatchCount = Math.min(_practiceCalc.total, _practiceMatches.length);
+      for (var _pi = 0; _pi < _pMatchCount; _pi++) {
+        var _pEnd = _pCursor + _pCt;
+        if (_pEnd > _practiceConfig.endMin) break;
+        var _pm = _practiceMatches[_pi];
+        _pEntries.push({
+          type: 'match', num: _pi + 1, practiceMatch: true,
+          startMin: _pCursor, endMin: _pEnd,
+          red: _pm ? _pm.red : [1,2,3], blue: _pm ? _pm.blue : [4,5,6],
+          redSurrogate: _pm ? _pm.redSurrogate : [], blueSurrogate: _pm ? _pm.blueSurrogate : [],
+          b2bTeams: new Set(),
+        });
+        _pCursor = _pEnd;
+      }
+      scheduled.push({ dayNum: 0, isPracticeDay: true, start: _practiceConfig.startMin, end: _practiceConfig.endMin, entries: _pEntries });
+      // Update practice status
+      var _pdStatus = document.getElementById('practiceDayStatus');
+      if (_pdStatus) _pdStatus.textContent = '≈ ' + _pEntries.length + ' practice matches (' + _practiceCalc.guaranteed + ' guaranteed + ' + Math.max(0, _pEntries.length - _practiceCalc.guaranteed) + ' filler) · ≈' + _practiceCalc.mpt + ' per team · ' + Math.round(_pEntries.length * _pCt) + '/' + _practiceCalc.availMin + ' min used';
+    }
+  }
+  // ── End Practice Day ──────────────────────────────────────────────────────
 
 
 
@@ -6659,7 +6856,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         for (var ci = 0; ci < day.cycleChanges.length; ci++) {
           var cc = day.cycleChanges[ci];
           if (cc.isStart) { ct = cc.time; }
-          else if (matchIdx + 1 >= cc.afterMatch) { ct = cc.time; }
+          else if (matchIdx + 1 > cc.afterMatch) { ct = cc.time; }
         }
         return ct;
       })();
@@ -6717,7 +6914,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
           for (var ci = 0; ci < day.cycleChanges.length; ci++) {
             var cc = day.cycleChanges[ci];
             if (cc.isStart) { ct = cc.time; }
-            else if (matchIdx >= cc.afterMatch) { ct = cc.time; }
+            else if (matchIdx > cc.afterMatch) { ct = cc.time; }
           }
           return ct;
         })();
@@ -6726,7 +6923,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
           for (var ci = 0; ci < day.cycleChanges.length; ci++) {
             var cc = day.cycleChanges[ci];
             if (cc.isStart) { ct = cc.time; }
-            else if (matchIdx + 1 >= cc.afterMatch) { ct = cc.time; }
+            else if (matchIdx + 1 > cc.afterMatch) { ct = cc.time; }
           }
           return ct;
         })();
@@ -7064,7 +7261,7 @@ function renderSchedule() {
       if (entry.type === 'break') {
         if (f.teams.length === 0 && f.alliance === null) {
           tr.className = 'break-row-display';
-          tr.innerHTML = '<td colspan="4">&#9646; ' + escHtml(entry.name) + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.start) + ' &ndash; ' + minToTime(entry.end) + '</td>';
+          tr.innerHTML = '<td colspan="4">&#9646; ' + entry.name + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.start) + ' &ndash; ' + minToTime(entry.end) + '</td>';
           tbody.appendChild(tr);
         }
       } else if (entry.type === 'cycle-change') {
@@ -7075,7 +7272,7 @@ function renderSchedule() {
         }
       } else {
         // Inject round boundary marker if this match starts a new round
-        if (!entry.practiceMatch && matchNumToRound.has(entry.num) && (f.teams.length === 0 && f.alliance === null)) {
+        if (matchNumToRound.has(entry.num) && (f.teams.length === 0 && f.alliance === null)) {
           var roundNum = matchNumToRound.get(entry.num);
           var surPerRound = window._frcSurrogatesPerRound || 0;
           var surNote = '';  // round 1 extra slots are second-match plays, not surrogates
@@ -7090,7 +7287,7 @@ function renderSchedule() {
 
         var hasB2B = entry.b2bTeams && entry.b2bTeams.size > 0;
         if (hasB2B) tr.classList.add('b2b-match');
-        tr.id = (entry.practiceMatch ? 'schedule-pmatch-' : 'schedule-match-') + entry.num;  // for scrollToMatch()
+        tr.id = 'schedule-match-' + entry.num;  // for scrollToMatch()
 
         var redTeams = entry.red.map(function(t, i) {
           return renderTeam(t, entry.redSurrogate && entry.redSurrogate[i],
@@ -7317,7 +7514,7 @@ function printSchedule() {
     day.entries.forEach(function(entry) {
       if (entry.type === 'break') {
         if (!opts.breaks) return;
-        html += '<tr class="break-row"><td colspan="4">&#9escHtml(entry.name)ntry.name + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.start) + ' &ndash; ' + minToTime(entry.end) + '</td></tr>';
+        html += '<tr class="break-row"><td colspan="4">&#9646; ' + entry.name + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.start) + ' &ndash; ' + minToTime(entry.end) + '</td></tr>';
       } else if (entry.type === 'cycle-change') {
         if (!opts.cycleChanges) return;
         html += '<tr class="cc-row"><td colspan="4">&#8645; Cycle time &rarr; <strong>' + entry.newTime + ' min</strong> from match ' + (entry.afterMatch + 1) + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.atMin) + '</td></tr>';
@@ -7799,7 +7996,7 @@ function generateMatches(numTeams, matchesPerTeam, idealGap, seed) {
   }
 
 
-  // ── Rule 3: no surrogate as a team's last appearance ───────────────────────
+  // ── Rule 3: no surrogate as a team's last appearance ────────────────────────
   // For each team that has a surrogate flag on their last appearance:
   //   Find any earlier appearance of that team (not their first, not a surrogate already)
   //   and move the surrogate flag there instead.
