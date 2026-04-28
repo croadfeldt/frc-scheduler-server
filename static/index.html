@@ -1052,6 +1052,13 @@
                 <input type="number" id="practiceCycleTime" value="9" min="0.5" max="60" step="any" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
               </div>
             </div>
+            <!-- Breaks, cycle changes, day break — same options as qual days -->
+            <div id="pdayBreaksList" class="breaks-list" style="margin-top:0.4rem;"></div>
+            <button class="btn-add-break" onclick="addPracticeBreak()" style="margin-top:0.25rem;">+ Add Break</button>
+            <div id="pdayCcList" class="cc-list" style="margin-top:0.25rem;"></div>
+            <button class="btn-add-break" onclick="addPracticeCycleChange()" style="margin-top:0.25rem;">+ Add Cycle Time Change</button>
+            <div id="pdayEarlyEndList" class="day-earlyend-list" style="margin-top:0.25rem;"></div>
+            <button class="btn-add-break" onclick="addPracticeEarlyEnd()" style="margin-top:0.25rem;">+ Add Day Break (stop scheduling)</button>
             <div id="practiceDayStatus" style="font-size:0.7rem;color:var(--text-muted);margin-top:0.3rem;"></div>
           </div>
         </div>
@@ -2200,6 +2207,42 @@ function applyDayConfigToUI(dc) {
         });
       }
     });
+  }
+
+  // Restore practice day config
+  if (dc.practiceDay && dc.practiceDay.enabled) {
+    var pdCb = document.getElementById('practiceDayEnabled');
+    if (pdCb && !pdCb.checked) { pdCb.checked = true; togglePracticeDay(); }
+    if (dc.practiceDay.start)              document.getElementById('practiceStart').value      = dc.practiceDay.start;
+    if (dc.practiceDay.end)                document.getElementById('practiceEnd').value        = dc.practiceDay.end;
+    if (dc.practiceDay.guaranteed != null) document.getElementById('practiceGuaranteed').value = dc.practiceDay.guaranteed;
+    if (dc.practiceDay.filler     != null) document.getElementById('practiceFiller').value     = dc.practiceDay.filler;
+    if (dc.practiceDay.ct         != null) document.getElementById('practiceCycleTime').value  = dc.practiceDay.ct;
+    // Restore practice breaks
+    var pdBreaksList = document.getElementById('pdayBreaksList');
+    if (pdBreaksList) {
+      pdBreaksList.innerHTML = '';
+      (dc.practiceDay.breaks || []).forEach(function(b) {
+        // Persisted as minutes in getPracticeConfig; UI helper expects HH:MM strings
+        var startStr = (typeof b.start === 'number') ? minToTimeStr(b.start) : b.start;
+        var endStr   = (typeof b.end   === 'number') ? minToTimeStr(b.end)   : b.end;
+        addPracticeBreak(startStr, endStr, b.name);
+      });
+    }
+    // Restore practice cycle changes
+    var pdCcList = document.getElementById('pdayCcList');
+    if (pdCcList) {
+      pdCcList.innerHTML = '';
+      (dc.practiceDay.cycleChanges || []).forEach(function(cc) {
+        if (cc.isStart) {
+          addPracticeCycleChange(null, cc.time, true);
+        } else if (!isNaN(cc.afterMatch) && cc.afterMatch >= 1) {
+          addPracticeCycleChange(cc.afterMatch, cc.time, false);
+        }
+      });
+    }
+    // Restore practice early-end
+    if (dc.practiceDay.earlyEnd != null) addPracticeEarlyEnd(dc.practiceDay.earlyEnd);
   }
 }
 
@@ -3568,28 +3611,6 @@ function applyAgendaToSchedule() {
   applyDayEndTimes();
   validateTimes();  // validate only — caller handles triggering generation
   showApiStatus('\u2713 Day config updated from agenda — ' + numDays + ' day' + (numDays!==1?'s':'') + ', ' + _agendaBlocks.length + ' qual blocks');
-  // Restore practice day config from DB
-  if (dc.practiceDay && dc.practiceDay.enabled) {
-    var _rpdCb = document.getElementById('practiceDayEnabled');
-    if (_rpdCb && !_rpdCb.checked) { _rpdCb.checked = true; togglePracticeDay(); }
-    if (dc.practiceDay.start) document.getElementById('practiceStart').value = dc.practiceDay.start;
-    if (dc.practiceDay.end)   document.getElementById('practiceEnd').value   = dc.practiceDay.end;
-    if (dc.practiceDay.guaranteed != null) document.getElementById('practiceGuaranteed').value = dc.practiceDay.guaranteed;
-    if (dc.practiceDay.filler     != null) document.getElementById('practiceFiller').value     = dc.practiceDay.filler;
-    if (dc.practiceDay.ct         != null) document.getElementById('practiceCycleTime').value  = dc.practiceDay.ct;
-  }
-
-  // Restore practice day config from DB
-  if (dc.practiceDay && dc.practiceDay.enabled) {
-    var _dbPdCb = document.getElementById('practiceDayEnabled');
-    if (_dbPdCb && !_dbPdCb.checked) { _dbPdCb.checked = true; togglePracticeDay(); }
-    if (dc.practiceDay.start) document.getElementById('practiceStart').value = dc.practiceDay.start;
-    if (dc.practiceDay.end)   document.getElementById('practiceEnd').value   = dc.practiceDay.end;
-    if (dc.practiceDay.guaranteed != null) document.getElementById('practiceGuaranteed').value = dc.practiceDay.guaranteed;
-    if (dc.practiceDay.filler     != null) document.getElementById('practiceFiller').value     = dc.practiceDay.filler;
-    if (dc.practiceDay.ct         != null) document.getElementById('practiceCycleTime').value  = dc.practiceDay.ct;
-  }
-
   // NOTE: calcMaxMatches / generateSchedule are intentionally NOT called here.
   // The auto-chain in fetchAndRenderAgendaFit is the sole orchestrator — it calls
   // calcMaxMatches (and then generateSchedule) after applyAgendaToSchedule returns.
@@ -3616,7 +3637,18 @@ function getPracticeConfig() {
   if (!start || !end) return null;
   var startMin = timeToMin(start), endMin = timeToMin(end);
   if (endMin <= startMin) return null;
-  return { start, end, startMin, endMin, guaranteed, filler, ct };
+  // Convert UI breaks (HH:MM strings) to minutes for scheduling math
+  var breaks = getPracticeBreaks().map(function(b) {
+    return { name: b.name, start: timeToMin(b.start), end: timeToMin(b.end) };
+  }).filter(function(b) { return b.end > b.start; })
+    .sort(function(a, b) { return a.start - b.start; });
+  return {
+    start: start, end: end, startMin: startMin, endMin: endMin,
+    guaranteed: guaranteed, filler: filler, ct: ct,
+    breaks: breaks,
+    cycleChanges: getPracticeCycleChanges(),
+    earlyEnd: getPracticeEarlyEnd(),
+  };
 }
 
 function applyPracticePDFBlocks(practiceBlocks) {
@@ -3639,6 +3671,14 @@ function calcPracticeMatches(numTeams, practiceConfig) {
   if (!practiceConfig || numTeams < 6) return null;
   var pc = practiceConfig;
   var available = pc.endMin - pc.startMin;
+  // Subtract break time from available (breaks reduce match-fit window)
+  if (pc.breaks && pc.breaks.length) {
+    pc.breaks.forEach(function(b) {
+      var os = Math.max(pc.startMin, b.start);
+      var oe = Math.min(pc.endMin, b.end);
+      if (oe > os) available -= (oe - os);
+    });
+  }
   var guaranteedMatchCount = Math.ceil(numTeams * pc.guaranteed / 6);
   var guaranteedTime = guaranteedMatchCount * pc.ct;
   var remainingTime = available - guaranteedTime;
@@ -3646,8 +3686,146 @@ function calcPracticeMatches(numTeams, practiceConfig) {
   var fillerByMpt   = Math.ceil(numTeams * pc.filler / 6);
   var fillerMatches = Math.min(fillerByTime, fillerByMpt);
   var totalMatches  = guaranteedMatchCount + Math.max(0, fillerMatches);
+  // Honor early-end if set (caps total at that match count)
+  if (pc.earlyEnd != null && pc.earlyEnd >= 1) {
+    totalMatches = Math.min(totalMatches, pc.earlyEnd);
+  }
   var totalMpt      = totalMatches > 0 ? Math.round((totalMatches * 6) / numTeams * 10) / 10 : 0;
-  return { guaranteed: guaranteedMatchCount, fillerFit: fillerMatches, total: totalMatches, mpt: totalMpt, availMin: available, usedMin: totalMatches * pc.ct };
+  return { guaranteed: guaranteedMatchCount, fillerFit: fillerMatches, total: totalMatches, mpt: totalMpt, availMin: pc.endMin - pc.startMin, usedMin: totalMatches * pc.ct };
+}
+
+// ── Practice day breaks / cycle changes / day-break ──────────────────────────
+// Mirror the qual-day controls. Same UI patterns as addBreak / addDayCycleChange /
+// addDayEarlyEnd, but scoped to the practice panel with .pday- class names so
+// global .break-row / .day-cc-row queries don't pick them up.
+
+function addPracticeBreak(startVal, endVal, nameVal) {
+  var list = document.getElementById('pdayBreaksList');
+  if (!list) return;
+  if (!startVal || !endVal) {
+    var rows = list.querySelectorAll('.pday-break-row');
+    if (rows.length > 0) {
+      var lastEnd = rows[rows.length - 1].querySelector('.break-end').value;
+      if (lastEnd) {
+        var p = lastEnd.split(':').map(Number);
+        startVal = startVal || (String(p[0]+1).padStart(2,'0') + ':' + String(p[1]).padStart(2,'0'));
+        endVal   = endVal   || (String(p[0]+2).padStart(2,'0') + ':' + String(p[1]).padStart(2,'0'));
+      }
+    } else {
+      startVal = startVal || '12:00';
+      endVal   = endVal   || '13:00';
+    }
+  }
+  nameVal = nameVal || '';
+  var row = document.createElement('div');
+  row.className = 'break-row pday-break-row';
+  row.innerHTML =
+    '<div class="field"><label>Name</label><input type="text" class="break-name" placeholder="Break" value="' + nameVal + '"></div>' +
+    '<div class="field"><label>Start</label><input type="time" class="break-start" value="' + startVal + '"></div>' +
+    '<div class="field"><label>End</label><input type="time" class="break-end" value="' + endVal + '"></div>' +
+    '<button class="btn-icon" title="Remove">&#x2715;</button>';
+  list.appendChild(row);
+  row.querySelector('.btn-icon').addEventListener('click', function() {
+    row.remove(); onCycleTimeChanged();
+  });
+  ['.break-name','.break-start','.break-end'].forEach(function(sel) {
+    row.querySelector(sel).addEventListener('change', onCycleTimeChanged);
+  });
+  if (!nameVal) {
+    setTimeout(function() {
+      var n = row.querySelector('.break-name'); if (n) { n.focus(); n.select(); }
+    }, 0);
+  }
+}
+
+function addPracticeCycleChange(afterMatch, newTime, isStart) {
+  var list = document.getElementById('pdayCcList');
+  if (!list) return;
+  var defaultCt = parseFloat(document.getElementById('practiceCycleTime').value) || 9;
+  var timeVal  = (newTime != null && newTime !== '') ? newTime : defaultCt;
+  var afterVal = (afterMatch != null && afterMatch !== '') ? afterMatch : '';
+  var isFirst = isStart === true;
+
+  var row = document.createElement('div');
+  row.className = 'day-cc-row pday-cc-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr auto;gap:0.4rem;align-items:end;margin-top:0.3rem;';
+  row.dataset.isStart = isFirst ? '1' : '0';
+
+  var inputStyle = 'background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.45rem 0.5rem;font-size:0.85rem;border-radius:4px;width:100%;';
+  var matchField = isFirst
+    ? '<div class="field"><label style="font-size:0.65rem;color:var(--text-muted);">Applies From</label><div style="font-size:0.82rem;padding:0.45rem 0.3rem;color:var(--text-muted);font-style:italic;">Start of Practice</div></div>'
+    : '<div class="field"><label style="font-size:0.65rem;">After Practice Match # <span style="color:var(--danger)">*</span></label><input type="number" class="cc-after" placeholder="Required" min="1" value="' + afterVal + '" required style="' + inputStyle + '"></div>';
+  var removeBtn = isFirst ? ''
+    : '<button class="btn-icon" title="Remove" style="align-self:flex-end;">&#x2715;</button>';
+
+  row.innerHTML =
+    matchField +
+    '<div class="field"><label style="font-size:0.65rem;">Cycle Time (min)</label><input type="number" class="cc-time" placeholder="e.g. 8.5" min="0.1" max="60" step="any" value="' + timeVal + '" style="' + inputStyle + '"></div>' +
+    removeBtn;
+
+  list.appendChild(row);
+  row.querySelector('.cc-time').addEventListener('change', onCycleTimeChanged);
+  row.querySelector('.cc-time').addEventListener('input',  onCycleTimeChanged);
+  if (!isFirst) {
+    var afterInp = row.querySelector('.cc-after');
+    afterInp.addEventListener('change', onCycleTimeChanged);
+    afterInp.addEventListener('input',  onCycleTimeChanged);
+    row.querySelector('.btn-icon').addEventListener('click', function() {
+      row.remove(); onCycleTimeChanged();
+    });
+    if (!afterVal) setTimeout(function() { afterInp.focus(); afterInp.select(); }, 0);
+  }
+}
+
+function addPracticeEarlyEnd(afterMatch) {
+  var list = document.getElementById('pdayEarlyEndList');
+  if (!list) return;
+  list.innerHTML = ''; // only one allowed
+  var afterVal = (afterMatch != null && afterMatch !== '') ? afterMatch : '';
+  var row = document.createElement('div');
+  row.className = 'day-earlyend-row pday-earlyend-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr auto;gap:0.4rem;align-items:end;margin-top:0.3rem;';
+  row.innerHTML =
+    '<div class="field"><label style="font-size:0.65rem;">Stop scheduling after practice match # <span style="color:var(--danger)">*</span></label>' +
+    '<input type="number" class="earlyend-after" placeholder="e.g. 18" min="1" step="1" value="' + afterVal + '" required ' +
+    'style="background:var(--bg);border:1px solid var(--border);color:var(--text-strong);padding:0.45rem 0.5rem;font-size:0.85rem;border-radius:4px;width:100%;"></div>' +
+    '<button class="btn-icon" title="Remove" style="align-self:flex-end;">&#x2715;</button>';
+  list.appendChild(row);
+  row.querySelector('.btn-icon').addEventListener('click', function() {
+    row.remove(); onCycleTimeChanged();
+  });
+  var inp = row.querySelector('.earlyend-after');
+  inp.addEventListener('change', onCycleTimeChanged);
+  inp.addEventListener('input',  onCycleTimeChanged);
+  if (!afterVal) setTimeout(function() { inp.focus(); inp.select(); }, 0);
+}
+
+// Read practice day breaks / cycle changes / early end from the UI
+function getPracticeBreaks() {
+  return Array.from(document.querySelectorAll('#pdayBreaksList .pday-break-row')).map(function(r) {
+    return {
+      name:  r.querySelector('.break-name').value || 'Break',
+      start: r.querySelector('.break-start').value,
+      end:   r.querySelector('.break-end').value,
+    };
+  }).filter(function(b) { return b.start && b.end; });
+}
+function getPracticeCycleChanges() {
+  return Array.from(document.querySelectorAll('#pdayCcList .pday-cc-row')).map(function(r) {
+    var t = parseFloat(r.querySelector('.cc-time').value);
+    var afterInp = r.querySelector('.cc-after');
+    return {
+      isStart:    r.dataset.isStart === '1',
+      afterMatch: afterInp ? parseInt(afterInp.value) : null,
+      time:       t,
+    };
+  }).filter(function(c) { return c.time > 0 && (c.isStart || (!isNaN(c.afterMatch) && c.afterMatch >= 1)); });
+}
+function getPracticeEarlyEnd() {
+  var inp = document.querySelector('#pdayEarlyEndList .earlyend-after');
+  if (!inp || !inp.value) return null;
+  var v = parseInt(inp.value);
+  return (isNaN(v) || v < 1) ? null : v;
 }
 
 // ── Day/Night mode ────────────────────────────────────────────────────────────
@@ -6081,6 +6259,26 @@ function collectDayConfig() {
     practiceDay: (function() {
       var _pde2 = document.getElementById('practiceDayEnabled');
       if (!_pde2 || !_pde2.checked) return null;
+      // Persist breaks as HH:MM strings (round-trip stable across UI rebuilds)
+      var pdayBreaks = Array.from(document.querySelectorAll('#pdayBreaksList .pday-break-row')).map(function(r) {
+        return {
+          name:  r.querySelector('.break-name').value || 'Break',
+          start: r.querySelector('.break-start').value,
+          end:   r.querySelector('.break-end').value,
+        };
+      }).filter(function(b) { return b.start && b.end; });
+      var pdayCc = Array.from(document.querySelectorAll('#pdayCcList .pday-cc-row')).map(function(r) {
+        var t = parseFloat(r.querySelector('.cc-time').value);
+        var afterInp = r.querySelector('.cc-after');
+        return {
+          isStart:    r.dataset.isStart === '1',
+          afterMatch: afterInp ? parseInt(afterInp.value) : null,
+          time:       t,
+        };
+      }).filter(function(c) { return c.time > 0 && (c.isStart || (!isNaN(c.afterMatch) && c.afterMatch >= 1)); });
+      var pdayEeInp = document.querySelector('#pdayEarlyEndList .earlyend-after');
+      var pdayEarlyEnd = (pdayEeInp && pdayEeInp.value && parseInt(pdayEeInp.value) >= 1)
+        ? parseInt(pdayEeInp.value) : null;
       return {
         enabled:    true,
         start:      document.getElementById('practiceStart').value,
@@ -6088,6 +6286,9 @@ function collectDayConfig() {
         guaranteed: parseInt(document.getElementById('practiceGuaranteed').value) || 3,
         filler:     parseInt(document.getElementById('practiceFiller').value) || 99,
         ct:         parseFloat(document.getElementById('practiceCycleTime').value) || 9,
+        breaks:        pdayBreaks,
+        cycleChanges:  pdayCc,
+        earlyEnd:      pdayEarlyEnd,
       };
     })(),
     breakBuffer:      parseFloat(document.getElementById('breakBuffer').value) || 5,
@@ -6645,45 +6846,135 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   const scheduled = [];
   let matchIdx = 0;
 
-  // Practice Day generation (dayNum 0, prepended before qual days)
+  // ── Practice Day generation (dayNum 0, prepended before qual days) ───────
+  // Honors the same scheduling options as qual days: breaks, cycle time changes,
+  // and day-break (early end). Runs in its own time window (practice start/end).
   var _pracCfg = getPracticeConfig();
   var _pracN   = parseInt(document.getElementById('numTeams').value) || 0;
   if (_pracCfg && _pracN >= 6) {
     var _pracCalc = calcPracticeMatches(_pracN, _pracCfg);
     if (_pracCalc && _pracCalc.total > 0) {
-      // Derive a deterministic seed from the qual seed
+      // Generate a balanced match list. mpt is set so we have enough matches
+      // to fill the time; the loop below stops when either time runs out or
+      // total/early-end is reached.
       var _pracSeedInt = parseInt((_currentSeed || '00000000') + 'f', 16) || Math.floor(Math.random() * 0xFFFFFFFF);
       var _pracMpt = Math.ceil(_pracCalc.total * 6 / _pracN);
       if (_pracMpt < 1) _pracMpt = 1;
       var _pracResult = generateMatches(_pracN, _pracMpt, 3, _pracSeedInt);
       var _pracMs = _pracResult.matches || [];
+
+      // Build practice "day" object — same shape as qual days so we use the
+      // same break/cycle-change logic.
+      var _pracStartCt = _pracCfg.ct;
+      // Honor cycle changes: if there's a start-of-day cc, use its time
+      (_pracCfg.cycleChanges || []).forEach(function(cc) {
+        if (cc.isStart) _pracStartCt = cc.time;
+      });
+
+      var _pracBreaksRun = (_pracCfg.breaks || []).map(function(b) {
+        return { name: b.name, start: b.start, end: b.end, done: false };
+      });
       var _pracEntries = [];
       var _pracCursor  = _pracCfg.startMin;
       var _pracMax     = Math.min(_pracCalc.total, _pracMs.length);
-      for (var _pi = 0; _pi < _pracMax; _pi++) {
-        var _pEnd = _pracCursor + _pracCfg.ct;
-        if (_pEnd > _pracCfg.endMin) break;
-        var _pmatch = _pracMs[_pi];
+      var _pracIdx     = 0;
+      var _pracCount   = 0;
+
+      function _pracEffectiveCt(idx) {
+        var ct = _pracStartCt;
+        (_pracCfg.cycleChanges || []).forEach(function(cc) {
+          if (cc.isStart) ct = cc.time;
+          else if (idx + 1 > cc.afterMatch) ct = cc.time;
+        });
+        return ct;
+      }
+
+      while (_pracIdx < _pracMax) {
+        // Flush breaks at or before cursor
+        var _pracFlushed = true;
+        while (_pracFlushed) {
+          _pracFlushed = false;
+          for (var _pbi = 0; _pbi < _pracBreaksRun.length; _pbi++) {
+            var _pbk = _pracBreaksRun[_pbi];
+            if (!_pbk.done && _pbk.start <= _pracCursor) {
+              _pracEntries.push({type:'break', name:_pbk.name, start:_pbk.start, end:_pbk.end});
+              _pracCursor = Math.max(_pracCursor, _pbk.end);
+              _pbk.done = true; _pracFlushed = true;
+            }
+          }
+        }
+        // Break-buffer check
+        var _pracNext = _pracBreaksRun.find(function(b) { return !b.done && b.start > _pracCursor; });
+        if (_pracNext && breakBuffer > 0 && _pracNext.start - _pracCursor < breakBuffer) {
+          _pracEntries.push({type:'break', name:_pracNext.name, start:_pracNext.start, end:_pracNext.end});
+          _pracCursor = Math.max(_pracCursor, _pracNext.end);
+          _pracNext.done = true;
+          continue;
+        }
+        var _pracCt   = _pracEffectiveCt(_pracIdx);
+        var _pracEnd  = _pracCursor + _pracCt;
+        // Interrupt break check
+        var _pracInterrupt = (!_pracNext || breakBuffer <= 0 || (_pracNext.start - _pracCursor < breakBuffer))
+          ? _pracBreaksRun.find(function(b) { return !b.done && b.start > _pracCursor && b.start < _pracEnd; })
+          : null;
+        if (_pracInterrupt) {
+          _pracEntries.push({type:'break', name:_pracInterrupt.name, start:_pracInterrupt.start, end:_pracInterrupt.end});
+          _pracCursor = Math.max(_pracCursor, _pracInterrupt.end);
+          _pracInterrupt.done = true;
+          continue;
+        }
+        // Time fit
+        if (_pracEnd > _pracCfg.endMin) break;
+        var _pmatch = _pracMs[_pracIdx];
+        // B2B for practice (within practice only — practice is a separate session)
+        var _pracB2B = new Set();
+        if (_pracIdx > 0 && _pracMs[_pracIdx - 1]) {
+          var _pracPrev = new Set([].concat(_pracMs[_pracIdx-1].red, _pracMs[_pracIdx-1].blue));
+          [].concat(_pmatch.red, _pmatch.blue).forEach(function(t) { if (_pracPrev.has(t)) _pracB2B.add(t); });
+        }
         _pracEntries.push({
-          type: 'match', num: _pi + 1, practiceMatch: true,
-          startMin: _pracCursor, endMin: _pEnd,
+          type: 'match', num: _pracIdx + 1, practiceMatch: true,
+          startMin: _pracCursor, endMin: _pracEnd,
           red:  _pmatch ? _pmatch.red  : [1,2,3],
           blue: _pmatch ? _pmatch.blue : [4,5,6],
           redSurrogate:  _pmatch ? _pmatch.redSurrogate  : [],
           blueSurrogate: _pmatch ? _pmatch.blueSurrogate : [],
-          b2bTeams: new Set(),
+          b2bTeams: _pracB2B,
         });
-        _pracCursor = _pEnd;
+        _pracCursor = _pracEnd;
+        _pracIdx++;
+        _pracCount++;
+        // Day-break (early end) check
+        if (_pracCfg.earlyEnd != null && _pracCount >= _pracCfg.earlyEnd) break;
+        // Cycle change marker
+        if (_pracIdx < _pracMax) {
+          var _prevPracCt = _pracEffectiveCt(_pracIdx - 1);
+          var _nextPracCt = _pracEffectiveCt(_pracIdx);
+          if (_nextPracCt !== _prevPracCt) {
+            _pracEntries.push({type: 'cycle-change', afterMatch: _pracIdx, newTime: _nextPracCt, atMin: _pracCursor});
+          }
+        }
       }
+      // Emit any remaining (unused) breaks for visual consistency
+      _pracBreaksRun.filter(function(b) { return !b.done; }).forEach(function(b) {
+        _pracEntries.push({type:'break', name:b.name, start:b.start, end:b.end});
+      });
+
       scheduled.push({ dayNum: 0, isPracticeDay: true,
         start: _pracCfg.startMin, end: _pracCfg.endMin, entries: _pracEntries });
+
+      // Status line in the panel
       var _pdSt = document.getElementById('practiceDayStatus');
-      if (_pdSt && _pracEntries.length > 0) {
-        var _pFiller = Math.max(0, _pracEntries.length - _pracCalc.guaranteed);
-        _pdSt.textContent = '≈ ' + _pracEntries.length + ' practice matches (' +
-          _pracCalc.guaranteed + ' guaranteed + ' + _pFiller + ' filler) · ≈' +
-          _pracCalc.mpt + ' per team · ' +
-          Math.round(_pracEntries.length * _pracCfg.ct) + '/' + _pracCalc.availMin + ' min used';
+      if (_pdSt) {
+        var _pracMatchCount = _pracEntries.filter(function(e) { return e.type === 'match'; }).length;
+        var _pFiller = Math.max(0, _pracMatchCount - _pracCalc.guaranteed);
+        var _pUsed = _pracEntries.reduce(function(s, e) {
+          return e.type === 'match' ? s + (e.endMin - e.startMin) : s;
+        }, 0);
+        _pdSt.textContent = '≈ ' + _pracMatchCount + ' practice matches (' +
+          Math.min(_pracCalc.guaranteed, _pracMatchCount) + ' guaranteed + ' + _pFiller + ' filler) · ≈' +
+          (_pracN > 0 ? Math.round(_pracMatchCount * 6 / _pracN * 10) / 10 : 0) + ' per team · ' +
+          Math.round(_pUsed) + '/' + (_pracCfg.endMin - _pracCfg.startMin) + ' min used';
       }
     }
   }
