@@ -47,7 +47,7 @@ spec:
 apiVersion: k8s.ovn.org/v1
 kind: EgressFirewall
 metadata:
-  name: frc-scheduler-egress-firewall
+  name: default
   namespace: NAMESPACE_PLACEHOLDER
 spec:
   egress:
