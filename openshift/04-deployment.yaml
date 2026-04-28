@@ -37,8 +37,28 @@ spec:
             optional: true
       initContainers:
         - name: wait-for-postgres
-          image: busybox:1.36
-          command: ["sh", "-c", "until nc -z frc-postgres 5432; do echo 'Waiting for postgres...'; sleep 2; done"]
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for postgres at frc-postgres:5432..."
+              until pg_isready -h frc-postgres -p 5432 -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+                echo "  postgres not ready — retrying in 3s..."
+                sleep 3
+              done
+              echo "Postgres is ready and database '$POSTGRES_DB' exists."
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: frc-db-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: frc-db-secret
+                  key: POSTGRES_DB
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true

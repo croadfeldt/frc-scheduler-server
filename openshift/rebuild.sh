@@ -161,6 +161,11 @@ echo ""
 echo "==> [4/6] Deploying application..."
 apply_manifest "$SCRIPT_DIR/04-deployment.yaml"
 
+# Force a rollout restart so pods always pick up the latest secret values.
+# Kubernetes does not automatically restart pods when referenced secrets change.
+echo "    Triggering rollout restart to pick up latest secrets..."
+oc rollout restart deployment/frc-scheduler-server -n "$NS"
+
 echo "    Waiting for app rollout (300s timeout)..."
 if ! oc rollout status deployment/frc-scheduler-server -n "$NS" --timeout=300s; then
   echo ""

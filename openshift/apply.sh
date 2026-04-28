@@ -49,5 +49,12 @@ for manifest in "$SCRIPT_DIR"/[0-9]*.yaml; do
   fi
 done
 
+# Restart the app deployment so pods pick up any secret changes.
+# Kubernetes does not automatically restart pods when secrets change.
+if oc get deployment frc-scheduler-server -n "$NAMESPACE" > /dev/null 2>&1; then
+  echo "  Restarting app deployment to pick up latest secrets..."
+  oc rollout restart deployment/frc-scheduler-server -n "$NAMESPACE"
+fi
+
 echo ""
 echo "Done. Monitor build: oc start-build frc-scheduler-server-git --follow -n ${NAMESPACE}"
