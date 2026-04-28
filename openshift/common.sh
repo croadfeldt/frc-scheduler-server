@@ -60,12 +60,11 @@ wait_for_postgres_db() {
 }
 
 refresh_registry() {
-  echo "    Refreshing image registry operator (NooBaa credential reconcile)..."
+  echo "    Ensuring image registry uses emptyDir storage (avoids NooBaa credential issues)..."
   oc patch configs.imageregistry.operator.openshift.io cluster \
-    --type merge --patch '{"spec":{"managementState":"Removed"}}' 2>/dev/null || true
-  sleep 15
-  oc patch configs.imageregistry.operator.openshift.io cluster \
-    --type merge --patch '{"spec":{"managementState":"Managed"}}' 2>/dev/null || true
+    --type merge \
+    --patch '{"spec":{"managementState":"Managed","storage":{"emptyDir":{},"s3":null}}}' \
+    2>/dev/null || true
   echo "    Waiting for registry rollout..."
   oc rollout status deployment/image-registry \
     -n openshift-image-registry --timeout=120s 2>/dev/null || true

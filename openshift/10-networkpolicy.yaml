@@ -39,43 +39,46 @@ spec:
         - port: 5432
           protocol: TCP
 ---
-# EgressNetworkPolicy (OpenShift-native): operates at node level before NAT,
-# correctly handles service VIPs and DNS unlike standard NetworkPolicy egress.
-# Allows only the specific external services the app needs; denies everything else
-# including all internal cluster and RFC1918 networks.
-apiVersion: network.openshift.io/v1
-kind: EgressNetworkPolicy
+# EgressFirewall: OVN-Kubernetes native egress control.
+# Evaluated at the node level before NAT — correctly handles service VIPs,
+# DNS, and pod-to-pod same-namespace traffic.
+# Rules are evaluated top-to-bottom, first match wins.
+# Pod-to-pod traffic within the same namespace is NOT subject to EgressFirewall.
+apiVersion: k8s.ovn.org/v1
+kind: EgressFirewall
 metadata:
-  name: frc-scheduler-egress-policy
+  name: frc-scheduler-egress-firewall
   namespace: NAMESPACE_PLACEHOLDER
 spec:
   egress:
-    # Allow DNS (cluster DNS service VIP)
+    # Allow cluster DNS service VIP
     - type: Allow
       to:
-        cidr: 172.30.0.10/32
-    # Allow Kubernetes API server (service account token validation)
+        cidrSelector: 172.30.0.10/32
+    # Allow Kubernetes API server
     - type: Allow
       to:
-        cidr: 172.30.0.1/32
-    # Allow internal image registry (image pulls)
+        cidrSelector: 172.30.0.1/32
+    # Allow internal image registry (image pulls on startup)
     - type: Allow
       to:
         dnsName: image-registry.openshift-image-registry.svc
-    # Allow postgres within the namespace — handled by pod-level NetworkPolicy above.
-    # EgressNetworkPolicy does not apply to same-namespace pod-to-pod traffic
-    # in OVN-Kubernetes, so no rule needed here for frc-postgres.
-
-    # Allow external APIs the app legitimately calls
+    # Allow NooBaa S3 internal endpoint (registry blob storage)
+    - type: Allow
+      to:
+        dnsName: s3.openshift-storage.svc
+    # Allow TBA API
     - type: Allow
       to:
         dnsName: www.thebluealliance.com
     - type: Allow
       to:
         dnsName: thebluealliance.com
+    # Allow FRC Events API
     - type: Allow
       to:
         dnsName: frc-api.firstinspires.org
+    # Allow Google OAuth
     - type: Allow
       to:
         dnsName: accounts.google.com
@@ -85,16 +88,12 @@ spec:
     - type: Allow
       to:
         dnsName: www.googleapis.com
+    # Allow Apple OAuth
     - type: Allow
       to:
         dnsName: appleid.apple.com
-    # Allow NooBaa S3 internal endpoint (image registry blob storage)
-    - type: Allow
-      to:
-        dnsName: s3.openshift-storage.svc
-
-    # DENY everything else — all RFC1918, all other cluster-internal,
-    # all internet destinations not explicitly allowed above.
+    # Deny everything else — all RFC1918, all cluster-internal,
+    # all internet destinations not explicitly allowed above
     - type: Deny
       to:
-        cidr: 0.0.0.0/0
+        cidrSelector: 0.0.0.0/0
