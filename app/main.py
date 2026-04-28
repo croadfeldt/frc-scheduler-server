@@ -17,7 +17,7 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import Any, AsyncGenerator
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -316,7 +316,7 @@ async def delete_event(event_id: int, db: AsyncSession = Depends(get_session)):
 # ── TBA ───────────────────────────────────────────────────────────────────────
 
 @app.get("/api/tba/events/{year}")
-async def tba_events(year: int = Query(..., ge=1992, le=2100),
+async def tba_events(year: int = Path(..., ge=1992, le=2100),
                      search: str = Query("", max_length=100)):
     try:
         events = await tba_client.search_events(year, search) if search else await tba_client.get_events(year)
@@ -335,7 +335,7 @@ async def tba_events(year: int = Query(..., ge=1992, le=2100),
 
 
 @app.get("/api/tba/team/{team_number}")
-async def tba_team_lookup(team_number: int = Query(..., ge=1, le=99999)):
+async def tba_team_lookup(team_number: int = Path(..., ge=1, le=99999)):
     try:
         raw = await tba_client.get_team(f"frc{team_number}")
         return tba_client.normalise_team(raw)
@@ -367,7 +367,7 @@ async def tba_search_index():
 
 
 @app.post("/api/tba/import/{event_key}", status_code=201)
-async def tba_import_event(event_key: str = Query(..., max_length=64),
+async def tba_import_event(event_key: str = Path(..., max_length=64),
                            db: AsyncSession = Depends(get_session)):
     try:
         tba_event = await tba_client.get_event(event_key)
@@ -430,7 +430,7 @@ async def frc_events_status():
 
 
 @app.get("/api/frc/events/{year}")
-async def frc_events_list(year: int = Query(..., ge=1992, le=2100),
+async def frc_events_list(year: int = Path(..., ge=1992, le=2100),
                           search: str = Query("", max_length=100)):
     try:
         events = await frc_client.search_events(year, search) if search else await frc_client.get_events(year)
@@ -449,7 +449,7 @@ async def frc_events_list(year: int = Query(..., ge=1992, le=2100),
 
 
 @app.post("/api/frc/import/{year}/{event_code}", status_code=201)
-async def frc_import_event(year: int, event_code: str = Query(..., max_length=32),
+async def frc_import_event(year: int = Path(..., ge=1992, le=2100), event_code: str = Path(..., max_length=32),
                            db: AsyncSession = Depends(get_session)):
     try:
         frc_event = await frc_client.get_event(year, event_code)
