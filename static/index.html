@@ -3110,7 +3110,7 @@ function renderScheduleBars() {
 
   // Day color palette — one distinct color per day number
   // DAY_COLORS defined at module level — see below renderScheduleBars
-  function dayColor(n) { return _DAY_COLORS[(n - 1) % _DAY_COLORS.length]; }
+  function dayColor(n) { if (n === 0) return "#5daf78"; /* practice green */ return _DAY_COLORS[(n - 1) % _DAY_COLORS.length]; }
 
   // ── Build sections from schedule ────────────────────────────────────────────
   // committed = sum of actual match durations (endMin - startMin), which already
@@ -3119,8 +3119,9 @@ function renderScheduleBars() {
 
   window._frcScheduled.forEach(function(day) {
     if (!day.entries || !day.entries.length) return;
-    var dayNum   = day.dayNum || 1;
-    var dayLabel = 'Day ' + dayNum;
+    var dayNum   = (day.dayNum != null) ? day.dayNum : 1;
+    var isPractice = !!day.isPracticeDay;
+    var dayLabel = isPractice ? 'Practice' : 'Day ' + dayNum;
     var currentMatches     = [];
     var currentShortBreaks = [];
     var slotStart = (day.start != null) ? day.start : null;
@@ -3385,9 +3386,12 @@ function updateAgendaFit() {
   }
 
   if (window._frcScheduled && window._frcScheduled.length) {
-    // Committed = actual match time from schedule (respects cycle-time changes)
+    // Committed = actual match time from schedule (respects cycle-time changes).
+    // Practice day is shown in renderScheduleBars but excluded from the qual capacity
+    // calculation here — agenda fit % is about qualification matches fitting in qual time.
     availableMin = _availFromDayConfig();
     window._frcScheduled.forEach(function(day) {
+      if (day.isPracticeDay) return;
       (day.entries || []).forEach(function(entry) {
         if (entry.type === 'match') timeNeeded += ((entry.endMin || 0) - (entry.startMin || 0));
       });
@@ -6651,7 +6655,8 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       var _pracSeedInt = parseInt((_currentSeed || '00000000') + 'f', 16) || Math.floor(Math.random() * 0xFFFFFFFF);
       var _pracMpt = Math.ceil(_pracCalc.total * 6 / _pracN);
       if (_pracMpt < 1) _pracMpt = 1;
-      var _pracMs = generateMatches(_pracN, _pracMpt, 3, _pracSeedInt);
+      var _pracResult = generateMatches(_pracN, _pracMpt, 3, _pracSeedInt);
+      var _pracMs = _pracResult.matches || [];
       var _pracEntries = [];
       var _pracCursor  = _pracCfg.startMin;
       var _pracMax     = Math.min(_pracCalc.total, _pracMs.length);
