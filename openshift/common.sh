@@ -11,6 +11,7 @@ apply_manifest() {
     -e "s|GIT_BRANCH_PLACEHOLDER|${GIT_BRANCH}|g" \
     -e "s|letsencrypt-prod|${CERT_ISSUER}|g" \
     -e "s|METALLB_IP_PLACEHOLDER|${METALLB_IP}|g" \
+    -e "s|METALLB_POOL_PLACEHOLDER|${METALLB_POOL}|g" \
     -e "s|K8S_SERVICE_CIDR_PLACEHOLDER|${K8S_SERVICE_CIDR}|g" \
     -e "s|APP_PORT_PLACEHOLDER|${APP_PORT}|g" \
     -e "s|CPU_WORKERS_PLACEHOLDER|${CPU_WORKERS}|g" \

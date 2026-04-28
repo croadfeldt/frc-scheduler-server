@@ -168,7 +168,12 @@ metadata:
   namespace: NAMESPACE_PLACEHOLDER
   labels:
     app: NAMESPACE_PLACEHOLDER-git
+  annotations:
+    # MetalLB: request a specific IP from the server-vlan pool
+    metallb.universe.tf/loadBalancerIPs: METALLB_IP_PLACEHOLDER
+    metallb.universe.tf/address-pool: METALLB_POOL_PLACEHOLDER
 spec:
+  type: LoadBalancer
   selector:
     app: NAMESPACE_PLACEHOLDER-git
   ports:
