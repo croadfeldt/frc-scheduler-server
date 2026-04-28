@@ -100,23 +100,16 @@ echo ""
 echo "==> [1/6] Applying secrets..."
 oc apply -f "$SCRIPT_DIR/01-secrets.yaml"
 
-# Read the DB credentials from the secret we just applied.
+# Rebuild DATABASE_URL in the secret from its component values.
+# Kubernetes $(VAR) interpolation does not work with valueFrom: secretKeyRef,
+# so DATABASE_URL must be stored as an explicit secret key.
+apply_db_secret "$NS"
+
+# Read PG_USER and PG_DB for the postgres readiness wait below.
 PG_USER=$(oc get secret frc-db-secret -n "$NS" \
   -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
 PG_DB=$(oc get secret frc-db-secret -n "$NS" \
   -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
-PG_PASS=$(oc get secret frc-db-secret -n "$NS" \
-  -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
-
-# Ensure DATABASE_URL is in the secret — Kubernetes $(VAR) interpolation does
-# not work when the referenced var comes from valueFrom: secretKeyRef.
-# We patch it here from the component values so it's always consistent.
-DB_URL="postgresql+asyncpg://${PG_USER}:${PG_PASS}@frc-postgres:5432/${PG_DB}"
-_TMP=$(mktemp /tmp/db-url-patch-XXXXXX.yaml)
-printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: frc-db-secret\n  namespace: %s\nstringData:\n  DATABASE_URL: "%s"\n' "${NS}" "${DB_URL}" > "$_TMP"
-oc apply -f "$_TMP"
-rm -f "$_TMP"
-echo "    DATABASE_URL patched into frc-db-secret"
 
 # ── 4. Network policy ─────────────────────────────────────────────────────────
 echo ""
@@ -138,8 +131,15 @@ wait_for_postgres_db "$PG_USER" "$PG_DB"
 
 # ── 6. Build ──────────────────────────────────────────────────────────────────
 echo ""
-echo "==> [3/6] Applying BuildConfig..."
+echo "==> [3/6] Applying BuildConfig + Certificate + Route..."
 apply_manifest "$SCRIPT_DIR/03-buildconfig.yaml"
+
+# Apply certificate and route early so cert-manager has maximum time to issue
+# the TLS certificate before the deployment needs it. The app volume is marked
+# optional so it starts on HTTP immediately; TLS kicks in after cert is ready.
+apply_manifest "$SCRIPT_DIR/06-certificate.yaml"
+apply_manifest "$SCRIPT_DIR/05-route.yaml"
+echo "    Certificate requested — cert-manager will issue in background."
 
 echo "    Waiting for builder service account..."
 for i in $(seq 1 24); do
@@ -172,12 +172,21 @@ wait_for_build "$BUILD_NAME"
 echo ""
 echo "==> [4/6] Deploying application..."
 apply_manifest "$SCRIPT_DIR/04-deployment.yaml"
-oc rollout status deployment/frc-scheduler-server -n "$NS" --timeout=300s
+echo "    Waiting for app rollout (300s timeout)..."
+if ! oc rollout status deployment/frc-scheduler-server -n "$NS" --timeout=300s; then
+  echo ""
+  echo "    WARNING: App rollout did not complete within 300s."
+  echo "    This is usually because the TLS certificate has not been issued yet."
+  echo "    The deployment is NOT failed — pods will start automatically once"
+  echo "    cert-manager issues the frc-scheduler-tls secret."
+  echo ""
+  echo "    Check cert status:  oc describe certificate frc-scheduler-tls -n $NS"
+  echo "    Watch pods:         oc get pods -n $NS -w"
+  echo "    Force TLS optional: oc patch deployment frc-scheduler-server -n $NS --type=json \"
+  echo "                          -p='[{"op":"add","path":"/spec/template/spec/volumes/0/secret/optional","value":true}]'"
+fi
 
-# ── 8. Route ──────────────────────────────────────────────────────────────────
-echo ""
-echo "==> [5/6] Applying route..."
-apply_manifest "$SCRIPT_DIR/05-route.yaml"
+# Route and certificate were already applied before the build — nothing to do here.
 
 # ── 9. CronJob + RBAC ─────────────────────────────────────────────────────────
 echo ""

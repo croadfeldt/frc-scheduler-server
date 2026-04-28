@@ -28,18 +28,11 @@ APP_PORT="${APP_PORT:-8443}"
 CPU_WORKERS="${CPU_WORKERS:-12}"
 WEB_WORKERS="${WEB_WORKERS:-1}"
 
-# Ensure DATABASE_URL is consistent with the component credentials in the secret.
-# Kubernetes $(VAR) interpolation does not work with valueFrom: secretKeyRef sources.
+# Rebuild DATABASE_URL in the secret from its component values.
+# Kubernetes $(VAR) interpolation does not work with valueFrom: secretKeyRef,
+# so DATABASE_URL must be stored as an explicit secret key.
 if oc get secret frc-db-secret -n "$NAMESPACE" > /dev/null 2>&1; then
-  PG_USER=$(oc get secret frc-db-secret -n "$NAMESPACE"     -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
-  PG_PASS=$(oc get secret frc-db-secret -n "$NAMESPACE"     -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
-  PG_DB=$(oc get secret frc-db-secret -n "$NAMESPACE"     -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
-  DB_URL="postgresql+asyncpg://${PG_USER}:${PG_PASS}@frc-postgres:5432/${PG_DB}"
-  _TMP=$(mktemp /tmp/db-url-patch-XXXXXX.yaml)
-  printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: frc-db-secret\n  namespace: %s\nstringData:\n  DATABASE_URL: "%s"\n' "${NAMESPACE}" "${DB_URL}" > "$_TMP"
-  oc apply -f "$_TMP"
-  rm -f "$_TMP"
-  echo "  DATABASE_URL patched into frc-db-secret"
+  apply_db_secret "$NAMESPACE"
 fi
 
 echo "Applying manifests to namespace: ${NAMESPACE}"

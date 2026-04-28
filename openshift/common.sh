@@ -39,3 +39,36 @@ wait_for_postgres_db() {
   oc logs -n "$NAMESPACE" deployment/frc-postgres --tail=30 2>/dev/null || true
   return 1
 }
+
+# Generate and apply the db secret with DATABASE_URL built from components.
+# This avoids both shell quoting issues and the Kubernetes $(VAR) interpolation
+# limitation with valueFrom: secretKeyRef sources.
+apply_db_secret() {
+  local ns="$1"
+  local pg_user pg_pass pg_db
+
+  # Read values from the already-applied secret if it exists, else error.
+  pg_user=$(oc get secret frc-db-secret -n "$ns" \
+    -o jsonpath='{.data.POSTGRES_USER}' 2>/dev/null | base64 -d) || true
+  pg_pass=$(oc get secret frc-db-secret -n "$ns" \
+    -o jsonpath='{.data.POSTGRES_PASSWORD}' 2>/dev/null | base64 -d) || true
+  pg_db=$(oc get secret frc-db-secret -n "$ns" \
+    -o jsonpath='{.data.POSTGRES_DB}' 2>/dev/null | base64 -d) || true
+
+  if [ -z "$pg_user" ] || [ -z "$pg_pass" ] || [ -z "$pg_db" ]; then
+    echo "ERROR: frc-db-secret not found or incomplete. Apply 01-secrets.yaml first."
+    return 1
+  fi
+
+  # Write DATABASE_URL back into the secret using oc create/apply with --dry-run
+  # piped to oc apply — this correctly handles all special characters.
+  oc create secret generic frc-db-secret \
+    --namespace="$ns" \
+    --from-literal="POSTGRES_USER=${pg_user}" \
+    --from-literal="POSTGRES_PASSWORD=${pg_pass}" \
+    --from-literal="POSTGRES_DB=${pg_db}" \
+    --from-literal="DATABASE_URL=postgresql+asyncpg://${pg_user}:${pg_pass}@frc-postgres:5432/${pg_db}" \
+    --dry-run=client -o yaml | oc apply -f -
+
+  echo "    DATABASE_URL set in frc-db-secret (db: ${pg_db}, user: ${pg_user})"
+}
