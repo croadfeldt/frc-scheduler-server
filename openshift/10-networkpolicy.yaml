@@ -25,7 +25,7 @@ spec:
         - port: 8443
           protocol: TCP
 ---
-# Allow app pods to reach Postgres
+# Allow app pods to reach Postgres (egress from app pods)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -41,6 +41,27 @@ spec:
         - podSelector:
             matchLabels:
               app: frc-postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+# Allow Postgres to receive connections from app pods (ingress to postgres).
+# Both this AND the egress rule above are required when deny-all is in effect.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frc-scheduler-allow-postgres-ingress
+  namespace: NAMESPACE_PLACEHOLDER
+spec:
+  podSelector:
+    matchLabels:
+      app: frc-postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: NAMESPACE_PLACEHOLDER-git
       ports:
         - port: 5432
           protocol: TCP
