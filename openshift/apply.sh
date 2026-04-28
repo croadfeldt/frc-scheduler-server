@@ -38,7 +38,17 @@ fi
 echo "Applying manifests to namespace: ${NAMESPACE}"
 for manifest in "$SCRIPT_DIR"/[0-9]*.yaml; do
   echo "  -> $(basename "$manifest")"
-  apply_manifest "$manifest"
+  # Skip certificate if already Ready — cert-manager manages renewal automatically
+  if [[ "$(basename "$manifest")" == "06-certificate.yaml" ]]; then
+    CERT_READY=$(oc get certificate frc-scheduler-tls -n "$NAMESPACE"       -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+    if [[ "$CERT_READY" == "True" ]]; then
+      echo "    Certificate already Ready — skipping (cert-manager manages renewal)"
+    else
+      apply_manifest "$manifest"
+    fi
+  else
+    apply_manifest "$manifest"
+  fi
   # After applying postgres, wait for the database to be ready
   if [[ "$(basename "$manifest")" == "02-postgres.yaml" ]]; then
     oc rollout status deployment/frc-postgres -n "$NAMESPACE" --timeout=120s
