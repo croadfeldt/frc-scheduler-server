@@ -1056,40 +1056,6 @@
           </div>
         </div>
 
-        <!-- Practice Day panel -->
-        <div id="practiceDaySection" style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
-          <div id="practiceDayHeader" style="display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.6rem;background:rgba(93,175,120,0.08);border-bottom:1px solid transparent;">
-            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.78rem;font-weight:600;color:var(--text);user-select:none;">
-              <input type="checkbox" id="practiceDayEnabled" onchange="togglePracticeDay()" style="accent-color:#5daf78;width:13px;height:13px;flex-shrink:0;">
-              <span style="color:#5daf78;">&#9654; Practice Day</span>
-            </label>
-            <span id="practiceDayPDFBadge" style="display:none;font-size:0.65rem;font-weight:600;padding:0.1rem 0.45rem;border-radius:3px;background:rgba(93,175,120,0.18);color:#5daf78;">PDF &#10003;</span>
-          </div>
-          <div id="practiceDayBody" style="display:none;padding:0.5rem 0.6rem 0.6rem;border-top:1px solid var(--border);">
-            <div class="field-row" style="margin-bottom:0.4rem;">
-              <div class="field"><label>Start Time</label><input type="time" id="practiceStart" value="08:00" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()"></div>
-              <div class="field"><label>End Time</label><input type="time" id="practiceEnd" value="17:00" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()"></div>
-            </div>
-            <div class="field-row" style="margin-bottom:0.4rem;">
-              <div class="field" title="Guaranteed matches per team (3 for most FRC regionals)">
-                <label>Guaranteed Matches/Team</label>
-                <input type="number" id="practiceGuaranteed" value="3" min="1" max="20" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
-              </div>
-              <div class="field" title="Max additional filler matches per team. 99 = fill all available time.">
-                <label>Max Filler Matches/Team</label>
-                <input type="number" id="practiceFiller" value="99" min="0" max="99" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
-              </div>
-            </div>
-            <div class="field-row">
-              <div class="field" title="Minutes per practice match. Practice typically runs slower than quals.">
-                <label>Minutes per Practice Match</label>
-                <input type="number" id="practiceCycleTime" value="9" min="0.5" max="60" step="any" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
-              </div>
-            </div>
-            <div id="practiceDayStatus" style="font-size:0.7rem;color:var(--text-muted);margin-top:0.3rem;"></div>
-          </div>
-        </div>
-
         <div id="cycleTimePushWarning" style="display:none;background:rgba(137,180,250,0.1);border:1px solid rgba(137,180,250,0.3);border-radius:4px;padding:0.4rem 0.7rem;margin-bottom:0.3rem;font-size:0.72rem;color:var(--accent);">
           &#9432; Minutes per match updated for all days. Per-day overrides are not affected.
         </div>
@@ -3678,61 +3644,6 @@ function calcPracticeMatches(numTeams, practiceConfig) {
   var totalMatches  = guaranteedMatchCount + Math.max(0, fillerMatches);
   var totalMpt      = totalMatches > 0 ? Math.round((totalMatches * 6) / numTeams * 10) / 10 : 0;
   return { guaranteed: guaranteedMatchCount, fillerFit: fillerMatches, total: totalMatches, mpt: totalMpt, availMin: available, usedMin: totalMatches * pc.ct };
-}
-
-// ── Practice Day ──────────────────────────────────────────────────────────────────────
-
-function togglePracticeDay() {
-  var enabled = document.getElementById('practiceDayEnabled').checked;
-  document.getElementById('practiceDayBody').style.display = enabled ? '' : 'none';
-  document.getElementById('practiceDayHeader').style.borderBottomColor = enabled ? 'var(--border)' : 'transparent';
-  onCycleTimeChanged();
-}
-
-function getPracticeConfig() {
-  var enabledEl = document.getElementById('practiceDayEnabled');
-  if (!enabledEl || !enabledEl.checked) return null;
-  var start = document.getElementById('practiceStart').value;
-  var end   = document.getElementById('practiceEnd').value;
-  var guaranteed = parseInt(document.getElementById('practiceGuaranteed').value) || 3;
-  var filler = parseInt(document.getElementById('practiceFiller').value);
-  if (isNaN(filler)) filler = 99;
-  var ct = parseFloat(document.getElementById('practiceCycleTime').value) || 9;
-  if (!start || !end) return null;
-  var startMin = timeToMin(start), endMin = timeToMin(end);
-  if (endMin <= startMin) return null;
-  return { start: start, end: end, startMin: startMin, endMin: endMin,
-           guaranteed: guaranteed, filler: filler, ct: ct };
-}
-
-function applyPracticePDFBlocks(practiceBlocks) {
-  if (!practiceBlocks || !practiceBlocks.length) return;
-  var allStart = Math.min.apply(null, practiceBlocks.map(function(b) { return b.start; }));
-  var allEnd   = Math.max.apply(null, practiceBlocks.map(function(b) { return b.end; }));
-  var cb = document.getElementById('practiceDayEnabled');
-  if (cb && !cb.checked) { cb.checked = true; togglePracticeDay(); }
-  var sEl = document.getElementById('practiceStart');
-  var eEl = document.getElementById('practiceEnd');
-  if (sEl) sEl.value = minToTimeStr(allStart);
-  if (eEl) eEl.value = minToTimeStr(allEnd);
-  var badge = document.getElementById('practiceDayPDFBadge');
-  if (badge) badge.style.display = '';
-  var status = document.getElementById('practiceDayStatus');
-  if (status) status.textContent = '✓ Practice time loaded from PDF: ' + fmtTime12(allStart) + ' – ' + fmtTime12(allEnd);
-}
-
-function calcPracticeMatches(numTeams, pc) {
-  if (!pc || numTeams < 6) return null;
-  var available = pc.endMin - pc.startMin;
-  var guaranteedCount = Math.ceil(numTeams * pc.guaranteed / 6);
-  var remaining = available - guaranteedCount * pc.ct;
-  var fillerByTime = remaining > 0 ? Math.floor(remaining / pc.ct) : 0;
-  var fillerByMpt  = Math.ceil(numTeams * pc.filler / 6);
-  var fillerCount  = Math.min(fillerByTime, fillerByMpt);
-  var total = guaranteedCount + Math.max(0, fillerCount);
-  var mpt   = total > 0 ? Math.round(total * 6 / numTeams * 10) / 10 : 0;
-  return { guaranteed: guaranteedCount, fillerFit: fillerCount, total: total,
-           mpt: mpt, availMin: available, usedMin: total * pc.ct };
 }
 
 // ── Day/Night mode ────────────────────────────────────────────────────────────
@@ -6772,43 +6683,6 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
     }
   }
   // End Practice Day
-
-
-
-  // ── Practice Day (prepended before qual days) ─────────────────────────────
-  var _practiceConfig = getPracticeConfig();
-  var _numTeamsForPractice = parseInt(document.getElementById('numTeams').value) || 0;
-  if (_practiceConfig && _numTeamsForPractice >= 6) {
-    var _practiceCalc = calcPracticeMatches(_numTeamsForPractice, _practiceConfig);
-    if (_practiceCalc && _practiceCalc.total > 0) {
-      var _practiceSeed = (_currentSeed || '00000000') + 'p';
-      var _practiceMpt  = Math.ceil(_practiceCalc.total * 6 / _numTeamsForPractice);
-      if (_practiceMpt < 1) _practiceMpt = 1;
-      var _practiceMatches = generateMatches(_numTeamsForPractice, _practiceMpt, 3, parseInt(_practiceSeed, 16) || Math.floor(Math.random() * 0xFFFFFFFF));
-      var _pEntries = [];
-      var _pCursor  = _practiceConfig.startMin;
-      var _pCt      = _practiceConfig.ct;
-      var _pMatchCount = Math.min(_practiceCalc.total, _practiceMatches.length);
-      for (var _pi = 0; _pi < _pMatchCount; _pi++) {
-        var _pEnd = _pCursor + _pCt;
-        if (_pEnd > _practiceConfig.endMin) break;
-        var _pm = _practiceMatches[_pi];
-        _pEntries.push({
-          type: 'match', num: _pi + 1, practiceMatch: true,
-          startMin: _pCursor, endMin: _pEnd,
-          red: _pm ? _pm.red : [1,2,3], blue: _pm ? _pm.blue : [4,5,6],
-          redSurrogate: _pm ? _pm.redSurrogate : [], blueSurrogate: _pm ? _pm.blueSurrogate : [],
-          b2bTeams: new Set(),
-        });
-        _pCursor = _pEnd;
-      }
-      scheduled.push({ dayNum: 0, isPracticeDay: true, start: _practiceConfig.startMin, end: _practiceConfig.endMin, entries: _pEntries });
-      // Update practice status
-      var _pdStatus = document.getElementById('practiceDayStatus');
-      if (_pdStatus) _pdStatus.textContent = '≈ ' + _pEntries.length + ' practice matches (' + _practiceCalc.guaranteed + ' guaranteed + ' + Math.max(0, _pEntries.length - _practiceCalc.guaranteed) + ' filler) · ≈' + _practiceCalc.mpt + ' per team · ' + Math.round(_pEntries.length * _pCt) + '/' + _practiceCalc.availMin + ' min used';
-    }
-  }
-  // ── End Practice Day ──────────────────────────────────────────────────────
 
 
 

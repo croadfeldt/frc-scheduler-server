@@ -102,19 +102,19 @@ spec:
                   name: frc-app-secret
                   key: TBA_API_KEY
             - name: CPU_WORKERS
-              value: "12"
+              value: "CPU_WORKERS_PLACEHOLDER"
             - name: PYTHONUNBUFFERED
               value: "1"
             - name: APP_PORT
-              value: "8443"
+              value: "APP_PORT_PLACEHOLDER"
             - name: WEB_WORKERS
-              value: "1"
+              value: "WEB_WORKERS_PLACEHOLDER"
             - name: SSL_CERTFILE
               value: "/certs/tls.crt"
             - name: SSL_KEYFILE
               value: "/certs/tls.key"
             - name: ALLOWED_ORIGINS
-              value: "https://YOUR_HOSTNAME"
+              value: "ALLOWED_ORIGINS_PLACEHOLDER"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:

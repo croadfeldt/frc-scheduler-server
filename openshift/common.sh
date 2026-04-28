@@ -12,10 +12,10 @@ apply_manifest() {
     -e "s|letsencrypt-prod|${CERT_ISSUER}|g" \
     -e "s|METALLB_IP_PLACEHOLDER|${METALLB_IP}|g" \
     -e "s|METALLB_POOL_PLACEHOLDER|${METALLB_POOL}|g" \
-    -e "s|K8S_SERVICE_CIDR_PLACEHOLDER|${K8S_SERVICE_CIDR}|g" \
     -e "s|APP_PORT_PLACEHOLDER|${APP_PORT}|g" \
     -e "s|CPU_WORKERS_PLACEHOLDER|${CPU_WORKERS}|g" \
     -e "s|WEB_WORKERS_PLACEHOLDER|${WEB_WORKERS}|g" \
+    -e "s|ALLOWED_ORIGINS_PLACEHOLDER|${ALLOWED_ORIGINS}|g" \
     "$file" | oc apply -f -
 }
 
@@ -97,14 +97,3 @@ refresh_builder_credentials() {
   echo "    WARNING: builder dockercfg secret did not regenerate"
 }
 
-link_builder_registry_secret() {
-  local ns="$1"
-  local secret
-  secret=$(oc get secret -n "$ns" -o name 2>/dev/null \
-    | grep builder-dockercfg | head -1 | sed 's|secret/||')
-  if [ -n "$secret" ]; then
-    oc secrets link builder "$secret" --for=mount -n "$ns" 2>/dev/null || true
-    oc secrets link default  "$secret" --for=pull  -n "$ns" 2>/dev/null || true
-    echo "    Linked registry secret $secret to builder/default SAs"
-  fi
-}
