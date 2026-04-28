@@ -28,24 +28,23 @@ APP_PORT="${APP_PORT:-8443}"
 CPU_WORKERS="${CPU_WORKERS:-12}"
 WEB_WORKERS="${WEB_WORKERS:-1}"
 
-# Rebuild DATABASE_URL in the secret from its component values.
-# Kubernetes $(VAR) interpolation does not work with valueFrom: secretKeyRef,
-# so DATABASE_URL must be stored as an explicit secret key.
+# Verify DATABASE_URL is in the secret before applying anything
 if oc get secret frc-db-secret -n "$NAMESPACE" > /dev/null 2>&1; then
-  apply_db_secret "$NAMESPACE"
+  echo "Verifying DATABASE_URL in frc-db-secret..."
+  check_db_secret "$NAMESPACE" || true
 fi
 
 echo "Applying manifests to namespace: ${NAMESPACE}"
 for manifest in "$SCRIPT_DIR"/[0-9]*.yaml; do
   echo "  -> $(basename "$manifest")"
   apply_manifest "$manifest"
-  # After applying postgres, wait for the database to be ready before
-  # continuing — prevents the app deployment from racing initdb on a
-  # fresh install or after a PVC wipe.
+  # After applying postgres, wait for the database to be ready
   if [[ "$(basename "$manifest")" == "02-postgres.yaml" ]]; then
     oc rollout status deployment/frc-postgres -n "$NAMESPACE" --timeout=120s
-    PG_USER=$(oc get secret frc-db-secret -n "$NAMESPACE"       -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
-    PG_DB=$(oc get secret frc-db-secret -n "$NAMESPACE"       -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
+    PG_USER=$(oc get secret frc-db-secret -n "$NAMESPACE" \
+      -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
+    PG_DB=$(oc get secret frc-db-secret -n "$NAMESPACE" \
+      -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
     wait_for_postgres_db "$PG_USER" "$PG_DB"
   fi
 done

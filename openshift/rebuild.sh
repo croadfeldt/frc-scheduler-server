@@ -15,6 +15,7 @@ if [ ! -f "$CONFIG" ]; then
 fi
 
 source "$CONFIG"
+source "$SCRIPT_DIR/common.sh"
 
 : "${NAMESPACE:?Set NAMESPACE in config.env}"
 : "${APP_HOSTNAME:?Set APP_HOSTNAME in config.env}"
@@ -29,9 +30,6 @@ CPU_WORKERS="${CPU_WORKERS:-12}"
 WEB_WORKERS="${WEB_WORKERS:-1}"
 
 NS="$NAMESPACE"
-
-source "$SCRIPT_DIR/common.sh"
-
 
 refresh_registry() {
   echo "    Refreshing image registry operator (NooBaa credential reconcile)..."
@@ -71,11 +69,6 @@ wait_for_build() {
   done
 }
 
-# Wait for the POSTGRES_DB database to actually exist and accept queries.
-# pg_isready returns success as soon as postgres accepts connections — before
-# initdb has finished creating the POSTGRES_DB database. This explicit check
-# prevents the app deployment from racing postgres initialization.
-
 # ── 1. Tear down ──────────────────────────────────────────────────────────────
 echo "==> Tearing down all resources in namespace: $NS"
 oc delete all         --all -n "$NS" --ignore-not-found
@@ -98,12 +91,16 @@ refresh_registry
 # ── 3. Secrets ────────────────────────────────────────────────────────────────
 echo ""
 echo "==> [1/6] Applying secrets..."
+if [ ! -f "$SCRIPT_DIR/01-secrets.yaml" ]; then
+  echo "ERROR: openshift/01-secrets.yaml not found."
+  echo "Copy 01-secrets.yaml.example to 01-secrets.yaml and fill in your values."
+  exit 1
+fi
 oc apply -f "$SCRIPT_DIR/01-secrets.yaml"
 
-# Rebuild DATABASE_URL in the secret from its component values.
-# Kubernetes $(VAR) interpolation does not work with valueFrom: secretKeyRef,
-# so DATABASE_URL must be stored as an explicit secret key.
-apply_db_secret "$NS"
+# Verify DATABASE_URL is in the secret — must be set explicitly in 01-secrets.yaml
+echo "    Verifying DATABASE_URL in secret..."
+check_db_secret "$NS"
 
 # Read PG_USER and PG_DB for the postgres readiness wait below.
 PG_USER=$(oc get secret frc-db-secret -n "$NS" \
@@ -120,27 +117,18 @@ apply_manifest "$SCRIPT_DIR/10-networkpolicy.yaml"
 echo ""
 echo "==> [2/6] Deploying Postgres..."
 apply_manifest "$SCRIPT_DIR/02-postgres.yaml"
-
-# Wait for the pod to be running first
 oc rollout status deployment/frc-postgres -n "$NS" --timeout=120s
-
-# Then wait for the actual database to exist — rollout status returns as soon
-# as the readiness probe passes, which now verifies the DB exists. But we also
-# do an explicit check here as a belt-and-suspenders guard.
 wait_for_postgres_db "$PG_USER" "$PG_DB"
 
-# ── 6. Build ──────────────────────────────────────────────────────────────────
+# ── 6. Certificate + Route (apply early for max cert issuance time) ───────────
 echo ""
 echo "==> [3/6] Applying BuildConfig + Certificate + Route..."
 apply_manifest "$SCRIPT_DIR/03-buildconfig.yaml"
-
-# Apply certificate and route early so cert-manager has maximum time to issue
-# the TLS certificate before the deployment needs it. The app volume is marked
-# optional so it starts on HTTP immediately; TLS kicks in after cert is ready.
 apply_manifest "$SCRIPT_DIR/06-certificate.yaml"
 apply_manifest "$SCRIPT_DIR/05-route.yaml"
 echo "    Certificate requested — cert-manager will issue in background."
 
+# ── 7. Build ──────────────────────────────────────────────────────────────────
 echo "    Waiting for builder service account..."
 for i in $(seq 1 24); do
   SECRET=$(oc get sa builder -n "$NS" -o jsonpath='{.secrets[*].name}' 2>/dev/null \
@@ -168,25 +156,21 @@ oc logs -f "build/$BUILD_NAME" -n "$NS" 2>/dev/null || true
 echo ""
 wait_for_build "$BUILD_NAME"
 
-# ── 7. Deploy app ─────────────────────────────────────────────────────────────
+# ── 8. Deploy app ─────────────────────────────────────────────────────────────
 echo ""
 echo "==> [4/6] Deploying application..."
 apply_manifest "$SCRIPT_DIR/04-deployment.yaml"
+
 echo "    Waiting for app rollout (300s timeout)..."
 if ! oc rollout status deployment/frc-scheduler-server -n "$NS" --timeout=300s; then
   echo ""
   echo "    WARNING: App rollout did not complete within 300s."
   echo "    This is usually because the TLS certificate has not been issued yet."
-  echo "    The deployment is NOT failed — pods will start automatically once"
-  echo "    cert-manager issues the frc-scheduler-tls secret."
+  echo "    The pods will start automatically once cert-manager issues frc-scheduler-tls."
   echo ""
-  echo "    Check cert status:  oc describe certificate frc-scheduler-tls -n $NS"
-  echo "    Watch pods:         oc get pods -n $NS -w"
-  echo "    Force TLS optional: oc patch deployment frc-scheduler-server -n $NS --type=json \"
-  echo "                          -p='[{"op":"add","path":"/spec/template/spec/volumes/0/secret/optional","value":true}]'"
+  echo "    Check:  oc describe certificate frc-scheduler-tls -n $NS"
+  echo "    Watch:  oc get pods -n $NS -w"
 fi
-
-# Route and certificate were already applied before the build — nothing to do here.
 
 # ── 9. CronJob + RBAC ─────────────────────────────────────────────────────────
 echo ""
