@@ -34,7 +34,6 @@ spec:
         - name: tls-certs
           secret:
             secretName: frc-scheduler-tls
-            optional: true
       initContainers:
         - name: wait-for-postgres
           image: postgres:16-alpine
