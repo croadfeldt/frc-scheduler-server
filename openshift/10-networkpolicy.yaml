@@ -15,7 +15,9 @@ spec:
         - port: 8443
           protocol: TCP
 ---
-# Ingress: postgres only accepts connections from app pods and build pods
+# Ingress: postgres only accepts connections from app pods and build pods.
+# Postgres has no external route so this is belt-and-suspenders — nothing
+# outside the namespace can reach it regardless.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -38,76 +40,3 @@ spec:
       ports:
         - port: 5432
           protocol: TCP
----
-# EgressFirewall: OVN-Kubernetes native egress control.
-# Evaluated at the node level before NAT — correctly handles service VIPs,
-# DNS, and pod-to-pod same-namespace traffic.
-# Rules are evaluated top-to-bottom, first match wins.
-# Pod-to-pod traffic within the same namespace is NOT subject to EgressFirewall.
-apiVersion: k8s.ovn.org/v1
-kind: EgressFirewall
-metadata:
-  name: default
-  namespace: NAMESPACE_PLACEHOLDER
-spec:
-  egress:
-    # Allow cluster DNS service VIP
-    - type: Allow
-      to:
-        cidrSelector: 172.30.0.10/32
-    # Allow Kubernetes API server
-    - type: Allow
-      to:
-        cidrSelector: 172.30.0.1/32
-    # Allow internal image registry (image pulls on startup)
-    - type: Allow
-      to:
-        dnsName: image-registry.openshift-image-registry.svc
-    # Allow NooBaa S3 internal endpoint (registry blob storage)
-    - type: Allow
-      to:
-        dnsName: s3.openshift-storage.svc
-    # Allow TBA API
-    - type: Allow
-      to:
-        dnsName: www.thebluealliance.com
-    - type: Allow
-      to:
-        dnsName: thebluealliance.com
-    # Allow FRC Events API
-    - type: Allow
-      to:
-        dnsName: frc-api.firstinspires.org
-    # Allow Google OAuth
-    - type: Allow
-      to:
-        dnsName: accounts.google.com
-    - type: Allow
-      to:
-        dnsName: oauth2.googleapis.com
-    - type: Allow
-      to:
-        dnsName: www.googleapis.com
-    # Allow Apple OAuth
-    - type: Allow
-      to:
-        dnsName: appleid.apple.com
-    # Allow GitHub (for build pod source clone)
-    - type: Allow
-      to:
-        dnsName: github.com
-    - type: Allow
-      to:
-        dnsName: codeload.github.com
-    - type: Allow
-      to:
-        dnsName: objects.githubusercontent.com
-    # Allow OpenShift internal registry (build pod image push)
-    - type: Allow
-      to:
-        dnsName: image-registry.openshift-image-registry.svc.cluster.local
-    # Deny everything else — all RFC1918, all cluster-internal,
-    # all internet destinations not explicitly allowed above
-    - type: Deny
-      to:
-        cidrSelector: 0.0.0.0/0
