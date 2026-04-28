@@ -178,7 +178,7 @@ spec:
     app: NAMESPACE_PLACEHOLDER-git
   ports:
     - name: https
-      port: 8443
+      port: 8088
       targetPort: 8443
 ---
 apiVersion: policy/v1
