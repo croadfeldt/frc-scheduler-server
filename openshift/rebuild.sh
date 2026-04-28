@@ -127,11 +127,11 @@ oc policy add-role-to-user \
   system:serviceaccount:"$NS":builder \
   -n "$NS"
 
-link_builder_registry_secret "$NS"
+# Refresh builder SA credentials — delete stale dockercfg and regenerate
+# so the build pod gets fresh registry tokens.
+refresh_builder_credentials "$NS"
 
 # Refresh registry credentials immediately before starting the build.
-# The credentials from the initial refresh may have rotated by the time
-# the build pod is ready to push, causing authentication failures.
 echo "    Refreshing registry credentials before build push..."
 refresh_registry
 

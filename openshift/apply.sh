@@ -61,7 +61,7 @@ if [[ "${1:-}" == "--build" ]]; then
   echo ""
   echo "==> Triggering build..."
   refresh_registry
-  link_builder_registry_secret "$NAMESPACE"
+  refresh_builder_credentials "$NAMESPACE"
   oc start-build frc-scheduler-server-git -n "$NAMESPACE" --follow
 else
   echo ""

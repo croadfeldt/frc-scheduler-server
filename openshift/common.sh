@@ -61,9 +61,39 @@ wait_for_postgres_db() {
 
 refresh_registry() {
   echo "    Waiting for image registry to be ready..."
-  oc rollout status deployment/image-registry \
-    -n openshift-image-registry --timeout=120s 2>/dev/null || true
+  oc rollout status deployment/image-registry     -n openshift-image-registry --timeout=120s 2>/dev/null || true
   echo "    Registry ready."
+}
+
+# Refresh the builder SA dockercfg secret so the build pod gets fresh
+# registry credentials. The old secret may have stale tokens after a
+# registry restart or credential rotation.
+refresh_builder_credentials() {
+  local ns="$1"
+  echo "    Refreshing builder SA registry credentials in $ns..."
+
+  # Delete the stale dockercfg secret — Kubernetes will immediately regenerate it
+  local old_secret
+  old_secret=$(oc get secret -n "$ns" -o name 2>/dev/null     | grep builder-dockercfg | head -1 | sed "s|secret/||")
+  if [ -n "$old_secret" ]; then
+    oc delete secret "$old_secret" -n "$ns" 2>/dev/null || true
+    echo "    Deleted stale secret: $old_secret"
+  fi
+
+  # Wait for the new dockercfg secret to be generated
+  for i in $(seq 1 12); do
+    local new_secret
+    new_secret=$(oc get secret -n "$ns" -o name 2>/dev/null       | grep builder-dockercfg | head -1 | sed "s|secret/||")
+    if [ -n "$new_secret" ]; then
+      echo "    New builder secret ready: $new_secret"
+      oc secrets link builder "$new_secret" --for=mount -n "$ns" 2>/dev/null || true
+      oc secrets link default  "$new_secret" --for=pull  -n "$ns" 2>/dev/null || true
+      return 0
+    fi
+    echo "    attempt $i/12 — waiting 5s for new secret..."
+    sleep 5
+  done
+  echo "    WARNING: builder dockercfg secret did not regenerate"
 }
 
 link_builder_registry_secret() {
