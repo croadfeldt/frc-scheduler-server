@@ -92,6 +92,20 @@ spec:
     - type: Allow
       to:
         dnsName: appleid.apple.com
+    # Allow GitHub (for build pod source clone)
+    - type: Allow
+      to:
+        dnsName: github.com
+    - type: Allow
+      to:
+        dnsName: codeload.github.com
+    - type: Allow
+      to:
+        dnsName: objects.githubusercontent.com
+    # Allow OpenShift internal registry (build pod image push)
+    - type: Allow
+      to:
+        dnsName: image-registry.openshift-image-registry.svc.cluster.local
     # Deny everything else — all RFC1918, all cluster-internal,
     # all internet destinations not explicitly allowed above
     - type: Deny
