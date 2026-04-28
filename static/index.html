@@ -1029,7 +1029,7 @@
             <div class="field-row" style="margin-bottom:0.4rem;">
               <div class="field">
                 <label>Start Time</label>
-                <input type="time" id="practiceStart" value="08:00" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
+                <input type="time" id="practiceStart" value="12:00" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
               </div>
               <div class="field">
                 <label>End Time</label>
@@ -1049,7 +1049,7 @@
             <div class="field-row">
               <div class="field" title="Minutes per practice match. Practice often runs slower than qual.">
                 <label>Minutes per Practice Match</label>
-                <input type="number" id="practiceCycleTime" value="9" min="0.5" max="60" step="any" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
+                <input type="number" id="practiceCycleTime" value="11" min="0.5" max="60" step="any" oninput="onCycleTimeChanged()" onchange="onCycleTimeChanged()">
               </div>
             </div>
             <!-- Breaks, cycle changes, day break — same options as qual days -->
@@ -3633,7 +3633,7 @@ function getPracticeConfig() {
   var guaranteed = parseInt(document.getElementById('practiceGuaranteed').value) || 3;
   var filler = parseInt(document.getElementById('practiceFiller').value);
   if (isNaN(filler)) filler = 99;
-  var ct = parseFloat(document.getElementById('practiceCycleTime').value) || 9;
+  var ct = parseFloat(document.getElementById('practiceCycleTime').value) || 11;
   if (!start || !end) return null;
   var startMin = timeToMin(start), endMin = timeToMin(end);
   if (endMin <= startMin) return null;
@@ -3741,7 +3741,7 @@ function addPracticeBreak(startVal, endVal, nameVal) {
 function addPracticeCycleChange(afterMatch, newTime, isStart) {
   var list = document.getElementById('pdayCcList');
   if (!list) return;
-  var defaultCt = parseFloat(document.getElementById('practiceCycleTime').value) || 9;
+  var defaultCt = parseFloat(document.getElementById('practiceCycleTime').value) || 11;
   var timeVal  = (newTime != null && newTime !== '') ? newTime : defaultCt;
   var afterVal = (afterMatch != null && afterMatch !== '') ? afterMatch : '';
   var isFirst = isStart === true;
@@ -6285,7 +6285,7 @@ function collectDayConfig() {
         end:        document.getElementById('practiceEnd').value,
         guaranteed: parseInt(document.getElementById('practiceGuaranteed').value) || 3,
         filler:     parseInt(document.getElementById('practiceFiller').value) || 99,
-        ct:         parseFloat(document.getElementById('practiceCycleTime').value) || 9,
+        ct:         parseFloat(document.getElementById('practiceCycleTime').value) || 11,
         breaks:        pdayBreaks,
         cycleChanges:  pdayCc,
         earlyEnd:      pdayEarlyEnd,
