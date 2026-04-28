@@ -98,7 +98,7 @@ echo ""
 echo "==> [2/6] Deploying Postgres..."
 apply_manifest "$SCRIPT_DIR/02-postgres.yaml"
 oc rollout status deployment/frc-postgres -n "$NS" --timeout=120s
-wait_for_postgres_db "$PG_USER" "$PG_DB"
+wait_for_postgres_db "$NS" "$PG_USER" "$PG_DB"
 
 # ── 6. Certificate + Route (apply early for max cert issuance time) ───────────
 echo ""

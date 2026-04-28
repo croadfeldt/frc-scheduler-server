@@ -42,13 +42,12 @@ check_db_secret() {
 
 # Wait for the POSTGRES_DB database to accept queries.
 wait_for_postgres_db() {
-  local pg_user="$1"
-  local pg_db="$2"
+  local ns="$1"
+  local pg_user="$2"
+  local pg_db="$3"
   echo "    Waiting for database '$pg_db' to be ready..."
   for i in $(seq 1 36); do
-    if oc exec -n "$NAMESPACE" deployment/frc-postgres -- \
-        pg_isready -h 127.0.0.1 -U "$pg_user" -d "$pg_db" \
-        > /dev/null 2>&1; then
+    if oc exec -n "$ns" deployment/frc-postgres --         pg_isready -h 127.0.0.1 -U "$pg_user" -d "$pg_db"         > /dev/null 2>&1; then
       echo "    Database '$pg_db' is ready."
       return 0
     fi
@@ -56,7 +55,7 @@ wait_for_postgres_db() {
     sleep 5
   done
   echo "ERROR: Database '$pg_db' did not become ready after 3 minutes."
-  oc logs -n "$NAMESPACE" deployment/frc-postgres --tail=30 2>/dev/null || true
+  oc logs -n "$ns" deployment/frc-postgres --tail=30 2>/dev/null || true
   return 1
 }
 

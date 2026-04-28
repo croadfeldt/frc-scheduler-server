@@ -45,7 +45,7 @@ for manifest in "$SCRIPT_DIR"/[0-9]*.yaml; do
       -o jsonpath='{.data.POSTGRES_USER}' | base64 -d)
     PG_DB=$(oc get secret frc-db-secret -n "$NAMESPACE" \
       -o jsonpath='{.data.POSTGRES_DB}' | base64 -d)
-    wait_for_postgres_db "$PG_USER" "$PG_DB"
+    wait_for_postgres_db "$NAMESPACE" "$PG_USER" "$PG_DB"
   fi
 done
 
