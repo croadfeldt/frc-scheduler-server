@@ -47,7 +47,7 @@ wait_for_postgres_db() {
   echo "    Waiting for database '$pg_db' to be ready..."
   for i in $(seq 1 36); do
     if oc exec -n "$NAMESPACE" deployment/frc-postgres -- \
-        psql -U "$pg_user" -d "$pg_db" -c "SELECT 1" -q --no-align -t \
+        pg_isready -h 127.0.0.1 -U "$pg_user" -d "$pg_db" \
         > /dev/null 2>&1; then
       echo "    Database '$pg_db' is ready."
       return 0

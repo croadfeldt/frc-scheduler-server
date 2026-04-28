@@ -64,13 +64,16 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1" -q --no-align -t
+                - pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 12
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "frc"]
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -h 127.0.0.1 -U "$POSTGRES_USER"
             initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 6
