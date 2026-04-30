@@ -1166,6 +1166,7 @@
         <div id="downloadBar" style="display:none;gap:0.4rem;display:none;align-items:center;">
           <button class="btn-export" id="btnDownloadCSV" onclick="downloadCSV()" title="Download schedule as CSV">&#11015; CSV</button>
           <button class="btn-export" id="btnDownloadJSON" onclick="downloadJSON()" title="Download schedule as JSON">&#11015; JSON</button>
+          <button class="btn-export" id="btnDownloadFMS" onclick="downloadFMS()" title="Download schedule for FIRST FMS Match Maker import (tab-delimited, qualification matches only). Match times must be re-entered in FMS Build Schedule.">&#11015; FMS</button>
           <button class="btn-export" id="btnPrint" onclick="openPrintDialog()" title="Print schedule">&#128438; Print</button>
         </div>
       </div>
@@ -7570,6 +7571,77 @@ function downloadJSON() {
   a.download = 'frc_schedule.json';
   a.click();
 }
+
+// ── Download schedule for FIRST FMS Match Maker import ────────────────────────
+//
+// Format spec from the official FMS Manual (2025.1):
+//   https://fms-manual.readthedocs.io/en/latest/event-manager/event-wizard/run-match-maker.html
+//
+// Tab-delimited, one match per line, 13 fields per line:
+//   1. Match Number
+//   2. Red 1 Number
+//   3. Red 1 Is Surrogate (true/false)
+//   4. Red 2 Number       5. Red 2 Is Surrogate
+//   6. Red 3 Number       7. Red 3 Is Surrogate
+//   8. Blue 1 Number      9. Blue 1 Is Surrogate
+//  10. Blue 2 Number     11. Blue 2 Is Surrogate
+//  12. Blue 3 Number     13. Blue 3 Is Surrogate
+//
+// Notes:
+//   - Practice and qualification matches are imported separately in FMS.
+//     This export contains qualification matches only.
+//   - Times are NOT imported — FMS uses the schedule from its own Build Schedule
+//     step. Re-enter day start, breaks, and cycle time changes in FMS first,
+//     then import this file on the Match Maker step.
+//   - Requires assigned (real) team numbers. Slot indices won't import.
+function downloadFMS() {
+  var scheduled = window._frcScheduled;
+  if (!scheduled) { showApiStatus('No schedule to download', true); return; }
+  if (window._frcAbstractMode) {
+    showApiStatus('FMS export needs real team numbers — assign teams first', true);
+    return;
+  }
+
+  var lines = [];
+  var matchNum = 0;
+  scheduled.forEach(function(day) {
+    if (day.isPracticeDay) return; // FMS imports practice and qual separately
+    day.entries.forEach(function(e) {
+      if (e.type !== 'match') return;
+      matchNum++;
+      var sur = function(arr, i) {
+        return (arr && arr[i]) ? 'true' : 'false';
+      };
+      var row = [
+        matchNum,
+        e.red[0],  sur(e.redSurrogate,  0),
+        e.red[1],  sur(e.redSurrogate,  1),
+        e.red[2],  sur(e.redSurrogate,  2),
+        e.blue[0], sur(e.blueSurrogate, 0),
+        e.blue[1], sur(e.blueSurrogate, 1),
+        e.blue[2], sur(e.blueSurrogate, 2),
+      ];
+      lines.push(row.join('\t'));
+    });
+  });
+
+  if (lines.length === 0) {
+    showApiStatus('No qualification matches to export', true);
+    return;
+  }
+
+  // FMS expects raw tab-delimited text. Use \r\n line endings for Windows
+  // compatibility since FMS runs on Windows.
+  var text = lines.join('\r\n') + '\r\n';
+  var blob = new Blob([text], {type: 'text/tab-separated-values'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'frc_schedule_fms.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showApiStatus('✓ Exported ' + lines.length + ' qualification matches for FMS Match Maker import');
+}
+
 
 function openPrintDialog() {
   if (!window._frcScheduled) { showApiStatus('No schedule to print', true); return; }
