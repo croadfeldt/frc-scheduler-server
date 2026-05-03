@@ -30,9 +30,11 @@ from starlette.responses import Response
 
 from app.db import (
     AbstractSchedule, AssignedSchedule, AsyncSessionLocal,
-    Event, EventTeam, MatchRow, Team, User, get_session, init_db,
+    Event, EventTeam, MatchResult, MatchRow, Team, User,
+    get_session, init_db,
 )
 from app.scheduler import run_iterations_worker, run_assignment_chunk
+from app import live as live_data
 from app import tba as tba_client
 from app import frc_events as frc_client
 from app.auth import (
@@ -958,6 +960,79 @@ async def duplicate_assigned_schedule(
         ))
     await db.commit()
     return {"id": new_asgn.id, "abstract_schedule_id": new_abs.id, "name": new_asgn.name}
+
+
+# ── Live event data ───────────────────────────────────────────────────────────
+# These endpoints power /view's live-mode UI: scores, current match, drift,
+# rankings, and queue status. Data is sourced from TBA + Nexus webhooks, with
+# a simulator for offline testing. Refresh is lazy + throttled — multiple
+# clients viewing the same event don't multiply API calls.
+
+
+@app.get("/api/events/{event_id}/live")
+async def get_event_live(
+    event_id: int,
+    db: AsyncSession = Depends(get_session),
+    refresh: bool = Query(True, description="Whether to attempt a TBA refresh before returning"),
+    force: bool = Query(False, description="Bypass the 30s throttle on TBA refreshes"),
+):
+    """Aggregated live data for the /view page. Returns current match results,
+    rankings, queue status, drift estimate, and data-source availability flags.
+    Lazily refreshes from TBA at most once per 30 seconds."""
+    event = await db.get(Event, event_id)
+    if not event:
+        raise HTTPException(404, "Event not found")
+    refresh_result = None
+    if refresh:
+        refresh_result = await live_data.refresh_event(db, event, force=force)
+    payload = await live_data.get_event_live_data(db, event)
+    if refresh_result is not None:
+        payload["refresh"] = {
+            k: (v.isoformat() if hasattr(v, "isoformat") else v)
+            for k, v in refresh_result.items()
+        }
+    return payload
+
+
+@app.post("/api/events/{event_id}/simulate/start")
+async def start_event_simulation(
+    event_id: int,
+    speedup: float = Query(60.0, gt=0, le=3600, description="1.0 = real-time, 60 = 1 sec per sim minute"),
+    db: AsyncSession = Depends(get_session),
+):
+    """Begin simulating event progress for testing live mode. Generates fake
+    match results based on the active assigned schedule. Replaces TBA as the
+    data source until simulate/stop is called."""
+    event = await db.get(Event, event_id)
+    if not event:
+        raise HTTPException(404, "Event not found")
+    return await live_data.start_simulation(db, event_id, speedup=speedup)
+
+
+@app.post("/api/events/{event_id}/simulate/stop")
+async def stop_event_simulation(event_id: int, db: AsyncSession = Depends(get_session)):
+    """End simulation and clear simulated data."""
+    event = await db.get(Event, event_id)
+    if not event:
+        raise HTTPException(404, "Event not found")
+    return await live_data.stop_simulation(db, event_id)
+
+
+@app.post("/api/webhooks/nexus")
+async def nexus_webhook(request: Request, db: AsyncSession = Depends(get_session)):
+    """Receive a Nexus event webhook. Validates the configured token and
+    upserts queue status into our DB. Configure the webhook URL in Nexus's
+    settings page; configure the token via NEXUS_WEBHOOK_TOKEN env var."""
+    expected_token = os.environ.get("NEXUS_WEBHOOK_TOKEN", "")
+    if expected_token:
+        provided = request.headers.get("Nexus-Token") or request.headers.get("x-nexus-token") or ""
+        if provided != expected_token:
+            raise HTTPException(403, "Invalid Nexus token")
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON payload")
+    return await live_data.ingest_nexus_event(db, payload)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

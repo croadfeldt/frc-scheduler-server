@@ -218,6 +218,114 @@ class MatchRow(Base):
     assigned_schedule: Mapped["AssignedSchedule"] = relationship(back_populates="match_rows")
 
 
+# ── Live event data ───────────────────────────────────────────────────────────
+# Match results synced from The Blue Alliance API. We store these so multiple
+# users viewing the same event don't multiply API calls and so the data
+# survives venue wifi flakiness. Refreshed lazily — see app.live.refresh_event.
+
+class MatchResult(Base):
+    """Result for a single played match. Sourced from TBA. One row per match
+    per event."""
+    __tablename__ = "match_results"
+    __table_args__ = (
+        UniqueConstraint("event_id", "comp_level", "match_number",
+                         "set_number", name="uix_match_result_key"),
+    )
+
+    id:           Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    event_id:     Mapped[int] = mapped_column(BigInteger, ForeignKey("events.id", ondelete="CASCADE"), index=True)
+    comp_level:   Mapped[str] = mapped_column(String(8))   # 'qm', 'sf', 'f', etc.
+    match_number: Mapped[int] = mapped_column(Integer)
+    set_number:   Mapped[int] = mapped_column(Integer, default=1)  # only meaningful in playoffs
+
+    # Time fields (unix seconds, nullable until set by TBA)
+    actual_time:      Mapped[int|None] = mapped_column(BigInteger, nullable=True)
+    predicted_time:   Mapped[int|None] = mapped_column(BigInteger, nullable=True)
+    post_result_time: Mapped[int|None] = mapped_column(BigInteger, nullable=True)
+
+    # Teams (red 1/2/3, blue 1/2/3) — denormalized for queries
+    red_teams:  Mapped[list] = mapped_column(JSON, default=list)   # [int, int, int]
+    blue_teams: Mapped[list] = mapped_column(JSON, default=list)
+
+    # Scores
+    red_score:         Mapped[int|None] = mapped_column(Integer, nullable=True)
+    blue_score:        Mapped[int|None] = mapped_column(Integer, nullable=True)
+    winning_alliance:  Mapped[str|None] = mapped_column(String(8), nullable=True)  # 'red'/'blue'/'tie'
+
+    # Year-specific score breakdown — pass through whatever TBA returns
+    score_breakdown: Mapped[dict|None] = mapped_column(JSON, nullable=True)
+
+    # Video keys (TBA's "videos" array)
+    videos: Mapped[list|None] = mapped_column(JSON, nullable=True)
+
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TeamRanking(Base):
+    """Current event ranking for a team. Sourced from TBA's rankings endpoint."""
+    __tablename__ = "team_rankings"
+    __table_args__ = (
+        UniqueConstraint("event_id", "team_number", name="uix_team_ranking_key"),
+    )
+
+    id:           Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    event_id:     Mapped[int] = mapped_column(BigInteger, ForeignKey("events.id", ondelete="CASCADE"), index=True)
+    team_number:  Mapped[int] = mapped_column(Integer, index=True)
+
+    rank:         Mapped[int|None]   = mapped_column(Integer, nullable=True)
+    wins:         Mapped[int]        = mapped_column(Integer, default=0)
+    losses:       Mapped[int]        = mapped_column(Integer, default=0)
+    ties:         Mapped[int]        = mapped_column(Integer, default=0)
+    matches_played: Mapped[int]      = mapped_column(Integer, default=0)
+    ranking_score: Mapped[float|None] = mapped_column(Float, nullable=True)
+    avg_match_score: Mapped[float|None] = mapped_column(Float, nullable=True)
+
+    # Raw "extra stats" from TBA — year-specific breakdown
+    extra_stats: Mapped[dict|None] = mapped_column(JSON, nullable=True)
+
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class QueueStatus(Base):
+    """Current queueing status for a match. Sourced from Nexus webhooks.
+
+    Status values match Nexus's terminology:
+      'queueing_soon', 'now_queueing', 'on_deck', 'on_field', 'completed'
+    """
+    __tablename__ = "queue_status"
+    __table_args__ = (
+        UniqueConstraint("event_id", "comp_level", "match_number",
+                         "set_number", name="uix_queue_status_key"),
+    )
+
+    id:           Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    event_id:     Mapped[int] = mapped_column(BigInteger, ForeignKey("events.id", ondelete="CASCADE"), index=True)
+    comp_level:   Mapped[str] = mapped_column(String(8))
+    match_number: Mapped[int] = mapped_column(Integer)
+    set_number:   Mapped[int] = mapped_column(Integer, default=1)
+
+    status:       Mapped[str] = mapped_column(String(32))  # 'queueing_soon' | 'now_queueing' | 'on_deck' | 'on_field' | 'completed'
+    queue_time:   Mapped[int|None] = mapped_column(BigInteger, nullable=True)  # unix seconds, when the match should queue
+    updated_at:   Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class EventLiveSync(Base):
+    """Tracks per-event sync state — when we last refreshed TBA, errors, etc.
+    Used to throttle TBA API calls and surface freshness to clients."""
+    __tablename__ = "event_live_sync"
+
+    event_id:           Mapped[int] = mapped_column(BigInteger, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    tba_last_fetched:   Mapped[datetime|None] = mapped_column(DateTime(timezone=True), nullable=True)
+    tba_last_error:     Mapped[str|None]      = mapped_column(Text, nullable=True)
+    nexus_last_event:   Mapped[datetime|None] = mapped_column(DateTime(timezone=True), nullable=True)
+    nexus_last_error:   Mapped[str|None]      = mapped_column(Text, nullable=True)
+    # Simulation mode — when set, refresh_event() generates fake data instead
+    # of calling TBA. Stores epoch-seconds when simulation started so progress
+    # is deterministic on each call.
+    sim_started_at:     Mapped[int|None]  = mapped_column(BigInteger, nullable=True)
+    sim_speedup:        Mapped[float|None] = mapped_column(Float, nullable=True)
+
+
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 async def init_db(retries: int = 10, delay: float = 2.0) -> None:

@@ -101,6 +101,12 @@ spec:
                 secretKeyRef:
                   name: frc-app-secret
                   key: TBA_API_KEY
+            - name: NEXUS_WEBHOOK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: frc-app-secret
+                  key: NEXUS_WEBHOOK_TOKEN
+                  optional: true
             - name: CPU_WORKERS
               value: "CPU_WORKERS_PLACEHOLDER"
             - name: PYTHONUNBUFFERED

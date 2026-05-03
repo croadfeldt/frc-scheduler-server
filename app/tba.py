@@ -47,6 +47,19 @@ async def get_event(event_key: str) -> dict:
     return await _get(f"/event/{event_key}/simple")
 
 
+# ── Live event data ───────────────────────────────────────────────────────────
+
+async def get_event_matches(event_key: str) -> list[dict]:
+    """All matches (qual + playoff) for the event, with scores+times when played."""
+    return await _get(f"/event/{event_key}/matches")
+
+
+async def get_event_rankings(event_key: str) -> dict | None:
+    """Team rankings for an event. Returns None for events with no rankings yet
+    (TBA returns an HTTP 404-ish empty response in that case)."""
+    return await _get(f"/event/{event_key}/rankings")
+
+
 async def get_event_teams(event_key: str) -> list[dict]:
     return await _get(f"/event/{event_key}/teams/simple")
 

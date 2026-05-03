@@ -259,6 +259,138 @@
   .footer-meta a { color: var(--text-muted); text-decoration: none; }
   .footer-meta a:hover { text-decoration: underline; }
 
+  /* ── Live data UI ──────────────────────────────────────────────────── */
+  .live-strip {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.5rem 0.85rem; margin-bottom: 1rem; box-shadow: var(--shadow);
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 0.75rem; flex-wrap: wrap; font-size: 12px;
+  }
+  .live-strip .strip-left { display: flex; align-items: center; gap: 0.6rem; }
+  .live-strip .strip-right { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .live-strip strong { font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px; }
+  .live-strip strong::before {
+    content: "●"; color: var(--secondary); margin-right: 4px;
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .src-badge {
+    padding: 2px 6px; border-radius: 10px; font-size: 11px; font-weight: 600;
+    background: var(--bg-alt); border: 1px solid var(--border);
+  }
+  .src-on  { color: var(--secondary); }
+  .src-off { color: var(--text-muted); opacity: 0.6; }
+  .src-sim { background: var(--next-match-accent); color: #fff; border-color: var(--next-match-accent); }
+  .src-err { background: #ffebe9; color: #82071e; border-color: #ff8182; }
+  .strip-fresh { color: var(--text-muted); font-size: 11px; }
+  .strip-btn {
+    background: var(--bg-alt); border: 1px solid var(--border); color: var(--text);
+    border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+  }
+  .strip-btn:hover { background: var(--border); }
+  .strip-drift {
+    padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+  }
+  .drift-ok    { color: var(--secondary); background: rgba(93,175,120,0.12); }
+  .drift-late  { color: #d97706; background: rgba(251,133,0,0.12); }
+  .drift-early { color: var(--primary); background: rgba(9,105,218,0.12); }
+
+  /* Drift badges next to estimated start times in the table */
+  .drift-badge {
+    display: inline-block; margin-left: 4px; padding: 1px 5px;
+    font-size: 10px; font-weight: 700; border-radius: 3px;
+    vertical-align: middle;
+  }
+
+  /* Queue status pills next to match numbers */
+  .queue-pill {
+    display: inline-block; margin-left: 6px; padding: 1px 6px;
+    font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; border-radius: 3px; vertical-align: middle;
+  }
+  .queue-queueing_soon { background: #fff3cd; color: #7d4e00; border: 1px solid #f7d785; }
+  .queue-now_queueing  { background: #ffd6a5; color: #8a4400; border: 1px solid #fd9c43; animation: pulse-dot 1.5s infinite; }
+  .queue-on_deck       { background: #c8e6c9; color: #1b5e20; border: 1px solid #66bb6a; }
+  .queue-on_field      { background: #5daf78; color: #fff; border: 1px solid #5daf78; animation: pulse-dot 1s infinite; }
+  .queue-completed     { background: var(--bg-alt); color: var(--text-muted); border: 1px solid var(--border); }
+
+  /* Completed match: replace 6 team cells with two big score blocks */
+  .score-block {
+    padding: 0.4rem 0.75rem !important; vertical-align: middle;
+    font-variant-numeric: tabular-nums;
+  }
+  .score-block .alliance-score {
+    display: inline-block; font-size: 20px; font-weight: 700;
+    margin-right: 0.6rem; vertical-align: middle;
+  }
+  .score-block .alliance-teams { font-size: 11px; color: var(--text-muted); }
+  .score-block.winner { font-weight: 700; }
+  .score-block.winner .alliance-score { font-size: 22px; }
+  .score-block .winner-badge {
+    display: inline-block; margin-left: 0.4rem; padding: 1px 5px;
+    background: var(--secondary); color: #fff; font-size: 10px;
+    font-weight: 700; border-radius: 3px;
+  }
+
+  /* Now-playing: more obvious pulse */
+  tr.now-playing { background: rgba(251,133,0,0.10) !important; box-shadow: inset 4px 0 0 var(--next-match-accent); }
+  tr.now-playing td.col-match::before {
+    content: "▶"; color: var(--next-match-accent); margin-right: 4px;
+    animation: pulse-dot 1s infinite;
+  }
+
+  /* Win/loss tinting on completed rows (subtle, doesn't overpower score block) */
+  tr.completed.result-red { background: rgba(209,36,47,0.04); }
+  tr.completed.result-blue { background: rgba(9,105,218,0.04); }
+  tr.completed.result-tie  { background: rgba(150,150,150,0.04); }
+  tr.completed.alt.result-red  { background: rgba(209,36,47,0.07); }
+  tr.completed.alt.result-blue { background: rgba(9,105,218,0.07); }
+  tr.completed .col-time .actual-time { color: var(--text-muted); }
+  tr.completed .col-time .playing-time { color: var(--next-match-accent); font-weight: 700; }
+
+  /* Per-team stats grid in next-match card */
+  .team-stats {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
+    margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--border);
+  }
+  .team-stats .stat { text-align: center; }
+  .team-stats .stat-label {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-muted); font-weight: 600;
+  }
+  .team-stats .stat-value { font-size: 16px; font-weight: 700; color: var(--text); }
+  @media (max-width: 480px) {
+    .team-stats { grid-template-columns: repeat(3, 1fr); }
+  }
+  .finish-est {
+    margin-top: 0.5rem; font-size: 12px; color: var(--text-muted);
+  }
+  .finish-est strong { color: var(--text); }
+  .result-line { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+  .result-line.won  { background: rgba(93,175,120,0.15); color: var(--secondary); }
+  .result-line.lost { background: rgba(209,36,47,0.10); color: var(--red-alliance); }
+
+  /* Score breakdown table in next-match card */
+  .breakdown { margin-top: 0.6rem; }
+  .breakdown summary {
+    cursor: pointer; font-size: 12px; color: var(--text-muted);
+    padding: 4px 0; user-select: none;
+  }
+  .breakdown summary:hover { color: var(--text); }
+  .bd-table { width: 100%; margin-top: 0.4rem; border-collapse: collapse; font-size: 11px; }
+  .bd-table th { text-align: left; font-weight: 500; color: var(--text-muted); padding: 2px 6px; }
+  .bd-table td { text-align: right; padding: 2px 6px; font-weight: 600; }
+  .bd-table tr.bd-extra th, .bd-table tr.bd-extra td { color: var(--text-muted); font-weight: 400; }
+
+  /* YouTube video embed */
+  .video-embed { margin-top: 0.5rem; }
+  .video-embed summary {
+    cursor: pointer; font-size: 12px; color: var(--text-muted); padding: 4px 0;
+  }
+  .video-embed iframe {
+    width: 100%; aspect-ratio: 16 / 9; border-radius: 6px; margin-top: 0.4rem;
+  }
+
   /* ── Print ───────────────────────────────────────────────────────────── */
   @page { size: letter; margin: 0.5in; }
   @media print {
@@ -305,6 +437,9 @@
 
   <!-- Main content -->
   <div id="mainContent" style="display:none;">
+
+    <!-- Live status strip — visible only in ?live=1 mode -->
+    <div class="live-strip no-print" id="liveStrip" style="display:none;"></div>
 
     <div class="action-grid no-print">
       <!-- Team search card -->
@@ -410,6 +545,16 @@ const STATE = {
   myTeam:     null,
   liveMode:   false,
   startEpoch: null,       // event start as epoch ms (for live mode)
+  // Live data — populated when ?live=1 by polling /api/events/{id}/live
+  live:       null,       // full payload from /api/events/{id}/live
+  liveByMatch: {},        // {matchNum: {actual_time, red_score, blue_score, status, ...}}
+  liveQueueByMatch: {},   // {matchNum: {status, queue_time}}
+  liveRankByTeam: {},     // {teamNum: {rank, wins, losses, ...}}
+  livePollHandle: null,
+  liveLastUpdate: null,
+  liveError:  null,
+  audioPrev:  null,       // last seen 'queueing now' match for my team (audio cue)
+  simMode:    false,      // ?simulate=1 — drives a fake event for testing
 };
 
 // ── URL params ─────────────────────────────────────────────────────────
@@ -423,7 +568,10 @@ async function boot() {
   applyUrlBranding();
 
   // Live mode flag
+  // Live mode flag — controls polling and the live UI overlays
   STATE.liveMode = PARAMS.get('live') === '1';
+  STATE.simMode  = PARAMS.get('simulate') === '1' || PARAMS.get('sim') === '1';
+  if (STATE.simMode) STATE.liveMode = true;  // simulate implies live
 
   // Pre-fill team filter from URL
   const teamParam = PARAMS.get('team') || PARAMS.get('myteam');
@@ -474,6 +622,12 @@ async function loadAssigned(id) {
     rerender();
     clearStatus();
     document.getElementById('mainContent').style.display = '';
+    // Kick off live data polling if requested. Simulate mode auto-starts a
+    // server-side simulation before the first poll so we have data immediately.
+    if (STATE.liveMode && STATE.schedule && STATE.schedule.event_id) {
+      if (STATE.simMode) await maybeStartSimulation();
+      startLivePolling();
+    }
   } catch (err) {
     showStatus('Could not load schedule: ' + err.message, 'error');
     showEmptyState();
@@ -756,9 +910,19 @@ function rerender() {
   STATE.myTeam = parseInt(document.getElementById('myTeam').value) || null;
   const onlyMine = document.getElementById('onlyMine').checked;
 
-  // Live mode: figure out which match is "now"
+  // Determine "now playing" preferring live API state over clock estimation.
+  // A match is "playing" when it has an actual_time but no post_result_time.
   let nowMatchNum = null;
-  if (STATE.liveMode) {
+  let nowFromLive = false;
+  for (const m of Object.values(STATE.liveByMatch || {})) {
+    if (m.actual_time && !m.post_result_time && m.comp_level === 'qm') {
+      nowMatchNum = m.match_number;
+      nowFromLive = true;
+      break;
+    }
+  }
+  if (!nowMatchNum && STATE.liveMode) {
+    // Fallback: clock estimation
     const now = new Date();
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const nowMin = (now.getTime() - todayStart.getTime()) / 60000;
@@ -785,39 +949,106 @@ function rerender() {
       html += '<tr class="break-row"><td colspan="8">⏸ ' + escapeHtml(entry.name) +
               ' · ' + minToTime12(entry.start) + ' – ' + minToTime12(entry.end) + '</td></tr>';
     } else {
+      const live  = STATE.liveByMatch[entry.matchNum];
+      const queue = STATE.liveQueueByMatch[entry.matchNum];
+      const status = live ? live.status : 'upcoming';
       const matched = STATE.myTeam && matchHasTeam(entry, STATE.myTeam);
       const isNow = entry.matchNum === nowMatchNum;
+
       const cls = ['match-row'];
       if (zebra++ % 2) cls.push('alt');
       if (matched) cls.push('my-team');
       if (isNow) cls.push('now-playing');
+      // Win/loss tint when match is completed
+      if (status === 'completed' && live.winning_alliance) {
+        cls.push('result-' + live.winning_alliance);  // 'result-red'/'result-blue'/'result-tie'
+      }
+      if (status === 'completed') cls.push('completed');
+
+      // Per-team cell renderer — handles surrogate flag, my-team highlight,
+      // and (for completed matches) winning-alliance bold styling
       const td = (val, isSur, side) => {
         const cellCls = ['col-' + side];
         if (val === STATE.myTeam) cellCls.push('my-team-cell');
+        // When completed, bold the winning alliance's cells
+        if (status === 'completed' && live.winning_alliance === side) cellCls.push('alliance-won');
         return '<td class="' + cellCls.join(' ') + '">' + val +
                (isSur ? '<span class="surr-flag">S</span>' : '') + '</td>';
       };
-      html += '<tr class="' + cls.join(' ') + '">' +
-              '<td class="col-time">' + minToTime12(entry.startMin) + '</td>' +
-              '<td class="col-match">Q' + entry.matchNum + '</td>' +
-              td(entry.blue[0], entry.blueSur[0], 'blue') +
-              td(entry.blue[1], entry.blueSur[1], 'blue') +
-              td(entry.blue[2], entry.blueSur[2], 'blue') +
-              td(entry.red[0],  entry.redSur[0],  'red') +
-              td(entry.red[1],  entry.redSur[1],  'red') +
-              td(entry.red[2],  entry.redSur[2],  'red') +
-              '</tr>';
+
+      // Time cell — adds drift badge in live mode
+      let timeCell;
+      if (status === 'completed' && live.actual_time) {
+        // Show actual played time
+        timeCell = '<span class="actual-time">' + minToTime12(epochToMin(live.actual_time)) + '</span>';
+      } else if (status === 'playing' && live.actual_time) {
+        timeCell = '<span class="playing-time">▶ ' + minToTime12(epochToMin(live.actual_time)) + '</span>';
+      } else {
+        timeCell = minToTime12(entry.startMin);
+        if (STATE.liveMode) {
+          const drift = matchDriftMinutes(entry.matchNum, entry.startMin);
+          if (drift !== null && Math.abs(drift) >= 1) {
+            const cls = drift > 0 ? 'drift-late' : 'drift-early';
+            timeCell += ' <span class="drift-badge ' + cls + '">' + formatDriftBadge(drift) + '</span>';
+          }
+        }
+      }
+
+      // Match-number cell — adds queue status pill
+      let matchCell = (entry.isPractice ? 'P' : 'Q') + entry.matchNum;
+      if (queue && queue.status && status !== 'completed') {
+        const pillCls = 'queue-pill queue-' + queue.status;
+        matchCell += ' <span class="' + pillCls + '">' + formatQueueStatus(queue.status) + '</span>';
+      }
+
+      // Score row — when completed, replace the alliance cells with score blocks
+      if (status === 'completed') {
+        const r = live.red_score, b = live.blue_score;
+        const winRed  = live.winning_alliance === 'red';
+        const winBlue = live.winning_alliance === 'blue';
+        // Render team list with pipe separators inside score block
+        const blueTeams = entry.blue.join(' · ');
+        const redTeams  = entry.red.join(' · ');
+        html += '<tr class="' + cls.join(' ') + '">' +
+                '<td class="col-time">' + timeCell + '</td>' +
+                '<td class="col-match">' + matchCell + '</td>' +
+                '<td colspan="3" class="col-blue score-block' + (winBlue ? ' winner' : '') + '">' +
+                '  <span class="alliance-score">' + (b ?? '—') + '</span>' +
+                '  <span class="alliance-teams">' + escapeHtml(blueTeams) + '</span>' +
+                '  ' + (winBlue ? '<span class="winner-badge">W</span>' : '') +
+                '</td>' +
+                '<td colspan="3" class="col-red score-block' + (winRed ? ' winner' : '') + '">' +
+                '  <span class="alliance-score">' + (r ?? '—') + '</span>' +
+                '  <span class="alliance-teams">' + escapeHtml(redTeams) + '</span>' +
+                '  ' + (winRed ? '<span class="winner-badge">W</span>' : '') +
+                '</td>' +
+                '</tr>';
+      } else {
+        html += '<tr class="' + cls.join(' ') + '">' +
+                '<td class="col-time">' + timeCell + '</td>' +
+                '<td class="col-match">' + matchCell + '</td>' +
+                td(entry.blue[0], entry.blueSur[0], 'blue') +
+                td(entry.blue[1], entry.blueSur[1], 'blue') +
+                td(entry.blue[2], entry.blueSur[2], 'blue') +
+                td(entry.red[0],  entry.redSur[0],  'red') +
+                td(entry.red[1],  entry.redSur[1],  'red') +
+                td(entry.red[2],  entry.redSur[2],  'red') +
+                '</tr>';
+      }
       matchRowsShown++;
     }
   });
 
   tbody.innerHTML = html;
 
-  // Counts
+  // Counts + freshness
   document.getElementById('tableCount').textContent =
     onlyMine && STATE.myTeam
       ? matchRowsShown + ' of ' + totalMatches + ' matches'
       : totalMatches + ' matches';
+
+  // Update live status strip (data sources, freshness, drift)
+  updateLiveStrip();
 
   // My team summary + next match
   updateNextMatch(nowMatchNum);
@@ -825,23 +1056,103 @@ function rerender() {
   // Footer meta
   const sch = STATE.schedule;
   const footerBits = [];
-  if (sch && sch.num_teams)       footerBits.push(sch.num_teams + ' teams');
+  if (sch && sch.num_teams)        footerBits.push(sch.num_teams + ' teams');
   if (sch && sch.matches_per_team) footerBits.push(sch.matches_per_team + ' matches/team');
   if (sch && sch.id)               footerBits.push('Schedule #' + sch.id);
   document.getElementById('footerMeta').textContent = footerBits.join(' · ');
-  // Editor link includes our schedule ID
   if (sch && sch.id) {
-    document.getElementById('editLink').href =
-      '/?aid=' + encodeURIComponent(sch.id);
+    document.getElementById('editLink').href = '/?aid=' + encodeURIComponent(sch.id);
   }
 
-  // Live mode: scroll to current match if found
-  if (STATE.liveMode && nowMatchNum) {
+  // Live mode: scroll to current match if found (only on first detection)
+  if (STATE.liveMode && nowMatchNum && nowMatchNum !== STATE._lastScrolledTo) {
+    STATE._lastScrolledTo = nowMatchNum;
     setTimeout(() => {
       const el = document.querySelector('tr.now-playing');
       if (el) el.scrollIntoView({behavior: 'smooth', block: 'center'});
     }, 100);
   }
+}
+
+function epochToMin(epochSeconds) {
+  const d = new Date(epochSeconds * 1000);
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+function formatQueueStatus(s) {
+  return ({
+    'queueing_soon': 'Queueing Soon',
+    'now_queueing':  'Queueing Now',
+    'on_deck':       'On Deck',
+    'on_field':      'On Field',
+    'completed':     'Done',
+  })[s] || s;
+}
+
+// Update the top live-status strip — data sources, freshness, drift
+function updateLiveStrip() {
+  const strip = document.getElementById('liveStrip');
+  if (!strip) return;
+  if (!STATE.liveMode) {
+    strip.style.display = 'none';
+    return;
+  }
+  strip.style.display = '';
+  const sources = (STATE.live && STATE.live.sources) || {};
+  const drift = eventDriftMinutes();
+  const freshness = STATE.liveLastUpdate ? formatRelativeTime(STATE.liveLastUpdate) : 'never';
+
+  // Build source badges
+  const sourceBadge = (name, label, available) =>
+    '<span class="src-badge ' + (available ? 'src-on' : 'src-off') + '" ' +
+    'title="' + label + ' ' + (available ? 'connected' : 'unavailable') + '">' +
+    label + (available ? ' ●' : ' ○') + '</span>';
+
+  // Source flags: TBA, Nexus, Sim
+  const tbaOn   = sources.tba && sources.tba.available;
+  const nexusOn = sources.nexus && sources.nexus.available;
+  const simOn   = sources.simulation && sources.simulation.active;
+
+  let driftHtml = '';
+  if (drift !== null) {
+    const cls = Math.abs(drift) < 2 ? 'drift-ok' : (drift > 0 ? 'drift-late' : 'drift-early');
+    driftHtml = '<span class="strip-drift ' + cls + '">' +
+                'Schedule ' + (drift > 0 ? 'running ' + Math.round(drift) + ' min late' :
+                              drift < 0 ? 'running ' + Math.round(-drift) + ' min early' :
+                              'on time') + '</span>';
+  }
+
+  let simBadge = '';
+  if (simOn) {
+    simBadge = '<span class="src-badge src-sim" title="Simulation active — generated data, not real">' +
+               'SIMULATION ● ' + (sources.simulation.speedup || '?') + 'x</span>' +
+               ' <button class="strip-btn" onclick="stopSimulation()">Stop Sim</button>';
+  }
+
+  let errBadge = '';
+  if (STATE.liveError) {
+    errBadge = '<span class="src-badge src-err" title="' + escapeAttr(STATE.liveError) + '">poll error</span>';
+  }
+
+  strip.innerHTML =
+    '<div class="strip-left">' +
+    '  <strong>Live</strong>' +
+    '  ' + driftHtml +
+    '</div>' +
+    '<div class="strip-right">' +
+    '  ' + (simOn ? simBadge : sourceBadge('tba', 'TBA', tbaOn) + sourceBadge('nexus', 'Nexus', nexusOn)) +
+    '  ' + errBadge +
+    '  <span class="strip-fresh">Updated ' + freshness + '</span>' +
+    '</div>';
+}
+
+function formatRelativeTime(date) {
+  const sec = Math.round((Date.now() - date.getTime()) / 1000);
+  if (sec < 5) return 'just now';
+  if (sec < 60) return sec + 's ago';
+  const min = Math.round(sec / 60);
+  if (min < 60) return min + 'm ago';
+  return Math.round(min / 60) + 'h ago';
 }
 
 function matchHasTeam(entry, team) {
@@ -882,37 +1193,166 @@ function updateNextMatch(nowMatchNum) {
     return;
   }
 
-  myStatus.textContent = myMatches.length + ' match' + (myMatches.length === 1 ? '' : 'es') + ' for team ' + STATE.myTeam;
+  myStatus.textContent = myMatches.length + ' match' + (myMatches.length === 1 ? '' : 'es');
 
-  // Determine "next" match: if live mode and there's a current match, highlight it.
-  // Otherwise, the first one.
-  const now = new Date();
-  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-  const nowMin = (now.getTime() - todayStart.getTime()) / 60000;
+  // Find the team's "next" match — preferring live status:
+  //   1. If a match for my team is currently playing (status === 'playing'), that one
+  //   2. First not-yet-completed match
+  //   3. First match overall
   let target = null;
-  if (STATE.liveMode) {
-    target = myMatches.find(m => m.startMin <= nowMin && nowMin < m.endMin)
-          || myMatches.find(m => m.startMin > nowMin)
-          || myMatches[0];
-  } else {
-    target = myMatches[0];
+  let targetIsPlaying = false;
+  for (const m of myMatches) {
+    const live = STATE.liveByMatch[m.matchNum];
+    if (live && live.status === 'playing') {
+      target = m; targetIsPlaying = true; break;
+    }
+  }
+  if (!target) {
+    target = myMatches.find(m => {
+      const live = STATE.liveByMatch[m.matchNum];
+      return !live || live.status !== 'completed';
+    }) || myMatches[myMatches.length - 1];  // all done? show the last one
   }
 
-  const isLive = target.startMin <= nowMin && nowMin < target.endMin;
-  card.className = 'card next-match-card' + (isLive ? ' active' : '');
+  card.className = 'card next-match-card' + (targetIsPlaying ? ' active' : '');
 
-  detail.textContent = (isLive ? 'Now playing: ' : 'Q') +
-                       (isLive ? 'Q' + target.matchNum : target.matchNum) +
-                       ' · ' + minToTime12(target.startMin);
+  // Header line — "Now playing" / "Up next" / "Final" with match details
+  const targetLive = STATE.liveByMatch[target.matchNum];
+  const allCompleted = myMatches.every(m => {
+    const l = STATE.liveByMatch[m.matchNum];
+    return l && l.status === 'completed';
+  });
+
+  let leadLabel;
+  if (targetIsPlaying) leadLabel = 'Now playing';
+  else if (targetLive && targetLive.status === 'completed') leadLabel = 'Final';
+  else if (allCompleted) leadLabel = 'Last match';
+  else leadLabel = 'Up next';
+
+  // Compute drift-adjusted ETA
+  let etaText = minToTime12(target.startMin);
+  let driftHtml = '';
+  if (STATE.liveMode && !targetIsPlaying && (!targetLive || targetLive.status !== 'completed')) {
+    const drift = matchDriftMinutes(target.matchNum, target.startMin);
+    if (drift !== null && Math.abs(drift) >= 1) {
+      const cls = drift > 0 ? 'drift-late' : 'drift-early';
+      driftHtml = ' <span class="drift-badge ' + cls + '">' + formatDriftBadge(drift) + '</span>';
+    }
+  }
+
+  detail.innerHTML = leadLabel + ': <strong>Q' + target.matchNum + '</strong> · ' + etaText + driftHtml;
+
   // Determine alliance + station
   let alliance = null, station = null;
   if ((station = target.blue.indexOf(STATE.myTeam) + 1) > 0) alliance = 'Blue';
   else if ((station = target.red.indexOf(STATE.myTeam) + 1) > 0) alliance = 'Red';
   const partners = (alliance === 'Blue' ? target.blue : target.red).filter(t => t !== STATE.myTeam);
   const opponents = alliance === 'Blue' ? target.red : target.blue;
-  meta.innerHTML = '<strong>' + alliance + ' ' + station + '</strong> ' +
-                   'with ' + partners.join(', ') +
-                   ' &middot; vs ' + opponents.join(', ');
+
+  // Build the meta block — alliance/partners/opponents + queue status + score (if completed)
+  let metaHtml = '<strong style="color:var(--' + (alliance || '').toLowerCase() + '-alliance);">' +
+                  (alliance || '?') + ' ' + (station || '?') + '</strong> ' +
+                  'with ' + partners.join(', ') +
+                  ' &middot; vs ' + opponents.join(', ');
+
+  // Queue status pill
+  const q = STATE.liveQueueByMatch[target.matchNum];
+  if (q && q.status && (!targetLive || targetLive.status !== 'completed')) {
+    metaHtml += '<br><span class="queue-pill queue-' + q.status + '">' +
+                formatQueueStatus(q.status) + '</span>';
+  }
+
+  // Score for completed matches
+  if (targetLive && targetLive.status === 'completed') {
+    const r = targetLive.red_score, b = targetLive.blue_score;
+    const wonByMyAlliance = targetLive.winning_alliance === (alliance || '').toLowerCase();
+    metaHtml += '<br><span class="result-line ' + (wonByMyAlliance ? 'won' : 'lost') + '">' +
+                'Result: ' + (b ?? '—') + '–' + (r ?? '—') + ' ' +
+                (wonByMyAlliance ? '🏆 Win' :
+                 (targetLive.winning_alliance === 'tie' ? 'Tie' : 'Loss')) + '</span>';
+  }
+
+  // Per-team stats block: rank, record, averages
+  const rank = STATE.liveRankByTeam[STATE.myTeam];
+  if (rank) {
+    metaHtml += '<div class="team-stats">' +
+      '<div class="stat"><div class="stat-label">Rank</div>' +
+      '  <div class="stat-value">#' + (rank.rank || '?') + '</div></div>' +
+      '<div class="stat"><div class="stat-label">Record</div>' +
+      '  <div class="stat-value">' + rank.wins + '-' + rank.losses + '-' + rank.ties + '</div></div>' +
+      '<div class="stat"><div class="stat-label">Played</div>' +
+      '  <div class="stat-value">' + rank.matches_played + ' / ' + myMatches.length + '</div></div>' +
+      (rank.avg_match_score != null ? '<div class="stat"><div class="stat-label">Avg Score</div>' +
+        '  <div class="stat-value">' + Math.round(rank.avg_match_score) + '</div></div>' : '') +
+      (rank.ranking_score != null ? '<div class="stat"><div class="stat-label">RS</div>' +
+        '  <div class="stat-value">' + (Math.round(rank.ranking_score * 10) / 10) + '</div></div>' : '') +
+      '</div>';
+  }
+
+  // Estimated finish — last match end time + drift
+  const lastMatch = myMatches[myMatches.length - 1];
+  if (lastMatch && !allCompleted) {
+    const drift = eventDriftMinutes() || 0;
+    const finishMin = lastMatch.endMin + drift;
+    metaHtml += '<div class="finish-est">Estimated finish: <strong>' +
+                minToTime12(Math.round(finishMin)) + '</strong></div>';
+  }
+
+  // Year-agnostic + auto-rendered breakdown for last completed match
+  const lastCompleted = [...myMatches].reverse().find(m => {
+    const l = STATE.liveByMatch[m.matchNum];
+    return l && l.status === 'completed' && l.score_breakdown;
+  });
+  if (lastCompleted) {
+    const live = STATE.liveByMatch[lastCompleted.matchNum];
+    const allianceKey = (alliance || '').toLowerCase();
+    const bd = live.score_breakdown && live.score_breakdown[allianceKey];
+    if (bd) {
+      metaHtml += '<details class="breakdown"><summary>Q' + lastCompleted.matchNum +
+                  ' breakdown (your alliance)</summary>' +
+                  renderScoreBreakdown(bd) + '</details>';
+    }
+    // YouTube embed for the last completed match if available
+    if (live.videos && live.videos.length) {
+      const yt = live.videos.find(v => v.type === 'youtube');
+      if (yt && yt.key) {
+        metaHtml += '<details class="video-embed"><summary>Watch Q' + lastCompleted.matchNum + '</summary>' +
+                    '<iframe loading="lazy" src="https://www.youtube.com/embed/' + escapeAttr(yt.key) + '" ' +
+                    'frameborder="0" allowfullscreen></iframe></details>';
+      }
+    }
+  }
+
+  meta.innerHTML = metaHtml;
+}
+
+// Render TBA's score_breakdown object as a small table.
+// Year-agnostic: pulls a few well-known keys (autoPoints, teleopPoints,
+// foulPoints, endGamePoints, totalPoints) plus auto-renders any other
+// numeric/boolean keys with camelCase → "Camel Case" labels. Will keep
+// working in 2027 when the game changes.
+function renderScoreBreakdown(bd) {
+  if (!bd || typeof bd !== 'object') return '';
+  const HEADLINE = ['autoPoints', 'teleopPoints', 'endGamePoints', 'foulPoints', 'totalPoints'];
+  const SKIP = new Set(['rp', 'tba_gameData']);  // internal/noisy
+  const labelize = k => k.replace(/[A-Z]/g, l => ' ' + l)
+                         .replace(/^./, l => l.toUpperCase())
+                         .replace(/\s+/g, ' ').trim();
+  let rows = '';
+  // Headline rows in fixed order
+  HEADLINE.forEach(k => {
+    if (bd[k] != null) {
+      rows += '<tr><th>' + labelize(k) + '</th><td>' + bd[k] + '</td></tr>';
+    }
+  });
+  // All other rows alphabetically
+  Object.keys(bd).sort().forEach(k => {
+    if (HEADLINE.indexOf(k) >= 0 || SKIP.has(k)) return;
+    const v = bd[k];
+    if (v === null || typeof v === 'object') return;  // skip nested
+    rows += '<tr class="bd-extra"><th>' + labelize(k) + '</th><td>' + (typeof v === 'boolean' ? (v ? '✓' : '—') : v) + '</td></tr>';
+  });
+  return '<table class="bd-table">' + rows + '</table>';
 }
 
 // ── Exports ────────────────────────────────────────────────────────────
@@ -1314,11 +1754,171 @@ function copyShareUrl() {
   });
 }
 
-// ── Live mode ─────────────────────────────────────────────────────────
-// Re-render every minute in live mode so the "now playing" tracker stays current
-setInterval(() => {
-  if (STATE.liveMode && STATE.computed) rerender();
-}, 60000);
+// ── Live mode ─────────────────────────────────────────────────────────────
+// In live mode (?live=1), poll /api/events/{id}/live every 15 seconds for
+// fresh match results, rankings, and queue status. Merge into STATE.computed
+// so rerender() can paint scores, "now playing" markers, drift badges, etc.
+
+const LIVE_POLL_INTERVAL_MS = 15000;
+const SIM_DEFAULT_SPEEDUP   = 60;  // 1 real sec = 1 sim minute
+
+function startLivePolling() {
+  stopLivePolling();
+  // Immediate first fetch
+  pollLive();
+  STATE.livePollHandle = setInterval(pollLive, LIVE_POLL_INTERVAL_MS);
+}
+function stopLivePolling() {
+  if (STATE.livePollHandle) {
+    clearInterval(STATE.livePollHandle);
+    STATE.livePollHandle = null;
+  }
+}
+
+async function pollLive() {
+  if (!STATE.schedule || !STATE.schedule.event_id) return;
+  try {
+    const r = await fetch('/api/events/' + STATE.schedule.event_id + '/live?refresh=true');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    STATE.live           = data;
+    STATE.liveLastUpdate = new Date();
+    STATE.liveError      = null;
+    // Index by match number (qual only — playoffs out of scope for view page)
+    STATE.liveByMatch = {};
+    (data.matches || []).forEach(m => {
+      if (m.comp_level === 'qm') STATE.liveByMatch[m.match_number] = m;
+    });
+    STATE.liveQueueByMatch = {};
+    (data.queue || []).forEach(q => {
+      if (q.comp_level === 'qm') STATE.liveQueueByMatch[q.match_number] = q;
+    });
+    STATE.liveRankByTeam = {};
+    (data.rankings || []).forEach(r => {
+      STATE.liveRankByTeam[r.team_number] = r;
+    });
+    rerender();
+    maybePlayQueueAudioCue();
+  } catch (err) {
+    STATE.liveError = err.message;
+    console.warn('Live poll failed:', err);
+    // Don't blank existing data — leave it stale and let the freshness
+    // indicator surface the problem. Keep polling.
+    rerender();
+  }
+}
+
+// Start a server-side simulation if simulate mode is requested. This wipes
+// any existing live data for the event and replaces it with deterministic
+// fake data driven by sim time (default 60x = 1 real sec → 1 sim minute).
+async function maybeStartSimulation() {
+  if (!STATE.simMode || !STATE.schedule || !STATE.schedule.event_id) return;
+  try {
+    const speedup = parseFloat(PARAMS.get('speedup')) || SIM_DEFAULT_SPEEDUP;
+    const r = await fetch('/api/events/' + STATE.schedule.event_id +
+                          '/simulate/start?speedup=' + speedup, { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const result = await r.json();
+    showStatus('Simulation started (' + speedup + 'x speed). Use the Stop Sim button or visit ?simulate=0 to end.', 'info');
+    setTimeout(clearStatus, 4000);
+    return result;
+  } catch (err) {
+    showStatus('Could not start simulation: ' + err.message, 'error');
+  }
+}
+
+async function stopSimulation() {
+  if (!STATE.schedule || !STATE.schedule.event_id) return;
+  try {
+    await fetch('/api/events/' + STATE.schedule.event_id +
+                '/simulate/stop', { method: 'POST' });
+    STATE.simMode = false;
+    // Clear the URL flag and reload so the page goes back to a clean state
+    const p = new URLSearchParams(window.location.search);
+    p.delete('simulate'); p.delete('sim');
+    window.location.search = '?' + p.toString();
+  } catch (err) {
+    showStatus('Stop sim failed: ' + err.message, 'error');
+  }
+}
+
+// Audio cue: short chime when our team's match enters "now_queueing" status.
+// Browsers require a user gesture before audio can play, so the first cue
+// might be silent — that's fine. Volume kept low and only triggers on
+// transitions (not every poll).
+function maybePlayQueueAudioCue() {
+  if (!STATE.myTeam) return;
+  // Find the next not-yet-played match for my team
+  const upcoming = (STATE.computed || []).find(e =>
+    e.type === 'match' && matchHasTeam(e, STATE.myTeam) &&
+    !((STATE.liveByMatch[e.matchNum] || {}).post_result_time)
+  );
+  if (!upcoming) { STATE.audioPrev = null; return; }
+  const q = STATE.liveQueueByMatch[upcoming.matchNum];
+  const status = q && q.status;
+  if (status === 'now_queueing' && STATE.audioPrev !== upcoming.matchNum) {
+    STATE.audioPrev = upcoming.matchNum;
+    try {
+      // Web Audio API short chime — no asset needed
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.value = 0.15;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(1320, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.45);
+      osc.stop(ctx.currentTime + 0.5);
+    } catch (e) { /* audio unavailable */ }
+  }
+}
+
+// ── Helpers used by rerender() for live data ──────────────────────────────
+
+// Format an offset in minutes as "+5m" / "-3m" / "on time"
+function formatDriftBadge(minutes) {
+  if (minutes === null || minutes === undefined || isNaN(minutes)) return '';
+  const m = Math.round(minutes);
+  if (Math.abs(m) < 1) return 'on time';
+  return (m > 0 ? '+' : '') + m + 'm';
+}
+
+// Compute drift for a single match: actual_time vs scheduled.
+// scheduledStartMin is our local computed start (minutes from midnight today).
+function matchDriftMinutes(matchNum, scheduledStartMin) {
+  const live = STATE.liveByMatch[matchNum];
+  if (!live) return null;
+  // Use predicted_time if available (TBA's drift-aware estimate); fall back
+  // to actual_time if the match is already playing/done.
+  const epoch = live.predicted_time || live.actual_time;
+  if (!epoch) return null;
+  // Convert epoch-seconds to minutes-from-midnight today
+  const d = new Date(epoch * 1000);
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const liveMin = (d.getTime() - todayStart.getTime()) / 60000;
+  return liveMin - scheduledStartMin;
+}
+
+// Aggregate drift across all played/playing matches: median of recent values
+function eventDriftMinutes() {
+  const drifts = [];
+  (STATE.computed || []).forEach(e => {
+    if (e.type !== 'match') return;
+    const d = matchDriftMinutes(e.matchNum, e.startMin);
+    if (d !== null && Math.abs(d) < 600) drifts.push(d);
+  });
+  if (!drifts.length) return null;
+  drifts.sort((a, b) => a - b);
+  // Most-recent 5 are the most relevant
+  const recent = drifts.slice(-5);
+  return recent[Math.floor(recent.length / 2)];
+}
+
+// ── End live mode ─────────────────────────────────────────────────────────
 
 </script>
 </body>
