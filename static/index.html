@@ -7580,7 +7580,7 @@ function downloadJSON() {
 // Tab-delimited, one match per line, 13 fields per line:
 //   1. Match Number
 //   2. Red 1 Number
-//   3. Red 1 Is Surrogate (true/false)
+//   3. Red 1 Is Surrogate (TRUE/FALSE — all caps, per real-world FMS exports)
 //   4. Red 2 Number       5. Red 2 Is Surrogate
 //   6. Red 3 Number       7. Red 3 Is Surrogate
 //   8. Blue 1 Number      9. Blue 1 Is Surrogate
@@ -7596,9 +7596,16 @@ function downloadJSON() {
 //   - Requires assigned (real) team numbers. Slot indices won't import.
 function downloadFMS() {
   var scheduled = window._frcScheduled;
-  if (!scheduled) { showApiStatus('No schedule to download', true); return; }
-  if (window._frcAbstractMode) {
-    showApiStatus('FMS export needs real team numbers — assign teams first', true);
+  if (!scheduled || !scheduled.length) {
+    showApiStatus('No schedule to download', true);
+    return;
+  }
+  // FMS needs real team numbers, not slot indices.
+  // After Stage 2 assignment, _currentSlotMap is populated; before that, slots
+  // are 1..N (sequential placeholders). Refuse export if no assignment was done.
+  var hasAssignment = _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
+  if (!hasAssignment) {
+    showApiStatus('FMS export needs real team numbers — click Assign Teams first', true);
     return;
   }
 
@@ -7609,8 +7616,11 @@ function downloadFMS() {
     day.entries.forEach(function(e) {
       if (e.type !== 'match') return;
       matchNum++;
+      // FMS Manual says "true or false" without specifying case. Real-world
+      // FMS exports from prior events use ALL CAPS (TRUE/FALSE) — confirmed
+      // against a 2025 event schedule. Match that format.
       var sur = function(arr, i) {
-        return (arr && arr[i]) ? 'true' : 'false';
+        return (arr && arr[i]) ? 'TRUE' : 'FALSE';
       };
       var row = [
         matchNum,
@@ -7633,12 +7643,16 @@ function downloadFMS() {
   // FMS expects raw tab-delimited text. Use \r\n line endings for Windows
   // compatibility since FMS runs on Windows.
   var text = lines.join('\r\n') + '\r\n';
-  var blob = new Blob([text], {type: 'text/tab-separated-values'});
+  var blob = new Blob([text], {type: 'text/plain'});
+  var url  = URL.createObjectURL(blob);
   var a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = 'frc_schedule_fms.txt';
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  document.body.removeChild(a);
+  // Defer revoke so the download has time to start
+  setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
   showApiStatus('✓ Exported ' + lines.length + ' qualification matches for FMS Match Maker import');
 }
 
