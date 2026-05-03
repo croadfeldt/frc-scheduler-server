@@ -397,7 +397,7 @@
 <!-- External libraries (loaded lazily — failures degrade gracefully) -->
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 
 <script>
 "use strict";
@@ -558,7 +558,11 @@ function applyBranding() {
   } else if (b.logo_text) {
     logoEl.textContent = b.logo_text;
   } else if (STATE.schedule && STATE.schedule.event && STATE.schedule.event.year) {
-    logoEl.textContent = String(STATE.schedule.event.year).slice(-2);
+    // Display the full 4-digit year — fits the 64×64 logo box at a smaller size
+    var yearStr = String(STATE.schedule.event.year);
+    logoEl.textContent = yearStr;
+    logoEl.style.fontSize = yearStr.length >= 4 ? '15px' : '22px';
+    logoEl.style.letterSpacing = '-0.02em';
   }
 
   // Title and subtitle
@@ -991,7 +995,7 @@ function exportXlsx() {
     return;
   }
   const ev = STATE.schedule.event;
-  const titleLine = ev && ev.name ? ev.name : 'Qualification Match Schedule';
+  const titleLine = ev && ev.name ? ev.name + (ev.year ? ' — ' + ev.year : '') : 'Qualification Match Schedule';
   const aoa = [
     ['Qualification Match Schedule'],
     [],
@@ -999,7 +1003,8 @@ function exportXlsx() {
     ['Matches Per Team', '', STATE.schedule.matches_per_team || ''],
     ['Time', 'Description', 'Blue 1', 'Blue 2', 'Blue 3', 'Red 1', 'Red 2', 'Red 3'],
   ];
-  getCurrentRows().forEach(e => {
+  const rows = getCurrentRows();
+  rows.forEach(e => {
     aoa.push([
       minToTime12(e.startMin),
       'Qualification ' + e.matchNum,
@@ -1017,6 +1022,60 @@ function exportXlsx() {
     { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
     { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } },
   ];
+
+  // ── Styling (xlsx-js-style supports cell-level styles) ────────────────
+  const headerStyle = {
+    font:      { bold: true, sz: 14 },
+    alignment: { horizontal: 'center' },
+  };
+  const subTitleStyle = {
+    font:      { bold: true, sz: 12 },
+    alignment: { horizontal: 'center' },
+  };
+  const colHeaderStyle = {
+    font:      { bold: true, sz: 10 },
+    fill:      { patternType: 'solid', fgColor: { rgb: 'D5DBDF' } },
+    alignment: { horizontal: 'center' },
+    border: {
+      bottom: { style: 'medium', color: { rgb: '000000' } },
+    },
+  };
+  const cellBase  = { alignment: { horizontal: 'center' } };
+  const cellBlue  = { font: { color: { rgb: '0550AE' } }, alignment: { horizontal: 'center' } };
+  const cellRed   = { font: { color: { rgb: 'A3261A' } }, alignment: { horizontal: 'center' } };
+  const cellShade = { fill: { patternType: 'solid', fgColor: { rgb: 'F2F4F7' } } };
+
+  // Apply title row, sub-title, "Matches Per Team", header row styles
+  if (ws['A1']) ws['A1'].s = headerStyle;
+  if (ws['A3']) ws['A3'].s = subTitleStyle;
+  if (ws['A4']) ws['A4'].s = { font: { bold: true } };
+  // Column headers (row 5 in 1-indexed = row 4 in 0-indexed)
+  ['A5','B5','C5','D5','E5','F5','G5','H5'].forEach(addr => {
+    if (ws[addr]) ws[addr].s = colHeaderStyle;
+  });
+
+  // Zebra stripe data rows: rows 6+ (1-indexed) — even rows get shading
+  // (so the first data row is plain, the second is shaded, etc.)
+  rows.forEach((_, idx) => {
+    const xlRow = 6 + idx;          // 1-indexed worksheet row
+    const isShaded = (idx % 2) === 1;
+    ['A','B','C','D','E','F','G','H'].forEach((col, cIdx) => {
+      const addr = col + xlRow;
+      if (!ws[addr]) return;
+      // Pick base style by column
+      let s = Object.assign({}, cellBase);
+      if (cIdx >= 2 && cIdx <= 4) s = Object.assign({}, cellBlue);
+      else if (cIdx >= 5 && cIdx <= 7) s = Object.assign({}, cellRed);
+      if (isShaded) {
+        s = Object.assign({}, s, cellShade);
+        // Preserve color while merging fill
+        if (cIdx >= 2 && cIdx <= 4) s.font = { color: { rgb: '0550AE' } };
+        if (cIdx >= 5 && cIdx <= 7) s.font = { color: { rgb: 'A3261A' } };
+      }
+      ws[addr].s = s;
+    });
+  });
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
   XLSX.writeFile(wb, getFilenameSlug('.xlsx'));
@@ -1027,21 +1086,191 @@ function exportPdf() {
     alert('PDF library failed to load. Use Print and choose Save as PDF.');
     return;
   }
-  // Clone the page minus toolbar/cards, build a print-style document
-  const page = document.querySelector('.page').cloneNode(true);
-  page.querySelectorAll('.no-print').forEach(n => n.remove());
-  // Wrap for html2pdf
-  const wrap = document.createElement('div');
-  wrap.style.background = '#fff'; wrap.style.color = '#000';
-  wrap.appendChild(page);
+
+  // html2pdf renders the live DOM via html2canvas. `@media print` rules don't
+  // apply (it isn't actually printing), and the dark-mode media query from
+  // `prefers-color-scheme: dark` continues to match. To get a clean light PDF
+  // we build a fresh detached DOM with explicit light colors set as inline
+  // styles on every relevant element — variables won't help here because
+  // var() resolution still walks back to :root.
+
+  var b = STATE.branding || {};
+  var primaryColor = b.primary_color || '#0969da';
+
+  // Container with explicit light styling
+  var wrap = document.createElement('div');
+  wrap.style.cssText = [
+    'background: #ffffff',
+    'color: #1c2128',
+    'padding: 0',
+    'margin: 0',
+    'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif',
+    'font-size: 11pt',
+    'line-height: 1.4',
+    '-webkit-print-color-adjust: exact',
+    'print-color-adjust: exact',
+  ].join(';');
+
+  // ── Header (rebuilt fresh, not cloned, so dark-mode styles don't leak) ─
+  var ev = (STATE.schedule && STATE.schedule.event) || {};
+  var titleText = b.title || ev.name || 'FRC Match Schedule';
+  var subtitleParts = [];
+  if (ev.year)     subtitleParts.push(String(ev.year));
+  if (ev.location) subtitleParts.push(ev.location);
+  if (b.venue && subtitleParts.indexOf(b.venue) < 0) subtitleParts.push(b.venue);
+  if (b.subtitle)  subtitleParts = [b.subtitle];
+
+  var logoText = b.logo_text || (ev.year ? String(ev.year) : 'FRC');
+  var logoFontSize = logoText.length >= 4 ? '15px' : '22px';
+  var logoInner = b.logo_url
+    ? '<img src="' + escapeAttr(b.logo_url) + '" alt="" style="max-width:60px;max-height:60px;object-fit:contain;">'
+    : '<span style="font-size:' + logoFontSize + ';font-weight:700;letter-spacing:-0.02em;color:#fff;">' + escapeHtml(logoText) + '</span>';
+
+  var header = document.createElement('div');
+  header.style.cssText = [
+    'background: ' + primaryColor,
+    'color: #ffffff',
+    'padding: 0.75rem 1rem',
+    'margin: 0 0 0.6rem 0',
+    'border-radius: 6px',
+    'display: table',
+    'width: 100%',
+    'box-sizing: border-box',
+    '-webkit-print-color-adjust: exact',
+    'print-color-adjust: exact',
+  ].join(';');
+  header.innerHTML =
+    '<div style="display:table-cell;vertical-align:middle;width:64px;padding-right:1rem;">' +
+    '  <div style="width:60px;height:60px;background:rgba(255,255,255,0.18);border-radius:6px;display:flex;align-items:center;justify-content:center;">' +
+        logoInner +
+    '  </div>' +
+    '</div>' +
+    '<div style="display:table-cell;vertical-align:middle;">' +
+    '  <div style="font-size:18pt;font-weight:700;line-height:1.15;color:#fff;">' + escapeHtml(titleText) + '</div>' +
+    (subtitleParts.length ? '<div style="font-size:10pt;opacity:0.9;color:#fff;margin-top:2px;">' + escapeHtml(subtitleParts.join(' · ')) + '</div>' : '') +
+    '</div>';
+  wrap.appendChild(header);
+
+  // ── Match table (rebuilt with inline styles for portability) ───────────
+  var rows = STATE.computed || [];
+  var onlyMine = document.getElementById('onlyMine').checked;
+  var myTeam = STATE.myTeam;
+
+  var tbl = document.createElement('table');
+  tbl.style.cssText = [
+    'width: 100%',
+    'border-collapse: collapse',
+    'font-size: 10pt',
+    'font-variant-numeric: tabular-nums',
+    'background: #ffffff',
+    'color: #1c2128',
+  ].join(';');
+
+  var thStyle = 'background:#f0f3f6;padding:6px 4px;font-weight:700;font-size:8pt;text-transform:uppercase;letter-spacing:0.04em;border-bottom:2px solid #1c2128;text-align:center;color:#424a53;-webkit-print-color-adjust:exact;print-color-adjust:exact;';
+  var thLeft  = thStyle + 'text-align:left;padding-left:10px;';
+  var thBlue  = thStyle + 'color:#0550ae;';
+  var thRed   = thStyle + 'color:#a3261a;';
+  tbl.innerHTML =
+    '<thead><tr>' +
+    '<th style="' + thLeft + '">Time</th>' +
+    '<th style="' + thLeft + '">Match</th>' +
+    '<th style="' + thBlue + '">Blue 1</th>' +
+    '<th style="' + thBlue + '">Blue 2</th>' +
+    '<th style="' + thBlue + '">Blue 3</th>' +
+    '<th style="' + thRed  + '">Red 1</th>' +
+    '<th style="' + thRed  + '">Red 2</th>' +
+    '<th style="' + thRed  + '">Red 3</th>' +
+    '</tr></thead><tbody></tbody>';
+
+  var tbody = tbl.querySelector('tbody');
+  var zebra = 0;
+  var totalMatches = 0, shown = 0;
+
+  rows.forEach(function(entry) {
+    if (entry.type === 'match') totalMatches++;
+    if (onlyMine && myTeam) {
+      if (entry.type === 'match' && !matchHasTeam(entry, myTeam)) return;
+      if (entry.type === 'break' || entry.type === 'day-divider') return;
+    }
+    var tr = document.createElement('tr');
+    if (entry.type === 'day-divider') {
+      tr.innerHTML = '<td colspan="8" style="background:' + primaryColor +
+        ';color:#fff;padding:5px 10px;font-weight:700;font-size:9pt;text-transform:uppercase;letter-spacing:0.05em;-webkit-print-color-adjust:exact;print-color-adjust:exact;">' +
+        escapeHtml(entry.label) + '</td>';
+      zebra = 0;
+    } else if (entry.type === 'break') {
+      tr.innerHTML = '<td colspan="8" style="background:#fff8c5;color:#7d4e00;padding:6px 10px;text-align:center;font-style:italic;font-weight:500;-webkit-print-color-adjust:exact;print-color-adjust:exact;">⏸ ' +
+        escapeHtml(entry.name) + ' · ' + minToTime12(entry.start) + ' – ' + minToTime12(entry.end) + '</td>';
+    } else {
+      var rowBg = (zebra++ % 2) ? '#f6f8fa' : '#ffffff';
+      var matched = myTeam && matchHasTeam(entry, myTeam);
+      if (matched) rowBg = '#e6f4eb';
+      var rowStyle = 'background:' + rowBg + ';-webkit-print-color-adjust:exact;print-color-adjust:exact;';
+      if (matched) rowStyle += 'box-shadow:inset 4px 0 0 #5daf78;';
+      tr.style.cssText = rowStyle;
+
+      var tdBase  = 'padding:5px 4px;text-align:center;border-bottom:1px solid #eaeef2;';
+      var tdLeft  = tdBase + 'text-align:left;padding-left:10px;';
+      var tdMatch = tdLeft + 'font-weight:700;';
+      var tdBlue  = tdBase + 'color:#0550ae;font-weight:500;';
+      var tdRed   = tdBase + 'color:#a3261a;font-weight:500;';
+
+      function teamCell(val, isSur, side) {
+        var st = side === 'blue' ? tdBlue : tdRed;
+        if (val === myTeam) {
+          st = tdBase + 'background:#5daf78;color:#fff !important;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;';
+        }
+        var marker = isSur ? '<span style="font-size:7pt;background:#fff3cd;color:#856404;padding:1px 3px;border-radius:2px;margin-left:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">S</span>' : '';
+        return '<td style="' + st + '">' + val + marker + '</td>';
+      }
+      tr.innerHTML =
+        '<td style="' + tdLeft + 'color:#57606a;font-size:9pt;">' + minToTime12(entry.startMin) + '</td>' +
+        '<td style="' + tdMatch + '">' + (entry.isPractice ? 'P' : 'Q') + entry.matchNum + '</td>' +
+        teamCell(entry.blue[0], entry.blueSur[0], 'blue') +
+        teamCell(entry.blue[1], entry.blueSur[1], 'blue') +
+        teamCell(entry.blue[2], entry.blueSur[2], 'blue') +
+        teamCell(entry.red[0],  entry.redSur[0],  'red') +
+        teamCell(entry.red[1],  entry.redSur[1],  'red') +
+        teamCell(entry.red[2],  entry.redSur[2],  'red');
+      shown++;
+    }
+    tbody.appendChild(tr);
+  });
+
+  wrap.appendChild(tbl);
+
+  // Footer
+  var foot = document.createElement('div');
+  foot.style.cssText = 'margin-top:10pt;padding-top:6pt;border-top:1px solid #d0d7de;font-size:8pt;color:#57606a;text-align:center;';
+  var footBits = [];
+  if (STATE.schedule.num_teams)        footBits.push(STATE.schedule.num_teams + ' teams');
+  if (STATE.schedule.matches_per_team) footBits.push(STATE.schedule.matches_per_team + ' matches/team');
+  footBits.push(totalMatches + ' total matches');
+  if (onlyMine && myTeam) footBits.push('Filtered: team ' + myTeam + ' (' + shown + ' shown)');
+  foot.textContent = footBits.join(' · ');
+  wrap.appendChild(foot);
+
+  // html2pdf needs the source attached briefly to size correctly
+  wrap.style.position = 'absolute';
+  wrap.style.left = '-9999px';
+  wrap.style.top = '0';
+  wrap.style.width = '7.5in';  // letter width minus 0.5in margins
+  document.body.appendChild(wrap);
+
   html2pdf().set({
     margin: [0.4, 0.4, 0.4, 0.4],
     filename: getFilenameSlug('.pdf'),
     image: { type: 'jpeg', quality: 0.95 },
-    html2canvas: { scale: 2, useCORS: true, logging: false },
+    html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
     jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
-    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
-  }).from(wrap).save();
+    pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' },
+  }).from(wrap).save().then(function() {
+    document.body.removeChild(wrap);
+  }).catch(function(err) {
+    console.error(err);
+    document.body.removeChild(wrap);
+    alert('PDF generation failed: ' + err.message);
+  });
 }
 
 function triggerDownload(blob, filename) {

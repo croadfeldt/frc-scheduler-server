@@ -7175,10 +7175,33 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         var _pUsed = _pracEntries.reduce(function(s, e) {
           return e.type === 'match' ? s + (e.endMin - e.startMin) : s;
         }, 0);
-        _pdSt.textContent = '≈ ' + _pracMatchCount + ' practice matches (' +
-          Math.min(_pracCalc.guaranteed, _pracMatchCount) + ' guaranteed + ' + _pFiller + ' filler) · ≈' +
-          (_pracN > 0 ? Math.round(_pracMatchCount * 6 / _pracN * 10) / 10 : 0) + ' per team · ' +
-          Math.round(_pUsed) + '/' + (_pracCfg.endMin - _pracCfg.startMin) + ' min used';
+        var _pAvail = _pracCfg.endMin - _pracCfg.startMin;
+        // Determine if filler matches are running until practice end. The
+        // filler-extends-to-end case is interesting because it tells the user
+        // "practice will run continuously to your scheduled end time" — useful
+        // when teams arrive late and want to know if they can still get matches.
+        // Only show when there are filler matches AND they actually push to the
+        // end window (within one cycle time of the end).
+        var _pCt = _pracCfg.ct || 9;
+        var _pHasFiller = _pFiller > 0;
+        var _pFillsToEnd = _pHasFiller && (_pAvail - _pUsed) < _pCt;
+        // Hide the indicator if guaranteed matches alone fill the practice
+        // window (no filler was needed) — there's nothing extra to communicate.
+        var _pBaseStatus = '\u2248 ' + _pracMatchCount + ' practice matches (' +
+          Math.min(_pracCalc.guaranteed, _pracMatchCount) + ' guaranteed + ' + _pFiller + ' filler) \u00b7 \u2248' +
+          (_pracN > 0 ? Math.round(_pracMatchCount * 6 / _pracN * 10) / 10 : 0) + ' per team \u00b7 ' +
+          Math.round(_pUsed) + '/' + _pAvail + ' min used';
+        if (_pFillsToEnd) {
+          // Find the actual end of the last match (could be earlier than the
+          // configured practice end if a final match wouldn't fit)
+          var _pLast = null;
+          for (var _pli = _pracEntries.length - 1; _pli >= 0; _pli--) {
+            if (_pracEntries[_pli].type === 'match') { _pLast = _pracEntries[_pli]; break; }
+          }
+          var _pEndStr = _pLast ? minToTime(_pLast.endMin) : minToTime(_pracCfg.endMin);
+          _pBaseStatus += ' \u00b7 \u21AA filler runs until ' + _pEndStr;
+        }
+        _pdSt.textContent = _pBaseStatus;
       }
     }
   }
@@ -7784,20 +7807,91 @@ function downloadJSON() {
 //
 // Produces the canonical FMS-style 8-column layout used by MSHSL and FIRST
 // state tournaments: Time | Description | Blue 1-3 | Red 1-3, with title rows
-// matching the format teams expect to receive. Loads SheetJS from CDN on
-// demand (so the library cost is zero unless the user actually clicks XLSX).
+// matching the format teams expect to receive. Loads xlsx-js-style from CDN
+// on demand (drop-in SheetJS replacement that supports cell styles, used here
+// for zebra striping and color-coded alliance columns). Library cost is zero
+// unless the user actually clicks XLSX.
+//
+// Practice matches are included as a separate worksheet ("Practice Schedule")
+// when a practice day was generated. Qualification is always the first sheet.
 let _xlsxLoading = null;
 function _loadXlsxLibrary() {
   if (typeof XLSX !== 'undefined') return Promise.resolve();
   if (_xlsxLoading) return _xlsxLoading;
   _xlsxLoading = new Promise(function(resolve, reject) {
     var s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.src = 'https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js';
     s.onload  = function() { resolve(); };
     s.onerror = function() { reject(new Error('Failed to load XLSX library')); };
     document.head.appendChild(s);
   });
   return _xlsxLoading;
+}
+
+// Build a styled worksheet for one match category (qual or practice)
+function _buildXlsxWorksheet(opts) {
+  // opts: { title, subtitle, mpt, matches: [{startMin, num, red, blue}] , isPractice }
+  var aoa = [
+    [opts.title],
+    [],
+    [opts.subtitle],
+    ['Matches Per Team', '', opts.mpt || ''],
+    ['Time', 'Description', 'Blue 1', 'Blue 2', 'Blue 3', 'Red 1', 'Red 2', 'Red 3'],
+  ];
+  opts.matches.forEach(function(m) {
+    aoa.push([
+      minToTime(m.startMin),
+      (opts.isPractice ? 'Practice ' : 'Qualification ') + m.num,
+      m.blue[0], m.blue[1], m.blue[2],
+      m.red[0],  m.red[1],  m.red[2],
+    ]);
+  });
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [
+    { wch: 18 }, { wch: 18 },
+    { wch: 8 }, { wch: 8 }, { wch: 8 },
+    { wch: 8 }, { wch: 8 }, { wch: 8 },
+  ];
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } },
+  ];
+
+  // Styling — matches the canonical FMS schedule report look
+  var titleStyle      = { font: { bold: true, sz: 14 }, alignment: { horizontal: 'center' } };
+  var subTitleStyle   = { font: { bold: true, sz: 12 }, alignment: { horizontal: 'center' } };
+  var colHeaderStyle  = {
+    font: { bold: true, sz: 10 },
+    fill: { patternType: 'solid', fgColor: { rgb: 'D5DBDF' } },
+    alignment: { horizontal: 'center' },
+    border: { bottom: { style: 'medium', color: { rgb: '000000' } } },
+  };
+  var blueColor = { rgb: '0550AE' };
+  var redColor  = { rgb: 'A3261A' };
+  var shadeFill = { patternType: 'solid', fgColor: { rgb: 'F2F4F7' } };
+
+  if (ws['A1']) ws['A1'].s = titleStyle;
+  if (ws['A3']) ws['A3'].s = subTitleStyle;
+  if (ws['A4']) ws['A4'].s = { font: { bold: true } };
+  ['A5','B5','C5','D5','E5','F5','G5','H5'].forEach(function(addr) {
+    if (ws[addr]) ws[addr].s = colHeaderStyle;
+  });
+
+  // Zebra stripe data rows (every other row gets light grey background)
+  opts.matches.forEach(function(_, idx) {
+    var xlRow = 6 + idx;
+    var isShaded = (idx % 2) === 1;
+    ['A','B','C','D','E','F','G','H'].forEach(function(col, cIdx) {
+      var addr = col + xlRow;
+      if (!ws[addr]) return;
+      var s = { alignment: { horizontal: 'center' } };
+      if (cIdx >= 2 && cIdx <= 4)      s.font = { color: blueColor };
+      else if (cIdx >= 5 && cIdx <= 7) s.font = { color: redColor };
+      if (isShaded) s.fill = shadeFill;
+      ws[addr].s = s;
+    });
+  });
+  return ws;
 }
 
 async function downloadXLSX() {
@@ -7813,39 +7907,50 @@ async function downloadXLSX() {
   var eventLine  = titleParts.full || 'FRC Match Schedule';
   var mpt = parseInt(document.getElementById('matchesPerTeam').value) || '';
 
-  var aoa = [
-    ['Qualification Match Schedule'],
-    [],
-    [eventLine],
-    ['Matches Per Team', '', mpt],
-    ['Time', 'Description', 'Blue 1', 'Blue 2', 'Blue 3', 'Red 1', 'Red 2', 'Red 3'],
-  ];
+  // Separate qual and practice matches
+  var qualMatches = [];
+  var practiceMatches = [];
   scheduled.forEach(function(day) {
-    if (day.isPracticeDay) return;  // FMS imports practice separately
     (day.entries || []).forEach(function(e) {
       if (e.type !== 'match') return;
-      aoa.push([
-        minToTime(e.startMin),
-        'Qualification ' + e.num,
-        e.blue[0], e.blue[1], e.blue[2],
-        e.red[0],  e.red[1],  e.red[2],
-      ]);
+      var entry = {
+        startMin: e.startMin, num: e.num,
+        red: e.red, blue: e.blue,
+      };
+      if (day.isPracticeDay) practiceMatches.push(entry);
+      else qualMatches.push(entry);
     });
   });
-  var ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [
-    { wch: 18 }, { wch: 18 },
-    { wch: 8 }, { wch: 8 }, { wch: 8 },
-    { wch: 8 }, { wch: 8 }, { wch: 8 },
-  ];
-  ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },  // title row
-    { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } },  // event line
-  ];
+
   var wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
+
+  // Qualification sheet — primary
+  var qualWs = _buildXlsxWorksheet({
+    title:    'Qualification Match Schedule',
+    subtitle: eventLine,
+    mpt:      mpt,
+    matches:  qualMatches,
+    isPractice: false,
+  });
+  XLSX.utils.book_append_sheet(wb, qualWs, 'Qualification');
+
+  // Practice sheet — only if practice was generated
+  if (practiceMatches.length > 0) {
+    var practiceWs = _buildXlsxWorksheet({
+      title:    'Practice Match Schedule',
+      subtitle: eventLine,
+      mpt:      '',  // practice "matches per team" is not a meaningful constant
+      matches:  practiceMatches,
+      isPractice: true,
+    });
+    XLSX.utils.book_append_sheet(wb, practiceWs, 'Practice');
+  }
+
   XLSX.writeFile(wb, getScheduleFilenameSlug('.xlsx'));
-  showApiStatus('\u2713 Exported XLSX');
+  var msg = '\u2713 Exported XLSX (' + qualMatches.length + ' qual';
+  if (practiceMatches.length) msg += ' + ' + practiceMatches.length + ' practice';
+  msg += ' matches)';
+  showApiStatus(msg);
 }
 
 // ── Download schedule for FIRST FMS Match Maker import ────────────────────────
