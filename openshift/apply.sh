@@ -2,9 +2,12 @@
 # openshift/apply.sh — Deploy/update FRC Match Scheduler.
 #
 # Usage:
-#   ./apply.sh             # apply all manifests, leave existing build/data alone
-#   ./apply.sh --build     # apply manifests then trigger a fresh build
-#   ./apply.sh --rebuild   # full teardown + redeploy from scratch
+#   ./apply.sh             # apply all manifests; restart deployment for secret changes
+#   ./apply.sh --build     # apply manifests, build, and roll out the new image
+#   ./apply.sh --rebuild   # full teardown + redeploy + build + rollout from scratch
+#
+# All modes wait for rollout completion and report the running pod + image
+# on success. A failed rollout (>5min) exits non-zero.
 #
 # Can be run from anywhere:
 #   ./openshift/apply.sh   (from repo root)
@@ -122,18 +125,54 @@ done
 
 # Restart the app deployment so pods pick up any secret changes.
 # Kubernetes does not automatically restart pods when secrets change.
-if oc get deployment frc-scheduler-server -n "$NAMESPACE" > /dev/null 2>&1; then
-  echo "  Restarting app deployment to pick up latest secrets..."
-  oc rollout restart deployment/frc-scheduler-server -n "$NAMESPACE"
+# Skipped when --build/--rebuild is set since the build will trigger its own rollout.
+if [[ "$MODE" != "--build" && "$MODE" != "--rebuild" ]]; then
+  if oc get deployment frc-scheduler-server -n "$NAMESPACE" > /dev/null 2>&1; then
+    echo "  Restarting app deployment to pick up latest secrets..."
+    oc rollout restart deployment/frc-scheduler-server -n "$NAMESPACE"
+    oc rollout status deployment/frc-scheduler-server -n "$NAMESPACE" --timeout=180s
+  fi
 fi
 
-# If --build or --rebuild, refresh registry credentials and trigger a build
+# If --build or --rebuild, refresh registry credentials, trigger a build,
+# then explicitly roll out the new image and wait for the rollout to complete.
+# OpenShift image-change triggers don't always pick up the new image reliably
+# (especially on rebuilds where the image stream tag may resolve to the same
+# digest temporarily), so we force a fresh rollout.
 if [[ "$MODE" == "--build" || "$MODE" == "--rebuild" ]]; then
   echo ""
   echo "==> Triggering build..."
   refresh_registry
   refresh_builder_credentials "$NAMESPACE"
   oc start-build frc-scheduler-server-git -n "$NAMESPACE" --follow
+
+  echo ""
+  echo "==> Build complete — rolling out new image..."
+  if oc get deployment frc-scheduler-server -n "$NAMESPACE" > /dev/null 2>&1; then
+    oc rollout restart deployment/frc-scheduler-server -n "$NAMESPACE"
+    if oc rollout status deployment/frc-scheduler-server -n "$NAMESPACE" --timeout=300s; then
+      echo ""
+      echo "==> Rollout complete. New pods are serving traffic."
+      # Show the actual running pod and image for confirmation
+      POD=$(oc get pod -n "$NAMESPACE" -l app=frc-scheduler-server \
+            --field-selector=status.phase=Running \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+      if [ -n "$POD" ]; then
+        IMAGE=$(oc get pod "$POD" -n "$NAMESPACE" \
+                -o jsonpath='{.spec.containers[0].image}' 2>/dev/null || true)
+        echo "    Pod:   $POD"
+        echo "    Image: $IMAGE"
+      fi
+    else
+      echo ""
+      echo "ERROR: Rollout did not complete within 5 minutes."
+      echo "Check pod status with: oc get pods -n $NAMESPACE"
+      echo "Check pod logs with:   oc logs -n $NAMESPACE -l app=frc-scheduler-server --tail=100"
+      exit 1
+    fi
+  else
+    echo "WARNING: Deployment frc-scheduler-server not found — skipping rollout."
+  fi
 else
   echo ""
   echo "Done."
