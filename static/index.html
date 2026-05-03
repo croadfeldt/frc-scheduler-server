@@ -1234,6 +1234,7 @@
         <div id="downloadBar" style="display:none;gap:0.4rem;display:none;align-items:center;">
           <button class="btn-export" id="btnDownloadCSV" onclick="downloadCSV()" title="Download schedule as CSV">&#11015; CSV</button>
           <button class="btn-export" id="btnDownloadJSON" onclick="downloadJSON()" title="Download schedule as JSON">&#11015; JSON</button>
+          <button class="btn-export" id="btnDownloadXLSX" onclick="downloadXLSX()" title="Download schedule as Excel spreadsheet (canonical FMS layout)">&#11015; XLSX</button>
           <button class="btn-export" id="btnDownloadPDF" onclick="downloadSchedulePDF()" title="Download schedule as PDF (uses your current Print options)">&#11015; PDF</button>
           <button class="btn-export" id="btnDownloadFMS" onclick="downloadFMS()" title="Download schedule for FIRST FMS Match Maker import (tab-delimited, qualification matches only). Match times must be re-entered in FMS Build Schedule.">&#11015; FMS</button>
           <button class="btn-export" id="btnFMSSetup" onclick="openFMSSetupSheet()" title="Open a printable FMS Build Schedule setup sheet with all timing settings, breaks, cycle changes, and a QR code linking back to this schedule">&#128196; FMS Setup</button>
@@ -1267,6 +1268,25 @@
 <script>
 // ── API base URL — must be declared before any function that references it ────
 const API = window.location.origin;
+
+// ── Read-only redirect ─────────────────────────────────────────────────────
+// /?readonly=1 is now served by /view (a purpose-built read-only viewer).
+// Redirect immediately so any old share links keep working. Preserve all other
+// URL params (aid, id, team, etc) so the destination lands in the right state.
+(function() {
+  try {
+    var p = new URLSearchParams(window.location.search);
+    var ro = p.get('readonly') || p.get('viewonly');
+    if (ro === '1' || ro === 'true' || ro === 'yes') {
+      // Strip the readonly flag itself, keep everything else
+      p.delete('readonly');
+      p.delete('viewonly');
+      var qs = p.toString();
+      window.location.replace('/view' + (qs ? '?' + qs : ''));
+      return; // halt further script execution
+    }
+  } catch(e) { /* fall through */ }
+})();
 
 // ── Read-only mode (?readonly=1) ──────────────────────────────────────────────
 // Activated by URL flag: hides editing controls, lets a team enter their team
@@ -7758,6 +7778,74 @@ function downloadJSON() {
   a.href   = URL.createObjectURL(blob);
   a.download = getScheduleFilenameSlug('.json');
   a.click();
+}
+
+// ── Download schedule as Excel (XLSX) ─────────────────────────────────────────
+//
+// Produces the canonical FMS-style 8-column layout used by MSHSL and FIRST
+// state tournaments: Time | Description | Blue 1-3 | Red 1-3, with title rows
+// matching the format teams expect to receive. Loads SheetJS from CDN on
+// demand (so the library cost is zero unless the user actually clicks XLSX).
+let _xlsxLoading = null;
+function _loadXlsxLibrary() {
+  if (typeof XLSX !== 'undefined') return Promise.resolve();
+  if (_xlsxLoading) return _xlsxLoading;
+  _xlsxLoading = new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onload  = function() { resolve(); };
+    s.onerror = function() { reject(new Error('Failed to load XLSX library')); };
+    document.head.appendChild(s);
+  });
+  return _xlsxLoading;
+}
+
+async function downloadXLSX() {
+  var scheduled = window._frcScheduled;
+  if (!scheduled || !scheduled.length) { showApiStatus('No schedule to download', true); return; }
+  try {
+    await _loadXlsxLibrary();
+  } catch (e) {
+    showApiStatus('XLSX library failed to load — try CSV or PDF instead', true);
+    return;
+  }
+  var titleParts = (typeof getScheduleTitleParts === 'function') ? getScheduleTitleParts() : { full: '' };
+  var eventLine  = titleParts.full || 'FRC Match Schedule';
+  var mpt = parseInt(document.getElementById('matchesPerTeam').value) || '';
+
+  var aoa = [
+    ['Qualification Match Schedule'],
+    [],
+    [eventLine],
+    ['Matches Per Team', '', mpt],
+    ['Time', 'Description', 'Blue 1', 'Blue 2', 'Blue 3', 'Red 1', 'Red 2', 'Red 3'],
+  ];
+  scheduled.forEach(function(day) {
+    if (day.isPracticeDay) return;  // FMS imports practice separately
+    (day.entries || []).forEach(function(e) {
+      if (e.type !== 'match') return;
+      aoa.push([
+        minToTime(e.startMin),
+        'Qualification ' + e.num,
+        e.blue[0], e.blue[1], e.blue[2],
+        e.red[0],  e.red[1],  e.red[2],
+      ]);
+    });
+  });
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [
+    { wch: 18 }, { wch: 18 },
+    { wch: 8 }, { wch: 8 }, { wch: 8 },
+    { wch: 8 }, { wch: 8 }, { wch: 8 },
+  ];
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },  // title row
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } },  // event line
+  ];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
+  XLSX.writeFile(wb, getScheduleFilenameSlug('.xlsx'));
+  showApiStatus('\u2713 Exported XLSX');
 }
 
 // ── Download schedule for FIRST FMS Match Maker import ────────────────────────

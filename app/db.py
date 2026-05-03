@@ -72,6 +72,11 @@ class Event(Base):
     start_date:  Mapped[str|None] = mapped_column(String(32), nullable=True)
     end_date:    Mapped[str|None] = mapped_column(String(32), nullable=True)
     tba_synced:  Mapped[bool]     = mapped_column(Boolean, default=False)
+    # Per-event branding for /view (logo URL, primary color, subtitle, etc).
+    # Schema (all keys optional): {"preset": "mshsl"|"frc"|null, "logo_url": str,
+    # "primary_color": "#RRGGBB", "secondary_color": "#RRGGBB", "title": str,
+    # "subtitle": str, "venue": str, "footer": str}
+    branding:    Mapped[dict|None] = mapped_column(JSON, nullable=True)
     created_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -223,6 +228,13 @@ async def init_db(retries: int = 10, delay: float = 2.0) -> None:
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                # Idempotent column additions for schema evolution.
+                # Postgres `ADD COLUMN IF NOT EXISTS` is supported since 9.6.
+                # Keep this list short and rare; for anything bigger use Alembic.
+                from sqlalchemy import text
+                await conn.execute(text(
+                    "ALTER TABLE events ADD COLUMN IF NOT EXISTS branding JSONB"
+                ))
             return
         except Exception as e:
             last_error = e

@@ -180,6 +180,14 @@ async def root():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
+@app.get("/view", include_in_schema=False)
+async def view_page():
+    """Read-only schedule viewer for teams, audiences, and printable handouts.
+    Same query params as the editor (?aid, ?id) plus optional ?team, ?live,
+    ?org branding presets, and ?logo / ?color / ?title overrides."""
+    return FileResponse(os.path.join(STATIC_DIR, "view.html"))
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -297,11 +305,41 @@ async def get_event(event_id: int, db: AsyncSession = Depends(get_session)):
     return {
         "id": event.id, "key": event.key, "name": event.name, "year": event.year,
         "location": event.location, "tba_synced": event.tba_synced,
+        "branding": event.branding or {},
         "teams": [
             {"number": et.team.number, "nickname": et.team.nickname, "name": et.team.name}
             for et in sorted(event.teams, key=lambda x: x.team.number)
         ],
     }
+
+
+@app.patch("/api/events/{event_id}/branding")
+async def patch_event_branding(
+    event_id: int,
+    branding: dict,
+    db: AsyncSession = Depends(get_session),
+):
+    """Update the event's branding payload for the /view page.
+
+    Accepts an arbitrary JSON object. Recognized keys (all optional):
+      preset:          str  — one of "mshsl", "frc" (built-in styling)
+      logo_url:        str  — URL of an event/org logo (rendered top-left)
+      primary_color:   str  — "#RRGGBB" — header background, accents
+      secondary_color: str  — "#RRGGBB" — secondary highlights
+      title:           str  — override the page title
+      subtitle:        str  — secondary line under the title (e.g. venue + date)
+      venue:           str  — venue display (e.g. "Concordia University, St. Paul")
+      footer:          str  — footer line (sponsor credits etc.)
+
+    Pass an empty object {} or null fields to clear branding.
+    """
+    event = await db.get(Event, event_id)
+    if not event:
+        raise HTTPException(404, "Event not found")
+    # Replace, don't merge — caller has the full object. Use empty dict to clear.
+    event.branding = branding if isinstance(branding, dict) else {}
+    await db.commit()
+    return {"id": event.id, "branding": event.branding}
 
 
 @app.delete("/api/events/{event_id}", status_code=204)
@@ -819,9 +857,18 @@ async def get_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get
          "red_surrogate": m["red_surrogate"], "blue_surrogate": m["blue_surrogate"]}
         for m in abstract.matches
     ]
+    # Pull event info too — saves an extra round-trip for the /view page
+    event = await db.get(Event, assigned.event_id) if assigned.event_id else None
+    event_info = None
+    if event:
+        event_info = {
+            "id": event.id, "key": event.key, "name": event.name,
+            "year": event.year, "location": event.location,
+            "branding": event.branding or {},
+        }
     return {
         "id": assigned.id, "name": assigned.name, "is_active": assigned.is_active,
-        "event_id": assigned.event_id,
+        "event_id": assigned.event_id, "event": event_info,
         "abstract_schedule_id": assigned.abstract_schedule_id,
         "num_teams": abstract.num_teams, "matches_per_team": abstract.matches_per_team,
         "cooldown": abstract.cooldown, "seed": abstract.seed,

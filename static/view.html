@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FRC Match Schedule</title>
+<style>
+  /* ── Design tokens (overridable by branding) ───────────────────────────── */
+  :root {
+    --primary: #0969da;
+    --primary-dark: #0858b8;
+    --secondary: #5daf78;
+    --bg: #ffffff;
+    --bg-alt: #f6f8fa;
+    --border: #d0d7de;
+    --text: #1c2128;
+    --text-muted: #57606a;
+    --red-alliance: #d1242f;
+    --blue-alliance: #0969da;
+    --my-team-bg: #5daf78;
+    --my-team-row: rgba(93,175,120,0.15);
+    --next-match-accent: #fb8500;
+    --break-bg: #fff3cd;
+    --break-text: #856404;
+    --shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --bg-alt: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --red-alliance: #f85149;
+      --blue-alliance: #58a6ff;
+      --primary: #58a6ff;
+      --primary-dark: #1f6feb;
+      --shadow: 0 1px 3px rgba(0,0,0,0.4);
+      --break-bg: #2d2a1a;
+      --break-text: #d4a72c;
+      --my-team-row: rgba(93,175,120,0.18);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+    background: var(--bg-alt); color: var(--text);
+    font-size: 14px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  }
+  a { color: var(--primary); }
+
+  /* ── Layout ──────────────────────────────────────────────────────────── */
+  .page { max-width: 1100px; margin: 0 auto; padding: 0 1rem 3rem; }
+
+  /* ── Header / branding ───────────────────────────────────────────────── */
+  .brand-header {
+    background: var(--primary); color: #fff;
+    padding: 1.25rem 1.5rem; margin: 0 -1rem 1.25rem;
+    display: flex; align-items: center; gap: 1.25rem;
+  }
+  .brand-header .logo {
+    flex-shrink: 0; width: 64px; height: 64px;
+    background: rgba(255,255,255,0.15); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; letter-spacing: -0.02em;
+  }
+  .brand-header .logo img { max-width: 64px; max-height: 64px; object-fit: contain; }
+  .brand-header h1 {
+    margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+  .brand-header .subtitle {
+    margin-top: 4px; font-size: 13px; opacity: 0.9;
+  }
+  @media (max-width: 600px) {
+    .brand-header { flex-direction: column; align-items: flex-start; gap: 0.75rem; padding: 1rem; }
+    .brand-header h1 { font-size: 18px; }
+    .brand-header .logo { width: 44px; height: 44px; font-size: 14px; }
+  }
+
+  /* ── Action row (team search + next match card) ──────────────────────── */
+  .action-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+  @media (max-width: 750px) {
+    .action-grid { grid-template-columns: 1fr; }
+  }
+  .card {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; box-shadow: var(--shadow);
+  }
+  .card-label {
+    text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px;
+    color: var(--text-muted); font-weight: 600; margin-bottom: 0.5rem;
+  }
+  .team-input-row { display: flex; gap: 0.5rem; align-items: center; }
+  .team-input-row input {
+    flex: 1; min-width: 0; padding: 0.55rem 0.75rem; font-size: 16px;
+    background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-weight: 600; letter-spacing: 0.02em;
+  }
+  .team-input-row input:focus {
+    outline: 2px solid var(--primary); outline-offset: -1px; background: var(--bg);
+  }
+  .btn {
+    background: var(--primary); color: #fff; border: 0; border-radius: 6px;
+    padding: 0.55rem 0.9rem; font-size: 13px; font-weight: 600; cursor: pointer;
+    letter-spacing: 0.02em; white-space: nowrap;
+  }
+  .btn:hover { background: var(--primary-dark); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary {
+    background: var(--bg-alt); color: var(--text); border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { background: var(--border); }
+  .filter-row { margin-top: 0.6rem; display: flex; gap: 0.5rem; align-items: center; font-size: 13px; color: var(--text-muted); }
+  .filter-row label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; user-select: none; }
+
+  .next-match-card { display: flex; flex-direction: column; }
+  .next-match-card.active { border-left: 4px solid var(--next-match-accent); }
+  .next-match-detail { font-size: 22px; font-weight: 700; color: var(--text); margin: 4px 0; }
+  .next-match-meta { font-size: 13px; color: var(--text-muted); }
+  .next-match-meta strong { color: var(--text); font-weight: 600; }
+  .next-match-card.empty { color: var(--text-muted); font-style: italic; }
+
+  /* ── Match table ──────────────────────────────────────────────────────── */
+  .match-table-wrap {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden; box-shadow: var(--shadow); margin-bottom: 1rem;
+  }
+  .match-table-header {
+    padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg-alt);
+  }
+  .match-table-header .title { font-weight: 600; font-size: 15px; }
+  .match-table-header .count { font-size: 12px; color: var(--text-muted); }
+
+  table.matches {
+    width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
+  }
+  table.matches thead th {
+    background: var(--bg-alt); padding: 0.6rem 0.5rem; font-weight: 600;
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-muted); text-align: center; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 1;
+  }
+  table.matches thead th.col-time, table.matches thead th.col-match { text-align: left; padding-left: 1rem; }
+  table.matches thead th.col-blue { color: var(--blue-alliance); }
+  table.matches thead th.col-red  { color: var(--red-alliance); }
+  table.matches tbody tr.match-row {
+    border-bottom: 1px solid var(--bg-alt);
+  }
+  table.matches tbody tr.match-row:hover { background: var(--bg-alt); }
+  table.matches tbody tr.match-row.alt { background: rgba(0,0,0,0.015); }
+  @media (prefers-color-scheme: dark) {
+    table.matches tbody tr.match-row.alt { background: rgba(255,255,255,0.02); }
+  }
+  table.matches td { padding: 0.5rem; text-align: center; }
+  table.matches td.col-time, table.matches td.col-match { text-align: left; padding-left: 1rem; }
+  table.matches td.col-time { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
+  table.matches td.col-match { font-weight: 600; }
+  table.matches td.col-blue { color: var(--blue-alliance); font-weight: 500; }
+  table.matches td.col-red  { color: var(--red-alliance);  font-weight: 500; }
+  table.matches td .surr-flag {
+    display: inline-block; margin-left: 3px; font-size: 9px; font-weight: 700;
+    background: #fff3cd; color: #856404; padding: 1px 3px; border-radius: 2px;
+    vertical-align: middle;
+  }
+  /* Highlight rows containing my team */
+  tr.my-team { background: var(--my-team-row) !important; box-shadow: inset 4px 0 0 var(--my-team-bg); }
+  tr.my-team td { font-weight: 700; }
+  td.my-team-cell {
+    background: var(--my-team-bg); color: #fff !important; font-weight: 700;
+    border-radius: 4px; padding: 4px 8px !important;
+  }
+  /* Currently-playing match (live mode) */
+  tr.now-playing { box-shadow: inset 4px 0 0 var(--next-match-accent), 0 0 0 2px var(--next-match-accent) inset; }
+  tr.now-playing::before {
+    content: "▶"; color: var(--next-match-accent); margin-right: 4px;
+  }
+  /* Break/lunch row */
+  tr.break-row td {
+    background: var(--break-bg); color: var(--break-text); font-style: italic;
+    font-weight: 500; padding: 0.6rem 1rem; text-align: center;
+  }
+  /* Day divider */
+  tr.day-divider td {
+    background: var(--primary); color: #fff; font-weight: 700;
+    padding: 0.5rem 1rem; text-align: left; font-size: 13px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+
+  /* ── Toolbar ─────────────────────────────────────────────────────────── */
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 0.5rem; padding: 1rem;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: var(--shadow);
+  }
+  .toolbar .group-label {
+    font-size: 11px; color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.06em; align-self: center; margin-right: 0.25rem;
+  }
+  .toolbar button { font-size: 13px; }
+
+  /* ── Modal (QR + others) ─────────────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000;
+    display: none; align-items: center; justify-content: center; padding: 1rem;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-card {
+    background: var(--bg); border-radius: 12px; padding: 1.5rem;
+    max-width: 480px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  }
+  .modal-card h2 { margin: 0 0 0.75rem 0; font-size: 18px; }
+  .modal-card .qr-display {
+    background: #fff; padding: 1rem; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-card .qr-display svg, .modal-card .qr-display img {
+    width: 100%; max-width: 280px; height: auto;
+  }
+  .modal-card .url-box {
+    margin-top: 0.75rem; padding: 0.6rem 0.75rem;
+    background: var(--bg-alt); border-radius: 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+    word-break: break-all;
+  }
+  .modal-card .modal-actions {
+    margin-top: 1rem; display: flex; justify-content: flex-end; gap: 0.5rem;
+  }
+
+  /* ── Status banner (loading / error) ─────────────────────────────────── */
+  .status-banner {
+    padding: 0.85rem 1rem; border-radius: 8px; margin: 0 0 1rem 0;
+    font-size: 13px; display: flex; align-items: center; gap: 0.6rem;
+  }
+  .status-banner.info  { background: #ddf4ff; color: #0550ae; border: 1px solid #54aeff; }
+  .status-banner.error { background: #ffebe9; color: #82071e; border: 1px solid #ff8182; }
+
+  /* ── Empty state ─────────────────────────────────────────────────────── */
+  .empty-state {
+    text-align: center; padding: 3rem 1rem; color: var(--text-muted);
+  }
+  .empty-state h2 { margin: 0 0 0.5rem 0; color: var(--text); font-weight: 600; }
+  .empty-state form {
+    margin-top: 1.5rem; max-width: 360px; margin-inline: auto;
+    display: flex; gap: 0.5rem;
+  }
+
+  .footer-meta {
+    margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);
+    text-align: center; font-size: 12px; color: var(--text-muted);
+  }
+  .footer-meta a { color: var(--text-muted); text-decoration: none; }
+  .footer-meta a:hover { text-decoration: underline; }
+
+  /* ── Print ───────────────────────────────────────────────────────────── */
+  @page { size: letter; margin: 0.5in; }
+  @media print {
+    body { background: #fff; }
+    .page { padding: 0; max-width: 100%; }
+    .no-print { display: none !important; }
+    .brand-header { background: #fff !important; color: #000 !important;
+                    border-bottom: 3px solid #000; padding: 0 0 0.75rem 0; margin: 0 0 1rem 0; }
+    .brand-header .logo { background: transparent; color: #000; }
+    .card, .toolbar, .match-table-wrap { box-shadow: none; border-color: #ccc; }
+    table.matches thead th { background: #f0f0f0 !important; color: #000 !important; }
+    tr.my-team { background: #ffe !important; }
+    td.my-team-cell { background: #fdf6b2 !important; color: #000 !important; }
+    tr.day-divider td { background: #333 !important; color: #fff !important; }
+    tr.break-row td { background: #fffbe6 !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Branding header — populated by JS based on branding payload -->
+  <header class="brand-header" id="brandHeader">
+    <div class="logo" id="brandLogo">FRC</div>
+    <div>
+      <h1 id="brandTitle">FRC Match Schedule</h1>
+      <div class="subtitle" id="brandSubtitle">Loading…</div>
+    </div>
+  </header>
+
+  <div id="statusArea"></div>
+
+  <!-- Empty state when no schedule is loaded -->
+  <div id="emptyState" class="empty-state" style="display:none;">
+    <h2>No schedule loaded</h2>
+    <p>Open this page from a share link, or paste an assigned schedule ID below.</p>
+    <form onsubmit="event.preventDefault(); loadByPastedId();">
+      <input type="text" id="pastedId" placeholder="Schedule ID or share URL"
+             style="flex:1;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-alt);color:var(--text);">
+      <button type="submit" class="btn">Load</button>
+    </form>
+  </div>
+
+  <!-- Main content -->
+  <div id="mainContent" style="display:none;">
+
+    <div class="action-grid no-print">
+      <!-- Team search card -->
+      <div class="card">
+        <div class="card-label">Find Your Team</div>
+        <div class="team-input-row">
+          <input type="number" id="myTeam" placeholder="Team number"
+                 inputmode="numeric" pattern="[0-9]*"
+                 oninput="onTeamChange()" onchange="onTeamChange()">
+          <button class="btn" onclick="onTeamChange(); scrollToFirstMatch();">Find</button>
+        </div>
+        <div class="filter-row">
+          <label><input type="checkbox" id="onlyMine" onchange="rerender()"> Only my matches</label>
+          <span style="flex:1"></span>
+          <span id="myStatus"></span>
+        </div>
+      </div>
+
+      <!-- Next match card -->
+      <div class="card next-match-card empty" id="nextMatchCard">
+        <div class="card-label">Status</div>
+        <div class="next-match-detail" id="nextMatchDetail">Enter your team number to find your matches</div>
+        <div class="next-match-meta" id="nextMatchMeta"></div>
+      </div>
+    </div>
+
+    <!-- Match table -->
+    <div class="match-table-wrap">
+      <div class="match-table-header">
+        <span class="title" id="tableTitle">Qualification Schedule</span>
+        <span class="count" id="tableCount"></span>
+      </div>
+      <table class="matches" id="matchesTable">
+        <thead>
+          <tr>
+            <th class="col-time">Time</th>
+            <th class="col-match">Match</th>
+            <th class="col-blue">Blue 1</th>
+            <th class="col-blue">Blue 2</th>
+            <th class="col-blue">Blue 3</th>
+            <th class="col-red">Red 1</th>
+            <th class="col-red">Red 2</th>
+            <th class="col-red">Red 3</th>
+          </tr>
+        </thead>
+        <tbody id="matchesTbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar no-print">
+      <span class="group-label">Export</span>
+      <button class="btn btn-secondary" onclick="exportPdf()" title="Download printable PDF">📄 PDF</button>
+      <button class="btn btn-secondary" onclick="exportXlsx()" title="Download Excel spreadsheet">📊 XLSX</button>
+      <button class="btn btn-secondary" onclick="exportCsv()" title="Download CSV">📑 CSV</button>
+      <button class="btn btn-secondary" onclick="exportJson()" title="Download raw JSON">{} JSON</button>
+      <button class="btn btn-secondary" onclick="exportFms()" title="Download FMS Match Maker import file">⬇ FMS</button>
+      <span style="flex:1"></span>
+      <span class="group-label">Share</span>
+      <button class="btn btn-secondary" onclick="window.print()" title="Print">🖨 Print</button>
+      <button class="btn btn-secondary" onclick="openShareModal()" title="Show QR code">📱 QR</button>
+    </div>
+
+    <div class="footer-meta no-print">
+      <span id="footerMeta"></span> ·
+      <a id="editLink" href="/" title="Open the editor for this schedule">Open editor</a> ·
+      Powered by <a href="/" >FRC Match Scheduler</a>
+    </div>
+
+  </div>
+</div>
+
+<!-- QR + share modal -->
+<div class="modal-overlay" id="qrModal" onclick="if(event.target===this)closeShareModal()">
+  <div class="modal-card">
+    <h2>Share this view</h2>
+    <p style="margin:0 0 0.75rem 0; color:var(--text-muted); font-size:13px;">
+      Scan or copy this URL. The link includes your current team filter, so
+      pass this on to a teammate or family member to give them your personalized schedule.
+    </p>
+    <div class="qr-display" id="qrDisplay">Generating…</div>
+    <div class="url-box" id="qrUrl"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="copyShareUrl()" id="btnCopyUrl">Copy URL</button>
+      <button class="btn" onclick="closeShareModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- External libraries (loaded lazily — failures degrade gracefully) -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<script>
+"use strict";
+
+// ── State ──────────────────────────────────────────────────────────────
+const STATE = {
+  schedule:   null,       // { id, matches, day_config, event, num_teams, ... }
+  computed:   null,       // [{ matchNum, startMin, dayNum, isPracticeDay, red, blue, redSur, blueSur, type }]
+  branding:   {},         // {primary_color, logo_url, title, subtitle, ...}
+  myTeam:     null,
+  liveMode:   false,
+  startEpoch: null,       // event start as epoch ms (for live mode)
+};
+
+// ── URL params ─────────────────────────────────────────────────────────
+const PARAMS = new URLSearchParams(window.location.search);
+
+// ── Boot ───────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', boot);
+
+async function boot() {
+  // Apply URL-based branding overrides immediately so the page paints right
+  applyUrlBranding();
+
+  // Live mode flag
+  STATE.liveMode = PARAMS.get('live') === '1';
+
+  // Pre-fill team filter from URL
+  const teamParam = PARAMS.get('team') || PARAMS.get('myteam');
+  if (teamParam) {
+    document.getElementById('myTeam').value = teamParam;
+  }
+  // "Only my matches" from URL
+  if (PARAMS.get('only') === '1' || PARAMS.get('mine') === '1') {
+    document.getElementById('onlyMine').checked = true;
+  }
+
+  // Determine schedule ID to load
+  const aid = PARAMS.get('aid');
+  const sid = PARAMS.get('id') || PARAMS.get('sid');
+
+  if (aid) {
+    await loadAssigned(aid);
+  } else if (sid) {
+    await loadAbstract(sid);
+  } else {
+    showEmptyState();
+  }
+}
+
+function showStatus(message, kind) {
+  const el = document.getElementById('statusArea');
+  el.innerHTML = '<div class="status-banner ' + (kind || 'info') + '">' + escapeHtml(message) + '</div>';
+}
+function clearStatus() { document.getElementById('statusArea').innerHTML = ''; }
+function showEmptyState() {
+  document.getElementById('emptyState').style.display = 'block';
+  document.getElementById('mainContent').style.display = 'none';
+}
+
+async function loadAssigned(id) {
+  showStatus('Loading schedule…', 'info');
+  try {
+    const r = await fetch('/api/assigned-schedules/' + encodeURIComponent(id));
+    if (!r.ok) throw new Error('Schedule ' + id + ' not found (' + r.status + ')');
+    const data = await r.json();
+    STATE.schedule = data;
+    if (data.event) {
+      // DB branding takes precedence over URL params (URL is just a quick override)
+      STATE.branding = Object.assign({}, STATE.branding, data.event.branding || {});
+    }
+    applyBranding();
+    computeMatchTimes();
+    rerender();
+    clearStatus();
+    document.getElementById('mainContent').style.display = '';
+  } catch (err) {
+    showStatus('Could not load schedule: ' + err.message, 'error');
+    showEmptyState();
+  }
+}
+
+async function loadAbstract(id) {
+  showStatus('Loading schedule…', 'info');
+  try {
+    const r = await fetch('/api/abstract-schedules/' + encodeURIComponent(id));
+    if (!r.ok) throw new Error('Schedule ' + id + ' not found (' + r.status + ')');
+    const data = await r.json();
+    // Treat as schedule with slot-numbers as team numbers
+    STATE.schedule = {
+      id: data.id, matches: data.matches, day_config: data.day_config,
+      num_teams: data.num_teams, matches_per_team: data.matches_per_team,
+      event: null, _isAbstract: true,
+    };
+    applyBranding();
+    computeMatchTimes();
+    rerender();
+    clearStatus();
+    document.getElementById('mainContent').style.display = '';
+  } catch (err) {
+    showStatus('Could not load schedule: ' + err.message, 'error');
+    showEmptyState();
+  }
+}
+
+function loadByPastedId() {
+  const v = (document.getElementById('pastedId').value || '').trim();
+  if (!v) return;
+  // Accept full URL or bare ID
+  const m = v.match(/[?&](aid|id|sid)=([^&]+)/);
+  if (m) {
+    const k = m[1] === 'aid' ? 'aid' : 'id';
+    window.location.search = '?' + k + '=' + encodeURIComponent(m[2]);
+  } else if (/^\d+$/.test(v)) {
+    window.location.search = '?aid=' + encodeURIComponent(v);
+  } else {
+    showStatus('Could not parse ID from input', 'error');
+  }
+}
+
+// ── Branding ───────────────────────────────────────────────────────────
+function applyUrlBranding() {
+  const b = STATE.branding;
+  const preset = (PARAMS.get('org') || PARAMS.get('preset') || '').toLowerCase();
+  if (preset === 'mshsl') {
+    Object.assign(b, {
+      primary_color: '#1c4587',
+      secondary_color: '#fbbc04',
+      title: '',  // will be filled from event
+      logo_text: 'MSHSL',
+    });
+  } else if (preset === 'frc' || preset === 'first') {
+    Object.assign(b, {
+      primary_color: '#0066b3',
+      logo_text: 'FRC',
+    });
+  }
+  // Direct URL overrides take final precedence
+  if (PARAMS.get('color'))     b.primary_color   = PARAMS.get('color');
+  if (PARAMS.get('color2'))    b.secondary_color = PARAMS.get('color2');
+  if (PARAMS.get('logo'))      b.logo_url        = PARAMS.get('logo');
+  if (PARAMS.get('title'))     b.title           = PARAMS.get('title');
+  if (PARAMS.get('subtitle'))  b.subtitle        = PARAMS.get('subtitle');
+  if (PARAMS.get('venue'))     b.venue           = PARAMS.get('venue');
+}
+
+function applyBranding() {
+  const b = STATE.branding;
+  // Colors
+  if (b.primary_color)   document.documentElement.style.setProperty('--primary',   b.primary_color);
+  if (b.primary_color)   document.documentElement.style.setProperty('--primary-dark', shadeColor(b.primary_color, -10));
+  if (b.secondary_color) document.documentElement.style.setProperty('--secondary', b.secondary_color);
+
+  // Logo
+  const logoEl = document.getElementById('brandLogo');
+  if (b.logo_url) {
+    logoEl.innerHTML = '<img src="' + escapeAttr(b.logo_url) + '" alt="logo">';
+  } else if (b.logo_text) {
+    logoEl.textContent = b.logo_text;
+  } else if (STATE.schedule && STATE.schedule.event && STATE.schedule.event.year) {
+    logoEl.textContent = String(STATE.schedule.event.year).slice(-2);
+  }
+
+  // Title and subtitle
+  const ev = STATE.schedule && STATE.schedule.event;
+  let title = b.title;
+  let subtitleParts = [];
+  if (!title) {
+    if (ev && ev.name) title = ev.name;
+    else title = 'FRC Match Schedule';
+  }
+  if (ev) {
+    if (ev.year) subtitleParts.push(ev.year);
+    if (ev.location) subtitleParts.push(ev.location);
+  }
+  if (b.venue) subtitleParts.push(b.venue);
+  if (b.subtitle) subtitleParts = [b.subtitle];
+
+  document.getElementById('brandTitle').textContent = title;
+  document.getElementById('brandSubtitle').textContent = subtitleParts.join(' · ');
+
+  // Browser tab title
+  document.title = title + (ev && ev.year ? ' (' + ev.year + ')' : '') + ' — Schedule';
+}
+
+function shadeColor(hex, percent) {
+  // Lighten/darken a hex color by `percent` (-100..100)
+  let c = hex.replace('#', '');
+  if (c.length === 3) c = c.split('').map(x => x + x).join('');
+  let r = parseInt(c.slice(0,2), 16), g = parseInt(c.slice(2,4), 16), b = parseInt(c.slice(4,6), 16);
+  const f = percent / 100;
+  r = Math.round(Math.max(0, Math.min(255, r + (f < 0 ? r * f : (255 - r) * f))));
+  g = Math.round(Math.max(0, Math.min(255, g + (f < 0 ? g * f : (255 - g) * f))));
+  b = Math.round(Math.max(0, Math.min(255, b + (f < 0 ? b * f : (255 - b) * f))));
+  return '#' + [r,g,b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+// ── Compute match times from day_config ────────────────────────────────
+// day_config is what the editor produced. Shape varies — handle both:
+//   {days: [{start, end, breaks: [...], cycleChanges: [...], earlyEnd}], practiceDay: {...}}
+function computeMatchTimes() {
+  const sch = STATE.schedule;
+  if (!sch) return;
+  const cfg = sch.day_config || {};
+  const cycleTime = cfg.cycleTime || 8;
+  const breakBuf  = cfg.breakBuffer || 5;
+  const days = (cfg.days && cfg.days.length) ? cfg.days : [{
+    start: '08:30', end: '17:00', breaks: [], cycleChanges: [], earlyEnd: null,
+  }];
+  const matches = sch.matches || [];
+
+  // First, optionally compute practice day matches (TODO: separate generation)
+  // For now, treat all matches as qualification.
+  const computed = [];
+
+  let matchIdx = 0;
+
+  // Practice day if enabled — practice matches aren't in `sch.matches` (they're
+  // separately generated in the editor's runtime). We can't reconstruct them
+  // server-side, so for now we just label any match flagged as practice.
+  // (The editor stores practice matches as part of _frcScheduled, not in the
+  // assigned schedule's pairings array.)
+
+  for (let di = 0; di < days.length; di++) {
+    const day = days[di];
+    const startMin = timeStrToMin(day.start);
+    const endMin   = timeStrToMin(day.end);
+    const breaksRun = (day.breaks || []).map(b => ({
+      name: b.name || 'Break',
+      start: typeof b.start === 'number' ? b.start : timeStrToMin(b.start),
+      end:   typeof b.end   === 'number' ? b.end   : timeStrToMin(b.end),
+      done:  false,
+    }));
+    const ccs = day.cycleChanges || [];
+    let curCt = cycleTime;
+    ccs.forEach(c => { if (c.isStart && c.time) curCt = c.time; });
+    let cursor = startMin;
+    const earlyEnd = day.earlyEnd;
+    let dayMatchCount = 0;
+
+    // Insert day divider
+    computed.push({
+      type: 'day-divider', dayNum: di + 1,
+      label: 'Day ' + (di + 1) + (day.dateLabel ? ' — ' + day.dateLabel : ''),
+      start: startMin, end: endMin,
+    });
+
+    while (matchIdx < matches.length) {
+      // Flush breaks at/before cursor
+      for (const bk of breaksRun) {
+        if (!bk.done && bk.start <= cursor) {
+          computed.push({type: 'break', name: bk.name, start: bk.start, end: bk.end});
+          cursor = Math.max(cursor, bk.end);
+          bk.done = true;
+        }
+      }
+      // Break-buffer
+      const next = breaksRun.find(b => !b.done && b.start > cursor);
+      if (next && breakBuf > 0 && next.start - cursor < breakBuf) {
+        computed.push({type: 'break', name: next.name, start: next.start, end: next.end});
+        cursor = Math.max(cursor, next.end);
+        next.done = true;
+        continue;
+      }
+      // Effective cycle time at this match index
+      let ct = curCt;
+      ccs.forEach(c => {
+        if (c.isStart && c.time) ct = c.time;
+        else if (!c.isStart && c.afterMatch != null && (matchIdx + 1) > c.afterMatch && c.time) ct = c.time;
+      });
+      const matchEnd = cursor + ct;
+      // Interrupt break check
+      const interrupt = (!next || breakBuf <= 0 || (next.start - cursor < breakBuf))
+        ? null
+        : breaksRun.find(b => !b.done && b.start > cursor && b.start < matchEnd);
+      if (interrupt) {
+        computed.push({type: 'break', name: interrupt.name, start: interrupt.start, end: interrupt.end});
+        cursor = Math.max(cursor, interrupt.end);
+        interrupt.done = true;
+        continue;
+      }
+      // Time fit
+      if (matchEnd > endMin) break;
+      const m = matches[matchIdx];
+      computed.push({
+        type: 'match',
+        matchNum: matchIdx + 1,
+        dayNum: di + 1,
+        startMin: cursor,
+        endMin: matchEnd,
+        red:  m.red, blue: m.blue,
+        redSur:  m.red_surrogate || [false,false,false],
+        blueSur: m.blue_surrogate || [false,false,false],
+      });
+      cursor = matchEnd;
+      matchIdx++; dayMatchCount++;
+      if (earlyEnd != null && dayMatchCount >= earlyEnd) break;
+    }
+    // Emit unused breaks for visual consistency
+    breaksRun.filter(b => !b.done).forEach(b => {
+      computed.push({type: 'break', name: b.name, start: b.start, end: b.end});
+    });
+  }
+
+  STATE.computed = computed;
+
+  // Anchor live mode times to today (or to a passed-in date) so we know
+  // when "now" maps onto match minutes.
+  // For simplicity: assume schedule plays today. Override with ?date=YYYY-MM-DD.
+  const dateOverride = PARAMS.get('date');
+  let baseDate;
+  if (dateOverride && /^\d{4}-\d{2}-\d{2}$/.test(dateOverride)) {
+    baseDate = new Date(dateOverride + 'T00:00:00');
+  } else {
+    baseDate = new Date();
+    baseDate.setHours(0, 0, 0, 0);
+  }
+  STATE.startEpoch = baseDate.getTime();
+}
+
+function timeStrToMin(s) {
+  if (typeof s !== 'string') return 0;
+  const p = s.split(':').map(Number);
+  return (p[0] || 0) * 60 + (p[1] || 0);
+}
+function minToTime12(min) {
+  const h = Math.floor(min / 60), m = min % 60;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = ((h + 11) % 12) + 1;
+  return h12 + ':' + String(m).padStart(2, '0') + ' ' + period;
+}
+function dayName(epochMs) {
+  const d = new Date(epochMs);
+  return d.toLocaleDateString(undefined, { weekday: 'short' });
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }
+
+// ── Rendering ──────────────────────────────────────────────────────────
+function rerender() {
+  const tbody = document.getElementById('matchesTbody');
+  const computed = STATE.computed || [];
+  if (!computed.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:2rem;text-align:center;color:var(--text-muted)">No matches scheduled</td></tr>';
+    return;
+  }
+
+  STATE.myTeam = parseInt(document.getElementById('myTeam').value) || null;
+  const onlyMine = document.getElementById('onlyMine').checked;
+
+  // Live mode: figure out which match is "now"
+  let nowMatchNum = null;
+  if (STATE.liveMode) {
+    const now = new Date();
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const nowMin = (now.getTime() - todayStart.getTime()) / 60000;
+    const cur = computed.find(e => e.type === 'match' && e.startMin <= nowMin && nowMin < e.endMin);
+    if (cur) nowMatchNum = cur.matchNum;
+  }
+
+  let html = '';
+  let matchRowsShown = 0;
+  let zebra = 0;
+  let totalMatches = 0;
+
+  computed.forEach(entry => {
+    if (entry.type === 'match') totalMatches++;
+    // Apply onlyMine filter
+    if (onlyMine && STATE.myTeam) {
+      if (entry.type === 'match' && !matchHasTeam(entry, STATE.myTeam)) return;
+      if (entry.type === 'break' || entry.type === 'day-divider') return;
+    }
+    if (entry.type === 'day-divider') {
+      html += '<tr class="day-divider"><td colspan="8">' + escapeHtml(entry.label) + '</td></tr>';
+      zebra = 0;
+    } else if (entry.type === 'break') {
+      html += '<tr class="break-row"><td colspan="8">⏸ ' + escapeHtml(entry.name) +
+              ' · ' + minToTime12(entry.start) + ' – ' + minToTime12(entry.end) + '</td></tr>';
+    } else {
+      const matched = STATE.myTeam && matchHasTeam(entry, STATE.myTeam);
+      const isNow = entry.matchNum === nowMatchNum;
+      const cls = ['match-row'];
+      if (zebra++ % 2) cls.push('alt');
+      if (matched) cls.push('my-team');
+      if (isNow) cls.push('now-playing');
+      const td = (val, isSur, side) => {
+        const cellCls = ['col-' + side];
+        if (val === STATE.myTeam) cellCls.push('my-team-cell');
+        return '<td class="' + cellCls.join(' ') + '">' + val +
+               (isSur ? '<span class="surr-flag">S</span>' : '') + '</td>';
+      };
+      html += '<tr class="' + cls.join(' ') + '">' +
+              '<td class="col-time">' + minToTime12(entry.startMin) + '</td>' +
+              '<td class="col-match">Q' + entry.matchNum + '</td>' +
+              td(entry.blue[0], entry.blueSur[0], 'blue') +
+              td(entry.blue[1], entry.blueSur[1], 'blue') +
+              td(entry.blue[2], entry.blueSur[2], 'blue') +
+              td(entry.red[0],  entry.redSur[0],  'red') +
+              td(entry.red[1],  entry.redSur[1],  'red') +
+              td(entry.red[2],  entry.redSur[2],  'red') +
+              '</tr>';
+      matchRowsShown++;
+    }
+  });
+
+  tbody.innerHTML = html;
+
+  // Counts
+  document.getElementById('tableCount').textContent =
+    onlyMine && STATE.myTeam
+      ? matchRowsShown + ' of ' + totalMatches + ' matches'
+      : totalMatches + ' matches';
+
+  // My team summary + next match
+  updateNextMatch(nowMatchNum);
+
+  // Footer meta
+  const sch = STATE.schedule;
+  const footerBits = [];
+  if (sch && sch.num_teams)       footerBits.push(sch.num_teams + ' teams');
+  if (sch && sch.matches_per_team) footerBits.push(sch.matches_per_team + ' matches/team');
+  if (sch && sch.id)               footerBits.push('Schedule #' + sch.id);
+  document.getElementById('footerMeta').textContent = footerBits.join(' · ');
+  // Editor link includes our schedule ID
+  if (sch && sch.id) {
+    document.getElementById('editLink').href =
+      '/?aid=' + encodeURIComponent(sch.id);
+  }
+
+  // Live mode: scroll to current match if found
+  if (STATE.liveMode && nowMatchNum) {
+    setTimeout(() => {
+      const el = document.querySelector('tr.now-playing');
+      if (el) el.scrollIntoView({behavior: 'smooth', block: 'center'});
+    }, 100);
+  }
+}
+
+function matchHasTeam(entry, team) {
+  return entry.red.indexOf(team) !== -1 || entry.blue.indexOf(team) !== -1;
+}
+
+function onTeamChange() {
+  const v = parseInt(document.getElementById('myTeam').value);
+  STATE.myTeam = isNaN(v) ? null : v;
+  rerender();
+}
+
+function scrollToFirstMatch() {
+  const el = document.querySelector('tr.my-team');
+  if (el) el.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
+function updateNextMatch(nowMatchNum) {
+  const card = document.getElementById('nextMatchCard');
+  const detail = document.getElementById('nextMatchDetail');
+  const meta = document.getElementById('nextMatchMeta');
+  const myStatus = document.getElementById('myStatus');
+
+  if (!STATE.myTeam) {
+    card.className = 'card next-match-card empty';
+    detail.textContent = 'Enter your team number to find your matches';
+    meta.textContent = '';
+    myStatus.textContent = '';
+    return;
+  }
+
+  const myMatches = (STATE.computed || []).filter(e => e.type === 'match' && matchHasTeam(e, STATE.myTeam));
+  if (!myMatches.length) {
+    card.className = 'card next-match-card empty';
+    detail.textContent = 'Team ' + STATE.myTeam + ' is not in this schedule';
+    meta.textContent = '';
+    myStatus.textContent = '';
+    return;
+  }
+
+  myStatus.textContent = myMatches.length + ' match' + (myMatches.length === 1 ? '' : 'es') + ' for team ' + STATE.myTeam;
+
+  // Determine "next" match: if live mode and there's a current match, highlight it.
+  // Otherwise, the first one.
+  const now = new Date();
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const nowMin = (now.getTime() - todayStart.getTime()) / 60000;
+  let target = null;
+  if (STATE.liveMode) {
+    target = myMatches.find(m => m.startMin <= nowMin && nowMin < m.endMin)
+          || myMatches.find(m => m.startMin > nowMin)
+          || myMatches[0];
+  } else {
+    target = myMatches[0];
+  }
+
+  const isLive = target.startMin <= nowMin && nowMin < target.endMin;
+  card.className = 'card next-match-card' + (isLive ? ' active' : '');
+
+  detail.textContent = (isLive ? 'Now playing: ' : 'Q') +
+                       (isLive ? 'Q' + target.matchNum : target.matchNum) +
+                       ' · ' + minToTime12(target.startMin);
+  // Determine alliance + station
+  let alliance = null, station = null;
+  if ((station = target.blue.indexOf(STATE.myTeam) + 1) > 0) alliance = 'Blue';
+  else if ((station = target.red.indexOf(STATE.myTeam) + 1) > 0) alliance = 'Red';
+  const partners = (alliance === 'Blue' ? target.blue : target.red).filter(t => t !== STATE.myTeam);
+  const opponents = alliance === 'Blue' ? target.red : target.blue;
+  meta.innerHTML = '<strong>' + alliance + ' ' + station + '</strong> ' +
+                   'with ' + partners.join(', ') +
+                   ' &middot; vs ' + opponents.join(', ');
+}
+
+// ── Exports ────────────────────────────────────────────────────────────
+function getFilenameSlug(ext) {
+  const ev = STATE.schedule && STATE.schedule.event;
+  const bits = ['frc_schedule'];
+  if (ev && ev.year) bits.push(ev.year);
+  if (ev && ev.key)  bits.push(String(ev.key).toLowerCase().replace(/[^a-z0-9]/g, ''));
+  return bits.join('_') + (ext || '');
+}
+
+function getCurrentRows() {
+  // Returns just the visible match rows (respects onlyMine filter)
+  const computed = STATE.computed || [];
+  const onlyMine = document.getElementById('onlyMine').checked;
+  return computed.filter(e => {
+    if (e.type !== 'match') return false;
+    if (onlyMine && STATE.myTeam) return matchHasTeam(e, STATE.myTeam);
+    return true;
+  });
+}
+
+function exportCsv() {
+  const rows = [['Time', 'Match', 'Blue 1', 'Blue 2', 'Blue 3', 'Red 1', 'Red 2', 'Red 3', 'Surrogates']];
+  getCurrentRows().forEach(e => {
+    const surr = [];
+    e.blue.forEach((t, i) => { if (e.blueSur[i]) surr.push(t); });
+    e.red.forEach( (t, i) => { if (e.redSur[i])  surr.push(t); });
+    rows.push([
+      minToTime12(e.startMin), 'Q' + e.matchNum,
+      e.blue[0], e.blue[1], e.blue[2],
+      e.red[0],  e.red[1],  e.red[2],
+      surr.join(';'),
+    ]);
+  });
+  const csv = rows.map(r => r.join(',')).join('\n');
+  triggerDownload(new Blob([csv], {type:'text/csv'}), getFilenameSlug('.csv'));
+}
+
+function exportJson() {
+  const blob = new Blob([JSON.stringify({
+    generated_at: new Date().toISOString(),
+    schedule_id:  STATE.schedule.id,
+    event:        STATE.schedule.event,
+    matches:      getCurrentRows().map(e => ({
+      match_num: e.matchNum,
+      day:       e.dayNum,
+      start:     minToTime12(e.startMin),
+      red:       e.red, blue: e.blue,
+      red_surrogate: e.redSur, blue_surrogate: e.blueSur,
+    })),
+  }, null, 2)], {type:'application/json'});
+  triggerDownload(blob, getFilenameSlug('.json'));
+}
+
+function exportFms() {
+  // Per FMS Manual: tab-delimited, 13 fields, TRUE/FALSE for surrogate
+  const lines = [];
+  let n = 0;
+  getCurrentRows().forEach(e => {
+    n++;
+    const sur = (arr, i) => (arr && arr[i]) ? 'TRUE' : 'FALSE';
+    lines.push([
+      n,
+      e.red[0],  sur(e.redSur,  0),
+      e.red[1],  sur(e.redSur,  1),
+      e.red[2],  sur(e.redSur,  2),
+      e.blue[0], sur(e.blueSur, 0),
+      e.blue[1], sur(e.blueSur, 1),
+      e.blue[2], sur(e.blueSur, 2),
+    ].join('\t'));
+  });
+  const blob = new Blob([lines.join('\r\n') + '\r\n'], {type:'text/plain'});
+  triggerDownload(blob, getFilenameSlug('') + '_fms.txt');
+}
+
+function exportXlsx() {
+  if (typeof XLSX === 'undefined') {
+    alert('XLSX library failed to load. Try CSV or PDF instead.');
+    return;
+  }
+  const ev = STATE.schedule.event;
+  const titleLine = ev && ev.name ? ev.name : 'Qualification Match Schedule';
+  const aoa = [
+    ['Qualification Match Schedule'],
+    [],
+    [titleLine],
+    ['Matches Per Team', '', STATE.schedule.matches_per_team || ''],
+    ['Time', 'Description', 'Blue 1', 'Blue 2', 'Blue 3', 'Red 1', 'Red 2', 'Red 3'],
+  ];
+  getCurrentRows().forEach(e => {
+    aoa.push([
+      minToTime12(e.startMin),
+      'Qualification ' + e.matchNum,
+      e.blue[0], e.blue[1], e.blue[2],
+      e.red[0],  e.red[1],  e.red[2],
+    ]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // Column widths matching the reference XLSX
+  ws['!cols'] = [
+    { wch: 18 }, { wch: 18 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 },
+  ];
+  // Merge title cells
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } },
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
+  XLSX.writeFile(wb, getFilenameSlug('.xlsx'));
+}
+
+function exportPdf() {
+  if (typeof html2pdf === 'undefined') {
+    alert('PDF library failed to load. Use Print and choose Save as PDF.');
+    return;
+  }
+  // Clone the page minus toolbar/cards, build a print-style document
+  const page = document.querySelector('.page').cloneNode(true);
+  page.querySelectorAll('.no-print').forEach(n => n.remove());
+  // Wrap for html2pdf
+  const wrap = document.createElement('div');
+  wrap.style.background = '#fff'; wrap.style.color = '#000';
+  wrap.appendChild(page);
+  html2pdf().set({
+    margin: [0.4, 0.4, 0.4, 0.4],
+    filename: getFilenameSlug('.pdf'),
+    image: { type: 'jpeg', quality: 0.95 },
+    html2canvas: { scale: 2, useCORS: true, logging: false },
+    jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
+    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+  }).from(wrap).save();
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ── QR / share ─────────────────────────────────────────────────────────
+function openShareModal() {
+  // Build current URL — preserves filter state so the recipient lands
+  // on the same view with same team highlighted
+  const url = window.location.href;
+  document.getElementById('qrUrl').textContent = url;
+  const display = document.getElementById('qrDisplay');
+  display.innerHTML = 'Generating…';
+  if (typeof qrcode === 'function') {
+    try {
+      const qr = qrcode(0, 'M');
+      qr.addData(url);
+      qr.make();
+      display.innerHTML = qr.createSvgTag({ scalable: true });
+    } catch (e) {
+      display.innerHTML = '<div style="color:var(--text-muted);padding:1rem;">QR generation failed</div>';
+    }
+  } else {
+    display.innerHTML = '<div style="color:var(--text-muted);padding:1rem;">QR library not loaded</div>';
+  }
+  document.getElementById('qrModal').classList.add('open');
+}
+function closeShareModal() { document.getElementById('qrModal').classList.remove('open'); }
+function copyShareUrl() {
+  const url = window.location.href;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('btnCopyUrl');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
+}
+
+// ── Live mode ─────────────────────────────────────────────────────────
+// Re-render every minute in live mode so the "now playing" tracker stays current
+setInterval(() => {
+  if (STATE.liveMode && STATE.computed) rerender();
+}, 60000);
+
+</script>
+</body>
+</html>
