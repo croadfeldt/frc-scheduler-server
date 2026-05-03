@@ -241,6 +241,9 @@ class AssignRequest(BaseModel):
     assign_seed:          str | None = Field(None, max_length=16)
     name:                 str        = Field("Schedule", max_length=128)
     day_config:           Any        = None
+    # Optional: practice match list, generated client-side. Same shape as
+    # AbstractSchedule.matches but with already-resolved team numbers.
+    practice_matches:     Any        = None
 
 
 # ── Events ────────────────────────────────────────────────────────────────────
@@ -798,6 +801,7 @@ async def assign_teams_endpoint(
                 abstract_schedule_id=abstract_id, event_id=body.event_id,
                 name=body.name, is_active=True,
                 slot_map=best_result["slot_map"], day_config=body.day_config,
+                practice_matches=body.practice_matches,
                 assign_seed=body.assign_seed,
                 created_by=current_user["sub"] if current_user else None,
             )
@@ -876,6 +880,7 @@ async def get_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get
         "cooldown": abstract.cooldown, "seed": abstract.seed,
         "assign_seed": assigned.assign_seed, "created_by": assigned.created_by,
         "slot_map": assigned.slot_map, "matches": resolved_matches,
+        "practice_matches": assigned.practice_matches or [],
         "surrogate_count": abstract.surrogate_count,
         "round_boundaries": abstract.round_boundaries,
         "day_config": assigned.day_config,
@@ -942,6 +947,7 @@ async def duplicate_assigned_schedule(
         abstract_schedule_id=new_abs.id, event_id=src.event_id,
         name=f"{src.name} (copy)", is_active=False,
         slot_map=src.slot_map, day_config=src.day_config,
+        practice_matches=src.practice_matches,
         assign_seed=src.assign_seed,
         created_by=current_user["sub"] if current_user else None,
     )

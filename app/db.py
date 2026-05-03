@@ -167,6 +167,13 @@ class AssignedSchedule(Base):
 
     slot_map:     Mapped[Any]      = mapped_column(JSON)
     day_config:   Mapped[Any|None] = mapped_column(JSON, nullable=True)
+    # Practice matches generated client-side at schedule-creation time.
+    # Already-resolved team numbers (not slot indices), shape:
+    #   [{red:[t,t,t], blue:[t,t,t], red_surrogate:[bool×3], blue_surrogate:[bool×3]}, ...]
+    # Practice matches don't follow the abstract schedule's structure (different
+    # team count, no surrogate balancing, no team-pair constraints) so we store
+    # them inline rather than via an AbstractSchedule indirection.
+    practice_matches: Mapped[Any|None] = mapped_column(JSON, nullable=True)
     assign_seed:  Mapped[str|None] = mapped_column(String(16), nullable=True)
     created_by:   Mapped[str|None] = mapped_column(String(256), nullable=True, index=True)
 
@@ -342,6 +349,9 @@ async def init_db(retries: int = 10, delay: float = 2.0) -> None:
                 from sqlalchemy import text
                 await conn.execute(text(
                     "ALTER TABLE events ADD COLUMN IF NOT EXISTS branding JSONB"
+                ))
+                await conn.execute(text(
+                    "ALTER TABLE assigned_schedules ADD COLUMN IF NOT EXISTS practice_matches JSONB"
                 ))
             return
         except Exception as e:

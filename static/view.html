@@ -282,6 +282,18 @@
   .src-off { color: var(--text-muted); opacity: 0.6; }
   .src-sim { background: var(--next-match-accent); color: #fff; border-color: var(--next-match-accent); }
   .src-err { background: #ffebe9; color: #82071e; border-color: #ff8182; }
+
+  /* Schedule source badges (PUBLISHED / MODIFIED / LOCAL DRAFT) */
+  .ssrc-published { background: #ddf4e8; color: #1a7f3e; border-color: #4ac480; font-weight: 700; }
+  .ssrc-modified  { background: #fff3cd; color: #7d4e00; border-color: #f7d785; font-weight: 700;
+                    animation: pulse-dot 3s infinite; }
+  .ssrc-local     { background: #fef3e7; color: #82400e; border-color: #fcb98a; font-weight: 700; }
+  .ssrc-none      { background: var(--bg-alt); color: var(--text-muted); border-color: var(--border); }
+  @media (prefers-color-scheme: dark) {
+    .ssrc-published { background: rgba(46,160,67,0.18); color: #56d364; border-color: #2ea043; }
+    .ssrc-modified  { background: rgba(187,128,9,0.18); color: #e3b341; border-color: #bb8009; }
+    .ssrc-local     { background: rgba(220,135,77,0.18); color: #fcb98a; border-color: #e07c4a; }
+  }
   .strip-fresh { color: var(--text-muted); font-size: 11px; }
   .strip-btn {
     background: var(--bg-alt); border: 1px solid var(--border); color: var(--text);
@@ -391,6 +403,25 @@
     width: 100%; aspect-ratio: 16 / 9; border-radius: 6px; margin-top: 0.4rem;
   }
 
+  /* Source banner — prominent caveat for local-only or modified schedules */
+  .source-banner {
+    display: flex; gap: 0.75rem; align-items: flex-start;
+    padding: 0.75rem 1rem; border-radius: 8px;
+    margin-bottom: 1rem; font-size: 13px; line-height: 1.4;
+    border-left: 4px solid;
+  }
+  .source-banner.warn { background: #fff8e1; color: #5d4037; border-left-color: #f57c00; }
+  .source-banner.info { background: #fef3e7; color: #82400e; border-left-color: #fcb98a; }
+  @media (prefers-color-scheme: dark) {
+    .source-banner.warn { background: rgba(187,128,9,0.12); color: #e3b341; }
+    .source-banner.info { background: rgba(220,135,77,0.12); color: #fcb98a; }
+  }
+  .source-banner .banner-icon { font-size: 18px; flex-shrink: 0; }
+  .source-banner .banner-content strong {
+    font-size: 14px; display: block; margin-bottom: 2px;
+  }
+  .source-banner .banner-detail { font-size: 12px; opacity: 0.9; }
+
   /* ── Print ───────────────────────────────────────────────────────────── */
   @page { size: letter; margin: 0.5in; }
   @media print {
@@ -423,6 +454,7 @@
   </header>
 
   <div id="statusArea"></div>
+  <div id="sourceBanner" style="display:none;"></div>
 
   <!-- Empty state when no schedule is loaded -->
   <div id="emptyState" class="empty-state" style="display:none;">
@@ -622,11 +654,17 @@ async function loadAssigned(id) {
     rerender();
     clearStatus();
     document.getElementById('mainContent').style.display = '';
-    // Kick off live data polling if requested. Simulate mode auto-starts a
-    // server-side simulation before the first poll so we have data immediately.
-    if (STATE.liveMode && STATE.schedule && STATE.schedule.event_id) {
+    // Fetch live data — always do an initial fetch to learn schedule_source
+    // (even outside live mode this is useful so we can show LOCAL DRAFT
+    // caveats). Set up polling only if live=1 was specified.
+    if (STATE.schedule && STATE.schedule.event_id) {
       if (STATE.simMode) await maybeStartSimulation();
-      startLivePolling();
+      if (STATE.liveMode) {
+        startLivePolling();
+      } else {
+        // One-shot fetch so the source badge shows
+        pollLive();
+      }
     }
   } catch (err) {
     showStatus('Could not load schedule: ' + err.message, 'error');
@@ -766,18 +804,73 @@ function computeMatchTimes() {
     start: '08:30', end: '17:00', breaks: [], cycleChanges: [], earlyEnd: null,
   }];
   const matches = sch.matches || [];
+  const practiceMatches = sch.practice_matches || [];
 
-  // First, optionally compute practice day matches (TODO: separate generation)
-  // For now, treat all matches as qualification.
   const computed = [];
 
-  let matchIdx = 0;
+  // ── Practice day (if persisted) ─────────────────────────────────────────
+  // Practice timing comes from cfg.practiceDay. Walk it the same way as a qual
+  // day, but label entries with isPractice: true and use 'P#' prefix.
+  if (practiceMatches.length > 0 && cfg.practiceDay && cfg.practiceDay.enabled !== false) {
+    const pday = cfg.practiceDay;
+    const pStart = timeStrToMin(pday.start || '08:30');
+    const pEnd   = timeStrToMin(pday.end   || '17:00');
+    const pCt    = parseFloat(pday.cycleTime || cfg.practiceCycleTime || 9);
+    const pBreaks = (pday.breaks || []).map(b => ({
+      name: b.name || 'Break',
+      start: typeof b.start === 'number' ? b.start : timeStrToMin(b.start),
+      end:   typeof b.end   === 'number' ? b.end   : timeStrToMin(b.end),
+      done:  false,
+    })).sort((a, b) => a.start - b.start);
 
-  // Practice day if enabled — practice matches aren't in `sch.matches` (they're
-  // separately generated in the editor's runtime). We can't reconstruct them
-  // server-side, so for now we just label any match flagged as practice.
-  // (The editor stores practice matches as part of _frcScheduled, not in the
-  // assigned schedule's pairings array.)
+    computed.push({
+      type: 'day-divider', dayNum: 0,
+      label: 'Practice Day' + (pday.dateLabel ? ' — ' + pday.dateLabel : ''),
+      start: pStart, end: pEnd, isPractice: true,
+    });
+
+    let pCursor = pStart;
+    let pIdx = 0;
+    while (pIdx < practiceMatches.length) {
+      // Flush due breaks
+      for (const bk of pBreaks) {
+        if (!bk.done && bk.start <= pCursor) {
+          computed.push({type: 'break', name: bk.name, start: bk.start, end: bk.end, isPractice: true});
+          pCursor = Math.max(pCursor, bk.end);
+          bk.done = true;
+        }
+      }
+      const next = pBreaks.find(b => !b.done && b.start > pCursor);
+      if (next && breakBuf > 0 && next.start - pCursor < breakBuf) {
+        computed.push({type: 'break', name: next.name, start: next.start, end: next.end, isPractice: true});
+        pCursor = Math.max(pCursor, next.end);
+        next.done = true;
+        continue;
+      }
+      const matchEnd = pCursor + pCt;
+      if (matchEnd > pEnd) break;
+      const m = practiceMatches[pIdx];
+      computed.push({
+        type: 'match',
+        isPractice: true,
+        matchNum: pIdx + 1,
+        dayNum: 0,
+        startMin: pCursor,
+        endMin: matchEnd,
+        red:  m.red, blue: m.blue,
+        redSur:  m.red_surrogate || [false,false,false],
+        blueSur: m.blue_surrogate || [false,false,false],
+      });
+      pCursor = matchEnd;
+      pIdx++;
+    }
+    // Emit unused breaks
+    pBreaks.filter(b => !b.done).forEach(b => {
+      computed.push({type: 'break', name: b.name, start: b.start, end: b.end, isPractice: true});
+    });
+  }
+
+  let matchIdx = 0;
 
   for (let di = 0; di < days.length; di++) {
     const day = days[di];
@@ -949,8 +1042,9 @@ function rerender() {
       html += '<tr class="break-row"><td colspan="8">⏸ ' + escapeHtml(entry.name) +
               ' · ' + minToTime12(entry.start) + ' – ' + minToTime12(entry.end) + '</td></tr>';
     } else {
-      const live  = STATE.liveByMatch[entry.matchNum];
-      const queue = STATE.liveQueueByMatch[entry.matchNum];
+      // Live data only applies to qualification matches — TBA/Nexus don't track practice
+      const live  = entry.isPractice ? null : STATE.liveByMatch[entry.matchNum];
+      const queue = entry.isPractice ? null : STATE.liveQueueByMatch[entry.matchNum];
       const status = live ? live.status : 'upcoming';
       const matched = STATE.myTeam && matchHasTeam(entry, STATE.myTeam);
       const isNow = entry.matchNum === nowMatchNum;
@@ -1047,8 +1141,11 @@ function rerender() {
       ? matchRowsShown + ' of ' + totalMatches + ' matches'
       : totalMatches + ' matches';
 
-  // Update live status strip (data sources, freshness, drift)
+  // Update the live strip first (it always renders, including source badge)
   updateLiveStrip();
+  // Then surface a dedicated banner for local-only or modified-published —
+  // these carry actionable caveats users should see prominently
+  updateSourceBanner();
 
   // My team summary + next match
   updateNextMatch(nowMatchNum);
@@ -1093,7 +1190,10 @@ function formatQueueStatus(s) {
 function updateLiveStrip() {
   const strip = document.getElementById('liveStrip');
   if (!strip) return;
-  if (!STATE.liveMode) {
+  // The strip is also useful in non-live mode to surface "this is local-only,
+  // not yet published" caveats. Show it whenever we have schedule_source data.
+  const ss = STATE.live && STATE.live.schedule_source;
+  if (!STATE.liveMode && !ss) {
     strip.style.display = 'none';
     return;
   }
@@ -1134,15 +1234,33 @@ function updateLiveStrip() {
     errBadge = '<span class="src-badge src-err" title="' + escapeAttr(STATE.liveError) + '">poll error</span>';
   }
 
+  // Schedule source badge — describes whether we're viewing TBA-published,
+  // local-only, or modified-published data. Tooltip carries the explanation.
+  let sourceBadgeHtml = '';
+  if (ss) {
+    const cfg = ({
+      'tba-published': { cls: 'ssrc-published', label: 'PUBLISHED', icon: '📡' },
+      'tba-modified':  { cls: 'ssrc-modified',  label: 'MODIFIED PUBLISHED', icon: '⚠' },
+      'local-only':    { cls: 'ssrc-local',     label: 'LOCAL DRAFT', icon: '📋' },
+      'none':          { cls: 'ssrc-none',      label: 'NO DATA', icon: '○' },
+    })[ss.source] || { cls: 'ssrc-none', label: ss.source.toUpperCase(), icon: '○' };
+    const detail = ss.differences > 0 ? ' (' + ss.differences + ' diff' +
+                   (ss.differences === 1 ? '' : 's') + ')' : '';
+    sourceBadgeHtml = '<span class="src-badge ' + cfg.cls + '" title="' +
+                      escapeAttr(ss.explanation || '') + '">' +
+                      cfg.icon + ' ' + cfg.label + detail + '</span>';
+  }
+
   strip.innerHTML =
     '<div class="strip-left">' +
-    '  <strong>Live</strong>' +
+    '  ' + (STATE.liveMode ? '<strong>Live</strong>' : '') +
+    '  ' + sourceBadgeHtml +
     '  ' + driftHtml +
     '</div>' +
     '<div class="strip-right">' +
     '  ' + (simOn ? simBadge : sourceBadge('tba', 'TBA', tbaOn) + sourceBadge('nexus', 'Nexus', nexusOn)) +
     '  ' + errBadge +
-    '  <span class="strip-fresh">Updated ' + freshness + '</span>' +
+    (STATE.liveMode ? '  <span class="strip-fresh">Updated ' + freshness + '</span>' : '') +
     '</div>';
 }
 
@@ -1153,6 +1271,41 @@ function formatRelativeTime(date) {
   const min = Math.round(sec / 60);
   if (min < 60) return min + 'm ago';
   return Math.round(min / 60) + 'h ago';
+}
+
+// Surface a prominent banner for schedule sources that carry caveats.
+// 'tba-published' is the happy path — no banner needed.
+// 'local-only' and 'tba-modified' both include important context users should see.
+function updateSourceBanner() {
+  const el = document.getElementById('sourceBanner');
+  if (!el) return;
+  const ss = STATE.live && STATE.live.schedule_source;
+  if (!ss || ss.source === 'tba-published' || ss.source === 'none') {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  let kind = 'info';
+  let icon = '📋';
+  let title = 'Local draft schedule';
+  if (ss.source === 'tba-modified') {
+    kind = 'warn';
+    icon = '⚠';
+    title = 'Schedule differs from published version';
+  } else if (ss.source === 'local-only') {
+    kind = 'info';
+    icon = '📋';
+    title = 'Showing local schedule';
+  }
+  el.style.display = 'block';
+  el.innerHTML =
+    '<div class="source-banner ' + kind + ' no-print">' +
+    '  <span class="banner-icon">' + icon + '</span>' +
+    '  <div class="banner-content">' +
+    '    <strong>' + title + '</strong>' +
+    '    <div class="banner-detail">' + escapeHtml(ss.explanation || '') + '</div>' +
+    '  </div>' +
+    '</div>';
 }
 
 function matchHasTeam(entry, team) {

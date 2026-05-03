@@ -609,7 +609,120 @@ async def _process_nexus_match_status(db: AsyncSession, event_id: int, payload: 
         if queue_time: row.queue_time = queue_time
 
 
-# ── Aggregation for /api/events/{id}/live ─────────────────────────────────────
+# ── Schedule source detection ────────────────────────────────────────────────
+#
+# Three possible sources for the schedule shown to users:
+#   'tba-published' — TBA has published matches and they match what the local
+#                     AssignedSchedule has. We're a viewer/parser of FMS data.
+#   'tba-modified'  — TBA has published matches but they differ from local.
+#                     This typically means FMS regenerated the schedule on-site.
+#                     The TBA version is authoritative; the local version is a
+#                     historical draft. UI surfaces this discrepancy explicitly.
+#   'local-only'    — TBA has no matches. We're the source of truth, but with a
+#                     prominent caveat that it's not guaranteed to be accurate
+#                     until published — actual event will follow whatever FMS
+#                     generates on-site.
+#   'none'          — Neither TBA nor a local AssignedSchedule. The /view page
+#                     shows a paste-an-ID empty state.
+
+def _alliance_set(red: list, blue: list) -> tuple[frozenset, frozenset]:
+    """Convert two team lists into a comparable canonical form. We use sets
+    because team order within an alliance is not semantically meaningful for
+    'is this the same matchup' comparison — FMS may shuffle station assignments
+    without the matchup itself being different."""
+    return (frozenset(t for t in (red or []) if t),
+            frozenset(t for t in (blue or []) if t))
+
+
+async def detect_schedule_source(db: AsyncSession, event_id: int) -> dict:
+    """Determine the canonical source for this event's schedule and quantify
+    any drift between local and published versions.
+
+    Returns:
+        {
+          source: 'tba-published' | 'tba-modified' | 'local-only' | 'none',
+          tba_match_count: int,
+          local_match_count: int,
+          differences: int,             # how many matches differ between TBA and local
+          explanation: str,             # human-friendly description for the UI
+        }
+    """
+    # Pull TBA-derived match results (qual only — playoffs are a separate concept)
+    tba_res = (await db.execute(
+        select(MatchResult).where(
+            MatchResult.event_id == event_id,
+            MatchResult.comp_level == "qm",
+        ).order_by(MatchResult.match_number)
+    )).scalars().all()
+
+    # Pull active local AssignedSchedule + its abstract for matches
+    asgn_res = await db.execute(
+        select(AssignedSchedule).where(AssignedSchedule.event_id == event_id)
+        .order_by(AssignedSchedule.is_active.desc(), AssignedSchedule.created_at.desc())
+        .limit(1)
+    )
+    assigned = asgn_res.scalar_one_or_none()
+    local_matches: list[tuple[frozenset, frozenset]] = []
+    if assigned:
+        await db.refresh(assigned, ["abstract_schedule"])
+        slot_map = {int(k): v for k, v in (assigned.slot_map or {}).items()}
+        for m in (assigned.abstract_schedule.matches or []):
+            red  = [slot_map.get(s, s) for s in m.get("red",  [])]
+            blue = [slot_map.get(s, s) for s in m.get("blue", [])]
+            local_matches.append(_alliance_set(red, blue))
+
+    tba_count   = len(tba_res)
+    local_count = len(local_matches)
+
+    # Decision tree
+    if tba_count == 0 and local_count == 0:
+        return {
+            "source": "none", "tba_match_count": 0, "local_match_count": 0,
+            "differences": 0, "explanation": "No schedule data available yet.",
+        }
+    if tba_count == 0:
+        return {
+            "source": "local-only", "tba_match_count": 0, "local_match_count": local_count,
+            "differences": 0,
+            "explanation": ("Showing locally-generated schedule. The actual event will "
+                            "follow whatever FMS generates on-site, so these team "
+                            "assignments are not guaranteed until the event publishes "
+                            "its schedule."),
+        }
+    if local_count == 0:
+        return {
+            "source": "tba-published", "tba_match_count": tba_count, "local_match_count": 0,
+            "differences": 0,
+            "explanation": "Showing the published event schedule from The Blue Alliance.",
+        }
+
+    # Both exist — compare. Look at the first N where N = min(tba, local).
+    n = min(tba_count, local_count)
+    differences = 0
+    for i in range(n):
+        tba_m = tba_res[i]
+        tba_pair = _alliance_set(tba_m.red_teams, tba_m.blue_teams)
+        if tba_pair != local_matches[i]:
+            differences += 1
+
+    if differences == 0 and tba_count == local_count:
+        return {
+            "source": "tba-published", "tba_match_count": tba_count, "local_match_count": local_count,
+            "differences": 0,
+            "explanation": "Showing the published event schedule from The Blue Alliance. "
+                           "Local schedule matches what was published.",
+        }
+    return {
+        "source": "tba-modified", "tba_match_count": tba_count, "local_match_count": local_count,
+        "differences": differences,
+        "explanation": ("Showing the published event schedule. Note: " +
+                        f"{differences} match{'es' if differences != 1 else ''} differ"
+                        f"{'s' if differences == 1 else ''} from the locally-drafted version."
+                        " The published schedule is authoritative."),
+    }
+
+
+
 
 async def get_event_live_data(db: AsyncSession, event: Event) -> dict:
     """Aggregate everything the /view page needs in one response.
@@ -662,6 +775,9 @@ async def get_event_live_data(db: AsyncSession, event: Event) -> dict:
             recent_drifts.sort()
             drift_min = recent_drifts[len(recent_drifts) // 2]
 
+    # Detect the canonical schedule source (TBA published vs local)
+    source_info = await detect_schedule_source(db, event.id)
+
     def match_status(m: MatchResult) -> str:
         if m.post_result_time or m.red_score is not None:
             return "completed"
@@ -673,6 +789,7 @@ async def get_event_live_data(db: AsyncSession, event: Event) -> dict:
         "event_id": event.id,
         "event_key": event.key,
         "fetched_at": (sync.tba_last_fetched.isoformat() if sync and sync.tba_last_fetched else None),
+        "schedule_source": source_info,
         "sources": {
             "tba": {
                 "available": bool(sync and sync.tba_last_fetched and not sync.sim_started_at),

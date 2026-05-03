@@ -6691,6 +6691,28 @@ async function commitSchedule() {
 }
 
 // ── Stage 2: Assign real team numbers to abstract schedule ────────────────────
+// Extract practice matches from window._frcScheduled in the shape the API
+// expects: [{red:[t,t,t], blue:[t,t,t], red_surrogate:[bool×3], blue_surrogate:[bool×3]}]
+// Returns null if no practice matches are present (i.e. practice day not enabled).
+function collectPracticeMatchesForSave() {
+  var sched = window._frcScheduled;
+  if (!sched || !sched.length) return null;
+  var practiceMatches = [];
+  sched.forEach(function(day) {
+    if (!day.isPracticeDay) return;
+    (day.entries || []).forEach(function(e) {
+      if (e.type !== 'match') return;
+      practiceMatches.push({
+        red:  (e.red || []).slice(0, 3),
+        blue: (e.blue || []).slice(0, 3),
+        red_surrogate:  (e.redSurrogate  || [false, false, false]).slice(0, 3),
+        blue_surrogate: (e.blueSurrogate || [false, false, false]).slice(0, 3),
+      });
+    });
+  });
+  return practiceMatches.length > 0 ? practiceMatches : null;
+}
+
 async function assignTeams() {
   if (!_currentEventId) { showApiStatus('Select an event first', true); return; }
   if (!_currentAbstractScheduleId) {
@@ -6739,6 +6761,10 @@ async function assignTeams() {
         assign_seed: assignSeed,
         name: 'Schedule ' + new Date().toLocaleTimeString(),
         day_config: dayConfig,
+        // Practice matches are generated client-side by _finishGenerationInner
+        // and stored on window._frcScheduled. Extract and persist with the
+        // assigned schedule so /view can render them too.
+        practice_matches: collectPracticeMatchesForSave(),
       }),
     });
 
