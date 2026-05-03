@@ -713,6 +713,62 @@
     height: 100%; background: var(--accent);
     border-radius: 2px; transition: width 0.3s ease; width: 0%;
   }
+
+  /* ── Read-only view (?readonly=1) ─────────────────────────────────────── */
+  /* Hide editing controls but keep schedule output, agenda fit, and downloads */
+  body.readonly-mode .config-panel,
+  body.readonly-mode #stepper,
+  body.readonly-mode .event-bar,
+  body.readonly-mode #btnSavedSchedules,
+  body.readonly-mode #btnManageTeams,
+  body.readonly-mode #btnDeleteEvent,
+  body.readonly-mode .auth-row,
+  body.readonly-mode .reset-btn,
+  body.readonly-mode .share-btn,
+  body.readonly-mode .btn-share,
+  body.readonly-mode #btnDownloadFMS,
+  body.readonly-mode #btnFMSSetup,
+  body.readonly-mode .btn-x { display: none !important; }
+  body.readonly-mode .agenda-fit-panel,
+  body.readonly-mode .schedule-output-panel { width: 100%; }
+  body.readonly-mode .main-grid { grid-template-columns: 1fr !important; }
+
+  /* Read-only banner */
+  .readonly-banner {
+    display: none;
+    background: linear-gradient(135deg, #5daf78 0%, #4a9e66 100%);
+    color: #fff; padding: 0.6rem 1rem; font-size: 0.85rem;
+    border-radius: 6px; margin: 0 0 1rem 0;
+    font-weight: 500; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 0.6rem; justify-content: space-between;
+  }
+  body.readonly-mode .readonly-banner { display: flex; }
+  body:not(.readonly-mode) .readonly-banner { display: none; }
+  .readonly-banner .team-filter-group {
+    display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem;
+  }
+  .readonly-banner input[type="number"] {
+    background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4);
+    color: #fff; padding: 0.25rem 0.5rem; border-radius: 4px; width: 80px;
+  }
+  .readonly-banner input[type="number"]::placeholder { color: rgba(255,255,255,0.7); }
+  .readonly-banner button {
+    background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4);
+    color: #fff; padding: 0.25rem 0.6rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .readonly-banner button:hover { background: rgba(255,255,255,0.3); }
+
+  /* Highlighted "my team" rows in readonly view */
+  body.readonly-mode tr.my-team {
+    background: rgba(93,175,120,0.2) !important;
+    box-shadow: inset 4px 0 0 #5daf78;
+  }
+  body.readonly-mode tr.my-team td { font-weight: 600; }
+  body.readonly-mode .my-team-cell {
+    background: #5daf78 !important; color: #fff !important;
+    font-weight: 700; padding: 2px 6px; border-radius: 3px;
+  }
 </style>
 </head>
 <body>
@@ -729,6 +785,18 @@
   </div>
 </div>
 <div class="container">
+  <!-- Read-only mode banner: visible only when ?readonly=1 in URL -->
+  <div class="readonly-banner" id="readonlyBanner">
+    <span>&#128065; <strong>View Only</strong> &middot; <span id="readonlyEventLabel">Schedule</span></span>
+    <span class="team-filter-group">
+      <label for="readonlyMyTeam">My team:</label>
+      <input type="number" id="readonlyMyTeam" placeholder="e.g. 2169" min="1" max="99999"
+             onchange="applyReadonlyHighlight()" oninput="applyReadonlyHighlight()">
+      <button onclick="applyReadonlyHighlight()">Highlight</button>
+      <button onclick="window.print()" title="Print this schedule">&#128438; Print</button>
+      <button onclick="downloadSchedulePDF()" title="Download PDF">&#11015; PDF</button>
+    </span>
+  </div>
   <header>
     <div class="logo-mark">FRC</div>
     <div>
@@ -1166,7 +1234,9 @@
         <div id="downloadBar" style="display:none;gap:0.4rem;display:none;align-items:center;">
           <button class="btn-export" id="btnDownloadCSV" onclick="downloadCSV()" title="Download schedule as CSV">&#11015; CSV</button>
           <button class="btn-export" id="btnDownloadJSON" onclick="downloadJSON()" title="Download schedule as JSON">&#11015; JSON</button>
+          <button class="btn-export" id="btnDownloadPDF" onclick="downloadSchedulePDF()" title="Download schedule as PDF (uses your current Print options)">&#11015; PDF</button>
           <button class="btn-export" id="btnDownloadFMS" onclick="downloadFMS()" title="Download schedule for FIRST FMS Match Maker import (tab-delimited, qualification matches only). Match times must be re-entered in FMS Build Schedule.">&#11015; FMS</button>
+          <button class="btn-export" id="btnFMSSetup" onclick="openFMSSetupSheet()" title="Open a printable FMS Build Schedule setup sheet with all timing settings, breaks, cycle changes, and a QR code linking back to this schedule">&#128196; FMS Setup</button>
           <button class="btn-export" id="btnPrint" onclick="openPrintDialog()" title="Print schedule">&#128438; Print</button>
         </div>
       </div>
@@ -1198,8 +1268,128 @@
 // ── API base URL — must be declared before any function that references it ────
 const API = window.location.origin;
 
+// ── Read-only mode (?readonly=1) ──────────────────────────────────────────────
+// Activated by URL flag: hides editing controls, lets a team enter their team
+// number to highlight their matches, and exposes Print/PDF.
+window._frcReadonlyMode = (function() {
+  try {
+    var p = new URLSearchParams(window.location.search);
+    return p.get('readonly') === '1' || p.get('viewonly') === '1';
+  } catch(e) { return false; }
+})();
+
+if (window._frcReadonlyMode) {
+  // Apply class as early as possible so CSS hides things before paint.
+  // DOMContentLoaded would still cause a flicker — set on documentElement
+  // instead, but bind to body once it exists.
+  document.documentElement.classList.add('readonly-mode-pending');
+  document.addEventListener('DOMContentLoaded', function() {
+    document.body.classList.add('readonly-mode');
+    // If a team number was passed in the URL, prefill and highlight
+    var p = new URLSearchParams(window.location.search);
+    var myTeam = p.get('team') || p.get('myteam');
+    if (myTeam) {
+      var inp = document.getElementById('readonlyMyTeam');
+      if (inp) inp.value = myTeam;
+    }
+    // Update the readonly banner label
+    var lbl = document.getElementById('readonlyEventLabel');
+    function updateBanner() {
+      if (!lbl) return;
+      var t = (typeof getScheduleTitleParts === 'function') ? getScheduleTitleParts() : { full: '' };
+      lbl.textContent = t.full || 'Schedule';
+    }
+    updateBanner();
+    // Re-update once event loads
+    var origActivate = window.activateEvent;
+    if (origActivate) {
+      window.activateEvent = async function(ev) {
+        await origActivate.apply(this, arguments);
+        updateBanner();
+        applyReadonlyHighlight();
+      };
+    }
+    // Highlight on initial schedule render
+    setTimeout(applyReadonlyHighlight, 600);
+  });
+}
+
+// Highlight the user's team in the rendered schedule output.
+// Called from the banner button and any time the schedule re-renders.
+function applyReadonlyHighlight() {
+  var inpEl = document.getElementById('readonlyMyTeam');
+  if (!inpEl) return;
+  var val = parseInt(inpEl.value);
+  // Clear existing highlights first
+  document.querySelectorAll('tr.my-team').forEach(function(r) {
+    r.classList.remove('my-team');
+  });
+  document.querySelectorAll('.my-team-cell').forEach(function(c) {
+    c.classList.remove('my-team-cell');
+  });
+  if (!val || isNaN(val)) return;
+  var teamStr = String(val);
+  // Walk every team span (rendered by renderTeam — has class teams-red/teams-blue);
+  // mark spans whose first text node matches and tag the row.
+  document.querySelectorAll('span.teams-red, span.teams-blue').forEach(function(span) {
+    var raw = (span.textContent || '').trim();
+    // Strip trailing badges (surrogate "S", b2b "B2B") — they're in nested spans
+    // but their text gets concatenated with the team number. The team number
+    // comes first, so isolate by reading the first text node.
+    var firstText = '';
+    for (var i = 0; i < span.childNodes.length; i++) {
+      if (span.childNodes[i].nodeType === Node.TEXT_NODE) {
+        firstText = (span.childNodes[i].textContent || '').trim();
+        break;
+      }
+    }
+    var teamNum = firstText || raw.replace(/[^\d].*/, '');
+    if (teamNum === teamStr) {
+      span.classList.add('my-team-cell');
+      var row = span.closest('tr');
+      if (row) row.classList.add('my-team');
+    }
+  });
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 let _currentEventId = null;
+let _currentEventInfo = null;  // {id, key, name, year} — set by activateEvent()
+
+// Centralized title builder used by every export (CSV/JSON/FMS Setup/Print/PDF/etc).
+// Returns an object with the best-available pieces — caller decides how to format.
+//   { name, code, year, dateStr, full }
+// `full` is the human-friendly one-liner: "<name> · <CODE> · <year>" with
+// the missing pieces dropped. Use `full` for headers; use the parts to build
+// filenames or window titles.
+function getScheduleTitleParts() {
+  // Prefer full event info if loaded; fall back to UI inputs
+  var info = _currentEventInfo || {};
+  var name = info.name || '';
+  var code = info.key  || (document.getElementById('eventCodeInput') || {}).value || '';
+  var year = String(info.year || (document.getElementById('eventYear') || {}).value || '');
+  var parts = [];
+  if (name)            parts.push(name);
+  if (code && !name)   parts.push(code.toUpperCase());        // avoid duplicate when name also includes code
+  else if (code)       parts.push(code.toUpperCase());
+  if (year)            parts.push(year);
+  return {
+    name: name,
+    code: code ? code.toUpperCase() : '',
+    year: year,
+    full: parts.join(' \u00b7 '),  // middle-dot separator
+  };
+}
+
+// Build a safe filename slug from the title parts
+// Example: "frc_schedule_2026_mnmsh.csv"
+function getScheduleFilenameSlug(extWithDot) {
+  var t = getScheduleTitleParts();
+  var bits = ['frc_schedule'];
+  if (t.year) bits.push(t.year);
+  if (t.code) bits.push(t.code.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  return bits.join('_') + (extWithDot || '');
+}
 let _currentAbstractScheduleId = null;   // Stage 1 result
 let _currentAssignedScheduleId = null;   // Stage 2 result (assigned)
 let _abstractParams = null;              // params snapshot when Stage 1 last ran
@@ -2018,21 +2208,6 @@ function buildShareUrl() {
     if (_pdFill && parseInt(_pdFill) !== 99) params.set('pfill', _pdFill);
     if (_pdCt)   params.set('pct',   _pdCt);
   }
-
-  // Practice day URL params
-  var _pdEnabledEl = document.getElementById('practiceDayEnabled');
-  if (_pdEnabledEl && _pdEnabledEl.checked) {
-    params.set('pday', '1');
-    var _ps = document.getElementById('practiceStart').value;
-    var _pe = document.getElementById('practiceEnd').value;
-    if (_ps && _pe) params.set('pd', _ps + '-' + _pe);
-    var _pmpt  = document.getElementById('practiceGuaranteed').value;
-    var _pfill = document.getElementById('practiceFiller').value;
-    var _pct   = document.getElementById('practiceCycleTime').value;
-    if (_pmpt) params.set('pmpt', _pmpt);
-    if (_pfill && parseInt(_pfill) !== 99) params.set('pfill', _pfill);
-    if (_pct)  params.set('pct', _pct);
-  }
   const bb = document.getElementById('breakBuffer').value;
   if (bb) params.set('bb', bb);
   // Encode auto flags — only include a param when it differs from its default (all on)
@@ -2576,6 +2751,8 @@ function fullReset() {
 
   // Clear event state — reset to no-event-loaded condition
   _currentEventId = null;
+  _currentEventInfo = null;
+  document.title = 'FRC Match Scheduler';
   var codeInput = document.getElementById('eventCodeInput');
   if (codeInput) { codeInput.value = ''; codeInput.className = ''; }
   var codeStatus = document.getElementById('eventCodeStatus');
@@ -5500,7 +5677,13 @@ document.addEventListener('DOMContentLoaded', function() {
 // Set the active event in UI state
 async function activateEvent(ev) {
   _currentEventId = ev.id;
+  _currentEventInfo = { id: ev.id, key: ev.key || '', name: ev.name || '', year: ev.year || '' };
   document.getElementById('eventYear').value = ev.year;
+  // Update browser tab title with event identification
+  try {
+    var __tt = getScheduleTitleParts();
+    document.title = (__tt.full ? __tt.full + ' — ' : '') + 'FRC Match Scheduler';
+  } catch(e) {}
   // Sync the event code input and status label to the loaded event
   var codeInput = document.getElementById('eventCodeInput');
   if (codeInput) {
@@ -7490,6 +7673,11 @@ function renderSchedule() {
     block.appendChild(table);
     output.appendChild(block);
   });
+
+  // Re-apply read-only highlight after every render
+  if (window._frcReadonlyMode) {
+    setTimeout(applyReadonlyHighlight, 0);
+  }
 }
 
 function downloadCSV() {
@@ -7512,7 +7700,7 @@ function downloadCSV() {
   var blob = new Blob([csv], {type:'text/csv'});
   var a    = document.createElement('a');
   a.href   = URL.createObjectURL(blob);
-  a.download = 'frc_schedule.csv';
+  a.download = getScheduleFilenameSlug('.csv');
   a.click();
 }
 
@@ -7568,7 +7756,7 @@ function downloadJSON() {
   var blob = new Blob([json], {type:'application/json'});
   var a    = document.createElement('a');
   a.href   = URL.createObjectURL(blob);
-  a.download = 'frc_schedule.json';
+  a.download = getScheduleFilenameSlug('.json');
   a.click();
 }
 
@@ -7647,7 +7835,8 @@ function downloadFMS() {
   var url  = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url;
-  a.download = 'frc_schedule_fms.txt';
+  // FMS file: standardized name FMS expects, but include year/code prefix
+  a.download = getScheduleFilenameSlug('') + '_fms.txt';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -7655,6 +7844,315 @@ function downloadFMS() {
   setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
   showApiStatus('✓ Exported ' + lines.length + ' qualification matches for FMS Match Maker import');
 }
+
+
+
+// ── FMS Build Schedule Setup Sheet ────────────────────────────────────────────
+//
+// Generates a printable, human-readable setup sheet for the FMS operator
+// to use when configuring the Build Schedule step in FMS. Includes:
+//   - Event identification (name, code, year)
+//   - Event parameters (# teams, matches/team, total matches, surrogates)
+//   - Per-day schedule (start/end, cycle time, breaks, cycle changes, day break)
+//   - Practice day (if enabled) with same details
+//   - QR code linking back to this schedule for re-loading in the scheduler
+//
+// Opens in a new browser window so the user can print or save as PDF.
+
+function _fmtTime12FromMin(min) {
+  if (min == null) return '';
+  var h = Math.floor(min / 60), m = min % 60;
+  var period = h >= 12 ? 'PM' : 'AM';
+  var h12 = ((h + 11) % 12) + 1;
+  return h12 + ':' + String(m).padStart(2, '0') + ' ' + period;
+}
+
+function _fmtTime12FromStr(hhmm) {
+  if (!hhmm) return '';
+  var p = hhmm.split(':').map(Number);
+  return _fmtTime12FromMin(p[0] * 60 + p[1]);
+}
+
+function _fmsSetupGetEventInfo() {
+  var year = (document.getElementById('eventYear') || {}).value || '';
+  var code = (document.getElementById('eventCodeInput') || {}).value || '';
+  // Try to read the event name from the loaded event header if present
+  var nameEl = document.querySelector('.event-name, #eventNameDisplay, [data-event-name]');
+  var name = nameEl ? (nameEl.textContent || nameEl.dataset.eventName || '').trim() : '';
+  return { year: year, code: code, name: name };
+}
+
+function openFMSSetupSheet() {
+  var scheduled = window._frcScheduled;
+  if (!scheduled || !scheduled.length) {
+    showApiStatus('No schedule to export — generate one first', true);
+    return;
+  }
+
+  // ── Gather data ──────────────────────────────────────────────────────────
+  // (Event identification comes from getScheduleTitleParts() below)
+  var numTeams       = parseInt(document.getElementById('numTeams').value) || 0;
+  var matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value) || 0;
+  var cycleTime      = parseFloat(document.getElementById('cycleTime').value) || 0;
+  var breakBuffer    = parseFloat(document.getElementById('breakBuffer').value) || 0;
+
+  // Tally matches and surrogates
+  var qualMatches = 0, practiceMatches = 0, surrogates = 0;
+  scheduled.forEach(function(day) {
+    (day.entries || []).forEach(function(e) {
+      if (e.type !== 'match') return;
+      if (day.isPracticeDay) practiceMatches++; else qualMatches++;
+      ['redSurrogate','blueSurrogate'].forEach(function(k) {
+        if (Array.isArray(e[k])) surrogates += e[k].filter(Boolean).length;
+      });
+    });
+  });
+
+  // Build share URL from existing helper
+  var shareUrl = (typeof buildShareUrl === 'function') ? buildShareUrl() : window.location.href;
+
+  // ── Compose per-day blocks ───────────────────────────────────────────────
+  function dayBlock(day) {
+    var label = day.isPracticeDay ? 'Practice Day' : 'Day ' + day.dayNum;
+    var startStr = _fmtTime12FromMin(day.start);
+    var endStr   = _fmtTime12FromMin(day.end);
+    var matchCount = (day.entries || []).filter(function(e) { return e.type === 'match'; }).length;
+    var breaks = (day.entries || []).filter(function(e) { return e.type === 'break'; });
+    var ccs    = (day.entries || []).filter(function(e) { return e.type === 'cycle-change'; });
+
+    // Determine starting cycle time for this day from the first match
+    var firstMatch = (day.entries || []).find(function(e) { return e.type === 'match'; });
+    var lastMatch;
+    for (var i = (day.entries || []).length - 1; i >= 0; i--) {
+      if (day.entries[i].type === 'match') { lastMatch = day.entries[i]; break; }
+    }
+    var startCt = firstMatch ? Math.round((firstMatch.endMin - firstMatch.startMin) * 10) / 10 : cycleTime;
+
+    var rows = [];
+    rows.push(['Window',     startStr + ' \u2014 ' + endStr]);
+    rows.push(['Match count', String(matchCount)]);
+    rows.push(['Cycle time (start)', startCt + ' min']);
+    if (firstMatch) rows.push(['First match starts', _fmtTime12FromMin(firstMatch.startMin)]);
+    if (lastMatch)  rows.push(['Last match ends',    _fmtTime12FromMin(lastMatch.endMin)]);
+
+    var html = '<section class="day-section">';
+    html += '<h2>' + label + '</h2>';
+    html += '<table class="kv">';
+    rows.forEach(function(r) {
+      html += '<tr><th>' + r[0] + '</th><td>' + r[1] + '</td></tr>';
+    });
+    html += '</table>';
+
+    if (breaks.length) {
+      html += '<h3>Breaks (' + breaks.length + ')</h3>';
+      html += '<table class="data"><thead><tr><th>Name</th><th>Start</th><th>End</th><th>Duration</th></tr></thead><tbody>';
+      breaks.forEach(function(b) {
+        var dur = (b.end - b.start) + ' min';
+        html += '<tr><td>' + (b.name || 'Break') + '</td><td>' + _fmtTime12FromMin(b.start) +
+                '</td><td>' + _fmtTime12FromMin(b.end) + '</td><td>' + dur + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    if (ccs.length) {
+      html += '<h3>Cycle Time Changes (' + ccs.length + ')</h3>';
+      html += '<table class="data"><thead><tr><th>After Match #</th><th>New Cycle Time</th><th>At Time</th></tr></thead><tbody>';
+      ccs.forEach(function(cc) {
+        html += '<tr><td>' + cc.afterMatch + '</td><td>' + cc.newTime + ' min</td><td>' +
+                _fmtTime12FromMin(cc.atMin) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    // Practice day extra params
+    if (day.isPracticeDay) {
+      var pcfg = (typeof getPracticeConfig === 'function') ? getPracticeConfig() : null;
+      if (pcfg) {
+        html += '<h3>Practice Parameters</h3>';
+        html += '<table class="kv">';
+        html += '<tr><th>Guaranteed matches per team</th><td>' + pcfg.guaranteed + '</td></tr>';
+        html += '<tr><th>Max filler matches per team</th><td>' + (pcfg.filler === 99 ? 'Fill all available time' : pcfg.filler) + '</td></tr>';
+        html += '</table>';
+      }
+    }
+
+    html += '</section>';
+    return html;
+  }
+
+  var daysHtml = '';
+  // Practice first (it's already at index 0 if enabled), then qual
+  scheduled.forEach(function(day) { daysHtml += dayBlock(day); });
+
+  // ── Build complete HTML document ────────────────────────────────────────
+  var titleInfo = getScheduleTitleParts();
+  var docTitle  = titleInfo.full ? (titleInfo.full + ' \u2014 FMS Build Schedule Setup')
+                                 : 'FMS Build Schedule Setup';
+  var pdfFilename = (typeof getScheduleFilenameSlug === 'function')
+                      ? getScheduleFilenameSlug('') + '_fms_setup.pdf'
+                      : 'frc_schedule_fms_setup.pdf';
+
+  var generatedAt = new Date().toLocaleString();
+
+  var html = '' +
+    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">' +
+    '<title>' + docTitle + '</title>' +
+    '<style>' +
+    '  @page { size: letter; margin: 0.6in; }' +
+    '  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; ' +
+    '         color: #1c2128; max-width: 7.5in; margin: 0 auto; padding: 0.5in 0; line-height: 1.4; }' +
+    '  h1 { font-size: 22px; margin: 0 0 4px 0; border-bottom: 2px solid #1c2128; padding-bottom: 6px; }' +
+    '  h2 { font-size: 16px; margin: 18px 0 8px 0; color: #0969da; ' +
+    '       border-bottom: 1px solid #d0d7de; padding-bottom: 4px; }' +
+    '  h3 { font-size: 13px; margin: 12px 0 4px 0; color: #424a53; text-transform: uppercase; ' +
+    '       letter-spacing: 0.04em; }' +
+    '  .header-meta { color: #57606a; font-size: 11px; margin-bottom: 4px; }' +
+    '  .lead { background: #ddf4ff; border-left: 3px solid #0969da; padding: 8px 12px; ' +
+    '          font-size: 11px; margin: 12px 0; border-radius: 3px; }' +
+    '  table { border-collapse: collapse; width: 100%; margin: 4px 0; font-size: 12px; }' +
+    '  table.kv { max-width: 5in; }' +
+    '  table.kv th { text-align: left; font-weight: 500; color: #57606a; padding: 3px 8px; ' +
+    '                width: 200px; vertical-align: top; }' +
+    '  table.kv td { padding: 3px 8px; font-weight: 600; color: #1c2128; }' +
+    '  table.data { font-size: 11px; }' +
+    '  table.data th { background: #f6f8fa; text-align: left; padding: 5px 8px; ' +
+    '                  border-bottom: 1px solid #d0d7de; font-weight: 600; }' +
+    '  table.data td { padding: 4px 8px; border-bottom: 1px solid #eaeef2; }' +
+    '  .qr-section { display: flex; align-items: center; gap: 18px; margin-top: 24px; ' +
+    '                padding-top: 16px; border-top: 1px solid #d0d7de; ' +
+    '                page-break-inside: avoid; }' +
+    '  .qr-section .qr-img { flex-shrink: 0; }' +
+    '  .qr-section .qr-img canvas, .qr-section .qr-img svg, .qr-section .qr-img img ' +
+    '       { width: 140px; height: 140px; }' +
+    '  .qr-section .qr-info { flex: 1; font-size: 11px; }' +
+    '  .qr-section .qr-info .url { font-family: ui-monospace, "SF Mono", Menlo, monospace; ' +
+    '                              font-size: 10px; word-break: break-all; ' +
+    '                              background: #f6f8fa; padding: 6px 8px; ' +
+    '                              border-radius: 3px; margin-top: 6px; }' +
+    '  .day-section { page-break-inside: avoid; }' +
+    '  .footer { margin-top: 30px; font-size: 10px; color: #8c959f; text-align: center; ' +
+    '            border-top: 1px solid #d0d7de; padding-top: 8px; }' +
+    '  @media print { ' +
+    '    body { padding: 0; max-width: 100%; } ' +
+    '    .no-print { display: none; }' +
+    '    a { color: inherit; text-decoration: none; }' +
+    '  }' +
+    '  .no-print { background: #fff8c5; padding: 8px 12px; border-radius: 4px; ' +
+    '              font-size: 11px; margin-bottom: 16px; text-align: center; }' +
+    '  .no-print button { font-size: 13px; padding: 4px 12px; cursor: pointer; ' +
+    '                     margin-left: 8px; }' +
+    '</style></head><body>' +
+    '<div class="no-print">This is a printable setup sheet. ' +
+    '<button onclick="window.print()">Print</button> ' +
+    '<button id="btnSavePdf" onclick="savePdfFromSheet()">Save as PDF</button> ' +
+    '<button onclick="window.close()">Close</button></div>' +
+    '<h1 id="sheetH1">' + (titleInfo.full ? titleInfo.full + ' \u2014 ' : '') + 'FMS Build Schedule Setup</h1>' +
+    '<div class="header-meta">' +
+       'Generated ' + generatedAt +
+    '</div>' +
+    '<div class="lead">' +
+    '  <strong>How to use this sheet in FMS:</strong> ' +
+    '  Open the FMS Event Wizard \u2192 Build Schedule step. Enter the values from the ' +
+    '  Event Parameters and per-day sections below. Add breaks and cycle time changes ' +
+    '  as listed. After completing Build Schedule, advance to the Run Match Maker step ' +
+    '  and import the FMS pairings file (separately downloaded). Practice and ' +
+    '  qualification schedules are configured separately in FMS.' +
+    '</div>' +
+
+    // Event parameters
+    '<h2>Event Parameters</h2>' +
+    '<table class="kv">' +
+    '<tr><th>Number of teams</th><td>' + numTeams + '</td></tr>' +
+    '<tr><th>Matches per team</th><td>' + matchesPerTeam + '</td></tr>' +
+    '<tr><th>Total qualification matches</th><td>' + qualMatches + '</td></tr>' +
+    (practiceMatches > 0 ? '<tr><th>Total practice matches</th><td>' + practiceMatches + '</td></tr>' : '') +
+    '<tr><th>Surrogate plays</th><td>' + surrogates + (surrogates === 0 ? ' (none required)' : '') + '</td></tr>' +
+    '<tr><th>Default cycle time</th><td>' + cycleTime + ' min</td></tr>' +
+    '<tr><th>Break buffer</th><td>' + breakBuffer + ' min</td></tr>' +
+    '</table>' +
+
+    // Per-day blocks
+    daysHtml +
+
+    // QR section (placeholder, filled by JS below)
+    '<div class="qr-section">' +
+    '  <div class="qr-img" id="qrCanvas"></div>' +
+    '  <div class="qr-info">' +
+    '    <strong>Reload this schedule in the scheduler tool</strong><br>' +
+    '    Scan the QR code or open the URL below to restore all settings (days, breaks, ' +
+    '    cycle changes, team assignments).' +
+    '    <div class="url">' + shareUrl + '</div>' +
+    '  </div>' +
+    '</div>' +
+
+    '<div class="footer">FRC Match Scheduler \u00b7 Generated ' + generatedAt + '</div>' +
+
+    // QR generation: load qrcode-generator from CDN, fall back to URL-only if blocked
+    '<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"><\/script>' +
+    // html2pdf for the "Save as PDF" button — this generates a real PDF download
+    // (independent of the browser's print-dialog Save-as-PDF flow)
+    '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>' +
+    '<script>' +
+    '  var __pdfFilename = ' + JSON.stringify(pdfFilename) + ';' +
+    '  function savePdfFromSheet() {' +
+    '    if (typeof html2pdf !== "function") {' +
+    '      alert("PDF library failed to load. Use the Print button and choose Save as PDF instead.");' +
+    '      return;' +
+    '    }' +
+    '    var btn = document.getElementById("btnSavePdf");' +
+    '    if (btn) { btn.disabled = true; btn.textContent = "Generating PDF\u2026"; }' +
+    '    var clone = document.body.cloneNode(true);' +
+    '    var noprint = clone.querySelector(".no-print"); if (noprint) noprint.remove();' +
+    '    html2pdf().set({' +
+    '      margin: [0.5, 0.5, 0.5, 0.5],' +
+    '      filename: __pdfFilename,' +
+    '      image: { type: "jpeg", quality: 0.95 },' +
+    '      html2canvas: { scale: 2, useCORS: true, logging: false },' +
+    '      jsPDF: { unit: "in", format: "letter", orientation: "portrait" },' +
+    '      pagebreak: { mode: ["avoid-all", "css", "legacy"] }' +
+    '    }).from(clone).save().then(function() {' +
+    '      if (btn) { btn.disabled = false; btn.textContent = "Save as PDF"; }' +
+    '    }).catch(function(err) {' +
+    '      console.error(err);' +
+    '      if (btn) { btn.disabled = false; btn.textContent = "Save as PDF"; }' +
+    '      alert("PDF generation failed: " + err.message);' +
+    '    });' +
+    '  }' +
+    '  (function() {' +
+    '    var url = ' + JSON.stringify(shareUrl) + ';' +
+    '    var holder = document.getElementById("qrCanvas");' +
+    '    function tryRender(attempt) {' +
+    '      if (typeof qrcode !== "function") {' +
+    '        if (attempt < 20) return setTimeout(function() { tryRender(attempt + 1); }, 100);' +
+    '        holder.innerHTML = "<div style=\\"font-size:10px;color:#8c959f;\\">(QR library unavailable \u2014 use the URL above)</div>";' +
+    '        return;' +
+    '      }' +
+    '      try {' +
+    '        var qr = qrcode(0, "M");' +
+    '        qr.addData(url);' +
+    '        qr.make();' +
+    '        holder.innerHTML = qr.createSvgTag({ scalable: true });' +
+    '      } catch (err) {' +
+    '        holder.innerHTML = "<div style=\\"font-size:10px;color:#8c959f;\\">(QR error: " + err.message + ")</div>";' +
+    '      }' +
+    '    }' +
+    '    tryRender(0);' +
+    '  })();' +
+    '<\/script>' +
+    '</body></html>';
+
+  // ── Open in new window ───────────────────────────────────────────────────
+  var w = window.open('', '_blank');
+  if (!w) {
+    showApiStatus('Popup blocked \u2014 allow popups for this site to open the setup sheet', true);
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  showApiStatus('\u2713 FMS Setup Sheet opened in new window');
+}
+
 
 
 function openPrintDialog() {
@@ -7669,6 +8167,26 @@ function openPrintDialog() {
     if (lbl) lbl.style.opacity = hasAssignment ? '' : '0.45';
     if (lbl) lbl.title = hasAssignment ? '' : 'Assign teams to enable team numbers';
   }
+  // Reset PDF mode flag — set by downloadSchedulePDF before opening the modal
+  window._frcPrintAsPdf = false;
+  openModal('modalPrint');
+}
+
+// Open the same Print options modal but route the result through html2pdf
+// for a real .pdf download instead of window.print(). Reuses printSchedule()
+// so all the print options (team nums, cycle changes, page breaks, etc.) apply.
+function downloadSchedulePDF() {
+  if (!window._frcScheduled) { showApiStatus('No schedule to download', true); return; }
+  var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
+  var teamNumsCb = document.getElementById('printOptTeamNums');
+  if (teamNumsCb) {
+    teamNumsCb.disabled = !hasAssignment;
+    if (!hasAssignment) teamNumsCb.checked = false;
+    var lbl = document.getElementById('printOptTeamNumsLabel');
+    if (lbl) lbl.style.opacity = hasAssignment ? '' : '0.45';
+    if (lbl) lbl.title = hasAssignment ? '' : 'Assign teams to enable team numbers';
+  }
+  window._frcPrintAsPdf = true;  // printSchedule() reads this flag
   openModal('modalPrint');
 }
 
@@ -7709,13 +8227,15 @@ function printSchedule() {
     return activeFilters.teams.some(function(ft) { return matchTeams.indexOf(ft) !== -1; });
   }
 
-  var eventName = document.getElementById('eventCodeStatus') ? document.getElementById('eventCodeStatus').textContent : '';
+  var titleParts = (typeof getScheduleTitleParts === 'function') ? getScheduleTitleParts() : { full: '' };
+  var eventName  = titleParts.full ||
+                   (document.getElementById('eventCodeStatus') ? document.getElementById('eventCodeStatus').textContent : '');
   var numTeams  = document.getElementById('numTeams').value;
   var mpt       = document.getElementById('matchesPerTeam').value;
 
   // Build print HTML
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">';
-  html += '<title>FRC Schedule' + (eventName ? ' — ' + eventName : '') + '</title>';
+  html += '<title>' + (eventName ? eventName + ' — ' : '') + 'FRC Schedule</title>';
   html += '<style>';
   html += 'body{font-family:Arial,sans-serif;font-size:10pt;margin:1cm;color:#000;}';
   html += 'h1{font-size:14pt;margin:0 0 2px 0;}';
@@ -7734,7 +8254,7 @@ function printSchedule() {
   html += '@media print{@page{margin:1cm;size:portrait;}body{margin:0;}.day-title{page-break-before:auto;}}';
   html += '</style></head><body>';
 
-  html += '<h1>FRC Match Schedule' + (eventName ? ' &mdash; ' + eventName : '') + '</h1>';
+  html += '<h1>' + (eventName ? eventName + ' &mdash; ' : '') + 'FRC Match Schedule</h1>';
   html += '<div class="meta">' + numTeams + ' teams &middot; ' + mpt + ' matches/team';
   html += ' &middot; Generated ' + new Date().toLocaleString() + '</div>';
 
@@ -7807,10 +8327,48 @@ function printSchedule() {
 
   var w = window.open('', '_blank');
   if (!w) { showApiStatus('Pop-up blocked — allow pop-ups to print', true); return; }
+
+  // PDF mode: inject html2pdf and call .save() instead of window.print()
+  var asPdf = !!window._frcPrintAsPdf;
+  window._frcPrintAsPdf = false;
+  if (asPdf) {
+    var pdfFile = (typeof getScheduleFilenameSlug === 'function')
+                    ? getScheduleFilenameSlug('.pdf') : 'frc_schedule.pdf';
+    // Inject html2pdf script + invoker just before </body>
+    var injection =
+      '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>' +
+      '<script>' +
+      '  window.addEventListener("load", function() {' +
+      '    var fname = ' + JSON.stringify(pdfFile) + ';' +
+      '    function go() {' +
+      '      if (typeof html2pdf !== "function") {' +
+      '        document.title = "PDF library failed";' +
+      '        document.body.insertAdjacentHTML("afterbegin", "<div style=\\"padding:1rem;background:#ffe1e1;color:#a3261a;\\">PDF generation library failed to load. Use the Print button and choose Save as PDF instead.</div>");' +
+      '        return;' +
+      '      }' +
+      '      html2pdf().set({' +
+      '        margin: [0.4, 0.4, 0.4, 0.4],' +
+      '        filename: fname,' +
+      '        image: { type: "jpeg", quality: 0.95 },' +
+      '        html2canvas: { scale: 2, useCORS: true, logging: false },' +
+      '        jsPDF: { unit: "in", format: "letter", orientation: "portrait" },' +
+      '        pagebreak: { mode: ["avoid-all", "css", "legacy"] }' +
+      '      }).from(document.body).save().then(function() {' +
+      '        setTimeout(function() { window.close(); }, 500);' +
+      '      });' +
+      '    }' +
+      '    setTimeout(go, 200);' +
+      '  });' +
+      '<\/script>';
+    html = html.replace('</body></html>', injection + '</body></html>');
+  }
+
   w.document.write(html);
   w.document.close();
   w.focus();
-  setTimeout(function() { w.print(); }, 300);
+  if (!asPdf) {
+    setTimeout(function() { w.print(); }, 300);
+  }
 }
 </script>
 <script type="text/plain" id="workerSrc">
