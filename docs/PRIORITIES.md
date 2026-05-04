@@ -52,15 +52,17 @@ surNeeded  = max(0, 6 − len(underQuota))
 ```
 
 60 random candidate sets per match; highest-scoring chosen.
-A slot is flagged surrogate only when mc[s] >= MPT at selection time.
 
-> **Known divergence from FIRST:** the FRC manual (§10.5.2 / §11.6.2) says
+> **FIRST-aligned surrogate placement (MPT ≥ 3):** Per FRC manual §10.5.2,
 > a surrogate's extra match is always *that team's* third qualification
-> match. We currently let surrogate appearances fall where they need to
-> based on quota math (typically end-of-schedule). Implementing the
-> "always 3rd appearance" rule requires reworking Phase 2's quota model
-> to pre-pick the K surrogate teams and target MPT+1 for them with the
-> 3rd appearance flagged. Tracked as future work.
+> match. We honor this by pre-picking the K surrogate teams (deterministic
+> from the seed via `rng.sample`), giving them target = MPT+1, and marking
+> their 3rd appearance as the surrogate. Round uniformity in Phase 1
+> guarantees the 3rd appearance falls in calendar round 3.
+>
+> For MPT < 3 (tiny demo events), the rule has no meaningful interpretation
+> — we fall back to the legacy "surrogates emerge at end of schedule" model.
+> The post-generation sweeps (R1, R2, R3 below) only run in legacy mode.
 
 ---
 
@@ -110,7 +112,13 @@ values listed in the table above. The same defaults are exposed via
 
 ---
 
-### Post-Generation Sweeps (deterministic, after greedy scheduling)
+### Post-Generation Sweeps (legacy model only)
+
+Active **only when MPT < 3** (the legacy fallback). In the FIRST-aligned
+model (MPT ≥ 3), surrogate placement is correct by construction and
+these sweeps are skipped — running them would move flags away from the
+team's 3rd appearance, which is exactly where the FRC manual says they
+should be.
 
 | Rule | Constraint | Method |
 |---|---|---|
@@ -230,7 +238,7 @@ by FMS at all official events) produces. Source documents:
 | 4. Minimize surrogates | ✅ Match + extend | Strict cap `fairSurCap` (we dropped the +1 buffer) |
 | 5. Red/Blue balancing | ✅ Match | P6 — W_BALANCE penalty per imbalance unit |
 | 6. Station position balancing | ✅ Match | P10 — new in this revision; FIRST has done this since 2017 (Steamworks) |
-| Surrogates = team's 3rd match | ⚠ Diverge | FIRST manual §10.5.2: "always their third Qualification MATCH" (since 2008). We currently let surrogates fall where quota math dictates. Tracked as future work — requires Phase 2 quota model rework. |
+| Surrogates = team's 3rd match | ✅ Match | FIRST manual §10.5.2: "always their third Qualification MATCH" (since 2008). Implemented via pre-picked surrogate set with target = MPT+1; the 3rd appearance is marked. Falls back to legacy model when MPT < 3 (the rule is undefined for tiny events). |
 
 ### Where we go beyond FIRST
 

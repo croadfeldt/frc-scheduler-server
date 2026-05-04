@@ -143,6 +143,32 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
     teams = list(range(1, num_teams + 1))
     rng.shuffle(teams)
 
+    # ── Pre-pick surrogate teams (FIRST manual §10.5.2) ─────────────────────
+    # The FRC manual specifies: "If a team plays a MATCH as a SURROGATE, it
+    # is always their third Qualification MATCH." This requires deciding
+    # upfront which teams will have an extra appearance — rather than letting
+    # surrogates emerge from end-of-schedule quota math (the older "fill
+    # missing slots from at-quota teams" approach, which puts surrogates in
+    # the last round and contradicts FIRST's rule).
+    #
+    # Only used when MPT >= 3 (the rule has no meaningful interpretation when
+    # teams play fewer than 3 matches). For MPT < 3 events, fall back to the
+    # legacy model — they're tiny demo/scrimmage cases anyway.
+    #
+    # rng.sample is seeded so the surrogate set is fully reproducible from
+    # the same seed.
+    USE_FIRST_SURROGATE_MODEL = matches_per_team >= 3 and total_sur_slots > 0
+    if USE_FIRST_SURROGATE_MODEL:
+        surrogate_team_set = set(rng.sample(teams, total_sur_slots))
+    else:
+        surrogate_team_set = set()
+
+    # Per-team appearance target. Non-surrogate teams play MPT matches.
+    # Surrogate teams play MPT+1 (one extra; their 3rd is the surrogate).
+    target_count = [matches_per_team] * (num_teams + 1)
+    for t in surrogate_team_set:
+        target_count[t] = matches_per_team + 1
+
     mc  = [0] * (num_teams + 1)
     lp  = [-999] * (num_teams + 1)
     sc  = [0] * (num_teams + 1)
@@ -284,8 +310,22 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
 
     def commit_match(red: list[int], blue: list[int], now: int) -> None:
         for t in red + blue:
-            if mc[t] >= matches_per_team:
-                sc[t] += 1
+            # Surrogate count tracking. Two models, picked at function entry:
+            #
+            # FIRST-aligned (USE_FIRST_SURROGATE_MODEL): increment only when
+            #   this match is the team's 3rd appearance AND the team is in
+            #   the pre-picked surrogate set. mc[t] is the appearance count
+            #   BEFORE this commit, so trigger on mc[t] + 1 == 3 (i.e. this
+            #   commit makes mc[t] == 3).
+            #
+            # Legacy: increment whenever the team has already met their MPT
+            #   quota (an "extra" appearance). Used for MPT < 3 events.
+            if USE_FIRST_SURROGATE_MODEL:
+                if t in surrogate_team_set and mc[t] + 1 == 3:
+                    sc[t] += 1
+            else:
+                if mc[t] >= matches_per_team:
+                    sc[t] += 1
             mc[t] += 1
             lp[t] = now
         for i, t in enumerate(red):
@@ -360,30 +400,72 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
     for i in range(total_matches - matches_per_round):
         now = len(matches)
 
-        under_quota = sorted(
-            [t for t in teams if mc[t] < matches_per_team],
-            key=lambda t: (-team_score(t, now), rng.random())
-        )
-        at_quota = sorted(
-            [t for t in teams if mc[t] == matches_per_team and sc[t] < fair_sur_cap],
-            key=lambda t: -surrogate_score(t, now)
-        )
+        if USE_FIRST_SURROGATE_MODEL:
+            # FIRST-aligned: per-team target_count drives eligibility. Surrogate
+            # teams have target MPT+1 so they remain in the pool until their
+            # extra appearance is scheduled. Their 3rd appearance (mc[t] == 2
+            # → 3 after this commit) is automatically marked as the surrogate
+            # match. No special end-of-schedule "draft surrogate teams from
+            # at-quota pool" handling — surrogate placement is uniform with
+            # everyone else's, just with a different target count.
+            under_quota = sorted(
+                [t for t in teams if mc[t] < target_count[t]],
+                key=lambda t: (-team_score(t, now), rng.random())
+            )
+            reg_pool = under_quota[:max(12, 6)]
+            red, blue = best_of_attempts(reg_pool, 6, [], 0, False, now)
 
-        sur_needed = max(0, 6 - len(under_quota))
-        reg_slots  = 6 - sur_needed
+            # Surrogate flag: this match is t's surrogate iff t is pre-picked
+            # AND this is t's 3rd appearance (mc[t] before commit is 2).
+            red_sur = tuple(
+                (t in surrogate_team_set and mc[t] + 1 == 3)
+                for t in red
+            )
+            blue_sur = tuple(
+                (t in surrogate_team_set and mc[t] + 1 == 3)
+                for t in blue
+            )
+        else:
+            # Legacy: surrogates emerge organically when under_quota dries up
+            # near end of schedule. Used for MPT < 3 where FIRST's "3rd match"
+            # rule has no meaningful interpretation.
+            under_quota = sorted(
+                [t for t in teams if mc[t] < matches_per_team],
+                key=lambda t: (-team_score(t, now), rng.random())
+            )
+            at_quota = sorted(
+                [t for t in teams if mc[t] == matches_per_team and sc[t] < fair_sur_cap],
+                key=lambda t: -surrogate_score(t, now)
+            )
 
-        reg_pool = under_quota[:max(reg_slots + 6, 12)]
-        sur_pool = at_quota[:sur_needed + 2]
+            sur_needed = max(0, 6 - len(under_quota))
+            reg_slots  = 6 - sur_needed
 
-        red, blue = best_of_attempts(reg_pool, reg_slots, sur_pool, sur_needed, False, now)
+            reg_pool = under_quota[:max(reg_slots + 6, 12)]
+            sur_pool = at_quota[:sur_needed + 2]
 
-        red_sur  = tuple(mc[t] >= matches_per_team for t in red)
-        blue_sur = tuple(mc[t] >= matches_per_team for t in blue)
+            red, blue = best_of_attempts(reg_pool, reg_slots, sur_pool, sur_needed, False, now)
+
+            red_sur  = tuple(mc[t] >= matches_per_team for t in red)
+            blue_sur = tuple(mc[t] >= matches_per_team for t in blue)
+
         matches.append(Match(red=tuple(red), blue=tuple(blue),
                              red_surrogate=red_sur, blue_surrogate=blue_sur))
         commit_match(red, blue, now)
 
     # ── Post-generation sweeps ────────────────────────────────────────────────
+    #
+    # Designed for the legacy model where surrogates emerge from end-of-
+    # schedule quota math. They fix three problems with that placement:
+    # surrogate in last match (R1), surrogate as first appearance (R2),
+    # surrogate as last appearance (R3).
+    #
+    # SKIPPED when USE_FIRST_SURROGATE_MODEL is active — pre-picked
+    # surrogates are placed at the team's 3rd appearance per FRC manual
+    # §10.5.2. That placement is correct by construction; running the
+    # legacy sweeps would only move flags away from where the manual says
+    # they belong (e.g. R1 would move a flag if a team's 3rd match
+    # happens to fall in the last calendar match).
 
     def build_appearance_map():
         first: dict[int, int] = {}
@@ -396,7 +478,7 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         return first, last_a
 
     # Rule 1+2: move last-match surrogates earlier
-    if matches:
+    if matches and not USE_FIRST_SURROGATE_MODEL:
         last_idx = len(matches) - 1
         last = matches[last_idx]
         last_red  = list(last.red);  last_rs = list(last.red_surrogate)
@@ -464,8 +546,8 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
             last_red  = list(last.red);  last_rs = list(last.red_surrogate)
             last_blue = list(last.blue); last_bs = list(last.blue_surrogate)
 
-    # Rule 3: no surrogate as last appearance
-    for _pass in range(3):
+    # Rule 3: no surrogate as last appearance — legacy only
+    for _pass in (range(3) if not USE_FIRST_SURROGATE_MODEL else range(0)):
         first_app, last_app = build_appearance_map()
         changed = False
         all_teams = list({t for m in matches for t in list(m.red) + list(m.blue)})
@@ -506,6 +588,20 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                     changed = True; break
         if not changed:
             break
+
+    # ── Post-generation sweeps ────────────────────────────────────────────────
+    #
+    # These sweeps were designed for the legacy model where surrogates emerge
+    # from end-of-schedule quota math. They fix three known problems with that
+    # placement: surrogate in last match (R1), surrogate as first appearance
+    # (R2), surrogate as last appearance (R3).
+    #
+    # In the FIRST-aligned model (USE_FIRST_SURROGATE_MODEL), surrogates are
+    # placed at the team's 3rd appearance per FRC manual §10.5.2. That
+    # placement is correct by construction, so these sweeps would only HARM
+    # correct placement (e.g. R1 would move a flag from a team's 3rd match
+    # if it happens to be in the last calendar match overall, contradicting
+    # the manual). The inline sweep code below runs only in legacy mode.
 
     return ScheduleResult(
         matches=matches,
