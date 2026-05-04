@@ -1,0 +1,177 @@
+# vLLM deployment — serves Qwen2.5-VL-7B-Instruct-AWQ via OpenAI-compatible API.
+#
+# This is the vision endpoint that the FRC scheduler uses to parse arbitrary
+# schedule PDFs. The model "sees" rasterized PDF pages and returns structured
+# JSON describing the schedule.
+#
+# Hardware: targeting one GPU with ≥10GB VRAM (NVIDIA by default).
+# Switch to AMD by uncommenting the amd.com/gpu line and using a ROCm image.
+#
+# Storage: model cached on a PVC so we don't re-download on every restart.
+#
+# Network: ClusterIP service exposes port 8000 internally. No Route by
+# default — accessible only within the cluster from the scheduler pod.
+# Add a Route + auth if external access is needed.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-vision
+  namespace: vllm-vision
+  labels:
+    app: vllm-vision
+    app.kubernetes.io/component: inference
+spec:
+  replicas: 1
+  # NOTE: do NOT scale to >1. vLLM holds the model in GPU memory exclusively;
+  # multiple replicas would each try to claim the same GPU and fail.
+  strategy:
+    type: Recreate
+    # Recreate (not RollingUpdate) because the GPU is a non-shareable resource.
+    # A new pod can't start until the old one releases the GPU.
+  selector:
+    matchLabels:
+      app: vllm-vision
+  template:
+    metadata:
+      labels:
+        app: vllm-vision
+    spec:
+      # Pin to the labeled GPU node. Apply the label with:
+      #   oc label node <gpu-node> gpu-tier.example.com/role=vllm-vision
+      nodeSelector:
+        gpu-tier.example.com/role: vllm-vision
+
+      # If you've tainted the GPU node to prevent other workloads from
+      # landing there, uncomment and adjust:
+      # tolerations:
+      #   - key: nvidia.com/gpu
+      #     operator: Exists
+      #     effect: NoSchedule
+
+      containers:
+        - name: vllm
+          # Pinned to a recent stable vLLM release. Bump as needed.
+          # See https://hub.docker.com/r/vllm/vllm-openai/tags for newer.
+          image: vllm/vllm-openai:v0.6.4
+          # For AMD/ROCm hardware, swap to:
+          #   image: rocm/vllm:latest
+          # and change resources.requests.nvidia.com/gpu to amd.com/gpu
+
+          imagePullPolicy: IfNotPresent
+
+          # vLLM CLI args. The image's entrypoint is `vllm serve`.
+          # Reference: https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html
+          args:
+            - "--model"
+            - "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
+            # AWQ quantization is auto-detected by vLLM from the model name
+            # but specifying explicitly avoids any ambiguity:
+            - "--quantization"
+            - "awq_marlin"
+            # Max input sequence length. 8192 fits a few high-res page images
+            # plus our prompt comfortably. Reduce to 4096 if you hit OOM.
+            - "--max-model-len"
+            - "8192"
+            # Limit concurrent sequences — single-user for a scheduler
+            # workload. Increase if you expect concurrent imports.
+            - "--max-num-seqs"
+            - "4"
+            # Bind to all interfaces so the Service can route to it.
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8000"
+            # vLLM trusts remote code in the model repo for some VL models.
+            # Required for Qwen2.5-VL.
+            - "--trust-remote-code"
+            # Limit GPU memory utilization to 90% so vLLM doesn't fight
+            # other pods on the same node (if any). KV cache lives in this.
+            - "--gpu-memory-utilization"
+            - "0.90"
+
+          env:
+            # Hugging Face cache directory — pointed at the PVC mount.
+            - name: HF_HOME
+              value: /models/huggingface
+            - name: TRANSFORMERS_CACHE
+              value: /models/huggingface
+            # Speed up downloads with the optional HF transfer accelerator.
+            # Uses the experimental `hf_transfer` package; safe to leave on.
+            - name: HF_HUB_ENABLE_HF_TRANSFER
+              value: "1"
+            # If you have a Hugging Face token (not needed for Qwen2.5-VL
+            # since it's not gated, but harmless to have for future models):
+            # - name: HF_TOKEN
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: vllm-secrets
+            #       key: HF_TOKEN
+            #       optional: true
+
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+              nvidia.com/gpu: 1
+              # For AMD: amd.com/gpu: 1
+            limits:
+              cpu: "8"
+              memory: 16Gi
+              nvidia.com/gpu: 1
+              # For AMD: amd.com/gpu: 1
+
+          # vLLM's /health endpoint returns 200 when the server is up
+          # AND the model is loaded. First-pod startup includes the
+          # model download (~5-15min on first run) so we give plenty
+          # of grace.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 60      # 60 × 30s = 30 minutes
+            periodSeconds: 30
+            timeoutSeconds: 5
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+            # vLLM uses /dev/shm for inter-process communication during
+            # multi-GPU inference. Even on single-GPU, sizing /dev/shm
+            # above the default 64MiB avoids cryptic crashes.
+            - name: dshm
+              mountPath: /dev/shm
+
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: vllm-model-cache
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
+
+      # vLLM container needs a few minutes to gracefully release the GPU
+      # on shutdown. Give it that time.
+      terminationGracePeriodSeconds: 120

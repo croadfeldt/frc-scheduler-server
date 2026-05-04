@@ -1,0 +1,11 @@
+# Dedicated namespace for the vLLM vision endpoint.
+# Kept separate from frc-scheduler-server because this is reusable
+# inference infrastructure that other workloads can target.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vllm-vision
+  labels:
+    app.kubernetes.io/part-of: frc-scheduler-platform
+    app.kubernetes.io/component: inference

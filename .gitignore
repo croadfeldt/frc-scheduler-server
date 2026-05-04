@@ -20,6 +20,15 @@ env/
 openshift/config.env
 openshift/01-secrets.yaml
 
+# Internal development notes — may contain cluster-specific details
+# (hostnames, IP ranges, internal DNS) that should not go to a public
+# repo. Keep locally as a knowledge base, but exclude from commits.
+REPRODUCTION_PROMPT.md
+docs/REPRODUCTION_PROMPT.md
+NOTES.md
+notes.md
+TODO.local.md
+
 # TLS
 *.key
 *.pem

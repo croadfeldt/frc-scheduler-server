@@ -1,0 +1,26 @@
+# ClusterIP service for the vLLM endpoint.
+#
+# Reachable from any pod in the cluster at:
+#   http://vllm-vision.vllm-vision.svc.cluster.local:8000/v1
+#
+# Not exposed externally — that's deliberate. The endpoint has no
+# auth, so it should only be reachable inside the cluster network.
+# If you need external access (e.g., calling from a developer
+# machine), use `oc port-forward` rather than adding a Route.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-vision
+  namespace: vllm-vision
+  labels:
+    app: vllm-vision
+spec:
+  type: ClusterIP
+  selector:
+    app: vllm-vision
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
