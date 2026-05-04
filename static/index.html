@@ -1029,6 +1029,16 @@
       <button class="btn-sm" id="btnAdhoc" onclick="loadAdhocEvent()"
         title="Create an ad-hoc schedule without importing an event.&#10;&#10;• Creates a persistent event in the database&#10;• Starts with 12 teams — add or remove via the Teams button&#10;• Generates a working schedule immediately&#10;• All schedules are saved and recallable via URL&#10;• Use Assign Teams to map real team numbers onto the schedule"
         style="white-space:nowrap;">&#9998; Quick Schedule</button>
+      <!-- PDF Import button — shown only when an LLM endpoint is configured.
+           Hidden until checkLlmStatus() confirms the LLM is reachable.
+           Sits next to Quick Schedule because both are alternative ways to
+           bring a schedule into the system (vs generating from scratch). -->
+      <button class="btn-sm" id="btnImportPdf" onclick="openPdfImportModal()"
+        title="Import a qualification schedule from a PDF.&#10;&#10;• Best for MSHSL state, off-season events, anything not on TBA&#10;• Uses a self-hosted LLM to parse arbitrary table layouts&#10;• You'll review the parsed result before committing&#10;• Validates against the loaded event's roster"
+        style="display:none;white-space:nowrap;">&#128195; Import PDF</button>
+      <span id="llmStatusIndicator" style="display:none;font-size:0.65rem;color:var(--text-muted);white-space:nowrap;">
+        <span id="llmStatusBadge" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-muted);vertical-align:middle;margin-right:0.2rem;"></span><span id="llmStatusText">checking&hellip;</span>
+      </span>
     </div>
     <div class="event-bar-actions" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
       <div style="height:1.5rem;width:1px;background:var(--border);flex-shrink:0;" class="event-bar-divider"></div>
@@ -1408,20 +1418,6 @@
         </div>
         <button class="btn-generate" id="btnGenerate" onclick="generateSchedule()">&#9889; Generate Schedule</button>
 
-        <!-- PDF Import button — shown only when LLM endpoint is configured.
-             Lets users import an arbitrary schedule PDF (MSHSL, regional state
-             tournaments, etc.) by passing it through a self-hosted LLM.
-             Hidden by default; revealed by checkLlmStatus() on page load. -->
-        <div id="pdfImportRow" style="display:none;margin-top:0.6rem;text-align:center;">
-          <button class="btn-sm" id="btnImportPdf" onclick="openPdfImportModal()" style="font-size:0.78rem;">
-            &#128195; Import schedule from PDF&hellip;
-          </button>
-          <div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.2rem;">
-            Uses a self-hosted LLM. <span id="llmStatusBadge" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-muted);vertical-align:middle;"></span>
-            <span id="llmStatusText">checking&hellip;</span>
-          </div>
-        </div>
-
         <!-- Assign Teams panel: shown after schedule generation completes -->
         <div id="stage2Panel" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
           <div class="section-label" style="margin-top:0;">Assign Teams</div>
@@ -1686,34 +1682,41 @@ async function loadSchedulerDefaults() {
 let LLM_AVAILABLE = false;
 
 async function checkLlmStatus() {
-  const row     = document.getElementById('pdfImportRow');
-  const badge   = document.getElementById('llmStatusBadge');
-  const text    = document.getElementById('llmStatusText');
-  if (!row) return;
+  const btn       = document.getElementById('btnImportPdf');
+  const indicator = document.getElementById('llmStatusIndicator');
+  const badge     = document.getElementById('llmStatusBadge');
+  const text      = document.getElementById('llmStatusText');
+  if (!btn) return;
   try {
     const r = await fetch(API + '/api/llm/status');
     if (!r.ok) {
-      row.style.display = 'none';
+      btn.style.display       = 'none';
+      indicator.style.display = 'none';
       LLM_AVAILABLE = false;
       return;
     }
     const d = await r.json();
     if (!d.configured) {
-      row.style.display = 'none';
+      btn.style.display       = 'none';
+      indicator.style.display = 'none';
       LLM_AVAILABLE = false;
       return;
     }
-    row.style.display = '';
+    btn.style.display       = '';
+    indicator.style.display = '';
     LLM_AVAILABLE = !!d.available;
     if (d.available) {
-      badge.style.background = 'var(--accent, #2ea043)';
-      text.textContent = 'ready · ' + (d.model || 'unknown model');
+      badge.style.background = 'var(--accent3, #2ea043)';
+      text.textContent = 'LLM ready';
+      btn.disabled = false;
     } else {
       badge.style.background = 'var(--amber, #c8992a)';
-      text.textContent = 'configured but unreachable';
+      text.textContent = 'LLM unreachable';
+      btn.disabled = true;
     }
   } catch (e) {
-    row.style.display = 'none';
+    btn.style.display       = 'none';
+    indicator.style.display = 'none';
     LLM_AVAILABLE = false;
   }
 }
@@ -1739,11 +1742,11 @@ function openPdfImportModal() {
   eventInfo.textContent = (eventName ? eventName.textContent : '') ||
                           (eventCode ? eventCode.value : '') ||
                           ('Event #' + _currentEventId);
-  document.getElementById('modalPdfImport').classList.add('is-open');
+  openModal('modalPdfImport');
 }
 
 function closePdfImportModal() {
-  document.getElementById('modalPdfImport').classList.remove('is-open');
+  closeModal('modalPdfImport');
   _pdfImportState = null;
 }
 
