@@ -1541,7 +1541,7 @@ let SCHEDULER_DESCRIPTIONS = null;
 async function loadSchedulerDefaults() {
   if (SCHEDULER_DEFAULTS) return SCHEDULER_DEFAULTS;
   try {
-    const r = await fetch(API_BASE + '/api/scheduler/defaults');
+    const r = await fetch(API + '/api/scheduler/defaults');
     if (!r.ok) return null;
     const d = await r.json();
     SCHEDULER_DEFAULTS = d.defaults;
@@ -1647,7 +1647,7 @@ async function loadDiversityReport(scheduleId) {
   card.style.display = 'block';
   card.innerHTML = '<div style="padding:1rem;color:var(--text-muted);text-align:center;">Loading diversity report…</div>';
   try {
-    const r = await fetch(API_BASE + '/api/abstract-schedules/' + scheduleId + '/diversity-report');
+    const r = await fetch(API + '/api/abstract-schedules/' + scheduleId + '/diversity-report');
     if (!r.ok) {
       card.innerHTML = '<div style="padding:1rem;color:var(--text-muted);">Diversity report unavailable.</div>';
       return;
