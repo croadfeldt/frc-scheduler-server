@@ -130,6 +130,53 @@
     animation: pulse 2s infinite;
   }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* PDF import preview table */
+  .pdf-import-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+  .pdf-import-table th, .pdf-import-table td {
+    padding: 4px 6px; border: 1px solid var(--border); text-align: center;
+  }
+  .pdf-import-table th {
+    background: var(--bg-alt, #f6f8fa); color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.65rem;
+    position: sticky; top: 0;
+  }
+  .pdf-import-table .col-red  { background: rgba(207,34,46,0.05); }
+  .pdf-import-table .col-blue { background: rgba(56,139,253,0.05); }
+  .pdf-import-table input.cell-input {
+    width: 50px; padding: 2px 4px; font-size: 0.72rem;
+    border: 1px solid transparent; background: transparent; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .pdf-import-table input.cell-input:focus {
+    border-color: var(--accent); background: var(--bg);
+  }
+  .pdf-import-table .surrogate-toggle {
+    display: inline-block; width: 14px; height: 14px; line-height: 14px;
+    font-size: 9px; font-weight: 700; text-align: center;
+    border: 1px solid var(--border); border-radius: 2px;
+    color: var(--text-muted); cursor: pointer; margin-left: 3px;
+  }
+  .pdf-import-table .surrogate-toggle.active {
+    background: var(--amber); color: #fff; border-color: var(--amber);
+  }
+
+  .pdf-validation-box {
+    padding: 0.55rem 0.8rem; border-radius: 4px; font-size: 0.75rem; line-height: 1.4;
+    margin-bottom: 0.4rem;
+  }
+  .pdf-validation-box.errors {
+    background: rgba(207,34,46,0.08); border-left: 3px solid var(--danger); color: var(--danger);
+  }
+  .pdf-validation-box.warnings {
+    background: rgba(200,153,42,0.10); border-left: 3px solid var(--amber); color: var(--amber);
+  }
+  .pdf-validation-box.info {
+    background: rgba(46,160,67,0.08); border-left: 3px solid var(--accent, #2ea043); color: var(--accent, #2ea043);
+  }
+  .pdf-validation-box ul { margin: 0.2rem 0 0 1.1rem; padding: 0; }
+  .pdf-validation-box ul li { margin: 0.15rem 0; }
 
   .panel-body { padding: 1.25rem; }
 
@@ -1138,6 +1185,68 @@
     </div>
   </div>
 
+  <!-- PDF Import modal — multi-stage:
+       1. File chooser + upload
+       2. Loading state while LLM processes
+       3. Preview with editable matches + validation summary
+       4. Confirmation -->
+  <div class="modal-overlay" id="modalPdfImport">
+    <div class="modal" style="width:min(960px,95vw);max-height:90vh;display:flex;flex-direction:column;">
+      <button class="modal-close" onclick="closePdfImportModal()">&#x2715;</button>
+      <div class="modal-title">Import Schedule from PDF</div>
+
+      <!-- Stage 1: file picker -->
+      <div id="pdfImportStage1">
+        <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 0.75rem 0;line-height:1.45;">
+          Upload a qualification schedule PDF. The schedule will be parsed by a self-hosted LLM and shown for review before importing.
+          Best results: PDFs with clear table structure (column headers like Match #, Time, Red 1, etc.). Re-uploading the same file is free (cached).
+        </p>
+        <p style="font-size:0.72rem;color:var(--amber);margin:0 0 1rem 0;line-height:1.4;background:rgba(200,153,42,0.12);padding:0.5rem 0.75rem;border-left:3px solid var(--amber);border-radius:3px;">
+          &#9888; LLM extraction can misread digits (8 vs 3, 0 vs 6) and miss surrogate notation.
+          Always review the parsed result before confirming import.
+        </p>
+        <div style="margin-bottom:0.6rem;font-size:0.72rem;color:var(--text-muted);">Event for this import:</div>
+        <div id="pdfImportEventInfo" style="margin-bottom:0.85rem;font-size:0.85rem;font-weight:600;">No event loaded</div>
+        <input type="file" accept="application/pdf,.pdf" id="pdfImportFile" style="display:none;" onchange="onPdfImportFileChosen(event)">
+        <button class="btn btn-accent" onclick="document.getElementById('pdfImportFile').click()">
+          Choose PDF&hellip;
+        </button>
+      </div>
+
+      <!-- Stage 2: loading -->
+      <div id="pdfImportStage2" style="display:none;text-align:center;padding:2rem 1rem;">
+        <div class="spinner" style="margin:0 auto 1rem;width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;"></div>
+        <div id="pdfImportProgressText" style="color:var(--text);font-weight:600;font-size:0.9rem;margin-bottom:0.4rem;">Uploading PDF&hellip;</div>
+        <div id="pdfImportSubText" style="color:var(--text-muted);font-size:0.72rem;line-height:1.4;">
+          The LLM may take 30-90 seconds, especially if other workloads are queued ahead.
+        </div>
+      </div>
+
+      <!-- Stage 3: preview + validation -->
+      <div id="pdfImportStage3" style="display:none;flex:1;overflow-y:auto;">
+        <div id="pdfImportSummary" style="margin-bottom:0.75rem;"></div>
+        <div id="pdfImportValidation" style="margin-bottom:0.75rem;"></div>
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem;">
+          Review and edit (click any cell to change). Surrogate flags are toggled by clicking the team's <strong>S</strong> indicator.
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="pdfImportTable" class="pdf-import-table"></table>
+        </div>
+      </div>
+
+      <!-- Stage 3 footer (sticks to bottom of modal) -->
+      <div id="pdfImportStage3Footer" style="display:none;margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border);display:none;justify-content:space-between;align-items:center;">
+        <button class="btn-sm" onclick="closePdfImportModal()">Cancel</button>
+        <button class="btn-sm btn-accent" id="pdfImportConfirmBtn" onclick="confirmPdfImport()">
+          &#10003; Import Schedule
+        </button>
+      </div>
+
+      <!-- Stage 4: post-import error -->
+      <div id="pdfImportError" style="display:none;background:rgba(207,34,46,0.10);border:1px solid var(--danger);padding:0.75rem 1rem;border-radius:4px;margin-top:0.5rem;font-size:0.8rem;color:var(--danger);"></div>
+    </div>
+  </div>
+
   <!-- Workflow step indicator -->
   <div id="workflowSteps" style="display:flex;align-items:center;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0.5rem 1.25rem;font-family:'Barlow Condensed',sans-serif;font-size:0.78rem;letter-spacing:0.06em;text-transform:uppercase;overflow-x:auto;">
     <div class="wf-step" id="wfStep1" style="display:flex;align-items:center;gap:0.4rem;opacity:1;font-weight:700;color:var(--accent);">
@@ -1298,6 +1407,20 @@
           <div class="progress-label" id="progressLabel">Running iteration 0 / 0&hellip;</div>
         </div>
         <button class="btn-generate" id="btnGenerate" onclick="generateSchedule()">&#9889; Generate Schedule</button>
+
+        <!-- PDF Import button — shown only when LLM endpoint is configured.
+             Lets users import an arbitrary schedule PDF (MSHSL, regional state
+             tournaments, etc.) by passing it through a self-hosted LLM.
+             Hidden by default; revealed by checkLlmStatus() on page load. -->
+        <div id="pdfImportRow" style="display:none;margin-top:0.6rem;text-align:center;">
+          <button class="btn-sm" id="btnImportPdf" onclick="openPdfImportModal()" style="font-size:0.78rem;">
+            &#128195; Import schedule from PDF&hellip;
+          </button>
+          <div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.2rem;">
+            Uses a self-hosted LLM. <span id="llmStatusBadge" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-muted);vertical-align:middle;"></span>
+            <span id="llmStatusText">checking&hellip;</span>
+          </div>
+        </div>
 
         <!-- Assign Teams panel: shown after schedule generation completes -->
         <div id="stage2Panel" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
@@ -1550,6 +1673,317 @@ async function loadSchedulerDefaults() {
   } catch (e) {
     console.warn('Failed to load scheduler defaults:', e);
     return null;
+  }
+}
+
+// ── LLM status + PDF import ───────────────────────────────────────────────────
+//
+// Probes /api/llm/status on page load. When the LLM endpoint is configured
+// AND reachable, reveals the PDF import button. Otherwise leaves it hidden
+// (no point teasing a feature that won't work). Status badge color reflects
+// availability so users know if a transient failure is in play.
+
+let LLM_AVAILABLE = false;
+
+async function checkLlmStatus() {
+  const row     = document.getElementById('pdfImportRow');
+  const badge   = document.getElementById('llmStatusBadge');
+  const text    = document.getElementById('llmStatusText');
+  if (!row) return;
+  try {
+    const r = await fetch(API + '/api/llm/status');
+    if (!r.ok) {
+      row.style.display = 'none';
+      LLM_AVAILABLE = false;
+      return;
+    }
+    const d = await r.json();
+    if (!d.configured) {
+      row.style.display = 'none';
+      LLM_AVAILABLE = false;
+      return;
+    }
+    row.style.display = '';
+    LLM_AVAILABLE = !!d.available;
+    if (d.available) {
+      badge.style.background = 'var(--accent, #2ea043)';
+      text.textContent = 'ready · ' + (d.model || 'unknown model');
+    } else {
+      badge.style.background = 'var(--amber, #c8992a)';
+      text.textContent = 'configured but unreachable';
+    }
+  } catch (e) {
+    row.style.display = 'none';
+    LLM_AVAILABLE = false;
+  }
+}
+
+let _pdfImportState = null;   // {pdf_import_id, matches, validation, ...}
+
+function openPdfImportModal() {
+  if (!_currentEventId) {
+    showApiStatus('Load an event first — PDF imports need an event to attach to', true);
+    return;
+  }
+  // Reset modal to stage 1
+  document.getElementById('pdfImportStage1').style.display = '';
+  document.getElementById('pdfImportStage2').style.display = 'none';
+  document.getElementById('pdfImportStage3').style.display = 'none';
+  document.getElementById('pdfImportStage3Footer').style.display = 'none';
+  document.getElementById('pdfImportError').style.display = 'none';
+  document.getElementById('pdfImportFile').value = '';
+  // Show event info
+  var eventInfo = document.getElementById('pdfImportEventInfo');
+  var eventName = document.getElementById('eventName');
+  var eventCode = document.getElementById('eventCodeInput');
+  eventInfo.textContent = (eventName ? eventName.textContent : '') ||
+                          (eventCode ? eventCode.value : '') ||
+                          ('Event #' + _currentEventId);
+  document.getElementById('modalPdfImport').classList.add('is-open');
+}
+
+function closePdfImportModal() {
+  document.getElementById('modalPdfImport').classList.remove('is-open');
+  _pdfImportState = null;
+}
+
+async function onPdfImportFileChosen(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (!_currentEventId) {
+    showApiStatus('Load an event first', true);
+    return;
+  }
+  // Stage 2: loading
+  document.getElementById('pdfImportStage1').style.display = 'none';
+  document.getElementById('pdfImportStage2').style.display = 'block';
+  document.getElementById('pdfImportStage3').style.display = 'none';
+  document.getElementById('pdfImportStage3Footer').style.display = 'none';
+  document.getElementById('pdfImportError').style.display = 'none';
+  document.getElementById('pdfImportProgressText').textContent = 'Uploading and parsing PDF…';
+
+  // Slow-LLM hint: after 15s, update the message so users know it's still working
+  var slowHint = setTimeout(function() {
+    var txt = document.getElementById('pdfImportProgressText');
+    if (txt) txt.textContent = 'LLM is processing — this can take 30-90 seconds…';
+  }, 15000);
+
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const headers = {};
+    const tok = getToken(); if (tok) headers['Authorization'] = 'Bearer ' + tok;
+    const url = API + '/api/schedules/import-pdf?event_id=' + encodeURIComponent(_currentEventId);
+    const r = await fetch(url, { method: 'POST', body: formData, headers });
+    clearTimeout(slowHint);
+    if (!r.ok) {
+      const errText = await r.text();
+      throw new Error(errText || ('HTTP ' + r.status));
+    }
+    const d = await r.json();
+    _pdfImportState = d;
+    renderPdfImportPreview(d);
+  } catch (e) {
+    clearTimeout(slowHint);
+    document.getElementById('pdfImportStage1').style.display = '';
+    document.getElementById('pdfImportStage2').style.display = 'none';
+    var err = document.getElementById('pdfImportError');
+    err.textContent = 'Import failed: ' + e.message;
+    err.style.display = '';
+  }
+}
+
+function renderPdfImportPreview(d) {
+  document.getElementById('pdfImportStage2').style.display = 'none';
+  document.getElementById('pdfImportStage3').style.display = '';
+  document.getElementById('pdfImportStage3Footer').style.display = 'flex';
+
+  // Summary line
+  const stats = (d.validation && d.validation.stats) || {};
+  let summaryHtml = '<div style="font-size:0.78rem;line-height:1.5;">';
+  summaryHtml += '<strong>Format:</strong> ' + (d.format_detected || 'Unknown') + '<br>';
+  summaryHtml += '<strong>Source:</strong> ' + (d.file_name || '(unnamed)') +
+                 ' · ' + d.page_count + ' page' + (d.page_count !== 1 ? 's' : '') +
+                 ' · ' + (d._cache === 'hit' ? 'cached' : 'fresh parse') + '<br>';
+  summaryHtml += '<strong>Detected:</strong> ' + (stats.num_teams || '?') + ' teams · ' +
+                 (stats.total_matches || '?') + ' matches · MPT≈' + (stats.mpt_normal || '?') +
+                 ' · ' + (stats.surrogate_count || 0) + ' surrogate(s)';
+  summaryHtml += '</div>';
+  if (d.notes && d.notes.trim()) {
+    summaryHtml += '<div style="font-size:0.7rem;color:var(--text-muted);margin-top:0.4rem;font-style:italic;">' +
+                   'LLM notes: ' + d.notes + '</div>';
+  }
+  document.getElementById('pdfImportSummary').innerHTML = summaryHtml;
+
+  // Validation boxes
+  const v = d.validation;
+  let valHtml = '';
+  if (v.errors && v.errors.length) {
+    valHtml += '<div class="pdf-validation-box errors"><strong>&#10006; Errors (must fix before import):</strong><ul>';
+    v.errors.forEach(function(e) { valHtml += '<li>' + escapeHtml(e.message) + '</li>'; });
+    valHtml += '</ul></div>';
+  }
+  if (v.warnings && v.warnings.length) {
+    valHtml += '<div class="pdf-validation-box warnings"><strong>&#9888; Warnings (review these):</strong><ul>';
+    v.warnings.forEach(function(w) { valHtml += '<li>' + escapeHtml(w.message) + '</li>'; });
+    valHtml += '</ul></div>';
+  }
+  if (v.errors.length === 0 && v.warnings.length === 0) {
+    valHtml += '<div class="pdf-validation-box info"><strong>&#10003; All checks passed</strong></div>';
+  }
+  document.getElementById('pdfImportValidation').innerHTML = valHtml;
+
+  // Confirm button: enabled only when no errors
+  const btn = document.getElementById('pdfImportConfirmBtn');
+  if (v.ok) {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+  } else {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+  }
+
+  // Match table
+  renderPdfImportTable(d.matches);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderPdfImportTable(matches) {
+  const tbl = document.getElementById('pdfImportTable');
+  let html = '<thead><tr>' +
+    '<th>#</th><th>Time</th>' +
+    '<th class="col-red">R1</th><th class="col-red">R2</th><th class="col-red">R3</th>' +
+    '<th class="col-blue">B1</th><th class="col-blue">B2</th><th class="col-blue">B3</th>' +
+    '</tr></thead><tbody>';
+  matches.forEach(function(m, idx) {
+    html += '<tr>';
+    html += '<td>' + (m.match_num || (idx + 1)) + '</td>';
+    html += '<td>' + escapeHtml(m.time || '') + '</td>';
+    var red  = m.red  || []; var blue = m.blue || [];
+    var rs   = m.red_surrogate  || [false, false, false];
+    var bs   = m.blue_surrogate || [false, false, false];
+    for (var i = 0; i < 3; i++) {
+      html += '<td class="col-red">' +
+        '<input class="cell-input" type="number" min="1" value="' + (red[i] || '') + '" ' +
+        'onchange="updatePdfImportCell(' + idx + ',\'red\',' + i + ',this.value)">' +
+        '<span class="surrogate-toggle' + (rs[i] ? ' active' : '') + '" ' +
+        'onclick="togglePdfImportSurrogate(' + idx + ',\'red\',' + i + ')" title="Toggle surrogate">S</span>' +
+        '</td>';
+    }
+    for (var j = 0; j < 3; j++) {
+      html += '<td class="col-blue">' +
+        '<input class="cell-input" type="number" min="1" value="' + (blue[j] || '') + '" ' +
+        'onchange="updatePdfImportCell(' + idx + ',\'blue\',' + j + ',this.value)">' +
+        '<span class="surrogate-toggle' + (bs[j] ? ' active' : '') + '" ' +
+        'onclick="togglePdfImportSurrogate(' + idx + ',\'blue\',' + j + ')" title="Toggle surrogate">S</span>' +
+        '</td>';
+    }
+    html += '</tr>';
+  });
+  html += '</tbody>';
+  tbl.innerHTML = html;
+}
+
+function updatePdfImportCell(matchIdx, side, pos, value) {
+  if (!_pdfImportState) return;
+  const m = _pdfImportState.matches[matchIdx];
+  const v = parseInt(value);
+  if (isNaN(v) || v <= 0) return;
+  m[side][pos] = v;
+  // Re-validate after each edit so the user sees immediate feedback
+  revalidatePdfImport();
+}
+
+function togglePdfImportSurrogate(matchIdx, side, pos) {
+  if (!_pdfImportState) return;
+  const m = _pdfImportState.matches[matchIdx];
+  const key = side + '_surrogate';
+  if (!m[key]) m[key] = [false, false, false];
+  m[key][pos] = !m[key][pos];
+  // Re-render just this cell's toggle (cheap, avoid full re-render)
+  renderPdfImportTable(_pdfImportState.matches);
+  revalidatePdfImport();
+}
+
+// Re-run validation client-side using the same checks the server does.
+// This is a lightweight subset — no roster cross-check (just structural).
+// Server re-validates on commit; this is just for live UI feedback.
+function revalidatePdfImport() {
+  if (!_pdfImportState) return;
+  const errors = []; const warnings = [];
+  const matches = _pdfImportState.matches;
+  matches.forEach(function(m) {
+    const all6 = (m.red || []).concat(m.blue || []);
+    const uniq = new Set(all6);
+    if (uniq.size !== all6.length) {
+      errors.push({ message: 'Match ' + m.match_num + ': duplicate team in match' });
+    }
+  });
+  _pdfImportState.validation.errors = errors;
+  _pdfImportState.validation.warnings = (_pdfImportState.validation.warnings || []).filter(function(w) {
+    // Drop validation warnings that depend on stats — we don't recompute those here.
+    // Keep server-side warnings visible.
+    return true;
+  });
+  // Update validation UI
+  let valHtml = '';
+  if (errors.length) {
+    valHtml += '<div class="pdf-validation-box errors"><strong>&#10006; Errors:</strong><ul>';
+    errors.forEach(function(e) { valHtml += '<li>' + escapeHtml(e.message) + '</li>'; });
+    valHtml += '</ul></div>';
+  }
+  if (_pdfImportState.validation.warnings.length) {
+    valHtml += '<div class="pdf-validation-box warnings"><strong>&#9888; Warnings:</strong><ul>';
+    _pdfImportState.validation.warnings.forEach(function(w) { valHtml += '<li>' + escapeHtml(w.message) + '</li>'; });
+    valHtml += '</ul></div>';
+  }
+  if (errors.length === 0 && _pdfImportState.validation.warnings.length === 0) {
+    valHtml += '<div class="pdf-validation-box info"><strong>&#10003; All checks passed</strong></div>';
+  }
+  document.getElementById('pdfImportValidation').innerHTML = valHtml;
+  const btn = document.getElementById('pdfImportConfirmBtn');
+  btn.disabled = errors.length > 0;
+  btn.style.opacity = errors.length > 0 ? '0.5' : '1';
+}
+
+async function confirmPdfImport() {
+  if (!_pdfImportState || !_currentEventId) return;
+  const btn = document.getElementById('pdfImportConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const tok = getToken(); if (tok) headers['Authorization'] = 'Bearer ' + tok;
+    const r = await fetch(API + '/api/schedules/import-pdf/commit', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        pdf_import_id: _pdfImportState.pdf_import_id,
+        event_id:      parseInt(_currentEventId),
+        name:          'PDF Import ' + new Date().toLocaleString(),
+        matches:       _pdfImportState.matches,
+        day_config:    collectDayConfig(),
+      }),
+    });
+    if (!r.ok) {
+      const errText = await r.text();
+      throw new Error(errText || ('HTTP ' + r.status));
+    }
+    const d = await r.json();
+    closePdfImportModal();
+    showApiStatus('✓ Imported ' + d.matches_imported + ' matches for ' + d.teams + ' teams');
+    // Reload the imported schedule into the editor
+    await loadAssignedSchedule(d.assigned_schedule_id, collectDayConfig());
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '✓ Import Schedule';
+    var err = document.getElementById('pdfImportError');
+    err.textContent = 'Import failed: ' + e.message;
+    err.style.display = '';
   }
 }
 
@@ -6221,6 +6655,9 @@ document.addEventListener('DOMContentLoaded', function() {
   loadSchedulerDefaults().then(function() {
     if (typeof renderWeightsPanel === 'function') renderWeightsPanel();
   });
+  // Check if LLM endpoint is available — reveals the PDF import button
+  // when configured and reachable.
+  if (typeof checkLlmStatus === 'function') checkLlmStatus();
 });
 
 // Set the active event in UI state

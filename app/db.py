@@ -201,6 +201,37 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class PdfImport(Base):
+    """Cache of LLM-parsed schedule PDFs.
+
+    Same PDF (by SHA-256) → same parsed result. Stops repeat LLM calls when
+    users re-upload the same file (very common during testing or iterating).
+
+    Cache entries are NOT tied to a specific event — a PDF that gets imported
+    for one event might also be reusable for another. We keep them separate
+    from AssignedSchedule and only materialize into AssignedSchedule on the
+    user's explicit confirmation.
+    """
+    __tablename__ = "pdf_imports"
+
+    id:           Mapped[int]      = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    pdf_hash:     Mapped[str]      = mapped_column(String, unique=True, index=True)
+    file_name:    Mapped[str|None] = mapped_column(String, nullable=True)
+    byte_size:    Mapped[int]      = mapped_column(Integer)
+    page_count:   Mapped[int]      = mapped_column(Integer)
+    # Raw LLM-parsed output before validation/edits. Reusable across attempts.
+    parsed:       Mapped[Any]      = mapped_column(JSON)
+    # Validation result (errors, warnings, stats). Computed at parse time and
+    # cached so the preview loads instantly on repeat upload.
+    validation:   Mapped[Any]      = mapped_column(JSON)
+    # Format identifier from the LLM ("MSHSL state schedule with...") — handy
+    # for debugging and surfacing to the user.
+    format_detected: Mapped[str|None] = mapped_column(String, nullable=True)
+    # Extraction method: "llm" or "deterministic_<format>"
+    method:       Mapped[str]      = mapped_column(String, default="llm")
+    created_at:   Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class MatchRow(Base):
     """
     Denormalised match row for queryable team lookups.

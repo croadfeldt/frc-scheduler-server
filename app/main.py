@@ -17,7 +17,7 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import Any, AsyncGenerator
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,7 +30,7 @@ from starlette.responses import Response
 
 from app.db import (
     AbstractSchedule, AssignedSchedule, AsyncSessionLocal,
-    Event, EventTeam, MatchResult, MatchRow, Team, User,
+    Event, EventTeam, MatchResult, MatchRow, PdfImport, Team, User,
     get_session, init_db,
 )
 from app.scheduler import run_iterations_worker, run_assignment_chunk
@@ -38,6 +38,9 @@ from app import live as live_data
 from app import statbotics as statbotics_client
 from app import tba as tba_client
 from app import frc_events as frc_client
+from app import pdf_extract
+from app import pdf_validate
+from app import llm_client
 from app.auth import (
     get_current_user, require_auth,
     google_login_url, google_exchange_code,
@@ -1638,6 +1641,328 @@ async def get_diversity_report(schedule_id: int):
             },
             "slots": slot_table,
         }
+
+
+# ── PDF schedule import (LLM-powered) ────────────────────────────────────────
+#
+# Accepts an arbitrary schedule PDF, extracts table content, sends to a
+# self-hosted LLM (vLLM or llama.cpp via OpenAI-compatible HTTP) for
+# parsing, validates the result, returns a preview the user confirms
+# before committing.
+#
+# Configured via env vars LLM_ENDPOINT, LLM_MODEL, LLM_API_KEY. When
+# unconfigured, this endpoint refuses with a clear error — there's no
+# fallback yet (a deterministic MSHSL parser is potential future work).
+#
+# Cached by SHA-256 of file content: same PDF re-uploaded → no LLM call,
+# instant response. Cache stored in pdf_imports table.
+
+
+class PdfImportPreview(BaseModel):
+    """Response shape for /api/schedules/import-pdf"""
+    pdf_import_id:    int
+    pdf_hash:         str
+    file_name:        str | None
+    page_count:       int
+    method:           str
+    format_detected:  str | None
+    matches:          list[dict]
+    validation:       dict   # see app.pdf_validate.validate_schedule
+    notes:            str    # LLM's free-form notes
+
+
+class PdfImportCommitRequest(BaseModel):
+    """Body for /api/schedules/import-pdf/commit"""
+    pdf_import_id: int
+    event_id:      int
+    name:          str = Field("Imported Schedule", max_length=128)
+    # User may have edited the matches in the preview UI before confirming.
+    # If provided, use these instead of the cached parsed matches.
+    matches:       list[dict] | None = None
+    day_config:    Any = None
+
+
+@app.post("/api/schedules/import-pdf")
+async def import_pdf(
+    file: UploadFile = File(...),
+    event_id: int | None = Query(None),
+    current_user: dict | None = Depends(get_current_user),
+):
+    """Parse a schedule PDF using the configured LLM. Returns a preview
+    that the user confirms (or edits) before committing via /commit.
+
+    The result is cached by content hash, so re-uploading the same file
+    is free.
+
+    Cross-checks against the event roster when event_id is provided —
+    catches OCR errors that produce team numbers not in the roster.
+    """
+    if not llm_client.is_configured():
+        raise HTTPException(
+            503,
+            "PDF import requires an LLM endpoint. Set LLM_ENDPOINT and LLM_MODEL "
+            "in the deployment secrets, or import via TBA event key instead. "
+            "See docs/INTEGRATIONS.md for setup."
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Empty file")
+    if not (content[:4] == b"%PDF"):
+        raise HTTPException(400, "File is not a PDF (missing %PDF header)")
+
+    pdf_hash = pdf_extract.hash_pdf(content)
+
+    # Check cache first — same PDF, no LLM call needed
+    async with AsyncSessionLocal() as db:
+        existing = await db.execute(
+            select(PdfImport).where(PdfImport.pdf_hash == pdf_hash)
+        )
+        cached = existing.scalar_one_or_none()
+        if cached:
+            log.info("PDF cache hit: %s (%s)", pdf_hash[:8], file.filename)
+            # Re-run validation in case the validator has improved since
+            # the cache entry was written, OR roster has changed
+            roster = None
+            if event_id:
+                roster_result = await db.execute(
+                    select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+                )
+                roster = [r[0] for r in roster_result.all()] or None
+            validation = pdf_validate.validate_schedule(cached.parsed.get("matches", []), roster)
+            return {
+                "pdf_import_id":   cached.id,
+                "pdf_hash":        pdf_hash,
+                "file_name":       cached.file_name,
+                "page_count":      cached.page_count,
+                "method":          cached.method,
+                "format_detected": cached.format_detected,
+                "matches":         cached.parsed.get("matches", []),
+                "validation":      validation,
+                "notes":           cached.parsed.get("notes", ""),
+                "_cache":          "hit",
+            }
+
+    # Not cached — extract and call LLM
+    try:
+        extracted = pdf_extract.extract_tables(content)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        log.exception("PDF extraction failed")
+        raise HTTPException(500, f"PDF extraction failed: {e}")
+
+    # Refuse if estimated tokens exceed the LLM context window. 32K
+    # leaves ~16K for output tokens.
+    est_tokens = pdf_extract.estimate_token_budget(extracted)
+    if est_tokens > 16000:
+        raise HTTPException(
+            413,
+            f"PDF too long for LLM extraction: ~{est_tokens} input tokens "
+            f"(max ~16000). Try a more focused document or split into pages."
+        )
+
+    pdf_text = pdf_extract.format_for_llm(extracted)
+
+    try:
+        parsed = await llm_client.parse_schedule(pdf_text)
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except ValueError as e:
+        # LLM returned malformed JSON
+        raise HTTPException(502, f"LLM returned malformed response: {e}")
+
+    if not parsed:
+        raise HTTPException(503, "LLM extraction not configured")
+
+    matches = parsed.get("matches") or []
+    if not matches:
+        raise HTTPException(422, "LLM did not extract any matches from the PDF. "
+                                  "Check that the PDF contains a qualification schedule.")
+
+    # Pull roster for cross-check if event provided
+    roster = None
+    if event_id:
+        async with AsyncSessionLocal() as db:
+            roster_result = await db.execute(
+                select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+            )
+            roster = [r[0] for r in roster_result.all()] or None
+
+    validation = pdf_validate.validate_schedule(matches, roster)
+
+    # Save to cache regardless of validation pass — user may want to edit
+    # bad parses rather than re-call the LLM
+    async with AsyncSessionLocal() as db:
+        pdf_import = PdfImport(
+            pdf_hash=pdf_hash,
+            file_name=file.filename,
+            byte_size=len(content),
+            page_count=extracted["page_count"],
+            parsed=parsed,
+            validation=validation,
+            format_detected=parsed.get("format_detected"),
+            method="llm",
+        )
+        db.add(pdf_import)
+        await db.commit()
+        await db.refresh(pdf_import)
+
+    return {
+        "pdf_import_id":   pdf_import.id,
+        "pdf_hash":        pdf_hash,
+        "file_name":       file.filename,
+        "page_count":      extracted["page_count"],
+        "method":          "llm",
+        "format_detected": parsed.get("format_detected"),
+        "matches":         matches,
+        "validation":      validation,
+        "notes":           parsed.get("notes", ""),
+        "_cache":          "miss",
+    }
+
+
+@app.post("/api/schedules/import-pdf/commit")
+async def commit_pdf_import(
+    body: PdfImportCommitRequest,
+    current_user: dict | None = Depends(get_current_user),
+):
+    """Commit a previewed PDF import as a real AssignedSchedule.
+
+    The user confirms (and optionally edits) the parsed matches before
+    calling this. We DON'T auto-commit — bad parses can corrupt schedules
+    and the cost of a manual review step is small vs the cost of importing
+    a wrong schedule.
+    """
+    async with AsyncSessionLocal() as db:
+        pdf_import = await db.get(PdfImport, body.pdf_import_id)
+        if not pdf_import:
+            raise HTTPException(404, "PDF import not found")
+        event = await db.get(Event, body.event_id)
+        if not event:
+            raise HTTPException(404, "Event not found")
+
+        # Use user-edited matches if provided, else cached parse
+        matches = body.matches if body.matches is not None else pdf_import.parsed.get("matches", [])
+        if not matches:
+            raise HTTPException(400, "No matches to commit")
+
+        # Final validation. If user submitted edited matches that have errors,
+        # bail with a useful message — don't silently corrupt the schedule.
+        roster_result = await db.execute(
+            select(EventTeam.team_number).where(EventTeam.event_id == body.event_id)
+        )
+        roster = [r[0] for r in roster_result.all()] or None
+        validation = pdf_validate.validate_schedule(matches, roster)
+        if not validation["ok"]:
+            err_summary = "; ".join(e["message"] for e in validation["errors"][:3])
+            raise HTTPException(
+                422,
+                f"Validation failed: {err_summary}. Edit the preview and try again."
+            )
+
+        stats = validation["stats"]
+        N = stats["num_teams"]
+        MPT = stats["mpt_normal"]
+
+        # Build a slot-based abstract schedule + slot map. Imported schedules
+        # don't have a "real" abstract schedule (no seed, no iterations) — we
+        # synthesize one to fit the existing data model so /view and the
+        # preview pipeline work uniformly.
+        # Slot indices are assigned by first-appearance order of teams.
+        team_to_slot: dict[int, int] = {}
+        next_slot = 1
+        abstract_matches: list[dict] = []
+        for m in sorted(matches, key=lambda x: x.get("match_num", 0)):
+            red_slots = []
+            for t in m.get("red") or []:
+                if t not in team_to_slot:
+                    team_to_slot[t] = next_slot; next_slot += 1
+                red_slots.append(team_to_slot[t])
+            blue_slots = []
+            for t in m.get("blue") or []:
+                if t not in team_to_slot:
+                    team_to_slot[t] = next_slot; next_slot += 1
+                blue_slots.append(team_to_slot[t])
+            abstract_matches.append({
+                "red":            red_slots,
+                "blue":           blue_slots,
+                "red_surrogate":  m.get("red_surrogate")  or [False, False, False],
+                "blue_surrogate": m.get("blue_surrogate") or [False, False, False],
+            })
+        slot_map = {str(slot): team for team, slot in team_to_slot.items()}
+
+        # Synthesize round_boundaries — assume one round per ceil(N/6) matches
+        # in the absence of source-specific information
+        import math
+        matches_per_round = max(1, math.ceil(N / 6))
+        round_boundaries = {
+            str(r + 1): r * matches_per_round
+            for r in range(math.ceil(len(matches) / matches_per_round))
+        }
+
+        # Surrogate count per slot
+        surrogate_count = [0] * (N + 1)
+        for am in abstract_matches:
+            for i, s in enumerate(am["red"]):
+                if am["red_surrogate"][i]: surrogate_count[s] += 1
+            for i, s in enumerate(am["blue"]):
+                if am["blue_surrogate"][i]: surrogate_count[s] += 1
+
+        sched = AbstractSchedule(
+            event_id=body.event_id, name=body.name + " (abstract)",
+            num_teams=N, matches_per_team=MPT,
+            cooldown=1, seed=None,  # imported — no seed
+            iterations_run=0, best_iteration=0, score=0.0,
+            created_by=current_user["sub"] if current_user else None,
+            matches=abstract_matches, surrogate_count=surrogate_count,
+            round_boundaries=round_boundaries, day_config=body.day_config,
+            weights=None,
+        )
+        db.add(sched)
+        await db.flush()
+
+        # Deactivate any prior active schedule on this event
+        await db.execute(
+            update(AssignedSchedule)
+            .where(AssignedSchedule.event_id == body.event_id)
+            .values(is_active=False)
+        )
+        assigned = AssignedSchedule(
+            abstract_schedule_id=sched.id, event_id=body.event_id,
+            name=body.name, is_active=True,
+            slot_map=slot_map, day_config=body.day_config,
+            practice_matches=[],   # imports don't include practice
+            assign_seed=None,
+            created_by=current_user["sub"] if current_user else None,
+        )
+        db.add(assigned)
+        await db.flush()
+
+        # Materialize MatchRow records for queryability
+        slot_map_int = {int(k): v for k, v in slot_map.items()}
+        for i, am in enumerate(abstract_matches, start=1):
+            db.add(MatchRow(
+                assigned_schedule_id=assigned.id, match_num=i,
+                red1=slot_map_int[am["red"][0]], red2=slot_map_int[am["red"][1]], red3=slot_map_int[am["red"][2]],
+                blue1=slot_map_int[am["blue"][0]], blue2=slot_map_int[am["blue"][1]], blue3=slot_map_int[am["blue"][2]],
+            ))
+
+        await db.commit()
+
+        return {
+            "abstract_schedule_id": sched.id,
+            "assigned_schedule_id": assigned.id,
+            "name":                 assigned.name,
+            "matches_imported":     len(matches),
+            "teams":                N,
+        }
+
+
+@app.get("/api/llm/status")
+async def llm_status():
+    """Returns LLM availability for the UI to surface in the import button."""
+    return await llm_client.health_check()
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

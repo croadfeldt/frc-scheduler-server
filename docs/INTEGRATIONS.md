@@ -15,6 +15,7 @@ when not configured.
 | **Nexus for FRC** (webhook) | They push to us | shared secret | yes (secret) |
 | **Nexus** (referral card) | UI deep-link | none | no |
 | **TBA / Statbotics / FRC Events deep-links** | UI deep-link | none | no |
+| **LLM endpoint** (PDF import) | We send PDFs to it | endpoint URL + model name | yes if remote |
 
 ## Where configuration lives
 
@@ -258,6 +259,95 @@ links that open the team's or event's page on each external tool.
 key. If you generate a schedule for an unidentified event (typed in by
 hand without TBA lookup), the deep-links section is hidden because there's
 no event key to construct URLs from.
+
+---
+
+## LLM endpoint (PDF schedule import)
+
+**What it does:** parses arbitrary qualification schedule PDFs into the
+scheduler's match format, so events can be imported from sources that
+aren't TBA-tracked. The PDF text is extracted server-side via pdfplumber,
+then sent to an OpenAI-compatible LLM endpoint for parsing into structured
+JSON. The user reviews the parsed result (with editable cells) and confirms
+before import.
+
+**Required for:**
+- The "Import schedule from PDF…" button in the editor
+- Importing schedules from MSHSL state, off-season events, or any source
+  that publishes a PDF schedule but isn't in TBA
+
+**Setup — endpoint side:**
+
+You need any OpenAI-compatible endpoint. Two common self-hosted options:
+
+- **vLLM** — `vllm serve <model>` exposes `/v1/chat/completions` natively
+- **llama.cpp** — `llama-server --model <path>.gguf` with `--port 8000`
+
+Both serve OpenAI-compatible HTTP. We've tested with **Qwen3-32B Q8** running
+on llama.cpp; the LLM client passes llama.cpp-specific knobs
+(`top_k`, `min_p`, `cache_prompt`, `chat_template_kwargs`) at the top level
+of the request body, which other servers will ignore harmlessly.
+
+**Setup — scheduler side:**
+
+```yaml
+# openshift/01-secrets.yaml
+stringData:
+  LLM_ENDPOINT:  "http://your-llm-host:8000/v1"
+  LLM_MODEL:     "qwen"        # whatever name your server expects
+  LLM_API_KEY:   ""            # most self-hosted endpoints don't auth
+```
+
+Apply secrets and restart:
+
+```sh
+oc apply -f openshift/01-secrets.yaml
+oc rollout restart deployment/frc-scheduler-server -n frc-scheduler-server
+```
+
+**Verifying:**
+
+1. Open the editor and load any event
+2. Look for the "Import schedule from PDF…" button below "Generate Schedule"
+3. The status badge next to it shows green when the LLM is reachable
+
+If the button stays hidden:
+- Check the deployment env: `oc exec deploy/frc-scheduler-server -n frc-scheduler-server -- env | grep LLM_`
+- If env vars are set but button hidden, check pod logs for connection errors
+
+If the button is visible but the badge is amber ("configured but unreachable"):
+- LLM endpoint is down or behind a network barrier the cluster can't cross
+- Check from a worker node: `curl -sf http://your-llm-host:8000/health`
+
+**Without it:** the PDF import button stays hidden. Other import paths
+(TBA event lookup, manual entry) still work.
+
+**Privacy:** PDFs are sent only to the configured endpoint. If you're
+self-hosting on your own infrastructure, no schedule data leaves your
+network. We don't log PDF content; only file size and SHA-256 hash are
+recorded for caching.
+
+**Caching:** PDFs are cached by SHA-256 hash. Re-uploading the same file
+costs zero — the cached parse is returned instantly. Cache lives in the
+`pdf_imports` table; safe to truncate if you want to clear it.
+
+**Quality expectations:**
+
+LLM extraction is unreliable on:
+- Scanned PDFs (no text layer — OCR is a separate problem)
+- Heavily-stylized formats with non-tabular layouts
+- PDFs with images-of-text instead of real text fragments
+- Highly compressed or encrypted PDFs
+
+The validator catches structural problems (duplicate teams, gaps in match
+numbering, surrogate count mismatches) and surfaces them to the user
+before commit. **Always review the preview before confirming** — LLMs
+misread digits and miss surrogate notation more often than you'd hope.
+
+**Concurrency:** the LLM endpoint typically processes one request at a
+time (`--parallel 1` for llama.cpp, similar for many vLLM configs).
+Multiple users importing concurrently will queue. The editor's progress
+indicator updates after 15 seconds with a "may be queued" hint.
 
 ---
 
