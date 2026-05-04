@@ -35,6 +35,7 @@ from app.db import (
 )
 from app.scheduler import run_iterations_worker, run_assignment_chunk
 from app import live as live_data
+from app import statbotics as statbotics_client
 from app import tba as tba_client
 from app import frc_events as frc_client
 from app.auth import (
@@ -1366,6 +1367,49 @@ async def nexus_webhook(request: Request, db: AsyncSession = Depends(get_session
     except Exception:
         raise HTTPException(400, "Invalid JSON payload")
     return await live_data.ingest_nexus_event(db, payload)
+
+
+# ── Statbotics integration ──────────────────────────────────────────────────
+#
+# Statbotics provides EPA (Expected Points Added) ratings — basically Elo
+# but in match-point units, with auto/teleop/endgame splits. Free public API.
+# We fetch on-demand per (team, event) when the user expands a team panel.
+
+
+@app.get("/api/statbotics/team-event/{team_number}/{event_key}")
+async def get_statbotics_team_event(team_number: int, event_key: str):
+    """Get EPA stats for a team at an event. Returns 404 if Statbotics
+    doesn't have data (happens for off-season events outside their dataset
+    or for teams that haven't played any matches yet)."""
+    raw = await statbotics_client.get_team_event(team_number, event_key)
+    if not raw:
+        # Try team-year as a fallback for pre-event lookups
+        # Extract year from event_key (e.g., '2026mnst' → 2026)
+        try:
+            year = int(event_key[:4])
+            raw_year = await statbotics_client.get_team_year(team_number, year)
+            if raw_year:
+                # Normalize team-year payload to look like team-event for frontend
+                epa = raw_year.get("epa") or {}
+                return {
+                    "team": team_number, "year": year, "event": None,
+                    "team_name": raw_year.get("team_name") or raw_year.get("name"),
+                    "norm_epa": epa.get("norm") or raw_year.get("norm_epa"),
+                    "epa_end": (epa.get("stats") or {}).get("end"),
+                    "auto_epa": (epa.get("breakdown") or {}).get("auto_points"),
+                    "teleop_epa": (epa.get("breakdown") or {}).get("teleop_points"),
+                    "endgame_epa": (epa.get("breakdown") or {}).get("endgame_points"),
+                    "predicted_rank": None,
+                    "wins": (raw_year.get("record") or {}).get("wins"),
+                    "losses": (raw_year.get("record") or {}).get("losses"),
+                    "ties": (raw_year.get("record") or {}).get("ties"),
+                    "winrate": (raw_year.get("record") or {}).get("winrate"),
+                    "_source": "team_year_fallback",
+                }
+        except (ValueError, TypeError):
+            pass
+        raise HTTPException(404, "Not found in Statbotics")
+    return statbotics_client.normalize_team_event(raw)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

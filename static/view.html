@@ -502,6 +502,56 @@
   }
   .source-banner .banner-detail { font-size: 12px; opacity: 0.9; }
 
+  /* Nexus referral card — encourages users to sign up there for notifications */
+  .nexus-card {
+    display: flex; gap: 0.75rem; align-items: flex-start;
+    padding: 0.75rem 1rem; border-radius: 8px;
+    margin-bottom: 1rem; font-size: 13px; line-height: 1.4;
+    background: rgba(9,105,218,0.08); color: var(--text);
+    border-left: 4px solid var(--primary);
+    position: relative;
+  }
+  .nexus-card .nexus-icon { font-size: 22px; flex-shrink: 0; line-height: 1.2; }
+  .nexus-card .nexus-content { flex: 1; padding-right: 1.5rem; }
+  .nexus-card strong {
+    font-size: 14px; display: block; margin-bottom: 2px; color: var(--text);
+  }
+  .nexus-card .nexus-detail { font-size: 12px; color: var(--text-muted); }
+  .nexus-card a { color: var(--primary); font-weight: 600; }
+  .nexus-card .nexus-dismiss {
+    position: absolute; top: 0.5rem; right: 0.6rem;
+    background: transparent; border: none; cursor: pointer;
+    font-size: 18px; color: var(--text-muted); line-height: 1;
+    padding: 2px 6px; border-radius: 3px;
+  }
+  .nexus-card .nexus-dismiss:hover { color: var(--text); background: var(--bg-alt); }
+  @media (prefers-color-scheme: dark) {
+    .nexus-card { background: rgba(56,139,253,0.12); }
+  }
+
+  /* External links — TBA / Statbotics / FRC Events deep-links in per-team panel */
+  .external-links {
+    display: flex; gap: 0.5rem; flex-wrap: wrap;
+    margin-top: 0.6rem; padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+  }
+  .external-links a {
+    flex: 1; min-width: 80px;
+    text-align: center;
+    padding: 4px 8px; font-size: 11px; font-weight: 600;
+    background: var(--bg-alt); color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 4px;
+    text-decoration: none; transition: all 0.1s;
+  }
+  .external-links a:hover {
+    color: var(--primary); border-color: var(--primary); background: var(--bg);
+  }
+  /* Footer event-link styling — slightly different (inline, not a grid) */
+  #eventLinks a {
+    color: var(--text-muted); text-decoration: none; margin-right: 0.4rem;
+  }
+  #eventLinks a:hover { color: var(--primary); text-decoration: underline; }
+
   /* ── Print ───────────────────────────────────────────────────────────── */
   @page { size: letter; margin: 0.5in; }
   @media print {
@@ -535,6 +585,7 @@
 
   <div id="statusArea"></div>
   <div id="sourceBanner" style="display:none;"></div>
+  <div id="nexusCard" style="display:none;"></div>
 
   <!-- Empty state when no schedule is loaded -->
   <div id="emptyState" class="empty-state" style="display:none;">
@@ -624,6 +675,7 @@
     <div class="footer-meta no-print">
       <span id="footerMeta"></span> ·
       <a id="editLink" href="/" title="Open the editor for this schedule">Open editor</a> ·
+      <span id="eventLinks"></span>
       Powered by <a href="/" >FRC Match Scheduler</a>
     </div>
 
@@ -693,7 +745,6 @@ const STATE = {
   livePollHandle: null,
   liveLastUpdate: null,
   liveError:  null,
-  audioPrev:  null,       // last seen 'queueing now' match for my team (audio cue)
   simMode:    false,      // ?simulate=1 — drives a fake event for testing
 };
 
@@ -1341,6 +1392,9 @@ function rerender() {
   // Then surface a dedicated banner for local-only or modified-published —
   // these carry actionable caveats users should see prominently
   updateSourceBanner();
+  // And the Nexus referral card — encourages users wanting notifications
+  // to sign up at frc.nexus instead of us trying to be a notification system
+  updateNexusCard();
 
   // My team summary + next match
   updateNextMatch(nowMatchNum);
@@ -1352,6 +1406,28 @@ function rerender() {
   if (sch && sch.matches_per_team) footerBits.push(sch.matches_per_team + ' matches/team');
   if (sch && sch.id)               footerBits.push('Schedule #' + sch.id);
   document.getElementById('footerMeta').textContent = footerBits.join(' · ');
+
+  // Event-level deep-links — TBA, Statbotics, FRC Events. Constructed from
+  // the event key (e.g. '2026mnst' → year=2026, code='mnst'). Hidden if no key.
+  const eventLinksEl = document.getElementById('eventLinks');
+  if (eventLinksEl) {
+    const eventKey = sch && sch.event && sch.event.key;
+    if (eventKey && /^\d{4}/.test(eventKey)) {
+      const year = eventKey.slice(0, 4);
+      const eventCode = eventKey.slice(4);
+      const links = [
+        '<a href="https://www.thebluealliance.com/event/' + encodeURIComponent(eventKey) +
+          '" target="_blank" rel="noopener" title="View this event on The Blue Alliance">TBA</a>',
+        '<a href="https://www.statbotics.io/event/' + encodeURIComponent(eventKey) +
+          '" target="_blank" rel="noopener" title="View EPA stats for this event on Statbotics">Statbotics</a>',
+        '<a href="https://frc-events.firstinspires.org/' + year + '/' + encodeURIComponent(eventCode) +
+          '" target="_blank" rel="noopener" title="View on the official FRC Events site">FRC Events</a>',
+      ];
+      eventLinksEl.innerHTML = links.join(' · ') + ' · ';
+    } else {
+      eventLinksEl.innerHTML = '';
+    }
+  }
   if (sch && sch.id) {
     document.getElementById('editLink').href = '/?aid=' + encodeURIComponent(sch.id);
   }
@@ -1501,6 +1577,65 @@ function updateSourceBanner() {
     '    <div class="banner-detail">' + escapeHtml(ss.explanation || '') + '</div>' +
     '  </div>' +
     '</div>';
+}
+
+// ── Nexus referral card ───────────────────────────────────────────────────
+//
+// Surfaces a prominent "Want notifications? Sign up at Nexus" link when the
+// event is on Nexus. We don't try to compete with their notification system —
+// theirs works with the page closed, has full delivery history, and doesn't
+// hit browser autoplay restrictions. Instead we point users there.
+//
+// Dismissible per-event via localStorage so it doesn't nag users who've
+// already signed up or decided they don't want it.
+
+const NEXUS_CARD_DISMISS_PREFIX = 'nexus_card_dismissed_';
+
+function updateNexusCard() {
+  const el = document.getElementById('nexusCard');
+  if (!el) return;
+  const sources = (STATE.live && STATE.live.sources) || {};
+  const eventKey = STATE.schedule && STATE.schedule.event && STATE.schedule.event.key;
+  if (!eventKey || !sources.nexus || !sources.nexus.available) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  const dismissKey = NEXUS_CARD_DISMISS_PREFIX + eventKey;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem(dismissKey) === '1'; } catch (e) {}
+  if (dismissed) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  el.style.display = 'block';
+  el.innerHTML =
+    '<div class="nexus-card no-print">' +
+    '  <span class="nexus-icon">📱</span>' +
+    '  <div class="nexus-content">' +
+    '    <strong>Want match alerts on your phone?</strong>' +
+    '    <div class="nexus-detail">' +
+    '      This event is on <a href="https://frc.nexus/event/' + encodeURIComponent(eventKey) +
+              '" target="_blank" rel="noopener">Nexus for FRC</a>. ' +
+    '      Sign up there for Slack, Discord, or push notifications when your team is queueing — ' +
+    '      they do this better than we can.' +
+    '    </div>' +
+    '  </div>' +
+    '  <button class="nexus-dismiss" onclick="dismissNexusCard()" title="Dismiss for this event">×</button>' +
+    '</div>';
+}
+
+function dismissNexusCard() {
+  const eventKey = STATE.schedule && STATE.schedule.event && STATE.schedule.event.key;
+  if (eventKey) {
+    try { localStorage.setItem(NEXUS_CARD_DISMISS_PREFIX + eventKey, '1'); } catch (e) {}
+  }
+  const el = document.getElementById('nexusCard');
+  if (el) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+  }
 }
 
 function matchHasTeam(entry, team) {
@@ -1800,7 +1935,7 @@ function updateNextMatch(nowMatchNum) {
                  (targetLive.winning_alliance === 'tie' ? 'Tie' : 'Loss')) + '</span>';
   }
 
-  // Per-team stats block: rank, record, averages
+  // Per-team stats block: rank, record, averages, EPA (from Statbotics)
   const rank = STATE.liveRankByTeam[primaryTeam];
   if (rank) {
     metaHtml += '<div class="team-stats">' +
@@ -1814,6 +1949,33 @@ function updateNextMatch(nowMatchNum) {
         '  <div class="stat-value">' + Math.round(rank.avg_match_score) + '</div></div>' : '') +
       (rank.ranking_score != null ? '<div class="stat"><div class="stat-label">RS</div>' +
         '  <div class="stat-value">' + (Math.round(rank.ranking_score * 10) / 10) + '</div></div>' : '') +
+      // Placeholder for EPA — gets filled by a separate fetch (async, doesn't block render).
+      // The data attribute lets fetchAndRenderEpa find this slot when its request completes.
+      '<div class="stat" data-epa-slot="' + primaryTeam + '">' +
+      '  <div class="stat-label">EPA</div>' +
+      '  <div class="stat-value" id="epaValue-' + primaryTeam + '">…</div>' +
+      '</div>' +
+      '</div>';
+    // Trigger the EPA fetch — separate async path so the panel renders immediately
+    // and the EPA slot fills in when Statbotics responds (or stays empty if 404).
+    const eventKey = STATE.schedule && STATE.schedule.event && STATE.schedule.event.key;
+    if (eventKey) fetchAndRenderEpa(primaryTeam, eventKey);
+  }
+
+  // External tool deep-links — TBA, Statbotics, FRC Events.
+  // We construct these from URL patterns rather than calling APIs (the data
+  // they'd return is mostly redundant with what we already show).
+  const eventKey = STATE.schedule && STATE.schedule.event && STATE.schedule.event.key;
+  const year = (eventKey && /^(\d{4})/.exec(eventKey) || [])[1];
+  if (year) {
+    const eventCode = eventKey.slice(4);  // strip year prefix → "mnst"
+    metaHtml += '<div class="external-links">' +
+      '<a href="https://www.thebluealliance.com/team/' + primaryTeam + '/' + year +
+        '" target="_blank" rel="noopener">TBA</a>' +
+      '<a href="https://www.statbotics.io/team/' + primaryTeam +
+        '" target="_blank" rel="noopener">Statbotics</a>' +
+      '<a href="https://frc-events.firstinspires.org/team/' + primaryTeam +
+        '" target="_blank" rel="noopener">FRC Events</a>' +
       '</div>';
   }
 
@@ -2347,7 +2509,6 @@ async function pollLive() {
       STATE.liveRankByTeam[r.team_number] = r;
     });
     rerender();
-    maybePlayQueueAudioCue();
   } catch (err) {
     STATE.liveError = err.message;
     console.warn('Live poll failed:', err);
@@ -2392,41 +2553,74 @@ async function stopSimulation() {
 }
 
 // Audio cue: short chime when our team's match enters "now_queueing" status.
-// Browsers require a user gesture before audio can play, so the first cue
-// might be silent — that's fine. Volume kept low and only triggers on
-// transitions (not every poll).
-function maybePlayQueueAudioCue() {
-  if (!STATE.myTeams || !STATE.myTeams.size) return;
-  // Find the next not-yet-played match that includes ANY of my selected teams
-  const upcoming = (STATE.computed || []).find(e =>
-    e.type === 'match' && matchHasAnySelectedTeam(e) &&
-    !((STATE.liveByMatch[e.matchNum] || {}).post_result_time)
-  );
-  if (!upcoming) { STATE.audioPrev = null; return; }
-  const q = STATE.liveQueueByMatch[upcoming.matchNum];
-  const status = q && q.status;
-  if (status === 'now_queueing' && STATE.audioPrev !== upcoming.matchNum) {
-    STATE.audioPrev = upcoming.matchNum;
-    try {
-      // Web Audio API short chime — no asset needed
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 880;
-      gain.gain.value = 0.15;
-      osc.connect(gain).connect(ctx.destination);
-      osc.start();
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      osc.frequency.setValueAtTime(1320, ctx.currentTime + 0.15);
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.45);
-      osc.stop(ctx.currentTime + 0.5);
-    } catch (e) { /* audio unavailable */ }
+// Browser-side notifications used to live here (audio chime on queueing).
+// They've been removed in favor of pointing users to Nexus, which does push
+// notifications properly: works with the page closed, has history, won't
+// trigger autoplay restrictions. The Nexus referral lives in the live strip.
+
+// ── Statbotics EPA fetch ──────────────────────────────────────────────────
+//
+// Fetches EPA for a (team, event) pair from our backend's /api/statbotics
+// endpoint, which proxies to Statbotics with caching. Renders into the
+// data-epa-slot placeholder asynchronously — doesn't block the main render.
+//
+// Per-session cache so we don't re-fetch the same team while the user clicks
+// around. The backend has its own 10-minute cache layer too.
+
+const _epaCache = {};   // {`${team}_${event}`: payload | 'pending' | 'failed'}
+
+function fetchAndRenderEpa(teamNumber, eventKey) {
+  const key = teamNumber + '_' + eventKey;
+  if (_epaCache[key] === 'pending' || _epaCache[key] === 'failed') return;
+  if (typeof _epaCache[key] === 'object') {
+    renderEpaSlot(teamNumber, _epaCache[key]);
+    return;
   }
+  _epaCache[key] = 'pending';
+  fetch('/api/statbotics/team-event/' + teamNumber + '/' + encodeURIComponent(eventKey))
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (!data) {
+        _epaCache[key] = 'failed';
+        renderEpaSlot(teamNumber, null);
+        return;
+      }
+      _epaCache[key] = data;
+      renderEpaSlot(teamNumber, data);
+    })
+    .catch(() => {
+      _epaCache[key] = 'failed';
+      renderEpaSlot(teamNumber, null);
+    });
 }
 
-// ── Helpers used by rerender() for live data ──────────────────────────────
+function renderEpaSlot(teamNumber, data) {
+  const valueEl = document.getElementById('epaValue-' + teamNumber);
+  if (!valueEl) return;  // panel may have re-rendered to a different team
+  if (!data) {
+    valueEl.textContent = '—';
+    valueEl.title = 'Statbotics has no data for this team yet';
+    return;
+  }
+  // Prefer epa_end (current point-units value); fall back to norm_epa.
+  const epaVal = data.epa_end != null ? data.epa_end : data.norm_epa;
+  if (epaVal == null) {
+    valueEl.textContent = '—';
+    return;
+  }
+  valueEl.textContent = Math.round(epaVal * 10) / 10;
+  // Build a tooltip with available context — auto/teleop/endgame splits +
+  // predicted rank if we have it
+  const bits = [];
+  if (data.auto_epa != null)    bits.push('Auto: ' + Math.round(data.auto_epa * 10) / 10);
+  if (data.teleop_epa != null)  bits.push('Teleop: ' + Math.round(data.teleop_epa * 10) / 10);
+  if (data.endgame_epa != null) bits.push('Endgame: ' + Math.round(data.endgame_epa * 10) / 10);
+  if (data.predicted_rank)      bits.push('Predicted rank: #' + data.predicted_rank);
+  if (data.norm_epa != null)    bits.push('Normalized EPA: ' + Math.round(data.norm_epa));
+  valueEl.title = bits.length ? bits.join(' · ') : 'Expected Points Added (Statbotics)';
+}
+
+
 
 // Format an offset in minutes as "+5m" / "-3m" / "on time"
 function formatDriftBadge(minutes) {
