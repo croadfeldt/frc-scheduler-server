@@ -830,6 +830,8 @@
       </div>
     </details>
     <div style="margin-left:auto;display:flex;gap:0.5rem;">
+      <button class="btn-share" id="btnOpenView" onclick="openInViewMode()"
+        title="Open this schedule in the read-only view (a separate page meant for teams, audience, and printable handouts)">&#128065; View Page</button>
       <button class="btn-share" onclick="shareSchedule()" title="Copy a shareable URL for this schedule">&#128279; Share URL</button>
       <button class="btn-duplicate" id="btnDuplicate" onclick="duplicateSchedule()" style="display:none;" title="Duplicate this schedule as your own">&#10560; Duplicate</button>
       <button class="btn-share" onclick="fullReset()" title="Clear everything and start fresh" style="border-color:var(--danger);color:var(--danger);">&#10006; Reset</button>
@@ -2290,6 +2292,41 @@ function shareSchedule() {
   }).catch(function() {
     prompt('Copy this URL:', url);
   });
+}
+
+// Open the read-only view page for the current schedule. Prefers the assigned
+// schedule ID (real team numbers + persisted state); falls back to the abstract
+// schedule ID for slot-only previews. Opens in a new tab so the editor stays
+// available — the user typically wants to compare the two side by side.
+function openInViewMode() {
+  var url;
+  if (_currentAssignedScheduleId) {
+    url = '/view?aid=' + encodeURIComponent(_currentAssignedScheduleId);
+  } else if (_currentAbstractScheduleId) {
+    url = '/view?id=' + encodeURIComponent(_currentAbstractScheduleId);
+  } else {
+    showApiStatus('Generate or assign a schedule first', true);
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
+}
+
+// Keep the View Page button enabled state in sync with whether a schedule
+// exists. Called from places that change _currentAssignedScheduleId or
+// _currentAbstractScheduleId — but a passive check is also fine since the
+// click handler validates again.
+function updateViewButton() {
+  var btn = document.getElementById('btnOpenView');
+  if (!btn) return;
+  var hasSchedule = !!(_currentAssignedScheduleId || _currentAbstractScheduleId);
+  btn.disabled = !hasSchedule;
+  btn.style.opacity = hasSchedule ? '' : '0.5';
+  btn.style.cursor  = hasSchedule ? 'pointer' : 'not-allowed';
+  btn.title = hasSchedule
+    ? (_currentAssignedScheduleId
+       ? 'Open this assigned schedule in the read-only view (separate page for teams/audience)'
+       : 'Open this slot-only schedule in the read-only view')
+    : 'Generate a schedule first to use the view page';
 }
 
 function parseUrlParams() {
@@ -5692,6 +5729,8 @@ document.addEventListener('DOMContentLoaded', function() {
   if (input) input.addEventListener('focus', function() {
     if (document.getElementById('tbaDropdownList').children.length > 0) showTbaDropdown(true);
   });
+  // Initialize the View Page button's disabled state — no schedule yet at boot
+  if (typeof updateViewButton === 'function') updateViewButton();
 });
 
 // Set the active event in UI state
@@ -7747,6 +7786,9 @@ function renderSchedule() {
   if (window._frcReadonlyMode) {
     setTimeout(applyReadonlyHighlight, 0);
   }
+
+  // Keep the View Page button's enabled state in sync
+  if (typeof updateViewButton === 'function') updateViewButton();
 }
 
 function downloadCSV() {
