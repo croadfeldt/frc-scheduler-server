@@ -12,7 +12,8 @@ when not configured.
 | **The Blue Alliance (TBA)** | We read from them | API key | yes (key) |
 | **FRC Events API** | We read from them | username + token | yes (token) |
 | **Statbotics** | We read from them | none | no |
-| **Nexus for FRC** (webhook) | They push to us | shared secret | yes (secret) |
+| **Nexus for FRC** (push) | They push to us | webhook token | yes (token) |
+| **Nexus for FRC** (pull) | We pull from them | API key | yes (key) |
 | **Nexus** (referral card) | UI deep-link | none | no |
 | **TBA / Statbotics / FRC Events deep-links** | UI deep-link | none | no |
 | **LLM endpoint** (PDF import) | We send PDFs to it | endpoint URL + model name | yes if remote |
@@ -132,92 +133,167 @@ minutes per (team, event) pair to reduce load.
 
 ---
 
-## Nexus for FRC — Webhook ingestion
+## Nexus for FRC — Live event data
 
-**What it does:** Nexus sends real-time match queue updates ("Q14 is now
-queueing", "Q15 is on deck") to our webhook endpoint. The scheduler stores
-these in the `queue_status` table and surfaces them as queue pills in
-`/view?live=1`.
+**What it does:** surfaces real-time match queue updates ("Q14 is now
+queueing", "Q15 is on deck") as queue pills in `/view?live=1` and lights
+up the "Nexus" data source badge.
 
-**Required for:**
-- Queueing Soon / Now Queueing / On Deck pills in the live view
-- The "Nexus" data source badge showing as connected
+**Availability caveat (per Nexus's docs):** Nexus only has accurate live
+data for events that are **using Nexus to manage queuing**. If your
+event isn't using Nexus's volunteer queueing tool, the API will return
+empty `matches[]` arrays and queue pills won't appear. This is true for
+both push and pull modes.
 
-**Setup — server side:**
+Nexus offers two integration modes — see https://frc.nexus/api/v1/docs
+for the official specification. **Both provide the same data.** You can
+use either or both; if both are configured, push events arrive in real
+time and pull serves as a fallback that refreshes during regular live
+polls.
 
-1. Generate a strong random shared secret. This is what Nexus will send in
-   each webhook request to prove the request is legitimate:
-   ```sh
-   openssl rand -hex 32
-   ```
+| | Push (webhook) | Pull (HTTP GET) |
+|---|---|---|
+| **Direction** | Nexus POSTs to our endpoint | We GET from Nexus's endpoint |
+| **Latency** | Real-time (event-driven) | Up to 30s (polled per refresh) |
+| **Network** | Requires public webhook URL | Outbound HTTPS only |
+| **Auth env var** | `NEXUS_WEBHOOK_TOKEN` | `NEXUS_API_KEY` |
+| **Auth header** | `Nexus-Token` (Nexus → us) | `Nexus-Api-Key` (us → Nexus) |
 
-2. Store it in the secrets file:
+### Mode 1: Push (webhook) — recommended when public URL is available
+
+Nexus POSTs match-status updates to a URL you own. Per Nexus's API
+spec (https://frc.nexus/api/v1/docs), there are two webhook variants:
+
+- **Live event status** — fires on any change to the event (match status,
+  break time, alliance picks, announcements, parts requests). Sends a
+  full snapshot of the event's current state. **Recommended for FTA-style
+  use** where you want everything visible.
+- **Match status for a specific team** — fires only when a match
+  containing that team has a status change. Sends just that single
+  match's data. Useful for team scouting apps.
+
+The scheduler is built for the first variant (full event snapshot). The
+second variant works too — the parser handles single-match payloads —
+but you'll only see queue pills for matches involving the registered team.
+
+**Setup:**
+
+1. Sign in at https://frc.nexus/api
+2. Under **Push**, click "Add a webhook URL" and configure:
+   - **URL:** `https://YOUR_SCHEDULER_HOST/api/webhooks/nexus`
+     (must be HTTPS-reachable from the public internet)
+   - **Events:** select "All events" (or your specific event)
+   - **Data:** select **"Live event status"** for full event snapshots
+3. Nexus generates a **webhook token** and displays it. Copy that token.
+4. Paste the token into your secrets file:
    ```yaml
    # openshift/01-secrets.yaml
    stringData:
-     NEXUS_WEBHOOK_TOKEN: 6f1c8e9d...the-output-of-openssl-rand
+     NEXUS_WEBHOOK_TOKEN: <paste-the-token-Nexus-gave-you>
    ```
+5. Apply secrets and restart:
+   ```sh
+   oc apply -f openshift/01-secrets.yaml
+   oc rollout restart deployment/frc-scheduler-server -n frc-scheduler-server
+   ```
+6. Save the webhook in Nexus's UI. Nexus sends a verification POST to
+   your URL — our endpoint responds 200 automatically and Nexus marks
+   the webhook as valid.
 
-3. Apply secrets and restart the deployment so the env var loads:
+**Important about token direction:** Nexus generates the token and gives
+it to you. You paste it into our config. Do not generate your own with
+`openssl rand`; that won't match what Nexus will send.
+
+**Important about delivery reliability:** per Nexus's docs, "webhooks
+that consistently fail to return a 200 status will be automatically
+disabled." Make sure your hostname is publicly reachable and stable
+before registering. Our endpoint always returns 200 except on token
+mismatch (403) — the verification ping path is safe.
+
+**Verifying:**
+
+```sh
+# Confirm the endpoint is reachable from outside the cluster
+curl -X POST https://YOUR_SCHEDULER_HOST/api/webhooks/nexus
+# Expect: 200 OK with {"status":"ok","type":"verification"}
+# (Empty body is treated as a verification ping — same as Nexus's check.)
+
+# Confirm token rejection works (when NEXUS_WEBHOOK_TOKEN is set)
+curl -X POST https://YOUR_SCHEDULER_HOST/api/webhooks/nexus \
+  -H 'Nexus-Token: WRONG' -H 'Content-Type: application/json' \
+  -d '{"type":"test"}'
+# Expect: 403 Forbidden
+```
+
+Open `/view?event=<your-event>&live=1` while the event is happening. The
+live status strip should show `Nexus ●` (green).
+
+### Mode 2: Pull (HTTP GET) — recommended when no public URL is available
+
+We periodically GET Nexus's pull endpoint (`GET /api/v1/event/{eventKey}`,
+verified at https://frc.nexus/api/v1/docs) and ingest the snapshot.
+Useful when the scheduler runs behind NAT/firewall, on a private
+network, or when you'd rather not expose a webhook endpoint.
+
+**Setup:**
+
+1. Sign in at https://frc.nexus/api
+2. Under **Pull**, copy the **API key** displayed for your account
+3. Paste it into your secrets file:
+   ```yaml
+   # openshift/01-secrets.yaml
+   stringData:
+     NEXUS_API_KEY: <paste-the-API-key-Nexus-gave-you>
+   ```
+4. Apply secrets and restart:
    ```sh
    oc apply -f openshift/01-secrets.yaml
    oc rollout restart deployment/frc-scheduler-server -n frc-scheduler-server
    ```
 
-4. Confirm the webhook endpoint is reachable from outside your cluster:
-   ```sh
-   curl -X POST https://frc-scheduler.example.com/api/webhooks/nexus \
-     -H 'Content-Type: application/json' \
-     -H 'Nexus-Token: WRONG_TOKEN_TO_TEST' \
-     -d '{"type":"test"}'
-   # Expect: 403 Forbidden
-   ```
-
-   If you get 403 with a wrong token, the endpoint is wired up correctly.
-   The real Nexus webhook will succeed because it sends the right token.
-
-**Setup — Nexus side:**
-
-1. Sign in at https://frc.nexus
-2. Go to your event settings (you must be an event admin on Nexus —
-   typically the event organizer or a designated lead)
-3. Find the Webhooks section (under Integrations or similar — Nexus's
-   exact UI may have changed since this was written; look for "outgoing
-   webhooks" or "webhook URL")
-4. Configure:
-   - **URL:** `https://frc-scheduler.example.com/api/webhooks/nexus` (your
-     hostname; must be HTTPS-reachable from the public internet)
-   - **Custom header:** name `Nexus-Token`, value the secret you generated
-     in step 1 above (must match exactly)
-   - **Events to subscribe:** match status changes (queueing, on-deck,
-     on-field, completed). Schedule updates are also accepted but the
-     scheduler currently ignores them — clients re-poll the schedule
-     directly from TBA.
-5. Send a test webhook from Nexus's UI if available
+We send the key as the `Nexus-Api-Key` request header. Pulls happen
+opportunistically as part of the regular live refresh — at most once
+per 30 seconds per event.
 
 **Verifying:**
 
-Open `/view?event=<your-event>&live=1` while the event is happening. The
-live status strip should show `Nexus ●` (green). Match number cells should
-get queue pills as Nexus sends webhooks: ⏳ Queueing Soon → 🟠 Now Queueing
-→ 🟢 On Deck → 🟢 On Field.
+```sh
+# Test the pull from outside, replacing {event_key} with your actual event:
+curl -H 'Nexus-Api-Key: YOUR_API_KEY' \
+  https://frc.nexus/api/v1/event/2026mnst
+# Expect: 200 OK with a JSON snapshot containing eventKey, dataAsOfTime,
+# nowQueuing, matches[], announcements[], partsRequests[]
+# Other expected statuses:
+#   401 = missing API key
+#   403 = invalid API key
+#   404 = event key doesn't exist on Nexus
+```
 
-If the badge stays gray (`Nexus ○`):
-- Check the deployment logs: `oc logs -l app=frc-scheduler-server -n frc-scheduler-server | grep nexus`
-- Verify the `NEXUS_WEBHOOK_TOKEN` env var matches what's configured in Nexus
-- Confirm Nexus has actually fired any webhooks (check Nexus's webhook
-  delivery log)
-- Most common cause: the URL in Nexus is missing `/api/webhooks/nexus` or
-  the token has whitespace
+Then open `/view?event=<your-event>&live=1` and confirm the Nexus badge
+turns green within ~30 seconds.
 
-**Without it:** queue pills don't appear and the Nexus source badge stays
-gray. Live match data still works via TBA.
+**Demo events for testing:** Nexus offers a demo event key (visible in
+the API page when you're signed in) that you can use to test integration
+without waiting for a real event to start. Substitute the demo key for
+your real event key in the URL above.
 
-**Security note:** the `NEXUS_WEBHOOK_TOKEN` env var is technically
-optional — if unset, the webhook endpoint accepts any incoming POST. This
-is fine for local development but should always be set in production.
-Setting it to `""` (empty string) explicitly disables the check; setting
-it to a real value enables it.
+### Without it
+
+Queue pills don't appear and the Nexus source badge stays gray. TBA-only
+live match data still works.
+
+### Security notes
+
+- `NEXUS_WEBHOOK_TOKEN` is technically optional. If unset, the webhook
+  endpoint accepts any incoming POST. Acceptable for local dev only —
+  always set it in production. Setting to `""` explicitly disables the
+  check; setting to a real value enables it.
+- `NEXUS_API_KEY` should be treated as a secret with the same care as
+  TBA_API_KEY — it grants read access to your account on Nexus.
+- The verification ping endpoint (POST with empty body) returns 200
+  even when no token is configured. This is required by Nexus's setup
+  flow. The token (when configured) is still checked first, so an
+  attacker without the token can't trigger ingestion logic.
 
 ---
 

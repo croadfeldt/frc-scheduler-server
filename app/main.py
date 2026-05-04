@@ -1415,18 +1415,45 @@ async def stop_event_simulation(event_id: int, db: AsyncSession = Depends(get_se
 
 @app.post("/api/webhooks/nexus")
 async def nexus_webhook(request: Request, db: AsyncSession = Depends(get_session)):
-    """Receive a Nexus event webhook. Validates the configured token and
-    upserts queue status into our DB. Configure the webhook URL in Nexus's
-    settings page; configure the token via NEXUS_WEBHOOK_TOKEN env var."""
+    """Receive a Nexus event webhook (Push mode).
+
+    Setup flow per Nexus's API page (https://frc.nexus/en/api):
+      1. You add this webhook's URL on the Nexus dashboard
+      2. Nexus generates a token and shows it to you
+      3. You paste that token into NEXUS_WEBHOOK_TOKEN
+      4. Nexus does a POST verification ping to your URL — must get 200 OK
+      5. After verification, Nexus pushes a snapshot every time match status updates
+
+    Nexus sends the token in the `Nexus-Token` request header (their docs;
+    we also accept the lowercase variant defensively).
+
+    Verification ping handling: Nexus's verification request may have an
+    empty body or a body that isn't shaped like our normal payload. We
+    return 200 in both cases — the only thing that matters at verify time
+    is that the URL is reachable and the token (if checked) matches. Real
+    payloads with valid JSON proceed to ingest_nexus_event normally.
+    """
     expected_token = os.environ.get("NEXUS_WEBHOOK_TOKEN", "")
     if expected_token:
         provided = request.headers.get("Nexus-Token") or request.headers.get("x-nexus-token") or ""
         if provided != expected_token:
             raise HTTPException(403, "Invalid Nexus token")
+
+    # Try to parse JSON; if body is empty or unparseable, treat as a
+    # verification ping and return 200 with a friendly status. This is what
+    # Nexus needs to confirm the webhook URL is valid during setup.
+    raw_body = await request.body()
+    if not raw_body or not raw_body.strip():
+        log.info("Nexus webhook verification ping received (empty body) — returning 200")
+        return {"status": "ok", "type": "verification"}
+
     try:
-        payload = await request.json()
+        payload = json.loads(raw_body)
     except Exception:
-        raise HTTPException(400, "Invalid JSON payload")
+        log.info("Nexus webhook with non-JSON body received (likely verification ping) — returning 200")
+        return {"status": "ok", "type": "verification"}
+
+    # Real payload — hand off to live data ingestion
     return await live_data.ingest_nexus_event(db, payload)
 
 

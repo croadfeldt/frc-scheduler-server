@@ -107,6 +107,15 @@ spec:
                   name: frc-app-secret
                   key: NEXUS_WEBHOOK_TOKEN
                   optional: true
+            # Nexus pull-mode API key. When set, a background task periodically
+            # GETs Nexus's pull endpoint with this key in the Nexus-Api-Key header.
+            # Optional — push mode (webhooks above) covers the same data.
+            - name: NEXUS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: frc-app-secret
+                  key: NEXUS_API_KEY
+                  optional: true
             # LLM endpoint for PDF schedule import. All three are optional —
             # the PDF import button stays hidden when LLM_ENDPOINT is empty.
             # See docs/INTEGRATIONS.md for setup.
