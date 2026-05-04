@@ -630,8 +630,8 @@
         <div class="card-label">Find Your Team(s)</div>
         <div class="team-input-row">
           <input type="text" id="myTeam" placeholder="Team number(s) — comma-separated"
-                 inputmode="numeric" pattern="[0-9, ]*"
-                 oninput="onTeamChange()" onchange="onTeamChange()">
+                 autocomplete="off" autocapitalize="off" spellcheck="false"
+                 onkeydown="onTeamInputKey(event)" onblur="onTeamChange()">
           <button class="btn" onclick="onTeamChange(); scrollToFirstMatch();">Find</button>
           <button class="btn btn-secondary" onclick="openTeamPicker()" title="Show all teams in the schedule and select multiple">&#9776;</button>
         </div>
@@ -1694,12 +1694,15 @@ function toggleTeamSelection(team) {
 }
 
 // Replace the entire selection (used when typing into the input)
-function setTeamSelection(teams) {
+function setTeamSelection(teams, opts) {
   STATE.myTeams = new Set(teams.filter(t => t && !isNaN(t)));
   if (!STATE.myTeams.has(STATE.myPrimary)) {
     STATE.myPrimary = STATE.myTeams.size ? STATE.myTeams.values().next().value : null;
   }
-  syncTeamSelectionToInput();
+  // When the user is actively typing, don't rewrite the input field — that
+  // would clobber whatever they're mid-typing. Caller passes {skipInputSync:
+  // true} for that case (typed input's onkeydown commit path).
+  if (!(opts && opts.skipInputSync)) syncTeamSelectionToInput();
   syncTeamSelectionToUrl();
   rerender();
 }
@@ -1733,10 +1736,38 @@ function syncTeamSelectionToUrl() {
 
 // Parse the input field's value(s) into a set of team numbers and replace
 // the current selection. Accepts comma- or space-separated numbers.
-function onTeamChange() {
+//
+// Called on blur (focus leaves the field) and explicitly when Enter or comma
+// is pressed via onTeamInputKey. We deliberately don't bind to oninput because
+// committing on every keystroke means typing "2169" passes through "2", "21",
+// "216" as intermediate selections, each one re-rendering the table and chips.
+// That looks janky and on mobile causes the keyboard to flash off briefly.
+//
+// keepInput=true preserves the user's raw typed text (used during typing —
+// otherwise the field would get rewritten to the sorted-canonical form
+// mid-keystroke, erasing what they're typing). False on blur/Find so the
+// field reflects the canonical selection once they're done.
+function onTeamChange(keepInput) {
   const raw = document.getElementById('myTeam').value || '';
   const nums = raw.split(/[\s,]+/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-  setTeamSelection(nums);
+  setTeamSelection(nums, { skipInputSync: !!keepInput });
+}
+
+// Commit the selection on Enter or comma — the natural "I'm done with this
+// team number" gestures. Comma is significant for multi-team workflows: typing
+// "2169," should produce selection [2169] and leave the cursor ready for the
+// next number, mirroring how chip-style multi-select inputs work elsewhere.
+function onTeamInputKey(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    onTeamChange(false);  // commit and rewrite to canonical form
+    scrollToFirstMatch();
+  } else if (event.key === ',') {
+    // Let the comma go into the input, then commit on the next tick so the
+    // typed comma is included in the parsed value. keepInput=true so the
+    // user can keep typing the next team number after the comma.
+    setTimeout(() => onTeamChange(true), 0);
+  }
 }
 
 function scrollToFirstMatch() {
