@@ -266,6 +266,72 @@
   .picker-item .picker-name { font-weight: 600; font-size: 14px; color: var(--text); }
   .picker-item .picker-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
+  /* ── Multi-team selection: chips, picker, clickable cells ────────────── */
+  .team-chips {
+    display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.6rem;
+  }
+  .team-chip {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    padding: 3px 8px; font-size: 12px; font-weight: 600;
+    background: var(--my-team-bg); color: #fff;
+    border: 1px solid var(--my-team-bg); border-radius: 12px;
+    cursor: pointer; transition: opacity 0.15s;
+  }
+  .team-chip:hover { opacity: 0.85; }
+  .team-chip.primary { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--primary); }
+  .team-chip .chip-x { font-size: 14px; line-height: 1; opacity: 0.8; }
+
+  /* Make table cells visibly clickable as toggles */
+  .team-cell-clickable { cursor: pointer; user-select: none; }
+  .team-cell-clickable:hover {
+    outline: 2px solid var(--primary); outline-offset: -2px;
+    border-radius: 3px;
+  }
+  /* The "primary" team gets a slightly brighter outline so the user knows
+     which one drives the per-team panel */
+  .my-team-primary { outline: 2px solid var(--primary); outline-offset: -2px; }
+
+  /* Team picker modal */
+  .team-picker-card { max-width: 600px; }
+  .team-picker-controls {
+    display: flex; gap: 0.5rem; margin-bottom: 0.75rem;
+  }
+  .team-picker-controls input {
+    flex: 1; padding: 0.4rem 0.6rem; border: 1px solid var(--border);
+    border-radius: 4px; background: var(--bg-alt); color: var(--text);
+    font-size: 14px;
+  }
+  .team-picker-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 0.4rem; max-height: 50vh; overflow-y: auto;
+    padding: 0.4rem; background: var(--bg-alt); border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .team-tile {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 0.4rem 0.2rem; font-weight: 600; font-size: 13px;
+    cursor: pointer; text-align: center;
+    font-variant-numeric: tabular-nums;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .team-tile:hover { border-color: var(--primary); }
+  .team-tile.selected {
+    background: var(--my-team-bg); color: #fff;
+    border-color: var(--my-team-bg); font-weight: 700;
+  }
+  .team-tile.selected:hover { background: var(--primary); border-color: var(--primary); }
+  .team-picker-summary {
+    margin-top: 0.6rem; padding: 0.5rem 0.75rem; font-size: 12px;
+    background: var(--bg-alt); border-radius: 4px; color: var(--text-muted);
+    min-height: 1.2em;
+  }
+  .picker-summary-team {
+    display: inline-block; padding: 1px 6px; margin: 1px 2px;
+    background: var(--my-team-bg); color: #fff; border-radius: 8px;
+    font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+
   .footer-meta {
     margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);
     text-align: center; font-size: 12px; color: var(--text-muted);
@@ -494,13 +560,15 @@
     <div class="action-grid no-print">
       <!-- Team search card -->
       <div class="card">
-        <div class="card-label">Find Your Team</div>
+        <div class="card-label">Find Your Team(s)</div>
         <div class="team-input-row">
-          <input type="number" id="myTeam" placeholder="Team number"
-                 inputmode="numeric" pattern="[0-9]*"
+          <input type="text" id="myTeam" placeholder="Team number(s) — comma-separated"
+                 inputmode="numeric" pattern="[0-9, ]*"
                  oninput="onTeamChange()" onchange="onTeamChange()">
           <button class="btn" onclick="onTeamChange(); scrollToFirstMatch();">Find</button>
+          <button class="btn btn-secondary" onclick="openTeamPicker()" title="Show all teams in the schedule and select multiple">&#9776;</button>
         </div>
+        <div id="selectedTeamsChips" class="team-chips" style="display:none;"></div>
         <div class="filter-row">
           <label><input type="checkbox" id="onlyMine" onchange="rerender()"> Only my matches</label>
           <span style="flex:1"></span>
@@ -562,6 +630,27 @@
   </div>
 </div>
 
+<!-- Team picker modal: shows all teams in the schedule, supports multi-select -->
+<div class="modal-overlay" id="teamPickerModal" onclick="if(event.target===this)closeTeamPicker()">
+  <div class="modal-card team-picker-card">
+    <h2>Select Teams</h2>
+    <p style="margin:0 0 0.75rem 0; color:var(--text-muted); font-size:13px;">
+      Tap a team to select or deselect it. Highlights apply across all matches.
+      Use the <strong>Only my matches</strong> filter to narrow down to just your teams' matches.
+    </p>
+    <div class="team-picker-controls">
+      <input type="text" id="teamPickerFilter" placeholder="Filter by team number" inputmode="numeric"
+             oninput="renderTeamPickerGrid()">
+      <button class="btn btn-secondary" onclick="clearAllTeamSelection()">Clear All</button>
+    </div>
+    <div class="team-picker-grid" id="teamPickerGrid"></div>
+    <div class="team-picker-summary" id="teamPickerSummary"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeTeamPicker()">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- QR + share modal -->
 <div class="modal-overlay" id="qrModal" onclick="if(event.target===this)closeShareModal()">
   <div class="modal-card">
@@ -592,7 +681,8 @@ const STATE = {
   schedule:   null,       // { id, matches, day_config, event, num_teams, ... }
   computed:   null,       // [{ matchNum, startMin, dayNum, isPracticeDay, red, blue, redSur, blueSur, type }]
   branding:   {},         // {primary_color, logo_url, title, subtitle, ...}
-  myTeam:     null,
+  myTeams:    new Set(),  // selected team numbers; multiple supported
+  myPrimary:  null,       // most-recently-selected team — drives next-match card
   liveMode:   false,
   startEpoch: null,       // event start as epoch ms (for live mode)
   // Live data — populated when ?live=1 by polling /api/events/{id}/live
@@ -623,11 +713,24 @@ async function boot() {
   STATE.simMode  = PARAMS.get('simulate') === '1' || PARAMS.get('sim') === '1';
   if (STATE.simMode) STATE.liveMode = true;  // simulate implies live
 
-  // Pre-fill team filter from URL
-  const teamParam = PARAMS.get('team') || PARAMS.get('myteam');
-  if (teamParam) {
-    document.getElementById('myTeam').value = teamParam;
+  // Pre-fill team selection from URL.
+  // Multiple teams: ?teams=2169,2530,3082 (comma-separated)
+  // Single team:    ?team=2169 (or legacy ?myteam=2169)
+  const teamsParam = PARAMS.get('teams');
+  const teamParam  = PARAMS.get('team') || PARAMS.get('myteam');
+  if (teamsParam) {
+    const nums = teamsParam.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    STATE.myTeams = new Set(nums);
+    STATE.myPrimary = nums[0] || null;
+  } else if (teamParam) {
+    const n = parseInt(teamParam);
+    if (!isNaN(n)) {
+      STATE.myTeams = new Set([n]);
+      STATE.myPrimary = n;
+    }
   }
+  // Reflect into input field after DOM is ready (myTeam input is in mainContent)
+  setTimeout(syncTeamSelectionToInput, 0);
   // "Only my matches" from URL
   if (PARAMS.get('only') === '1' || PARAMS.get('mine') === '1') {
     document.getElementById('onlyMine').checked = true;
@@ -1084,7 +1187,8 @@ function rerender() {
     return;
   }
 
-  STATE.myTeam = parseInt(document.getElementById('myTeam').value) || null;
+  // Multi-team primary check — used to determine which row gets per-team styling
+  const hasSelection = STATE.myTeams && STATE.myTeams.size > 0;
   const onlyMine = document.getElementById('onlyMine').checked;
 
   // Determine "now playing" preferring live API state over clock estimation.
@@ -1115,8 +1219,8 @@ function rerender() {
   computed.forEach(entry => {
     if (entry.type === 'match') totalMatches++;
     // Apply onlyMine filter
-    if (onlyMine && STATE.myTeam) {
-      if (entry.type === 'match' && !matchHasTeam(entry, STATE.myTeam)) return;
+    if (onlyMine && hasSelection) {
+      if (entry.type === 'match' && !matchHasAnySelectedTeam(entry)) return;
       if (entry.type === 'break' || entry.type === 'day-divider') return;
     }
     if (entry.type === 'day-divider') {
@@ -1130,7 +1234,7 @@ function rerender() {
       const live  = entry.isPractice ? null : STATE.liveByMatch[entry.matchNum];
       const queue = entry.isPractice ? null : STATE.liveQueueByMatch[entry.matchNum];
       const status = live ? live.status : 'upcoming';
-      const matched = STATE.myTeam && matchHasTeam(entry, STATE.myTeam);
+      const matched = hasSelection && matchHasAnySelectedTeam(entry);
       const isNow = entry.matchNum === nowMatchNum;
 
       const cls = ['match-row'];
@@ -1145,13 +1249,20 @@ function rerender() {
 
       // Per-team cell renderer — handles surrogate flag, my-team highlight,
       // and (for completed matches) winning-alliance bold styling
+      // Per-team cell renderer — handles surrogate flag, my-team highlight,
+      // and (for completed matches) winning-alliance bold styling.
+      // Cells are clickable: clicking a team toggles its membership in the
+      // selection, just like the picker does.
       const td = (val, isSur, side) => {
-        const cellCls = ['col-' + side];
-        if (val === STATE.myTeam) cellCls.push('my-team-cell');
+        const cellCls = ['col-' + side, 'team-cell-clickable'];
+        const isSelected = STATE.myTeams && STATE.myTeams.has(val);
+        if (isSelected) cellCls.push('my-team-cell');
+        if (val === STATE.myPrimary) cellCls.push('my-team-primary');
         // When completed, bold the winning alliance's cells
         if (status === 'completed' && live.winning_alliance === side) cellCls.push('alliance-won');
-        return '<td class="' + cellCls.join(' ') + '">' + val +
-               (isSur ? '<span class="surr-flag">S</span>' : '') + '</td>';
+        return '<td class="' + cellCls.join(' ') + '" onclick="toggleTeamSelection(' + val + ')" ' +
+               'title="Click to ' + (isSelected ? 'remove from' : 'add to') + ' your selection">' +
+               val + (isSur ? '<span class="surr-flag">S</span>' : '') + '</td>';
       };
 
       // Time cell — adds drift badge in live mode
@@ -1221,7 +1332,7 @@ function rerender() {
 
   // Counts + freshness
   document.getElementById('tableCount').textContent =
-    onlyMine && STATE.myTeam
+    onlyMine && hasSelection
       ? matchRowsShown + ' of ' + totalMatches + ' matches'
       : totalMatches + ' matches';
 
@@ -1396,15 +1507,184 @@ function matchHasTeam(entry, team) {
   return entry.red.indexOf(team) !== -1 || entry.blue.indexOf(team) !== -1;
 }
 
-function onTeamChange() {
-  const v = parseInt(document.getElementById('myTeam').value);
-  STATE.myTeam = isNaN(v) ? null : v;
+// Multi-team selection helpers ─────────────────────────────────────────────
+//
+// STATE.myTeams (Set<int>) holds all currently-selected team numbers.
+// STATE.myPrimary (int|null) is the "primary" team used to drive the
+// next-match card and per-team stats — typically the most-recently-selected
+// team. When myTeams is empty, myPrimary is null.
+
+// True if any selected team is in this match
+function matchHasAnySelectedTeam(entry) {
+  if (!STATE.myTeams || !STATE.myTeams.size) return false;
+  for (const t of entry.red)  if (STATE.myTeams.has(t)) return true;
+  for (const t of entry.blue) if (STATE.myTeams.has(t)) return true;
+  return false;
+}
+
+// Toggle a team in the selection. If becoming the only selection, also makes
+// it primary; if deselecting the primary, picks another as primary.
+function toggleTeamSelection(team) {
+  if (!team || isNaN(team)) return;
+  if (STATE.myTeams.has(team)) {
+    STATE.myTeams.delete(team);
+    if (STATE.myPrimary === team) {
+      // Pick a remaining team as primary, or null if empty
+      const remaining = STATE.myTeams.size ? STATE.myTeams.values().next().value : null;
+      STATE.myPrimary = remaining;
+    }
+  } else {
+    STATE.myTeams.add(team);
+    STATE.myPrimary = team;  // newest selection becomes primary
+  }
+  syncTeamSelectionToInput();
+  syncTeamSelectionToUrl();
   rerender();
+}
+
+// Replace the entire selection (used when typing into the input)
+function setTeamSelection(teams) {
+  STATE.myTeams = new Set(teams.filter(t => t && !isNaN(t)));
+  if (!STATE.myTeams.has(STATE.myPrimary)) {
+    STATE.myPrimary = STATE.myTeams.size ? STATE.myTeams.values().next().value : null;
+  }
+  syncTeamSelectionToInput();
+  syncTeamSelectionToUrl();
+  rerender();
+}
+
+// Update the input field to reflect the current selection.
+// Multiple teams render as "2169, 2530, 3082" — typed input is bidirectional.
+function syncTeamSelectionToInput() {
+  const inp = document.getElementById('myTeam');
+  if (!inp) return;
+  if (!STATE.myTeams.size) { inp.value = ''; return; }
+  const sorted = [...STATE.myTeams].sort((a, b) => a - b);
+  inp.value = sorted.join(', ');
+}
+
+// Persist selection in the URL (?teams=2169,2530,3082) without reloading.
+// Single team kept as ?team=NNNN for back-compat with shared links.
+function syncTeamSelectionToUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('team');
+  url.searchParams.delete('myteam');
+  url.searchParams.delete('teams');
+  if (STATE.myTeams.size === 1) {
+    url.searchParams.set('team', STATE.myTeams.values().next().value);
+  } else if (STATE.myTeams.size > 1) {
+    const sorted = [...STATE.myTeams].sort((a, b) => a - b);
+    url.searchParams.set('teams', sorted.join(','));
+  }
+  // Use replaceState so the browser back button doesn't bounce through every toggle
+  window.history.replaceState(null, '', url.toString());
+}
+
+// Parse the input field's value(s) into a set of team numbers and replace
+// the current selection. Accepts comma- or space-separated numbers.
+function onTeamChange() {
+  const raw = document.getElementById('myTeam').value || '';
+  const nums = raw.split(/[\s,]+/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+  setTeamSelection(nums);
 }
 
 function scrollToFirstMatch() {
   const el = document.querySelector('tr.my-team');
   if (el) el.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
+// ── Team picker modal ─────────────────────────────────────────────────────
+//
+// Shows every team that appears in any match (qual or practice) sorted
+// numerically. Each tile is a toggle: click adds, click again removes.
+// The grid is filtered live by the search input.
+
+function openTeamPicker() {
+  const all = collectAllTeamsInSchedule();
+  if (!all.length) {
+    showStatus('No teams in this schedule yet', 'error');
+    return;
+  }
+  const filterInp = document.getElementById('teamPickerFilter');
+  if (filterInp) filterInp.value = '';
+  renderTeamPickerGrid();
+  document.getElementById('teamPickerModal').classList.add('open');
+}
+
+function closeTeamPicker() {
+  document.getElementById('teamPickerModal').classList.remove('open');
+}
+
+// Walk the computed schedule and collect every distinct team number, sorted ascending.
+function collectAllTeamsInSchedule() {
+  const set = new Set();
+  (STATE.computed || []).forEach(e => {
+    if (e.type !== 'match') return;
+    e.red.forEach(t => { if (t) set.add(t); });
+    e.blue.forEach(t => { if (t) set.add(t); });
+  });
+  return [...set].sort((a, b) => a - b);
+}
+
+// Build the picker grid. Filter applies a substring match on the team number.
+function renderTeamPickerGrid() {
+  const grid = document.getElementById('teamPickerGrid');
+  if (!grid) return;
+  const all = collectAllTeamsInSchedule();
+  const filter = (document.getElementById('teamPickerFilter') || {}).value || '';
+  const filtered = filter
+    ? all.filter(t => String(t).indexOf(filter.trim()) !== -1)
+    : all;
+  grid.innerHTML = filtered.map(t => {
+    const sel = STATE.myTeams.has(t);
+    return '<button class="team-tile' + (sel ? ' selected' : '') + '" ' +
+           'data-team="' + t + '" onclick="onTeamTileClick(' + t + ')">' + t + '</button>';
+  }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:1rem;">No teams match filter</div>';
+  updateTeamPickerSummary();
+}
+
+function onTeamTileClick(team) {
+  toggleTeamSelection(team);
+  // Refresh just the tile in place so the modal stays open
+  const tile = document.querySelector('.team-tile[data-team="' + team + '"]');
+  if (tile) tile.classList.toggle('selected', STATE.myTeams.has(team));
+  updateTeamPickerSummary();
+}
+
+function clearAllTeamSelection() {
+  setTeamSelection([]);
+  document.querySelectorAll('.team-tile.selected').forEach(el => el.classList.remove('selected'));
+  updateTeamPickerSummary();
+}
+
+function updateTeamPickerSummary() {
+  const el = document.getElementById('teamPickerSummary');
+  if (!el) return;
+  const n = STATE.myTeams.size;
+  if (!n) { el.textContent = 'No teams selected'; return; }
+  const sorted = [...STATE.myTeams].sort((a, b) => a - b);
+  el.innerHTML = '<strong>' + n + ' selected:</strong> ' +
+                 sorted.map(t => '<span class="picker-summary-team">' + t + '</span>').join(' ');
+}
+
+// Render selected-team chips below the input (small remove buttons per team)
+function renderSelectedTeamChips() {
+  const wrap = document.getElementById('selectedTeamsChips');
+  if (!wrap) return;
+  if (!STATE.myTeams.size) {
+    wrap.style.display = 'none';
+    wrap.innerHTML = '';
+    return;
+  }
+  const sorted = [...STATE.myTeams].sort((a, b) => a - b);
+  wrap.style.display = '';
+  wrap.innerHTML = sorted.map(t => {
+    const isPrimary = t === STATE.myPrimary;
+    return '<button class="team-chip' + (isPrimary ? ' primary' : '') + '" ' +
+           'onclick="toggleTeamSelection(' + t + ')" ' +
+           'title="Remove team ' + t + ' from selection">' +
+           t + ' <span class="chip-x">×</span></button>';
+  }).join('');
 }
 
 function updateNextMatch(nowMatchNum) {
@@ -1413,24 +1693,35 @@ function updateNextMatch(nowMatchNum) {
   const meta = document.getElementById('nextMatchMeta');
   const myStatus = document.getElementById('myStatus');
 
-  if (!STATE.myTeam) {
+  // Render chips below the input on every refresh
+  renderSelectedTeamChips();
+
+  if (!STATE.myPrimary) {
     card.className = 'card next-match-card empty';
-    detail.textContent = 'Enter your team number to find your matches';
+    detail.textContent = 'Enter team number(s) to find your matches';
     meta.textContent = '';
     myStatus.textContent = '';
     return;
   }
 
-  const myMatches = (STATE.computed || []).filter(e => e.type === 'match' && matchHasTeam(e, STATE.myTeam));
+  const primaryTeam = STATE.myPrimary;
+  const myMatches = (STATE.computed || []).filter(e => e.type === 'match' && matchHasTeam(e, primaryTeam));
   if (!myMatches.length) {
     card.className = 'card next-match-card empty';
-    detail.textContent = 'Team ' + STATE.myTeam + ' is not in this schedule';
+    detail.textContent = 'Team ' + primaryTeam + ' is not in this schedule';
     meta.textContent = '';
     myStatus.textContent = '';
     return;
   }
 
-  myStatus.textContent = myMatches.length + ' match' + (myMatches.length === 1 ? '' : 'es');
+  // Status line: report total selection but focus on primary
+  const totalSel = STATE.myTeams.size;
+  if (totalSel > 1) {
+    myStatus.innerHTML = '<strong>Showing team ' + primaryTeam + '</strong> · ' +
+                        totalSel + ' selected total';
+  } else {
+    myStatus.textContent = myMatches.length + ' match' + (myMatches.length === 1 ? '' : 'es');
+  }
 
   // Find the team's "next" match — preferring live status:
   //   1. If a match for my team is currently playing (status === 'playing'), that one
@@ -1481,9 +1772,9 @@ function updateNextMatch(nowMatchNum) {
 
   // Determine alliance + station
   let alliance = null, station = null;
-  if ((station = target.blue.indexOf(STATE.myTeam) + 1) > 0) alliance = 'Blue';
-  else if ((station = target.red.indexOf(STATE.myTeam) + 1) > 0) alliance = 'Red';
-  const partners = (alliance === 'Blue' ? target.blue : target.red).filter(t => t !== STATE.myTeam);
+  if ((station = target.blue.indexOf(primaryTeam) + 1) > 0) alliance = 'Blue';
+  else if ((station = target.red.indexOf(primaryTeam) + 1) > 0) alliance = 'Red';
+  const partners = (alliance === 'Blue' ? target.blue : target.red).filter(t => t !== primaryTeam);
   const opponents = alliance === 'Blue' ? target.red : target.blue;
 
   // Build the meta block — alliance/partners/opponents + queue status + score (if completed)
@@ -1510,7 +1801,7 @@ function updateNextMatch(nowMatchNum) {
   }
 
   // Per-team stats block: rank, record, averages
-  const rank = STATE.liveRankByTeam[STATE.myTeam];
+  const rank = STATE.liveRankByTeam[primaryTeam];
   if (rank) {
     metaHtml += '<div class="team-stats">' +
       '<div class="stat"><div class="stat-label">Rank</div>' +
@@ -1605,9 +1896,10 @@ function getCurrentRows() {
   // Returns just the visible match rows (respects onlyMine filter)
   const computed = STATE.computed || [];
   const onlyMine = document.getElementById('onlyMine').checked;
+  const hasSel = STATE.myTeams && STATE.myTeams.size > 0;
   return computed.filter(e => {
     if (e.type !== 'match') return false;
-    if (onlyMine && STATE.myTeam) return matchHasTeam(e, STATE.myTeam);
+    if (onlyMine && hasSel) return matchHasAnySelectedTeam(e);
     return true;
   });
 }
@@ -1831,7 +2123,13 @@ function exportPdf() {
   // ── Match table (rebuilt with inline styles for portability) ───────────
   var rows = STATE.computed || [];
   var onlyMine = document.getElementById('onlyMine').checked;
-  var myTeam = STATE.myTeam;
+  var myTeams = STATE.myTeams || new Set();
+  var hasSel  = myTeams.size > 0;
+  function matchHasMine(e) {
+    for (var t of e.red)  if (myTeams.has(t)) return true;
+    for (var t of e.blue) if (myTeams.has(t)) return true;
+    return false;
+  }
 
   var tbl = document.createElement('table');
   tbl.style.cssText = [
@@ -1865,8 +2163,8 @@ function exportPdf() {
 
   rows.forEach(function(entry) {
     if (entry.type === 'match') totalMatches++;
-    if (onlyMine && myTeam) {
-      if (entry.type === 'match' && !matchHasTeam(entry, myTeam)) return;
+    if (onlyMine && hasSel) {
+      if (entry.type === 'match' && !matchHasMine(entry)) return;
       if (entry.type === 'break' || entry.type === 'day-divider') return;
     }
     var tr = document.createElement('tr');
@@ -1880,7 +2178,7 @@ function exportPdf() {
         escapeHtml(entry.name) + ' · ' + minToTime12(entry.start) + ' – ' + minToTime12(entry.end) + '</td>';
     } else {
       var rowBg = (zebra++ % 2) ? '#f6f8fa' : '#ffffff';
-      var matched = myTeam && matchHasTeam(entry, myTeam);
+      var matched = hasSel && matchHasMine(entry);
       if (matched) rowBg = '#e6f4eb';
       var rowStyle = 'background:' + rowBg + ';-webkit-print-color-adjust:exact;print-color-adjust:exact;';
       if (matched) rowStyle += 'box-shadow:inset 4px 0 0 #5daf78;';
@@ -1894,7 +2192,7 @@ function exportPdf() {
 
       function teamCell(val, isSur, side) {
         var st = side === 'blue' ? tdBlue : tdRed;
-        if (val === myTeam) {
+        if (myTeams.has(val)) {
           st = tdBase + 'background:#5daf78;color:#fff !important;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;';
         }
         var marker = isSur ? '<span style="font-size:7pt;background:#fff3cd;color:#856404;padding:1px 3px;border-radius:2px;margin-left:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">S</span>' : '';
@@ -1923,7 +2221,11 @@ function exportPdf() {
   if (STATE.schedule.num_teams)        footBits.push(STATE.schedule.num_teams + ' teams');
   if (STATE.schedule.matches_per_team) footBits.push(STATE.schedule.matches_per_team + ' matches/team');
   footBits.push(totalMatches + ' total matches');
-  if (onlyMine && myTeam) footBits.push('Filtered: team ' + myTeam + ' (' + shown + ' shown)');
+  if (onlyMine && hasSel) {
+    var sortedSel = [...myTeams].sort(function(a,b){return a-b;});
+    footBits.push('Filtered: team' + (sortedSel.length === 1 ? ' ' : 's ') +
+                  sortedSel.join(', ') + ' (' + shown + ' shown)');
+  }
   foot.textContent = footBits.join(' · ');
   wrap.appendChild(foot);
 
@@ -2094,10 +2396,10 @@ async function stopSimulation() {
 // might be silent — that's fine. Volume kept low and only triggers on
 // transitions (not every poll).
 function maybePlayQueueAudioCue() {
-  if (!STATE.myTeam) return;
-  // Find the next not-yet-played match for my team
+  if (!STATE.myTeams || !STATE.myTeams.size) return;
+  // Find the next not-yet-played match that includes ANY of my selected teams
   const upcoming = (STATE.computed || []).find(e =>
-    e.type === 'match' && matchHasTeam(e, STATE.myTeam) &&
+    e.type === 'match' && matchHasAnySelectedTeam(e) &&
     !((STATE.liveByMatch[e.matchNum] || {}).post_result_time)
   );
   if (!upcoming) { STATE.audioPrev = null; return; }
