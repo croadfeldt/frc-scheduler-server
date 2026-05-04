@@ -794,7 +794,19 @@ async def assign_teams_endpoint(
                     if best_result is None or res["score"] > best_result["score"]:
                         best_result = res
                     pct = int(done_chunks / total_chunks * 100)
-                    yield f"data: {json.dumps({'type':'progress','pct':pct,'score':best_result['score']})}\n\n"
+                    # Frontend reads `done`/`total` (matches Stage 1's pattern)
+                    # AND we keep `pct` as a fallback for older clients.
+                    # `done`/`total` are CHUNK counts, not iteration counts —
+                    # but each chunk is `chunk_size` iterations, so the user-
+                    # visible iteration count is done_chunks * chunk_size.
+                    progress_msg = {
+                        'type':  'progress',
+                        'done':  done_chunks * chunk_size,
+                        'total': total_chunks * chunk_size,
+                        'pct':   pct,
+                        'score': best_result['score'],
+                    }
+                    yield f"data: {json.dumps(progress_msg)}\n\n"
                 except Exception as e:
                     log.error("Stage 2 worker error: %s", e)
 

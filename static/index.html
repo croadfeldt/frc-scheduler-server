@@ -7686,9 +7686,20 @@ function collectPracticeMatchesForSave() {
 }
 
 async function assignTeams() {
-  if (!_currentEventId) { showApiStatus('Select an event first', true); return; }
+  // Defensive logging — helps diagnose "button appears to do nothing" cases.
+  // The state of these IDs is the most common cause of silent bail.
+  console.log('[assignTeams]', {
+    eventId: _currentEventId,
+    abstractId: _currentAbstractScheduleId,
+    assignedId: _currentAssignedScheduleId,
+  });
+
+  if (!_currentEventId) {
+    showApiStatus('Select an event first', true);
+    return;
+  }
   if (!_currentAbstractScheduleId) {
-    showApiStatus('No saved abstract schedule \u2014 regenerate with server connected', true);
+    showApiStatus('No saved abstract schedule — regenerate, then click Assign Teams', true);
     return;
   }
 
@@ -7771,26 +7782,43 @@ async function assignTeams() {
         let msg2;
         try { msg2 = JSON.parse(line.slice(6)); } catch(e) { continue; }
         if (msg2.type === 'progress') {
-          const pct = Math.round(msg2.done / msg2.total * 100);
+          // Server sends both done/total (preferred) and pct (fallback).
+          // Use done/total when available so the iteration count is meaningful;
+          // fall back to pct-only if an older server is sending the old schema.
+          let pct;
+          if (typeof msg2.done === 'number' && typeof msg2.total === 'number' && msg2.total > 0) {
+            pct = Math.round(msg2.done / msg2.total * 100);
+          } else if (typeof msg2.pct === 'number') {
+            pct = msg2.pct;
+          } else {
+            pct = 0;
+          }
           document.getElementById('progressFill2').style.width = pct + '%';
           const elapsed = performance.now() - startTime;
-          const eta = msg2.done > 1 ? formatETA((elapsed/msg2.done)*(msg2.total-msg2.done)) : '';
+          // ETA from done/total when we have them
+          let eta = '';
+          if (typeof msg2.done === 'number' && msg2.done > 1 && typeof msg2.total === 'number' && msg2.total > msg2.done) {
+            eta = formatETA((elapsed / msg2.done) * (msg2.total - msg2.done));
+          }
+          // Score is now a quadratic-weighted total (post FIRST-alignment) — the
+          // older "decode into b2b/imbal/surr" math no longer matches the formula
+          // (which now includes station_spread*30 and squared-pair penalties).
+          // Show the raw score; component breakdown is in the diversity report
+          // panel after completion.
           var scoreStr2 = '';
           if (msg2.score !== undefined && msg2.score !== null && msg2.score > -1e17) {
-            // Decode score components: -(b2b*1000 + imbalance*500 + surrogates*200 + repeat_opp*15 + repeat_part*12)
-            var s = -msg2.score;
-            var b2b2     = Math.floor(s / 1000); s -= b2b2 * 1000;
-            var imbal2   = Math.floor(s / 500);  s -= imbal2 * 500;
-            var sur2     = Math.floor(s / 200);  s -= sur2 * 200;
-            var parts2 = [];
-            if (b2b2 > 0)  parts2.push(b2b2 + ' B2B');
-            if (imbal2 > 0) parts2.push(imbal2 + ' imbal');
-            if (sur2 > 0)  parts2.push(sur2 + ' sur');
-            if (s > 0)     parts2.push('rep');
-            scoreStr2 = parts2.length ? ' \u00b7 ' + parts2.join(', ') : ' \u00b7 \u2713 optimal';
+            if (msg2.score === 0 || msg2.score > -1) {
+              scoreStr2 = ' \u00b7 \u2713 optimal';
+            } else {
+              scoreStr2 = ' \u00b7 score: ' + Math.round(msg2.score);
+            }
           }
+          // Iteration display when we have done/total, else just percentage
+          const labelLeft = (typeof msg2.done === 'number' && typeof msg2.total === 'number')
+            ? (msg2.done + ' / ' + msg2.total + ' iterations')
+            : (pct + '%');
           document.getElementById('progressLabel2').textContent =
-            msg2.done + ' / ' + msg2.total + ' iterations' + (eta ? ' \u00b7 ' + eta : '') + scoreStr2 + '\u2026';
+            labelLeft + (eta ? ' \u00b7 ' + eta : '') + scoreStr2 + '\u2026';
         } else if (msg2.type === 'done') {
           doneMsg2 = msg2;
           break;
