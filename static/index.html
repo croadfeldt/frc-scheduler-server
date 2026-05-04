@@ -2216,7 +2216,13 @@ function buildShareUrl() {
   if (ct)  params.set('ct',  ct);
   if (nd)  params.set('days', nd);
 
-  // Practice day URL params
+  // Practice day URL params. Mirrors what we encode for qual days:
+  //   pday=1                     — practice day enabled
+  //   pd=HH:MM-HH:MM             — practice window (already existed)
+  //   pmpt, pfill, pct           — guaranteed/filler/cycle-time (already existed)
+  //   pdb=name|HH:MM|HH:MM,...   — practice breaks (NEW; pipe-delimited like d{N}b)
+  //   pdcc=after|time;...        — practice cycle changes (NEW); start-of-day uses 'start' as after
+  //   pde=N                      — practice early-end after match N (NEW)
   var _pdEl = document.getElementById('practiceDayEnabled');
   if (_pdEl && _pdEl.checked) {
     params.set('pday', '1');
@@ -2229,6 +2235,34 @@ function buildShareUrl() {
     if (_pdMpt)  params.set('pmpt',  _pdMpt);
     if (_pdFill && parseInt(_pdFill) !== 99) params.set('pfill', _pdFill);
     if (_pdCt)   params.set('pct',   _pdCt);
+
+    // Practice breaks
+    var _pdBreaks = Array.from(document.querySelectorAll('#pdayBreaksList .pday-break-row')).map(function(r) {
+      var name  = (r.querySelector('.break-name').value || 'Break').replace(/[|,]/g, '');
+      var start = r.querySelector('.break-start').value;
+      var end   = r.querySelector('.break-end').value;
+      return (start && end) ? (name + '|' + start + '|' + end) : null;
+    }).filter(Boolean);
+    if (_pdBreaks.length) params.set('pdb', _pdBreaks.join(','));
+
+    // Practice cycle changes — same encoding as qual:
+    //   start-of-day:   "start|<time>"
+    //   after-match #N: "<N>|<time>"
+    var _pdCcs = Array.from(document.querySelectorAll('#pdayCcList .pday-cc-row')).map(function(r) {
+      var t        = parseFloat(r.querySelector('.cc-time').value);
+      var afterInp = r.querySelector('.cc-after');
+      if (!t || t <= 0) return null;
+      if (r.dataset.isStart === '1') return 'start|' + t;
+      var n = parseInt(afterInp.value);
+      return (n >= 1) ? (n + '|' + t) : null;
+    }).filter(Boolean);
+    if (_pdCcs.length) params.set('pdcc', _pdCcs.join(';'));
+
+    // Practice early-end (day-break)
+    var _pdEeInp = document.querySelector('#pdayEarlyEndList .earlyend-after');
+    if (_pdEeInp && _pdEeInp.value && parseInt(_pdEeInp.value) >= 1) {
+      params.set('pde', String(parseInt(_pdEeInp.value)));
+    }
   }
   const bb = document.getElementById('breakBuffer').value;
   if (bb) params.set('bb', bb);
@@ -2370,11 +2404,9 @@ function parseUrlParams() {
     pmpt:            p.get('pmpt')  || null,
     pfill:           p.get('pfill') || null,
     pct:             p.get('pct')   || null,
-    pday:            p.get('pday')  || null,
-    pd:              p.get('pd')    || null,
-    pmpt:            p.get('pmpt')  || null,
-    pfill:           p.get('pfill') || null,
-    pct:             p.get('pct')   || null,
+    pdb:             p.get('pdb')   || null,
+    pdcc:            p.get('pdcc')  || null,
+    pde:             p.get('pde')   || null,
     sid:             p.get('sid')   ? parseInt(p.get('sid'))  : null,
     aid:             p.get('aid')   ? parseInt(p.get('aid'))  : null,
     autoPopulate:    parseBoolFlag('autoPopulate'),
@@ -2486,7 +2518,9 @@ function applyUrlParams(params) {
   if (params.ct)  document.getElementById('cycleTime').value      = params.ct;
   if (params.bb)  document.getElementById('breakBuffer').value  = params.bb;
 
-  // Restore practice day from URL
+  // Restore practice day from URL — settings, breaks, cycle changes, early end.
+  // Note: practice match pairings are NOT in the URL — they come either from
+  // a saved DB schedule (?aid=) or from re-generation at finishGeneration time.
   if (params.pday === '1') {
     var _urlPdCb = document.getElementById('practiceDayEnabled');
     if (_urlPdCb && !_urlPdCb.checked) { _urlPdCb.checked = true; togglePracticeDay(); }
@@ -2500,22 +2534,41 @@ function applyUrlParams(params) {
     if (params.pmpt)  document.getElementById('practiceGuaranteed').value = params.pmpt;
     if (params.pfill) document.getElementById('practiceFiller').value     = params.pfill;
     if (params.pct)   document.getElementById('practiceCycleTime').value  = params.pct;
-  }
 
-  // Restore practice day from URL
-  if (params.pday === '1') {
-    var _pdCb = document.getElementById('practiceDayEnabled');
-    if (_pdCb && !_pdCb.checked) { _pdCb.checked = true; togglePracticeDay(); }
-    if (params.pd) {
-      var _pdParts = params.pd.split('-');
-      if (_pdParts.length >= 2) {
-        document.getElementById('practiceStart').value = _pdParts[0];
-        document.getElementById('practiceEnd').value   = _pdParts[1];
-      }
+    // Practice breaks — encoded as "name|HH:MM|HH:MM,name|HH:MM|HH:MM"
+    if (params.pdb && typeof addPracticeBreak === 'function') {
+      var _pdbList = document.getElementById('pdayBreaksList');
+      if (_pdbList) _pdbList.innerHTML = '';  // clear defaults
+      params.pdb.split(',').forEach(function(s) {
+        var bits = s.split('|');
+        if (bits.length >= 3 && bits[1] && bits[2]) {
+          addPracticeBreak(bits[1], bits[2], bits[0] || 'Break');
+        }
+      });
     }
-    if (params.pmpt)  document.getElementById('practiceGuaranteed').value = params.pmpt;
-    if (params.pfill) document.getElementById('practiceFiller').value     = params.pfill;
-    if (params.pct)   document.getElementById('practiceCycleTime').value  = params.pct;
+
+    // Practice cycle changes — encoded as "start|<time>;<after>|<time>;..."
+    if (params.pdcc && typeof addPracticeCycleChange === 'function') {
+      var _pdccList = document.getElementById('pdayCcList');
+      if (_pdccList) _pdccList.innerHTML = '';  // clear defaults
+      params.pdcc.split(';').forEach(function(s) {
+        var bits = s.split('|');
+        var t = parseFloat(bits[1]);
+        if (!t || t <= 0) return;
+        if (bits[0] === 'start') {
+          addPracticeCycleChange(null, t, true);
+        } else {
+          var n = parseInt(bits[0]);
+          if (n >= 1) addPracticeCycleChange(n, t, false);
+        }
+      });
+    }
+
+    // Practice early-end (day-break) — single integer match number
+    if (params.pde && typeof addPracticeEarlyEnd === 'function') {
+      var _pdeN = parseInt(params.pde);
+      if (_pdeN >= 1) addPracticeEarlyEnd(_pdeN);
+    }
   }
 
   // Restore day count and rebuild UI, then fill in times
@@ -6952,8 +7005,10 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
     const roundBoundaries = new Map(
       Object.entries(sched.round_boundaries || {}).map(function(e) { return [parseInt(e[0]), e[1]]; })
     );
-    window._frcAbstractMode = false;    finishGeneration(matches, roundBoundaries, sched.surrogate_count,
-      0, 0, dayConfig || sched.day_config);    showApiStatus('Schedule loaded');
+    window._frcAbstractMode = false;
+    finishGeneration(matches, roundBoundaries, sched.surrogate_count,
+      0, 0, dayConfig || sched.day_config, sched.practice_matches || null);
+    showApiStatus('Schedule loaded');
   } catch(e) { showApiStatus(e.message, true); }
 }
 
@@ -7044,9 +7099,9 @@ function runClientSide(numTeams, matchesPerTeam, cooldown, iterations, startTime
 }
 
 
-function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride) {
+function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride, persistedPracticeMatches) {
   try {
-    return _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride);
+    return _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride, persistedPracticeMatches);
   } catch(e) {
     console.error('finishGeneration error:', e);
     showApiStatus('Schedule render error: ' + e.message, true);
@@ -7055,7 +7110,7 @@ function finishGeneration(matches, roundBoundaries, surrogateCount, bestIteratio
   }
 }
 
-function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride) {
+function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIteration, totalIterations, dayConfigOverride, persistedPracticeMatches) {
   if (!matches || matches.length === 0) {
     console.error('finishGeneration called with empty matches');
     document.getElementById('btnGenerate').disabled = false;
@@ -7123,14 +7178,31 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   if (_pracCfg && _pracN >= 6) {
     var _pracCalc = calcPracticeMatches(_pracN, _pracCfg);
     if (_pracCalc && _pracCalc.total > 0) {
-      // Generate a balanced match list. mpt is set so we have enough matches
-      // to fill the time; the loop below stops when either time runs out or
-      // total/early-end is reached.
-      var _pracSeedInt = parseInt((_currentSeed || '00000000') + 'f', 16) || Math.floor(Math.random() * 0xFFFFFFFF);
-      var _pracMpt = Math.ceil(_pracCalc.total * 6 / _pracN);
-      if (_pracMpt < 1) _pracMpt = 1;
-      var _pracResult = generateMatches(_pracN, _pracMpt, 3, _pracSeedInt);
-      var _pracMs = _pracResult.matches || [];
+      // Use persisted practice match pairings if a saved schedule supplied them.
+      // Otherwise generate balanced pairings from the team list using a
+      // deterministic seed derived from the qual seed. This ensures reload of
+      // a saved schedule shows exactly the same practice pairings as when it
+      // was originally created.
+      var _pracMs;
+      if (persistedPracticeMatches && persistedPracticeMatches.length > 0) {
+        _pracMs = persistedPracticeMatches.map(function(m) {
+          return {
+            red:           (m.red || []).slice(),
+            blue:          (m.blue || []).slice(),
+            redSurrogate:  m.red_surrogate  || m.redSurrogate  || [false, false, false],
+            blueSurrogate: m.blue_surrogate || m.blueSurrogate || [false, false, false],
+          };
+        });
+      } else {
+        // Generate a balanced match list. mpt is set so we have enough matches
+        // to fill the time; the loop below stops when either time runs out or
+        // total/early-end is reached.
+        var _pracSeedInt = parseInt((_currentSeed || '00000000') + 'f', 16) || Math.floor(Math.random() * 0xFFFFFFFF);
+        var _pracMpt = Math.ceil(_pracCalc.total * 6 / _pracN);
+        if (_pracMpt < 1) _pracMpt = 1;
+        var _pracResult = generateMatches(_pracN, _pracMpt, 3, _pracSeedInt);
+        _pracMs = _pracResult.matches || [];
+      }
 
       // Build practice "day" object — same shape as qual days so we use the
       // same break/cycle-change logic.
