@@ -30,6 +30,8 @@ Copyright (C) 2025 FRC Match Scheduler Contributors.
 
 The scheduler ships as an OCI container image built from `Containerfile` (Docker/Podman) or `Containerfile.openshift` (OpenShift). All three runtimes share the same application code and environment variable schema.
 
+> 🔌 **External integrations** (TBA, Nexus, Statbotics, FRC Events): see [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) for what each does, what configuration it needs, and how to set it up. The scheduler runs without any of them configured — every integration degrades gracefully when missing.
+
 ---
 
 ### Docker

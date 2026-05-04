@@ -37,6 +37,18 @@ oc get certificate frc-scheduler-tls -n frc-scheduler-server -w
 oc start-build frc-scheduler-server-git --follow -n frc-scheduler-server
 ```
 
+### 6. Configure external integrations (TBA, Nexus, etc.)
+The scheduler talks to several external services — TBA for event data,
+Nexus for live queue updates, Statbotics for EPA stats, and others. Each
+integration's setup, what it does, and what configuration it needs is
+documented separately:
+
+> 📖 See **[`docs/INTEGRATIONS.md`](../docs/INTEGRATIONS.md)** for full setup of every integration.
+
+Most integrations need only an entry in `01-secrets.yaml`. The Nexus
+webhook setup additionally requires configuring the webhook URL inside
+Nexus's own dashboard — that walkthrough is in the integrations doc.
+
 ## Files
 
 | File | Purpose | Committed? |
