@@ -224,6 +224,11 @@ class AbstractGenerateRequest(BaseModel):
     name:             str        = Field("Abstract Schedule", max_length=128)
     event_id:         int | None = None
     day_config:       Any        = None
+    # Optional weight overrides for placement criteria. When None, FIRST-aligned
+    # defaults from app.scheduler.DEFAULT_WEIGHTS are used. The editor's
+    # "Advanced criteria" panel uses this to let users tune scoring while
+    # preserving reproducibility — the chosen weights round-trip through the URL.
+    weights:          dict[str, float] | None = None
 
     from pydantic import field_validator
 
@@ -643,7 +648,7 @@ async def generate_abstract(
             try:
                 future = loop.run_in_executor(
                     pool, run_iterations_worker,
-                    (body.num_teams, body.matches_per_team, body.cooldown, 1, 0, _seed_int),
+                    (body.num_teams, body.matches_per_team, body.cooldown, 1, 0, _seed_int, body.weights),
                 )
                 while not future.done():
                     await asyncio.sleep(0.5)
@@ -665,6 +670,7 @@ async def generate_abstract(
                     matches=result["matches"], surrogate_count=result["surrogate_count"],
                     round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
                     day_config=body.day_config,
+                    weights=body.weights,  # None = FIRST defaults
                 )
                 db.add(sched)
                 await db.commit()
@@ -708,6 +714,7 @@ async def get_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(get
         "iterations_run": sched.iterations_run, "score": sched.score,
         "matches": sched.matches, "surrogate_count": sched.surrogate_count,
         "round_boundaries": sched.round_boundaries, "day_config": sched.day_config,
+        "weights": sched.weights,  # None means FIRST defaults were used
         "created_at": sched.created_at.isoformat(),
     }
 
@@ -940,6 +947,7 @@ async def duplicate_assigned_schedule(
         score=abs_src.score, matches=abs_src.matches,
         surrogate_count=abs_src.surrogate_count, round_boundaries=abs_src.round_boundaries,
         day_config=abs_src.day_config,
+        weights=abs_src.weights,
         created_by=current_user["sub"] if current_user else None,
     )
     db.add(new_abs)
@@ -1410,6 +1418,188 @@ async def get_statbotics_team_event(team_number: int, event_key: str):
             pass
         raise HTTPException(404, "Not found in Statbotics")
     return statbotics_client.normalize_team_event(raw)
+
+
+# ── Scheduler defaults ────────────────────────────────────────────────────────
+# Exposes the canonical FIRST-aligned weight defaults so the editor's "Advanced
+# criteria" panel can show "what FIRST does" and compare against user's choices.
+
+
+@app.get("/api/scheduler/defaults")
+async def scheduler_defaults():
+    """Return the FIRST-aligned default weights for placement criteria. The
+    editor uses this to populate the Advanced Criteria panel and to detect
+    when the user has deviated from canonical FIRST settings (which triggers
+    a notice indicating non-standard configuration)."""
+    from app import scheduler as sched
+    return {
+        "defaults": sched.DEFAULT_WEIGHTS,
+        "first_strict": sched.FIRST_STRICT_WEIGHTS,
+        # Documentation surfaces what each weight does, so the UI can render
+        # tooltips without hardcoding strings.
+        "descriptions": {
+            "balance":  "Penalty per unit of red/blue imbalance per team. FIRST balances each team's red vs blue appearances.",
+            "gap":      "Bonus per match-cycle of waiting between a team's appearances. Encourages spacing.",
+            "count":    "Penalty for over-scheduling; tie-breaker within iteration scoring.",
+            "opponent": "Penalty per cross-alliance opponent repeat. Quadratic — second repeat costs 4× first.",
+            "partner":  "Penalty per same-alliance partner repeat. Higher than opponent (FIRST: only 2 partners but 3 opponents per match).",
+            "station":  "Penalty for uneven station appearances. FIRST balances all 6 stations (R1-R3, B1-B3).",
+            "sur_rpt":  "Penalty for surrogate concentration on the same teams.",
+        },
+    }
+
+
+# ── Diversity report ──────────────────────────────────────────────────────────
+# Computes the actual distribution metrics for a generated schedule — partner
+# repeat histogram, opponent repeat histogram, station balance per team,
+# surrogate placement, worst-case callouts. The frontend renders this as a
+# panel below the generated schedule.
+
+
+@app.get("/api/abstract-schedules/{schedule_id}/diversity-report")
+async def get_diversity_report(schedule_id: int):
+    """Return per-pair partner/opponent repeat distributions, station balance
+    per slot, surrogate distribution, and worst-case callouts. All metrics
+    are computed against slot indices (1..N), not real team numbers — this
+    works on Stage 1 abstract schedules. The frontend can map slots → teams
+    after the fact for display.
+    """
+    import math
+    async with AsyncSessionLocal() as db:
+        sched = await db.get(AbstractSchedule, schedule_id)
+        if not sched:
+            raise HTTPException(404, "Abstract schedule not found")
+
+        N = sched.num_teams
+        MPT = sched.matches_per_team
+        matches = sched.matches  # list of {red, blue, red_surrogate, blue_surrogate}
+
+        # ── Pair counts ────────────────────────────────────────────────────
+        # partner[a][b] = # of times slots a and b shared an alliance
+        # opponent[a][b] = # of times slots a and b were on opposing alliances
+        # Indices are 1-based; index 0 unused.
+        partner  = [[0] * (N + 1) for _ in range(N + 1)]
+        opponent = [[0] * (N + 1) for _ in range(N + 1)]
+        # Station counts per slot — 6 positions (R1, R2, R3, B1, B2, B3)
+        station = [[0] * 6 for _ in range(N + 1)]
+        # Surrogate count per slot
+        surrogate = [0] * (N + 1)
+
+        for m in matches:
+            red = m["red"]; blue = m["blue"]
+            for i, t in enumerate(red):
+                station[t][i] += 1
+            for i, t in enumerate(blue):
+                station[t][3 + i] += 1
+            for i, s in enumerate(m.get("red_surrogate", [False] * 3)):
+                if s: surrogate[red[i]] += 1
+            for i, s in enumerate(m.get("blue_surrogate", [False] * 3)):
+                if s: surrogate[blue[i]] += 1
+            # Same-alliance pairs
+            for a_list in (red, blue):
+                for i in range(len(a_list)):
+                    for j in range(i + 1, len(a_list)):
+                        x, y = a_list[i], a_list[j]
+                        partner[x][y] += 1
+                        partner[y][x] += 1
+            # Cross-alliance opponents
+            for r in red:
+                for b in blue:
+                    opponent[r][b] += 1
+                    opponent[b][r] += 1
+
+        # ── Theoretical floors ────────────────────────────────────────────
+        # Each slot has 2 partners × MPT total partner-slots = 2*MPT encounters
+        # spread across N-1 possible partners. Best-case avg = 2*MPT/(N-1).
+        # If 2*MPT < (N-1), some pairs MUST be at 0 — floor is 0.
+        # If 2*MPT >= (N-1), some pairs MUST be at 1+ — floor is ceil(2*MPT/(N-1)).
+        partner_floor  = math.ceil((2 * MPT) / max(1, N - 1)) if N > 1 else 0
+        opponent_floor = math.ceil((3 * MPT) / max(1, N - 1)) if N > 1 else 0
+
+        # ── Pair distribution (only count each unordered pair once: a < b) ─
+        partner_hist  = {}   # repeat_count → number_of_pairs
+        opponent_hist = {}
+        partner_max = 0; opponent_max = 0
+        partner_sum = 0; opponent_sum = 0
+        zero_partner_pairs = 0; zero_opponent_pairs = 0
+        # Worst-case pairs (over the floor)
+        worst_partner = []   # [{slots: [a, b], count: n}]
+        worst_opponent = []
+        for a in range(1, N + 1):
+            for b in range(a + 1, N + 1):
+                p = partner[a][b]
+                o = opponent[a][b]
+                partner_hist[p]  = partner_hist.get(p, 0) + 1
+                opponent_hist[o] = opponent_hist.get(o, 0) + 1
+                partner_sum += p; opponent_sum += o
+                if p == 0: zero_partner_pairs += 1
+                if o == 0: zero_opponent_pairs += 1
+                if p > partner_max:  partner_max = p
+                if o > opponent_max: opponent_max = o
+                if p > partner_floor:
+                    worst_partner.append({"slots": [a, b], "count": p})
+                if o > opponent_floor:
+                    worst_opponent.append({"slots": [a, b], "count": o})
+        worst_partner.sort(key=lambda x: -x["count"])
+        worst_opponent.sort(key=lambda x: -x["count"])
+        total_pairs = (N * (N - 1)) // 2
+
+        # ── Per-slot table ────────────────────────────────────────────────
+        # For each slot: distinct partners, distinct opponents, station balance
+        slot_table = []
+        for t in range(1, N + 1):
+            distinct_partners  = sum(1 for x in range(1, N + 1) if x != t and partner[t][x] > 0)
+            distinct_opponents = sum(1 for x in range(1, N + 1) if x != t and opponent[t][x] > 0)
+            sta = station[t]
+            station_imbalance = (max(sta) - min(sta)) if any(sta) else 0
+            slot_table.append({
+                "slot": t,
+                "distinct_partners":  distinct_partners,
+                "distinct_opponents": distinct_opponents,
+                "max_partners":  2 * MPT,
+                "max_opponents": 3 * MPT,
+                "stations": sta,
+                "station_imbalance": station_imbalance,
+                "surrogate_count": surrogate[t],
+            })
+
+        # ── Headline numbers ──────────────────────────────────────────────
+        avg_partner  = partner_sum / total_pairs if total_pairs else 0.0
+        avg_opponent = opponent_sum / total_pairs if total_pairs else 0.0
+        max_station_imbalance = max((s["station_imbalance"] for s in slot_table), default=0)
+
+        return {
+            "schedule_id": schedule_id,
+            "num_teams":   N,
+            "matches_per_team": MPT,
+            "total_pairs": total_pairs,
+            "partner": {
+                "histogram":   partner_hist,
+                "max":         partner_max,
+                "floor":       partner_floor,
+                "average":     round(avg_partner, 3),
+                "zero_pairs":  zero_partner_pairs,
+                "worst_pairs": worst_partner[:10],   # limit for UI
+            },
+            "opponent": {
+                "histogram":   opponent_hist,
+                "max":         opponent_max,
+                "floor":       opponent_floor,
+                "average":     round(avg_opponent, 3),
+                "zero_pairs":  zero_opponent_pairs,
+                "worst_pairs": worst_opponent[:10],
+            },
+            "stations": {
+                "max_imbalance":     max_station_imbalance,
+                "imbalanced_slots":  sum(1 for s in slot_table if s["station_imbalance"] > 1),
+            },
+            "surrogates": {
+                "total":      sum(surrogate),
+                "max_per_slot": max(surrogate) if N > 0 else 0,
+                "concentrated_slots": sum(1 for x in surrogate if x > 1),
+            },
+            "slots": slot_table,
+        }
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

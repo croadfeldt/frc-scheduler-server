@@ -143,6 +143,112 @@
 
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem; }
   .field-row.single { grid-template-columns: 1fr; }
+
+  /* Placement Criteria weights panel — compact grid of weight inputs with
+     visible default values for comparison. Each row shows label, default
+     value (greyed), and the user's value as a number input. */
+  .weights-grid { display: grid; gap: 0.4rem; }
+  .weights-grid .weight-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 0.5rem; align-items: center;
+    padding: 0.3rem 0.4rem;
+    background: var(--bg-alt, #f6f8fa);
+    border-radius: 4px;
+    font-size: 0.72rem;
+  }
+  .weights-grid .weight-row .weight-label {
+    font-weight: 600; color: var(--text);
+    cursor: help;
+  }
+  .weights-grid .weight-row .weight-default {
+    color: var(--text-muted); font-size: 0.65rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .weights-grid .weight-row input[type=number] {
+    width: 56px; padding: 2px 4px; font-size: 0.72rem;
+    border: 1px solid var(--border); border-radius: 3px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .weights-grid .weight-row.deviates {
+    background: rgba(200,153,42,0.12);
+    border-left: 3px solid var(--amber);
+  }
+
+  /* ── Diversity Report ─────────────────────────────────────────────────────
+     Shows partner/opponent repeat distributions, station balance, surrogate
+     placement after a schedule is generated. Surfaces concrete numbers so
+     users can see if the algorithm is doing its job. */
+  .diversity-report {
+    margin-top: 1rem; padding: 0.85rem 1rem;
+    background: var(--bg-alt, #f6f8fa);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.78rem;
+  }
+  .diversity-report h3 {
+    font-size: 0.78rem; margin: 0 0 0.5rem 0;
+    color: var(--text); letter-spacing: 0.04em;
+    text-transform: uppercase; font-weight: 700;
+  }
+  .diversity-report .dr-headline {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.5rem; margin-bottom: 0.85rem;
+  }
+  .diversity-report .dr-stat {
+    background: var(--bg);
+    padding: 0.45rem 0.6rem;
+    border-radius: 4px;
+    border-left: 3px solid var(--accent);
+  }
+  .diversity-report .dr-stat-label {
+    font-size: 0.65rem; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .diversity-report .dr-stat-value {
+    font-size: 1.1rem; font-weight: 700; color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .diversity-report .dr-stat-detail {
+    font-size: 0.65rem; color: var(--text-muted);
+  }
+  .diversity-report .dr-section {
+    margin-top: 0.85rem; padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+  }
+  /* Histogram bars — one bar per repeat-count bucket */
+  .diversity-report .dr-histogram {
+    display: grid; grid-template-columns: 60px 1fr 60px; gap: 0.4rem;
+    margin: 0.2rem 0; align-items: center; font-size: 0.7rem;
+  }
+  .diversity-report .dr-histogram-label {
+    font-variant-numeric: tabular-nums; color: var(--text-muted);
+    text-align: right;
+  }
+  .diversity-report .dr-histogram-bar {
+    height: 14px; background: var(--accent); border-radius: 2px;
+    min-width: 2px;
+  }
+  .diversity-report .dr-histogram-bar.zero { background: var(--text-muted); opacity: 0.3; }
+  .diversity-report .dr-histogram-bar.over-floor { background: var(--amber); }
+  .diversity-report .dr-histogram-bar.way-over    { background: var(--danger); }
+  .diversity-report .dr-histogram-count {
+    font-variant-numeric: tabular-nums; color: var(--text);
+  }
+  .diversity-report .dr-issues {
+    background: rgba(200,153,42,0.10);
+    border: 1px solid var(--amber);
+    border-radius: 4px;
+    padding: 0.5rem 0.7rem; margin-top: 0.6rem;
+    color: var(--amber); font-size: 0.72rem;
+  }
+  .diversity-report .dr-issues.clean {
+    background: rgba(46,160,67,0.10);
+    border-color: var(--accent, #2ea043);
+    color: var(--accent, #2ea043);
+  }
+  .diversity-report .dr-issues ul { margin: 0.2rem 0 0 1rem; padding: 0; }
   .field { display: flex; flex-direction: column; gap: 0.3rem; }
 
   label { font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0.05em; text-transform: uppercase; font-weight: 500; }
@@ -1150,6 +1256,27 @@
           </div>
         </details>
 
+        <!-- Placement Criteria — exposes the scheduler's scoring weights for power users.
+             Defaults match the FIRST/MatchMaker algorithm. Deviating triggers a notice
+             that the resulting schedule won't match official FIRST scheduling.
+             URL-encoded as wb/wg/wc/wo/wp/ws/wsr params for reproducibility. -->
+        <details id="placementCriteriaPanel">
+          <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Placement Criteria (FIRST-aligned)</summary>
+          <div style="margin-top:0.5rem;font-size:0.72rem;color:var(--text-muted);line-height:1.4;margin-bottom:0.6rem;">
+            How heavily each scheduling concern is weighted. Defaults align with the FIRST
+            <a href="https://idleloop.com/matchmaker/" target="_blank" rel="noopener" style="color:var(--accent);">MatchMaker</a>
+            algorithm used by FMS. Higher = more important relative to the others.
+          </div>
+          <div id="placementCriteriaWeights" class="weights-grid"></div>
+          <div style="display:flex;gap:0.4rem;margin-top:0.5rem;flex-wrap:wrap;">
+            <button class="btn btn-secondary" id="btnFirstStrict" onclick="resetWeightsToFirstStrict()" type="button"
+                    title="Reset all weights to canonical FIRST values">⊕ Match FIRST defaults</button>
+          </div>
+          <div id="weightsDeviationNotice" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-top:0.5rem;font-size:0.75rem;color:var(--amber);line-height:1.4;">
+            &#9888; <strong>Custom weights in use.</strong> The generated schedule will not match what official FIRST scheduling would produce. Click "Match FIRST defaults" to align with FRC manual §10.5.2 / MatchMaker.
+          </div>
+        </details>
+
         <!-- autoPopulate and autoMaxCycles are always on; hidden to reduce UI noise -->
         <input type="checkbox" id="autoPopulate" checked style="display:none;">
         <input type="checkbox" id="autoMaxCycles" checked style="display:none;">
@@ -1263,6 +1390,10 @@
           <p>Load an event or enter your team count,<br>then click <strong>Generate Schedule</strong></p>
         </div>
       </div>
+      <!-- Diversity Report — shows partner/opponent repeat distribution, station
+           balance, surrogate placement, and worst-case callouts. Populated after
+           Stage 1 generation completes. Hidden by default. -->
+      <div id="diversityReportCard" class="diversity-report" style="display:none;"></div>
     </div>
   </div>
 
@@ -1372,6 +1503,253 @@ function applyReadonlyHighlight() {
       if (row) row.classList.add('my-team');
     }
   });
+}
+
+// ── Placement Criteria weights ────────────────────────────────────────────────
+//
+// Mirrors app.scheduler.DEFAULT_WEIGHTS / FIRST_STRICT_WEIGHTS. Loaded fresh
+// from /api/scheduler/defaults on page load so the UI never drifts from
+// what the backend actually does.
+//
+// Each weight has a short ID (URL-safe), a human label, and a tooltip pulled
+// from the API. The current value is whatever the user has set; if it differs
+// from the FIRST default, the row gets the "deviates" highlight and the
+// global notice banner appears.
+
+const WEIGHT_DEFS = [
+  { key: 'partner',  short: 'wp', label: 'Partner repeats',
+    desc: 'Penalty per same-alliance partner repeat. Quadratic — 2nd repeat costs 4× the 1st.' },
+  { key: 'opponent', short: 'wo', label: 'Opponent repeats',
+    desc: 'Penalty per cross-alliance opponent repeat. Quadratic.' },
+  { key: 'station',  short: 'ws', label: 'Station balance',
+    desc: 'Penalty for uneven appearances at the 6 stations (R1-R3, B1-B3).' },
+  { key: 'balance',  short: 'wb', label: 'Red/Blue balance',
+    desc: 'Penalty for red/blue imbalance per team.' },
+  { key: 'gap',      short: 'wg', label: 'Gap reward',
+    desc: 'Bonus per match-cycle of waiting between a team\'s appearances.' },
+  { key: 'sur_rpt',  short: 'wsr', label: 'Surrogate spread',
+    desc: 'Penalty for surrogate concentration on the same teams.' },
+  { key: 'count',    short: 'wc', label: 'Count penalty',
+    desc: 'Tie-breaker: penalty for over-scheduling. Rarely changed.' },
+];
+
+// Loaded from /api/scheduler/defaults — populated on first call to
+// loadSchedulerDefaults(). When null, UI shows a placeholder until ready.
+let SCHEDULER_DEFAULTS = null;
+let SCHEDULER_DESCRIPTIONS = null;
+
+async function loadSchedulerDefaults() {
+  if (SCHEDULER_DEFAULTS) return SCHEDULER_DEFAULTS;
+  try {
+    const r = await fetch(API_BASE + '/api/scheduler/defaults');
+    if (!r.ok) return null;
+    const d = await r.json();
+    SCHEDULER_DEFAULTS = d.defaults;
+    SCHEDULER_DESCRIPTIONS = d.descriptions || {};
+    return SCHEDULER_DEFAULTS;
+  } catch (e) {
+    console.warn('Failed to load scheduler defaults:', e);
+    return null;
+  }
+}
+
+// User-controlled values. Initialized to defaults once loaded.
+let CURRENT_WEIGHTS = null;
+
+function renderWeightsPanel() {
+  const container = document.getElementById('placementCriteriaWeights');
+  if (!container) return;
+  if (!SCHEDULER_DEFAULTS) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.7rem;padding:0.4rem;">Loading…</div>';
+    return;
+  }
+  if (!CURRENT_WEIGHTS) CURRENT_WEIGHTS = { ...SCHEDULER_DEFAULTS };
+  let html = '';
+  for (const def of WEIGHT_DEFS) {
+    const dflt = SCHEDULER_DEFAULTS[def.key];
+    const cur  = CURRENT_WEIGHTS[def.key] != null ? CURRENT_WEIGHTS[def.key] : dflt;
+    const deviates = Number(cur) !== Number(dflt);
+    const tooltip = (SCHEDULER_DESCRIPTIONS && SCHEDULER_DESCRIPTIONS[def.key]) || def.desc;
+    html +=
+      '<div class="weight-row' + (deviates ? ' deviates' : '') + '" data-key="' + def.key + '">' +
+      '  <span class="weight-label" title="' + tooltip.replace(/"/g, '&quot;') + '">' + def.label + '</span>' +
+      '  <span class="weight-default" title="FIRST default">FIRST: ' + dflt + '</span>' +
+      '  <input type="number" min="0" max="9999" step="1" value="' + cur + '" ' +
+      '         oninput="onWeightChange(\'' + def.key + '\', this.value)">' +
+      '</div>';
+  }
+  container.innerHTML = html;
+  updateWeightsDeviationNotice();
+}
+
+function onWeightChange(key, raw) {
+  if (!CURRENT_WEIGHTS) CURRENT_WEIGHTS = { ...SCHEDULER_DEFAULTS };
+  const v = parseFloat(raw);
+  if (!isNaN(v) && v >= 0) CURRENT_WEIGHTS[key] = v;
+  // Re-style the row that just changed; re-evaluate the global notice
+  const row = document.querySelector('#placementCriteriaWeights .weight-row[data-key="' + key + '"]');
+  if (row) {
+    const dflt = SCHEDULER_DEFAULTS[key];
+    if (Number(CURRENT_WEIGHTS[key]) !== Number(dflt)) row.classList.add('deviates');
+    else row.classList.remove('deviates');
+  }
+  updateWeightsDeviationNotice();
+  // Push to URL so changes round-trip
+  try { window.history.replaceState(null, '', buildShareUrl()); } catch (e) {}
+}
+
+function updateWeightsDeviationNotice() {
+  const notice = document.getElementById('weightsDeviationNotice');
+  if (!notice || !SCHEDULER_DEFAULTS || !CURRENT_WEIGHTS) return;
+  const deviates = Object.keys(SCHEDULER_DEFAULTS).some(k =>
+    Number(CURRENT_WEIGHTS[k]) !== Number(SCHEDULER_DEFAULTS[k])
+  );
+  notice.style.display = deviates ? 'block' : 'none';
+}
+
+function resetWeightsToFirstStrict() {
+  if (!SCHEDULER_DEFAULTS) return;
+  CURRENT_WEIGHTS = { ...SCHEDULER_DEFAULTS };
+  renderWeightsPanel();
+  try { window.history.replaceState(null, '', buildShareUrl()); } catch (e) {}
+}
+
+// Returns the current weights dict for sending to the API. Returns null if
+// weights are at defaults (so the request body stays minimal — backend
+// applies defaults when null).
+function getWeightsForRequest() {
+  if (!SCHEDULER_DEFAULTS || !CURRENT_WEIGHTS) return null;
+  const deviates = Object.keys(SCHEDULER_DEFAULTS).some(k =>
+    Number(CURRENT_WEIGHTS[k]) !== Number(SCHEDULER_DEFAULTS[k])
+  );
+  return deviates ? { ...CURRENT_WEIGHTS } : null;
+}
+
+// ── Diversity Report ─────────────────────────────────────────────────────────
+//
+// Fetches and renders the post-generation diversity report. Shows:
+//   - Headline numbers (avg partner/opponent repeats, max station imbalance)
+//   - Histogram of partner repeat counts
+//   - Histogram of opponent repeat counts
+//   - Issues callouts (worst pairs, station imbalance) — or a "clean" green
+//     banner if everything is at the theoretical floor.
+//
+// Called from Stage 1 completion handler. Hides the panel if no schedule.
+
+async function loadDiversityReport(scheduleId) {
+  const card = document.getElementById('diversityReportCard');
+  if (!card) return;
+  if (!scheduleId) {
+    card.style.display = 'none';
+    card.innerHTML = '';
+    return;
+  }
+  card.style.display = 'block';
+  card.innerHTML = '<div style="padding:1rem;color:var(--text-muted);text-align:center;">Loading diversity report…</div>';
+  try {
+    const r = await fetch(API_BASE + '/api/abstract-schedules/' + scheduleId + '/diversity-report');
+    if (!r.ok) {
+      card.innerHTML = '<div style="padding:1rem;color:var(--text-muted);">Diversity report unavailable.</div>';
+      return;
+    }
+    const d = await r.json();
+    renderDiversityReport(card, d);
+  } catch (e) {
+    console.warn('Diversity report fetch failed:', e);
+    card.innerHTML = '<div style="padding:1rem;color:var(--text-muted);">Diversity report failed to load.</div>';
+  }
+}
+
+function renderDiversityReport(card, d) {
+  const p = d.partner;
+  const o = d.opponent;
+  // Build histograms with bars sized to the largest bucket
+  function maxVal(hist) { return Math.max(0, ...Object.values(hist || {})); }
+  function histRows(hist, floor, total) {
+    const max = maxVal(hist);
+    const counts = Object.keys(hist).map(Number).sort((a, b) => a - b);
+    return counts.map(function(c) {
+      const n = hist[c];
+      const pct = max > 0 ? Math.round((n / max) * 100) : 0;
+      let cls = 'dr-histogram-bar';
+      if (c === 0) cls += ' zero';
+      else if (c > floor + 1) cls += ' way-over';
+      else if (c > floor) cls += ' over-floor';
+      const lbl = c === 0 ? '0 (never met)' : (c + ' time' + (c > 1 ? 's' : ''));
+      const sharePct = total > 0 ? Math.round((n / total) * 100) : 0;
+      return '<div class="dr-histogram">' +
+             '  <span class="dr-histogram-label">' + lbl + '</span>' +
+             '  <div><div class="' + cls + '" style="width:' + pct + '%"></div></div>' +
+             '  <span class="dr-histogram-count">' + n + ' (' + sharePct + '%)</span>' +
+             '</div>';
+    }).join('');
+  }
+  // Issues
+  const issues = [];
+  if (p.worst_pairs && p.worst_pairs.length) {
+    issues.push(p.worst_pairs.length + ' pair' + (p.worst_pairs.length > 1 ? 's' : '') +
+                ' partnered more than the floor (' + p.floor + ')');
+  }
+  if (o.worst_pairs && o.worst_pairs.length) {
+    issues.push(o.worst_pairs.length + ' pair' + (o.worst_pairs.length > 1 ? 's' : '') +
+                ' opposed more than the floor (' + o.floor + ')');
+  }
+  if (d.stations.imbalanced_slots > 0) {
+    issues.push(d.stations.imbalanced_slots + ' slot' + (d.stations.imbalanced_slots > 1 ? 's have' : ' has') +
+                ' uneven station distribution (max imbalance: ' + d.stations.max_imbalance + ')');
+  }
+  if (d.surrogates.concentrated_slots > 0) {
+    issues.push(d.surrogates.concentrated_slots + ' slot' +
+                (d.surrogates.concentrated_slots > 1 ? 's have' : ' has') + ' more than 1 surrogate match');
+  }
+  const issuesHtml = issues.length
+    ? '<div class="dr-issues"><strong>&#9888; Notable:</strong><ul>' +
+      issues.map(function(i) { return '<li>' + i + '</li>'; }).join('') + '</ul></div>'
+    : '<div class="dr-issues clean"><strong>&#9989; Clean:</strong> all distributions at or near theoretical floor.</div>';
+
+  const totalPartnerSlots  = 2 * d.matches_per_team;
+  const totalOpponentSlots = 3 * d.matches_per_team;
+
+  card.innerHTML =
+    '<h3>Diversity Report</h3>' +
+    '<div class="dr-headline">' +
+    '  <div class="dr-stat">' +
+    '    <div class="dr-stat-label">Avg partner repeats</div>' +
+    '    <div class="dr-stat-value">' + p.average + '</div>' +
+    '    <div class="dr-stat-detail">floor: ' + (p.floor === 0 ? '0 (none required)' : p.floor) + ' · max: ' + p.max + '</div>' +
+    '  </div>' +
+    '  <div class="dr-stat">' +
+    '    <div class="dr-stat-label">Avg opponent repeats</div>' +
+    '    <div class="dr-stat-value">' + o.average + '</div>' +
+    '    <div class="dr-stat-detail">floor: ' + (o.floor === 0 ? '0 (none required)' : o.floor) + ' · max: ' + o.max + '</div>' +
+    '  </div>' +
+    '  <div class="dr-stat">' +
+    '    <div class="dr-stat-label">Pairs never met</div>' +
+    '    <div class="dr-stat-value">' + p.zero_pairs + '</div>' +
+    '    <div class="dr-stat-detail">of ' + d.total_pairs + ' possible pairs</div>' +
+    '  </div>' +
+    '  <div class="dr-stat">' +
+    '    <div class="dr-stat-label">Station balance</div>' +
+    '    <div class="dr-stat-value">' + (d.stations.max_imbalance === 0 ? '✓' : '±' + d.stations.max_imbalance) + '</div>' +
+    '    <div class="dr-stat-detail">' + (d.stations.imbalanced_slots > 0 ? d.stations.imbalanced_slots + ' slot(s) uneven' : 'all 6 stations balanced') + '</div>' +
+    '  </div>' +
+    '  <div class="dr-stat">' +
+    '    <div class="dr-stat-label">Surrogates</div>' +
+    '    <div class="dr-stat-value">' + d.surrogates.total + '</div>' +
+    '    <div class="dr-stat-detail">' + (d.surrogates.total === 0 ? 'none required' : 'max ' + d.surrogates.max_per_slot + ' per slot') + '</div>' +
+    '  </div>' +
+    '</div>' +
+    '<div class="dr-section">' +
+    '  <h3 style="margin-bottom:0.4rem;">Partner pair distribution</h3>' +
+    '  <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.3rem;">Each team plays alongside ' + totalPartnerSlots + ' partner-slots across the schedule.</div>' +
+    histRows(p.histogram, p.floor, d.total_pairs) +
+    '</div>' +
+    '<div class="dr-section">' +
+    '  <h3 style="margin-bottom:0.4rem;">Opponent pair distribution</h3>' +
+    '  <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.3rem;">Each team faces ' + totalOpponentSlots + ' opponent-slots across the schedule.</div>' +
+    histRows(o.histogram, o.floor, d.total_pairs) +
+    '</div>' +
+    issuesHtml;
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -2216,6 +2594,19 @@ function buildShareUrl() {
   if (ct)  params.set('ct',  ct);
   if (nd)  params.set('days', nd);
 
+  // Placement criteria weights — only emit when they deviate from FIRST defaults.
+  // Keeps URLs short for the common case. WEIGHT_DEFS gives us the URL-safe
+  // short keys (wp/wo/ws/wb/wg/wsr/wc).
+  if (SCHEDULER_DEFAULTS && CURRENT_WEIGHTS) {
+    for (const def of WEIGHT_DEFS) {
+      const cur  = CURRENT_WEIGHTS[def.key];
+      const dflt = SCHEDULER_DEFAULTS[def.key];
+      if (cur != null && Number(cur) !== Number(dflt)) {
+        params.set(def.short, String(cur));
+      }
+    }
+  }
+
   // Practice day URL params. Mirrors what we encode for qual days:
   //   pday=1                     — practice day enabled
   //   pd=HH:MM-HH:MM             — practice window (already existed)
@@ -2417,6 +2808,19 @@ function parseUrlParams() {
     autoPopulate:    parseBoolFlag('autoPopulate'),
     autoMaxCycles:   parseBoolFlag('autoMaxCycles'),
     autoAssign:      parseBoolFlag('autoAssign'),
+    // Placement criteria weights from URL (any subset). null = use defaults.
+    weights:         (function() {
+      const w = {};
+      let any = false;
+      for (const def of WEIGHT_DEFS) {
+        const v = p.get(def.short);
+        if (v !== null) {
+          const n = parseFloat(v);
+          if (!isNaN(n) && n >= 0) { w[def.key] = n; any = true; }
+        }
+      }
+      return any ? w : null;
+    })(),
   };
 }
 
@@ -2522,6 +2926,15 @@ function applyUrlParams(params) {
   if (params.cd)  document.getElementById('cooldown').value       = params.cd;
   if (params.ct)  document.getElementById('cycleTime').value      = params.ct;
   if (params.bb)  document.getElementById('breakBuffer').value  = params.bb;
+
+  // Apply placement criteria weights from URL. We need SCHEDULER_DEFAULTS
+  // loaded first to compare against; if it's not yet, we set CURRENT_WEIGHTS
+  // optimistically and renderWeightsPanel() will reconcile once defaults arrive.
+  if (params.weights) {
+    if (!CURRENT_WEIGHTS) CURRENT_WEIGHTS = {};
+    Object.assign(CURRENT_WEIGHTS, params.weights);
+    if (SCHEDULER_DEFAULTS) renderWeightsPanel();
+  }
 
   // Restore practice day from URL — settings, breaks, cycle changes, early end.
   // Note: practice match pairings are NOT in the URL — they come either from
@@ -2726,6 +3139,16 @@ async function autoRunFromUrl() {
       }
       window._frcAbstractMode = true;
       displayAbstractSchedule(absResp, dayConfig);
+      // Diversity report — also load when restoring from URL
+      if (typeof loadDiversityReport === 'function') {
+        loadDiversityReport(absResp.id);
+      }
+      // Restore weights from the stored schedule (persisted on the abstract record)
+      if (absResp.weights) {
+        if (!CURRENT_WEIGHTS) CURRENT_WEIGHTS = {};
+        Object.assign(CURRENT_WEIGHTS, absResp.weights);
+        if (typeof renderWeightsPanel === 'function' && SCHEDULER_DEFAULTS) renderWeightsPanel();
+      }
       showStage2Panel(_abstractParams.numTeams);
       await checkForSavedAssignment(absResp.id);
       showApiStatus('\u2713 Schedule #' + params.sid + ' loaded from server');
@@ -2830,6 +3253,9 @@ function fullReset() {
     '<p>Configure your competition parameters<br>and click Generate Schedule</p></div>';
   document.getElementById('scheduleWarning').style.display = 'none';
   document.getElementById('scheduleWarning').textContent = '';
+  // Hide the diversity report panel
+  var drCard = document.getElementById('diversityReportCard');
+  if (drCard) { drCard.style.display = 'none'; drCard.innerHTML = ''; }
   var dlBar = document.getElementById('downloadBar');
   if (dlBar) dlBar.style.display = 'none';
 
@@ -5789,6 +6215,12 @@ document.addEventListener('DOMContentLoaded', function() {
   });
   // Initialize the View Page button's disabled state — no schedule yet at boot
   if (typeof updateViewButton === 'function') updateViewButton();
+  // Load placement criteria defaults from API and render the weights panel.
+  // URL params (?wp=80&wo=60&...) may have already populated CURRENT_WEIGHTS;
+  // we reconcile in renderWeightsPanel.
+  loadSchedulerDefaults().then(function() {
+    if (typeof renderWeightsPanel === 'function') renderWeightsPanel();
+  });
 });
 
 // Set the active event in UI state
@@ -6379,6 +6811,7 @@ async function generateSchedule() {
         name: 'Abstract ' + new Date().toLocaleTimeString(),
         event_id: _currentEventId ? parseInt(_currentEventId) : null,
         day_config: dayConfig,
+        weights: getWeightsForRequest(),  // null = backend uses FIRST defaults
       }),
     });
 
@@ -6441,6 +6874,11 @@ async function generateSchedule() {
       _currentSeed = sched.seed || seed;
       updateSeedDisplay(_currentSeed, null);
       displayAbstractSchedule(sched, dayConfig);
+      // Diversity report — fetch in background, render below the schedule
+      // when ready. Errors are silently swallowed (panel stays hidden).
+      if (typeof loadDiversityReport === 'function') {
+        loadDiversityReport(doneMsg.abstract_schedule_id);
+      }
       showStage2Panel(numTeams);
       await checkForSavedAssignment(doneMsg.abstract_schedule_id);
       btn.disabled = false;

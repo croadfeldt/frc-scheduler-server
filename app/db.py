@@ -144,6 +144,10 @@ class AbstractSchedule(Base):
     surrogate_count:  Mapped[Any]      = mapped_column(JSON)
     round_boundaries: Mapped[Any]      = mapped_column(JSON)
     day_config:       Mapped[Any|None] = mapped_column(JSON, nullable=True)
+    # Placement criteria weights (FIRST-aligned defaults if NULL). Stored so
+    # generated schedules are fully reproducible — a schedule generated with
+    # custom weights stays consistent on reload. See app.scheduler for shape.
+    weights:          Mapped[Any|None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -352,6 +356,9 @@ async def init_db(retries: int = 10, delay: float = 2.0) -> None:
                 ))
                 await conn.execute(text(
                     "ALTER TABLE assigned_schedules ADD COLUMN IF NOT EXISTS practice_matches JSONB"
+                ))
+                await conn.execute(text(
+                    "ALTER TABLE abstract_schedules ADD COLUMN IF NOT EXISTS weights JSONB"
                 ))
             return
         except Exception as e:

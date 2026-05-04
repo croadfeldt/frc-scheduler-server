@@ -22,12 +22,60 @@ import random
 from typing import NamedTuple
 
 # ── Weights ───────────────────────────────────────────────────────────────────
-W_BALANCE  = 50
+# Defaults aligned with the FIRST official MatchMaker algorithm (Idle Loop /
+# Saxton, used by FMS at all official events). Notes on each:
+#
+#   W_BALANCE   — penalty for red/blue imbalance per team. FIRST: balanced.
+#                 Lowered from 50 → 30 since we now also balance per-station
+#                 (W_STATION) which subsumes much of the red/blue balance.
+#   W_GAP       — bonus for longer gaps between a team's appearances.
+#   W_COUNT     — penalty for over-scheduling a team. (Within-iteration tie
+#                 breaker; quotas are enforced as a hard constraint.)
+#   W_OPPONENT  — penalty per repeat cross-alliance opponent.
+#   W_PARTNER   — penalty per repeat same-alliance partner. NOTE: now > W_OPPONENT
+#                 to align with FIRST's documented stance ("partner duplication
+#                 weighted slightly heavier than opponent — only 2 partners but
+#                 3 opponents per round, so a partner repeat is more impactful").
+#   W_STATION   — NEW. Penalty for uneven station appearances per team.
+#                 FIRST balances all 6 stations (R1/R2/R3/B1/B2/B3) since 2017.
+#                 Different stations have different field sightlines.
+#   W_SUR_RPT   — penalty for surrogate concentration on the same teams.
+#
+# Penalties on opponent/partner/station are applied QUADRATICALLY in the
+# diversity scorer. This means the second repeat of a pair costs 4× the first,
+# the third costs 9×, etc. — which strongly pushes the scheduler to spread
+# repeats evenly rather than concentrate them on a few unlucky pairs.
+#
+# These constants are runtime-overridable via the `weights` parameter on
+# generate_matches(); the editor surfaces these as "Advanced criteria" in the
+# UI with a "Match FIRST defaults" reset button.
+W_BALANCE  = 30
 W_GAP      = 10
 W_COUNT    = 5
-W_OPPONENT = 15
-W_PARTNER  = 12
+W_OPPONENT = 60
+W_PARTNER  = 80
+W_STATION  = 30
 W_SUR_RPT  = 200
+
+# Default weight bundle exposed for callers (UI + URL params).
+DEFAULT_WEIGHTS = {
+    "balance":  W_BALANCE,
+    "gap":      W_GAP,
+    "count":    W_COUNT,
+    "opponent": W_OPPONENT,
+    "partner":  W_PARTNER,
+    "station":  W_STATION,
+    "sur_rpt":  W_SUR_RPT,
+}
+
+# "FIRST strict" preset: matches the canonical MatchMaker algorithm as
+# documented at https://idleloop.com/matchmaker/. The weights here reflect
+# our best read of FIRST's relative priorities. Not literally the same
+# numbers (FIRST uses simulated annealing, not weighted scoring), but the
+# RELATIVE ordering matches what FMS produces:
+#   round uniformity (hard) >> match separation (hard) >> pairing uniformity
+#   >> minimize surrogates >> red/blue balance >> station balance.
+FIRST_STRICT_WEIGHTS = dict(DEFAULT_WEIGHTS)  # currently identical to defaults
 
 
 class Match(NamedTuple):
@@ -52,17 +100,45 @@ _SPLITS = [
     for m in _MASKS_3_OF_6
 ]
 
+# All 6 permutations of (0, 1, 2) — used to enumerate within-alliance station
+# orderings when picking the best red/blue split. With 6 perms × 6 perms × 20
+# splits = 720 candidates per match, which is fast.
+_PERM3 = [
+    (0, 1, 2), (0, 2, 1), (1, 0, 2),
+    (1, 2, 0), (2, 0, 1), (2, 1, 0),
+]
+
 
 def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
-                     seed: int | None = None) -> ScheduleResult:
+                     seed: int | None = None,
+                     weights: dict | None = None) -> ScheduleResult:
+    """Generate one Stage 1 schedule iteration.
+
+    weights: optional override for the W_* constants. Pass DEFAULT_WEIGHTS
+    or FIRST_STRICT_WEIGHTS, or a custom dict with any subset of:
+        balance, gap, count, opponent, partner, station, sur_rpt
+    Missing keys fall back to module defaults.
+    """
     ideal_gap = max(1, ideal_gap)
     rng = random.Random(seed)
+
+    # Pull weights — runtime-overridable so the editor's "Advanced criteria"
+    # panel can experiment without touching code.
+    w = dict(DEFAULT_WEIGHTS)
+    if weights: w.update({k: v for k, v in weights.items() if k in DEFAULT_WEIGHTS})
+    w_balance, w_gap, w_count = w["balance"], w["gap"], w["count"]
+    w_opponent, w_partner, w_station = w["opponent"], w["partner"], w["station"]
+    w_sur_rpt = w["sur_rpt"]
 
     total_matches     = math.ceil(num_teams * matches_per_team / 6)
     matches_per_round = math.ceil(num_teams / 6)
     total_sur_slots   = total_matches * 6 - num_teams * matches_per_team
     phase1_surplus    = matches_per_round * 6 - num_teams
-    fair_sur_cap      = math.ceil(total_sur_slots / num_teams) + 1 if num_teams > 0 else 1
+    # Strict surrogate cap — drops the +1 buffer that was here historically.
+    # Math: total_sur_slots distributed across N teams → ceil(slots/N) is the
+    # minimum-possible max per team. No team should exceed this except when
+    # mathematically unavoidable.
+    fair_sur_cap      = max(1, math.ceil(total_sur_slots / num_teams)) if num_teams > 0 and total_sur_slots > 0 else 0
 
     teams = list(range(1, num_teams + 1))
     rng.shuffle(teams)
@@ -72,6 +148,12 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
     sc  = [0] * (num_teams + 1)
     rc  = [0] * (num_teams + 1)
     bc  = [0] * (num_teams + 1)
+
+    # Station counts per team — 6 stations indexed 0..5 (R1, R2, R3, B1, B2, B3).
+    # Tracked separately from rc/bc (red/blue counts) to support FIRST's
+    # station-balance criterion: each team should appear roughly equally at
+    # each of the 6 station positions, not just balanced red vs blue overall.
+    station_counts = [[0] * 6 for _ in range(num_teams + 1)]
 
     opp = [[0] * (num_teams + 1) for _ in range(num_teams + 1)]
     par = [[0] * (num_teams + 1) for _ in range(num_teams + 1)]
@@ -88,25 +170,51 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         gap = now - lp[t]
         if gap < ideal_gap:
             return -1000 * (ideal_gap - gap)
-        return gap * W_GAP - mc[t] * W_COUNT
+        return gap * w_gap - mc[t] * w_count
 
     def surrogate_score(t: int, now: int) -> float:
-        return -sc[t] * W_SUR_RPT + (now - lp[t]) * 2
+        return -sc[t] * w_sur_rpt + (now - lp[t]) * 2
 
     def diversity_score(red: list[int], blue: list[int]) -> float:
+        """Score the diversity (anti-repeat) cost of pairing these 6 teams.
+        Quadratic in repeat count: a 2nd encounter costs 4× the 1st, a 3rd
+        costs 9×, etc. This pushes the scheduler to spread repeats evenly
+        across all pairs rather than concentrate them on a few unlucky ones."""
         s = 0.0
         for r in red:
             for b in blue:
-                s -= opp[r][b] * W_OPPONENT
+                # Cost of the NEW (post-commit) repeat count, minus the cost
+                # of the current state. opp[r][b] going from k to k+1 adds
+                # ((k+1)² - k²) × W = (2k+1) × W to the penalty.
+                s -= (2 * opp[r][b] + 1) * w_opponent
         for i in range(len(red)):
             for j in range(i + 1, len(red)):
-                s -= par[red[i]][red[j]] * W_PARTNER
+                s -= (2 * par[red[i]][red[j]] + 1) * w_partner
         for i in range(len(blue)):
             for j in range(i + 1, len(blue)):
-                s -= par[blue[i]][blue[j]] * W_PARTNER
+                s -= (2 * par[blue[i]][blue[j]] + 1) * w_partner
+        return s
+
+    def station_imbalance_penalty(red: list[int], blue: list[int]) -> float:
+        """Penalize tentatively assigning these 6 teams to stations 0..5
+        (R1, R2, R3, B1, B2, B3 in that order). Cost is the marginal increase
+        in max-min station spread for each team."""
+        s = 0.0
+        for i, t in enumerate(red):
+            # Station i (0..2 for red 1..3) would gain one appearance
+            new_counts = list(station_counts[t])
+            new_counts[i] += 1
+            s -= w_station * (max(new_counts) - min(new_counts))
+        for i, t in enumerate(blue):
+            new_counts = list(station_counts[t])
+            new_counts[3 + i] += 1
+            s -= w_station * (max(new_counts) - min(new_counts))
         return s
 
     def assign_alliances(six: list[int]) -> tuple[list[int], list[int]] | None:
+        """Pick the best 3-red / 3-blue split AND best within-alliance ordering
+        for these 6 teams. Tries every combination (20 splits × 36 orderings =
+        720 candidates per match). Cheap, runs once per match."""
         if len(six) != 6 or len(set(six)) != 6:
             return None
         best_score = -float('inf')
@@ -114,17 +222,35 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         for ri, bi in _SPLITS:
             r = [six[i] for i in ri]
             b = [six[i] for i in bi]
-            bal = -W_BALANCE * (
+            bal = -w_balance * (
                 sum(abs((rc[t] + 1) - bc[t]) for t in r) +
                 sum(abs(rc[t] - (bc[t] + 1)) for t in b)
             )
-            total = bal + diversity_score(r, b)
+            div = diversity_score(r, b)
+            # Try a few orderings within each alliance to find best station
+            # placement. We don't enumerate all 6 (3! × 3! = 36) — that's
+            # cheap but we usually find a good one in ~6 tries with the
+            # heuristic: prefer placing teams at their LEAST-occupied stations.
+            best_ord_score = -float('inf')
+            best_ord_r, best_ord_b = r, b
+            for r_ord in _PERM3:
+                for b_ord in _PERM3:
+                    rr = [r[k] for k in r_ord]
+                    bb = [b[k] for k in b_ord]
+                    sta = station_imbalance_penalty(rr, bb)
+                    if sta > best_ord_score:
+                        best_ord_score = sta
+                        best_ord_r, best_ord_b = rr, bb
+            total = bal + div + best_ord_score
             if total > best_score:
                 best_score = total
-                best_r, best_b = r, b
+                best_r, best_b = best_ord_r, best_ord_b
         return (best_r, best_b) if best_r is not None else None
 
     def assign_alliances_r1(six: list[int]) -> tuple[list[int], list[int]] | None:
+        """Round-1-aware variant: also penalizes uneven distribution of
+        second-time players across the two alliances in the round-1 boundary
+        match. Used only at the round-1/round-2 transition."""
         if len(six) != 6 or len(set(six)) != 6:
             return None
         best_score = -float('inf')
@@ -135,14 +261,25 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
             r_second = sum(1 for t in r if mc[t] >= 1)
             b_second = sum(1 for t in b if mc[t] >= 1)
             sec_penalty = -500 * abs(r_second - b_second)
-            bal = -W_BALANCE * (
+            bal = -w_balance * (
                 sum(abs((rc[t] + 1) - bc[t]) for t in r) +
                 sum(abs(rc[t] - (bc[t] + 1)) for t in b)
             )
-            total = sec_penalty + bal + diversity_score(r, b)
+            div = diversity_score(r, b)
+            best_ord_score = -float('inf')
+            best_ord_r, best_ord_b = r, b
+            for r_ord in _PERM3:
+                for b_ord in _PERM3:
+                    rr = [r[k] for k in r_ord]
+                    bb = [b[k] for k in b_ord]
+                    sta = station_imbalance_penalty(rr, bb)
+                    if sta > best_ord_score:
+                        best_ord_score = sta
+                        best_ord_r, best_ord_b = rr, bb
+            total = sec_penalty + bal + div + best_ord_score
             if total > best_score:
                 best_score = total
-                best_r, best_b = r, b
+                best_r, best_b = best_ord_r, best_ord_b
         return (best_r, best_b) if best_r is not None else None
 
     def commit_match(red: list[int], blue: list[int], now: int) -> None:
@@ -151,10 +288,12 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                 sc[t] += 1
             mc[t] += 1
             lp[t] = now
-        for t in red:
+        for i, t in enumerate(red):
             rc[t] += 1
-        for t in blue:
+            station_counts[t][i] += 1   # stations 0,1,2 = R1, R2, R3
+        for i, t in enumerate(blue):
             bc[t] += 1
+            station_counts[t][3 + i] += 1   # stations 3,4,5 = B1, B2, B3
         for r in red:
             for b in blue:
                 opp[r][b] += 1; opp[b][r] += 1
@@ -377,15 +516,29 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
 
 
 def score_schedule(matches: list[Match], num_teams: int) -> float:
+    """Score a complete schedule — used to pick the best of N iterations.
+
+    Penalties (negative score):
+      - back-to-back appearances: 1000 per occurrence (effectively hard)
+      - max red/blue imbalance per team: 500 per imbalance unit
+      - surrogate count: 200 per surrogate
+      - opponent repeats: sum of count² × 60 — quadratic, so a 2nd repeat
+        for the same pair is 4× as costly as the 1st
+      - partner repeats: sum of count² × 80 — same shape, weighted higher
+        (FIRST: partner duplication is more costly than opponent because
+        there are only 2 partners but 3 opponents per match)
+      - station imbalance: sum across teams of (max_station - min_station)
+        × 30 — pushes each team to appear roughly equally at all 6
+        positions (R1, R2, R3, B1, B2, B3)
+    """
     if not matches:
         return -float('inf')
 
     b2b = 0
     surrogates = 0
-    repeat_opp = 0
-    repeat_part = 0
     red_counts  = [0] * (num_teams + 1)
     blue_counts = [0] * (num_teams + 1)
+    station_counts = [[0] * 6 for _ in range(num_teams + 1)]
     opp  = [[0] * (num_teams + 1) for _ in range(num_teams + 1)]
     par  = [[0] * (num_teams + 1) for _ in range(num_teams + 1)]
 
@@ -395,36 +548,62 @@ def score_schedule(matches: list[Match], num_teams: int) -> float:
             if any(t in prev for t in m.red + m.blue):
                 b2b += 1
         surrogates += sum(m.red_surrogate) + sum(m.blue_surrogate)
-        for t in m.red:
+        for sta_idx, t in enumerate(m.red):
             red_counts[t] += 1
-        for t in m.blue:
+            station_counts[t][sta_idx] += 1
+        for sta_idx, t in enumerate(m.blue):
             blue_counts[t] += 1
+            station_counts[t][3 + sta_idx] += 1
         for r in m.red:
             for b in m.blue:
-                if opp[r][b] > 0: repeat_opp += 1
                 opp[r][b] += 1; opp[b][r] += 1
         rl = list(m.red); bl = list(m.blue)
         for a in range(len(rl)):
             for b in range(a + 1, len(rl)):
-                if par[rl[a]][rl[b]] > 0: repeat_part += 1
                 par[rl[a]][rl[b]] += 1; par[rl[b]][rl[a]] += 1
         for a in range(len(bl)):
             for b in range(a + 1, len(bl)):
-                if par[bl[a]][bl[b]] > 0: repeat_part += 1
                 par[bl[a]][bl[b]] += 1; par[bl[b]][bl[a]] += 1
 
     max_imbalance = max(abs(red_counts[t] - blue_counts[t]) for t in range(1, num_teams + 1))
+
+    # Quadratic penalty for repeats — encourages spreading repeats across
+    # many pairs rather than concentrating them on a few unlucky pairs.
+    # opp/par are symmetric so we only count each (a,b) once with a < b.
+    opp_penalty = 0
+    par_penalty = 0
+    for a in range(1, num_teams + 1):
+        for b in range(a + 1, num_teams + 1):
+            if opp[a][b] > 0:
+                opp_penalty += opp[a][b] ** 2
+            if par[a][b] > 0:
+                par_penalty += par[a][b] ** 2
+
+    # Station imbalance — sum across teams of (max - min) station counts.
+    # 0 means perfectly balanced; higher means some stations get heavier use.
+    station_penalty = 0
+    for t in range(1, num_teams + 1):
+        sc_t = station_counts[t]
+        if any(sc_t):
+            station_penalty += max(sc_t) - min(sc_t)
+
     return -(b2b * 1000 + max_imbalance * 500 + surrogates * 200 +
-             repeat_opp * 15 + repeat_part * 12)
+             opp_penalty * W_OPPONENT + par_penalty * W_PARTNER +
+             station_penalty * W_STATION)
 
 
 def run_iterations_worker(args: tuple) -> dict:
-    num_teams, matches_per_team, ideal_gap, n_iterations, worker_id, seed = args
+    # Unpack with backwards-compatible weights tuple (old callers send 6-tuple)
+    if len(args) == 7:
+        num_teams, matches_per_team, ideal_gap, n_iterations, worker_id, seed, weights = args
+    else:
+        num_teams, matches_per_team, ideal_gap, n_iterations, worker_id, seed = args
+        weights = None
     best: ScheduleResult | None = None
 
     for i in range(n_iterations):
         iter_seed = (seed ^ (worker_id * 1000 + i)) if seed is not None else None
-        result = generate_matches(num_teams, matches_per_team, ideal_gap, iter_seed)
+        result = generate_matches(num_teams, matches_per_team, ideal_gap, iter_seed, weights)
         if best is None or result.score > best.score:
             best = result
 

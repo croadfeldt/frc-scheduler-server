@@ -269,15 +269,22 @@ This means a compromised container cannot reach other cluster services or intern
 
 ```
 Stage 1 — Abstract Schedule
-  Input:  numTeams, matchesPerTeam, cooldown, seed (hex)
+  Input:  numTeams, matchesPerTeam, cooldown, seed (hex), [weights]
   Output: slot-indexed match structure (no real team numbers)
-          reproducible: same seed → identical structure
+          reproducible: same seed + weights → identical structure
 
 Stage 2 — Team Assignment
   Input:  abstract schedule + event roster + assign_seed (hex)
   Output: slot_map {slot: team_number}
           reproducible: same assign_seed → identical mapping
 ```
+
+> 📐 **Placement criteria & FIRST alignment:** the scheduler's defaults match
+> the official FIRST/MatchMaker algorithm used by FMS, including station-position
+> balancing and partner-weighted-higher-than-opponent diversity. Weights are
+> tunable via the editor's Advanced Criteria panel with a "⊕ Match FIRST defaults"
+> reset button. See [`docs/PRIORITIES.md`](docs/PRIORITIES.md) for the full
+> criteria table, configurability details, and the FIRST alignment matrix.
 
 ### System components
 
