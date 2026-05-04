@@ -13,9 +13,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps + gosu for privilege dropping (linuxserver pattern)
+# System deps + gosu for privilege dropping (linuxserver pattern).
+# tesseract-ocr is needed for the PDF import OCR strategy (image-based PDFs
+# like the MSHSL state schedule have no extractable text — Tesseract OCRs
+# them so the LLM can interpret the result). The -eng language pack covers
+# everything our schedules ever contain.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libpq-dev gosu \
+    tesseract-ocr tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

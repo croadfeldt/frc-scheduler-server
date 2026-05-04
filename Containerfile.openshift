@@ -9,7 +9,19 @@ USER 0
 
 WORKDIR /app
 
-RUN dnf install -y --nodocs gcc libpq-devel shadow-utils && dnf clean all
+# System deps. tesseract is needed for PDF import OCR strategy (handles
+# image-based PDFs where pdfplumber can't extract text). Modern tesseract
+# packages on EL9+/CS10+ bundle the English training data directly, so
+# tesseract-langpack-eng may not be a separate package — install it
+# best-effort. EPEL is enabled for tesseract on stock CentOS Stream
+# images (already enabled on python-312-c10s); if not, this fails clearly.
+RUN dnf install -y --nodocs \
+        gcc libpq-devel shadow-utils \
+        tesseract \
+    && dnf install -y --nodocs tesseract-langpack-eng || true \
+    && dnf clean all \
+    && tesseract --list-langs 2>&1 | grep -q '^eng$' \
+        || { echo "ERROR: tesseract installed but eng training data missing"; exit 1; }
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

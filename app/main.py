@@ -1782,37 +1782,47 @@ async def import_pdf(
                 "_cache":          "hit",
             }
 
-    # Not cached — extract and call LLM
+    # Not cached — extract using the strategy router. This tries native
+    # text extraction first (works for most FIRST PDFs), falls through to
+    # OCR for image-based PDFs (MSHSL state schedule, scanned events),
+    # and finally to vision LLM for anything else.
     try:
-        extracted = pdf_extract.extract_tables(content)
+        extracted = await pdf_extract.extract_schedule(content)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
         log.exception("PDF extraction failed")
         raise HTTPException(500, f"PDF extraction failed: {e}")
 
-    # Refuse if estimated tokens exceed the LLM context window. 32K
-    # leaves ~16K for output tokens.
-    est_tokens = pdf_extract.estimate_token_budget(extracted)
-    if est_tokens > 16000:
-        raise HTTPException(
-            413,
-            f"PDF too long for LLM extraction: ~{est_tokens} input tokens "
-            f"(max ~16000). Try a more focused document or split into pages."
-        )
+    strategy = extracted["strategy"]
+    log.info("PDF extraction succeeded via strategy=%s", strategy)
 
-    pdf_text = pdf_extract.format_for_llm(extracted)
+    # Vision strategy returns already-parsed JSON. Skip the text-LLM step.
+    if strategy == "vision":
+        parsed = extracted["parsed"]
+    else:
+        # Native or OCR — feed extracted text to the text LLM as before.
+        # Refuse if estimated tokens exceed context window.
+        est_tokens = pdf_extract.estimate_token_budget(extracted)
+        if est_tokens > 16000:
+            raise HTTPException(
+                413,
+                f"PDF too long for LLM extraction: ~{est_tokens} input tokens "
+                f"(max ~16000). Try a more focused document or split into pages."
+            )
 
-    try:
-        parsed = await llm_client.parse_schedule(pdf_text)
-    except RuntimeError as e:
-        raise HTTPException(503, str(e))
-    except ValueError as e:
-        # LLM returned malformed JSON
-        raise HTTPException(502, f"LLM returned malformed response: {e}")
+        pdf_text = pdf_extract.format_for_llm(extracted)
 
-    if not parsed:
-        raise HTTPException(503, "LLM extraction not configured")
+        try:
+            parsed = await llm_client.parse_schedule(pdf_text)
+        except RuntimeError as e:
+            raise HTTPException(503, str(e))
+        except ValueError as e:
+            # LLM returned malformed JSON
+            raise HTTPException(502, f"LLM returned malformed response: {e}")
+
+        if not parsed:
+            raise HTTPException(503, "LLM extraction not configured")
 
     matches = parsed.get("matches") or []
     if not matches:
@@ -1841,7 +1851,7 @@ async def import_pdf(
             parsed=parsed,
             validation=validation,
             format_detected=parsed.get("format_detected"),
-            method="llm",
+            method=f"llm:{strategy}",
         )
         db.add(pdf_import)
         await db.commit()
@@ -1852,7 +1862,9 @@ async def import_pdf(
         "pdf_hash":        pdf_hash,
         "file_name":       file.filename,
         "page_count":      extracted["page_count"],
-        "method":          "llm",
+        "method":          f"llm:{strategy}",
+        "strategy":        strategy,
+        "tried":           extracted.get("tried", []),
         "format_detected": parsed.get("format_detected"),
         "matches":         matches,
         "validation":      validation,
@@ -2000,8 +2012,21 @@ async def commit_pdf_import(
 
 @app.get("/api/llm/status")
 async def llm_status():
-    """Returns LLM availability for the UI to surface in the import button."""
-    return await llm_client.health_check()
+    """Returns LLM availability for the UI to surface in the import button.
+
+    Reports both the text endpoint (used for native + OCR strategies) and
+    the optional vision endpoint (used for image-only PDFs the other
+    strategies can't handle).
+    """
+    text   = await llm_client.health_check()
+    vision = await llm_client.vision_health_check()
+    # Backwards-compat top-level fields keep the existing UI working.
+    # New `text` and `vision` sub-objects let the UI distinguish them.
+    return {
+        **text,
+        "text":   text,
+        "vision": vision,
+    }
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

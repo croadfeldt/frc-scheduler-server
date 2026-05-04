@@ -1808,6 +1808,30 @@ function renderPdfImportPreview(d) {
   summaryHtml += '<strong>Source:</strong> ' + (d.file_name || '(unnamed)') +
                  ' · ' + d.page_count + ' page' + (d.page_count !== 1 ? 's' : '') +
                  ' · ' + (d._cache === 'hit' ? 'cached' : 'fresh parse') + '<br>';
+  // Show which extraction strategy succeeded. OCR + vision results need
+  // extra scrutiny — surface that to the user so they review digits carefully.
+  if (d.strategy) {
+    let stratLabel, stratColor, stratNote;
+    if (d.strategy === 'native') {
+      stratLabel = 'Native text extraction';
+      stratColor = 'var(--accent3, #2ea043)';
+      stratNote = '';
+    } else if (d.strategy === 'ocr') {
+      stratLabel = 'OCR (Tesseract)';
+      stratColor = 'var(--amber, #c8992a)';
+      stratNote = ' — review team numbers carefully; OCR can confuse 8/3, 0/6, 1/7';
+    } else if (d.strategy === 'vision') {
+      stratLabel = 'Vision LLM';
+      stratColor = 'var(--info, #58a6ff)';
+      stratNote = ' — review team numbers carefully';
+    } else {
+      stratLabel = d.strategy;
+      stratColor = 'var(--text-muted)';
+      stratNote = '';
+    }
+    summaryHtml += '<strong>Method:</strong> <span style="color:' + stratColor +
+                   ';">' + stratLabel + '</span>' + stratNote + '<br>';
+  }
   summaryHtml += '<strong>Detected:</strong> ' + (stats.num_teams || '?') + ' teams · ' +
                  (stats.total_matches || '?') + ' matches · MPT≈' + (stats.mpt_normal || '?') +
                  ' · ' + (stats.surrogate_count || 0) + ' surrogate(s)';
