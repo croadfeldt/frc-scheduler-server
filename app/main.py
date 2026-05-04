@@ -968,6 +968,285 @@ async def duplicate_assigned_schedule(
     return {"id": new_asgn.id, "abstract_schedule_id": new_abs.id, "name": new_asgn.name}
 
 
+# ── Event-keyed view resolver ────────────────────────────────────────────────
+#
+# A stable URL like /view?event=2026mnst should "just work" for teams,
+# audiences, and printed flyers without needing to know an opaque schedule ID.
+# This endpoint resolves an event key to a unified payload that the view page
+# can consume the same way regardless of source:
+#
+#   1. Local active AssignedSchedule exists  → return that (current behavior)
+#   2. Multiple local schedules, none active → return a picker payload
+#   3. No local schedule but TBA has it      → synthesize a TBA-sourced payload
+#   4. Nothing                                → 404
+#
+# The output shape mirrors GET /api/assigned-schedules/{id} so the frontend
+# can treat both paths interchangeably. The "source" field on the payload
+# tells the UI which path was taken.
+#
+# Auth note (TODO, separate landing):
+#   /view payloads are intentionally public — anyone with the event key can
+#   see the schedule. Editing endpoints (create/update/delete) will be the
+#   ones that get auth in the next pass. The view page treats the schedule
+#   as read-only by design.
+
+
+@app.get("/api/events/by-key/{event_key}/view-payload")
+async def get_event_view_payload(
+    event_key: str,
+    db: AsyncSession = Depends(get_session),
+):
+    """Resolve an event key to a /view-ready payload, regardless of whether
+    we have a local schedule for it.
+
+    Returns one of:
+      { source: 'local',         ...full assigned schedule shape... }
+      { source: 'local-picker',  candidates: [...] }       — multiple, none active
+      { source: 'tba',           ...synthesized from TBA... }
+      { source: 'none', error:'...' }                      — nothing found
+    """
+    # Look up local Event by key first
+    res = await db.execute(select(Event).where(Event.key == event_key))
+    event = res.scalar_one_or_none()
+
+    # ── Path 1+2: Local schedule lookup ──
+    if event:
+        # Find AssignedSchedules for this event, preferring the active one
+        sched_res = await db.execute(
+            select(AssignedSchedule)
+            .options(selectinload(AssignedSchedule.abstract_schedule))
+            .where(AssignedSchedule.event_id == event.id)
+            .order_by(AssignedSchedule.is_active.desc(),
+                      AssignedSchedule.created_at.desc())
+        )
+        schedules = sched_res.scalars().all()
+
+        if schedules:
+            # Pick the active schedule, or auto-select if there's only one
+            active = next((s for s in schedules if s.is_active), None)
+            if active is not None:
+                payload = await _build_assigned_payload(db, active, event)
+                payload["source"] = "local"
+                return payload
+            if len(schedules) == 1:
+                payload = await _build_assigned_payload(db, schedules[0], event)
+                payload["source"] = "local"
+                return payload
+            # Multiple schedules, none active → picker
+            return {
+                "source": "local-picker",
+                "event": {
+                    "id": event.id, "key": event.key, "name": event.name,
+                    "year": event.year, "location": event.location,
+                    "branding": event.branding or {},
+                },
+                "candidates": [
+                    {
+                        "id": s.id, "name": s.name, "is_active": s.is_active,
+                        "created_at": s.created_at.isoformat(),
+                        "created_by": s.created_by,
+                    }
+                    for s in schedules
+                ],
+            }
+
+    # ── Path 3: TBA-only fallback ──
+    # No local AssignedSchedule (and possibly no local Event row either).
+    # If TBA has matches for this key, synthesize a payload from them.
+    try:
+        tba_event = await tba_client.get_event(event_key)
+    except Exception:
+        tba_event = None
+
+    if not tba_event:
+        raise HTTPException(404, f"Event '{event_key}' not found locally or on TBA")
+
+    # Try to fetch TBA matches — these may not exist yet pre-event
+    try:
+        tba_matches = await tba_client.get_event_matches(event_key)
+    except Exception as e:
+        log.warning("TBA matches fetch failed for %s: %s", event_key, e)
+        tba_matches = []
+
+    # If we have a local Event row but no schedules, use its branding/info.
+    # If we don't, build minimal info from the TBA event payload.
+    if event:
+        event_info = {
+            "id": event.id, "key": event.key, "name": event.name,
+            "year": event.year, "location": event.location,
+            "branding": event.branding or {},
+        }
+        event_id = event.id
+    else:
+        event_info = {
+            "id": None, "key": event_key,
+            "name": tba_event.get("name") or event_key,
+            "year": tba_event.get("year"),
+            "location": (
+                ", ".join(filter(None, [
+                    tba_event.get("city"), tba_event.get("state_prov"),
+                    tba_event.get("country"),
+                ])) or None
+            ),
+            "branding": {},
+        }
+        event_id = None
+
+    # Synthesize matches from TBA. We only include qualification matches —
+    # playoffs are out of scope for the schedule view.
+    qual_matches = [m for m in tba_matches if m.get("comp_level") == "qm"]
+    qual_matches.sort(key=lambda m: m.get("match_number", 0))
+
+    synthetic_matches = []
+    teams_seen = set()
+    for m in qual_matches:
+        red  = (m.get("alliances") or {}).get("red",  {}) or {}
+        blue = (m.get("alliances") or {}).get("blue", {}) or {}
+        red_teams  = [_tba_key_to_num(k) for k in (red.get("team_keys")  or [])]
+        blue_teams = [_tba_key_to_num(k) for k in (blue.get("team_keys") or [])]
+        # Preserve surrogates if TBA reports them
+        red_surrogate  = [
+            _tba_key_to_num(k) in red_teams
+            for k in (red.get("surrogate_team_keys") or [])
+        ] if red.get("surrogate_team_keys") else [False, False, False]
+        blue_surrogate = [
+            _tba_key_to_num(k) in blue_teams
+            for k in (blue.get("surrogate_team_keys") or [])
+        ] if blue.get("surrogate_team_keys") else [False, False, False]
+        # If surrogate_team_keys is present, build a positional flag list
+        red_flags  = _surrogate_flags(red_teams,  red.get("surrogate_team_keys"))
+        blue_flags = _surrogate_flags(blue_teams, blue.get("surrogate_team_keys"))
+        synthetic_matches.append({
+            "red": red_teams, "blue": blue_teams,
+            "red_surrogate": red_flags, "blue_surrogate": blue_flags,
+        })
+        teams_seen.update(red_teams)
+        teams_seen.update(blue_teams)
+
+    # Compose a minimal day_config from TBA's first/last match times. The view
+    # page primarily needs day windows for time computation, but for TBA-sourced
+    # data the times come straight from TBA so we don't need elaborate breaks.
+    day_config = _synthesize_day_config_from_tba(qual_matches)
+
+    return {
+        "source": "tba",
+        "id": None,  # No local schedule ID
+        "name": tba_event.get("name") or event_key,
+        "is_active": True,
+        "event_id": event_id,
+        "event": event_info,
+        "abstract_schedule_id": None,
+        "num_teams": len(teams_seen),
+        "matches_per_team": (len(synthetic_matches) * 6 // len(teams_seen)) if teams_seen else 0,
+        "cooldown": None,
+        "seed": None, "assign_seed": None, "created_by": None,
+        "slot_map": {},
+        "matches": synthetic_matches,
+        "practice_matches": [],  # TBA doesn't track practice
+        "surrogate_count": sum(
+            sum(m["red_surrogate"]) + sum(m["blue_surrogate"]) for m in synthetic_matches
+        ),
+        "round_boundaries": {},
+        "day_config": day_config,
+        "created_at": None,
+    }
+
+
+def _tba_key_to_num(key: str) -> int:
+    """'frc2169' → 2169."""
+    if not key: return 0
+    s = key[3:] if key.startswith("frc") else key
+    try: return int(s)
+    except (ValueError, TypeError): return 0
+
+
+def _surrogate_flags(team_list: list[int], surrogate_keys: list[str] | None) -> list[bool]:
+    """Build a positional [bool, bool, bool] surrogate flag list from TBA's
+    flat surrogate_team_keys array. Defaults to [False, False, False] if no
+    surrogate data is present."""
+    if not surrogate_keys:
+        return [False, False, False]
+    surrogate_nums = {_tba_key_to_num(k) for k in surrogate_keys}
+    flags = [t in surrogate_nums for t in team_list]
+    # Pad to length 3 to match the editor's data shape
+    while len(flags) < 3:
+        flags.append(False)
+    return flags[:3]
+
+
+def _synthesize_day_config_from_tba(qual_matches: list[dict]) -> dict | None:
+    """Build a minimal day_config from TBA match times. The view page uses this
+    for break/cycle-time logic; for TBA data we just want a reasonable default
+    so the schedule can render at all. The actual times shown will come from
+    TBA's predicted_time/actual_time per match, not from day_config math."""
+    times = [m.get("time") or m.get("predicted_time") or m.get("actual_time")
+             for m in qual_matches]
+    times = [t for t in times if t]
+    if not times:
+        return None
+    from datetime import datetime as _dt, timezone as _tz
+    first = _dt.fromtimestamp(min(times), tz=_tz.utc).astimezone()
+    last  = _dt.fromtimestamp(max(times), tz=_tz.utc).astimezone()
+    # Group matches by date, build a day per distinct calendar date
+    days_by_date: dict[str, list[int]] = {}
+    for t in sorted(times):
+        d = _dt.fromtimestamp(t, tz=_tz.utc).astimezone()
+        days_by_date.setdefault(d.strftime("%Y-%m-%d"), []).append(t)
+    days = []
+    for date_str, day_times in days_by_date.items():
+        d_start = _dt.fromtimestamp(min(day_times), tz=_tz.utc).astimezone()
+        d_end   = _dt.fromtimestamp(max(day_times), tz=_tz.utc).astimezone()
+        days.append({
+            "start": d_start.strftime("%H:%M"),
+            "end":   d_end.strftime("%H:%M"),
+            "breaks": [], "cycleChanges": [], "earlyEnd": None,
+            "dateLabel": d_start.strftime("%a %b %d"),
+        })
+    return {
+        "cycleTime": 8,  # ignored for TBA data — UI uses real times per match
+        "breakBuffer": 5,
+        "numDays": len(days),
+        "days": days,
+        "practiceDay": None,
+    }
+
+
+async def _build_assigned_payload(
+    db: AsyncSession, assigned: AssignedSchedule, event: Event,
+) -> dict:
+    """Build the same payload as GET /api/assigned-schedules/{id} given a
+    pre-loaded AssignedSchedule and its Event."""
+    abstract = assigned.abstract_schedule
+    slot_map = {int(k): v for k, v in (assigned.slot_map or {}).items()}
+    resolved_matches = [
+        {"red": [slot_map[s] for s in m["red"]], "blue": [slot_map[s] for s in m["blue"]],
+         "red_surrogate": m["red_surrogate"], "blue_surrogate": m["blue_surrogate"]}
+        for m in (abstract.matches or [])
+    ]
+    return {
+        "id": assigned.id, "name": assigned.name, "is_active": assigned.is_active,
+        "event_id": assigned.event_id,
+        "event": {
+            "id": event.id, "key": event.key, "name": event.name,
+            "year": event.year, "location": event.location,
+            "branding": event.branding or {},
+        },
+        "abstract_schedule_id": assigned.abstract_schedule_id,
+        "num_teams": abstract.num_teams, "matches_per_team": abstract.matches_per_team,
+        "cooldown": abstract.cooldown, "seed": abstract.seed,
+        "assign_seed": assigned.assign_seed, "created_by": assigned.created_by,
+        "slot_map": assigned.slot_map, "matches": resolved_matches,
+        "practice_matches": assigned.practice_matches or [],
+        "surrogate_count": abstract.surrogate_count,
+        "round_boundaries": abstract.round_boundaries,
+        "day_config": assigned.day_config,
+        "created_at": assigned.created_at.isoformat(),
+    }
+
+
+
+
+
 # ── Live event data ───────────────────────────────────────────────────────────
 # These endpoints power /view's live-mode UI: scores, current match, drift,
 # rankings, and queue status. Data is sourced from TBA + Nexus webhooks, with
@@ -988,6 +1267,54 @@ async def get_event_live(
     event = await db.get(Event, event_id)
     if not event:
         raise HTTPException(404, "Event not found")
+    refresh_result = None
+    if refresh:
+        refresh_result = await live_data.refresh_event(db, event, force=force)
+    payload = await live_data.get_event_live_data(db, event)
+    if refresh_result is not None:
+        payload["refresh"] = {
+            k: (v.isoformat() if hasattr(v, "isoformat") else v)
+            for k, v in refresh_result.items()
+        }
+    return payload
+
+
+@app.get("/api/events/by-key/{event_key}/live")
+async def get_event_live_by_key(
+    event_key: str,
+    db: AsyncSession = Depends(get_session),
+    refresh: bool = Query(True),
+    force: bool = Query(False),
+):
+    """Same as /api/events/{event_id}/live but resolves by event key. Use this
+    for events that only exist on TBA (no local Event row). If a local Event
+    row exists for this key, this is equivalent to the numeric variant."""
+    res = await db.execute(select(Event).where(Event.key == event_key))
+    event = res.scalar_one_or_none()
+    # If the event isn't in our DB at all, create a minimal local Event row
+    # so live data has something to attach to (rankings, sync state, etc.).
+    # This is the "we're a parser of TBA data" path — we still need to track
+    # per-event metadata locally for lazy refresh throttling and freshness.
+    if not event:
+        try:
+            tba_event = await tba_client.get_event(event_key)
+        except Exception:
+            tba_event = None
+        if not tba_event:
+            raise HTTPException(404, f"Event '{event_key}' not found locally or on TBA")
+        event = Event(
+            key=event_key,
+            name=tba_event.get("name") or event_key,
+            year=tba_event.get("year") or 0,
+            location=", ".join(filter(None, [
+                tba_event.get("city"), tba_event.get("state_prov"),
+                tba_event.get("country"),
+            ])) or None,
+            tba_synced=True,
+        )
+        db.add(event)
+        await db.flush()
+        await db.commit()
     refresh_result = None
     if refresh:
         refresh_result = await live_data.refresh_event(db, event, force=force)

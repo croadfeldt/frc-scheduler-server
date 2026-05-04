@@ -2334,7 +2334,12 @@ function shareSchedule() {
 // available — the user typically wants to compare the two side by side.
 function openInViewMode() {
   var url;
-  if (_currentAssignedScheduleId) {
+  // Prefer the stable event-key URL when an event is loaded — this URL keeps
+  // working across re-assignments (each new AssignedSchedule gets a new ID,
+  // but the event key is constant). Fall back to the explicit ID if no event.
+  if (_currentEventInfo && _currentEventInfo.key) {
+    url = '/view?event=' + encodeURIComponent(_currentEventInfo.key);
+  } else if (_currentAssignedScheduleId) {
     url = '/view?aid=' + encodeURIComponent(_currentAssignedScheduleId);
   } else if (_currentAbstractScheduleId) {
     url = '/view?id=' + encodeURIComponent(_currentAbstractScheduleId);

@@ -251,6 +251,20 @@
     margin-top: 1.5rem; max-width: 360px; margin-inline: auto;
     display: flex; gap: 0.5rem;
   }
+  /* Schedule picker (multiple drafts, none active) */
+  .picker-list {
+    margin-top: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem;
+    max-width: 480px; margin-inline: auto;
+  }
+  .picker-item {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); padding: 0.75rem 1rem;
+    border-radius: 6px; cursor: pointer; text-align: left;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .picker-item:hover { border-color: var(--primary); background: var(--bg-alt); }
+  .picker-item .picker-name { font-weight: 600; font-size: 14px; color: var(--text); }
+  .picker-item .picker-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
   .footer-meta {
     margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);
@@ -459,12 +473,16 @@
   <!-- Empty state when no schedule is loaded -->
   <div id="emptyState" class="empty-state" style="display:none;">
     <h2>No schedule loaded</h2>
-    <p>Open this page from a share link, or paste an assigned schedule ID below.</p>
+    <p>Open this page from a share link, or enter an event below.</p>
     <form onsubmit="event.preventDefault(); loadByPastedId();">
-      <input type="text" id="pastedId" placeholder="Schedule ID or share URL"
+      <input type="text" id="pastedId" placeholder="Event key (e.g. 2026mnst) or share URL"
              style="flex:1;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-alt);color:var(--text);">
       <button type="submit" class="btn">Load</button>
     </form>
+    <p style="margin-top:1rem;font-size:12px;color:var(--text-muted);">
+      Event keys look like <code>2026mnst</code> (year + event code). They come from
+      <a href="https://www.thebluealliance.com" target="_blank" rel="noopener">The Blue Alliance</a>.
+    </p>
   </div>
 
   <!-- Main content -->
@@ -615,11 +633,20 @@ async function boot() {
     document.getElementById('onlyMine').checked = true;
   }
 
-  // Determine schedule ID to load
-  const aid = PARAMS.get('aid');
-  const sid = PARAMS.get('id') || PARAMS.get('sid');
+  // Determine what to load. Priority order:
+  //   ?event=<key>  — stable URL by event key (looks up active schedule, falls
+  //                   back to TBA if no local exists, shows picker if multiple
+  //                   local schedules and none is active)
+  //   ?aid=<id>     — explicit assigned schedule ID (from editor's View Page button)
+  //   ?id= / ?sid=  — abstract schedule ID
+  //   nothing       — empty state
+  const eventKey = PARAMS.get('event');
+  const aid      = PARAMS.get('aid');
+  const sid      = PARAMS.get('id') || PARAMS.get('sid');
 
-  if (aid) {
+  if (eventKey) {
+    await loadByEventKey(eventKey);
+  } else if (aid) {
     await loadAssigned(aid);
   } else if (sid) {
     await loadAbstract(sid);
@@ -644,31 +671,86 @@ async function loadAssigned(id) {
     const r = await fetch('/api/assigned-schedules/' + encodeURIComponent(id));
     if (!r.ok) throw new Error('Schedule ' + id + ' not found (' + r.status + ')');
     const data = await r.json();
-    STATE.schedule = data;
-    if (data.event) {
-      // DB branding takes precedence over URL params (URL is just a quick override)
-      STATE.branding = Object.assign({}, STATE.branding, data.event.branding || {});
-    }
-    applyBranding();
-    computeMatchTimes();
-    rerender();
-    clearStatus();
-    document.getElementById('mainContent').style.display = '';
-    // Fetch live data — always do an initial fetch to learn schedule_source
-    // (even outside live mode this is useful so we can show LOCAL DRAFT
-    // caveats). Set up polling only if live=1 was specified.
-    if (STATE.schedule && STATE.schedule.event_id) {
-      if (STATE.simMode) await maybeStartSimulation();
-      if (STATE.liveMode) {
-        startLivePolling();
-      } else {
-        // One-shot fetch so the source badge shows
-        pollLive();
-      }
-    }
+    await _applyLoadedSchedule(data, 'local');
   } catch (err) {
     showStatus('Could not load schedule: ' + err.message, 'error');
     showEmptyState();
+  }
+}
+
+// Load by event key — works for local schedules AND TBA-only events.
+// The backend returns a unified payload with a 'source' field indicating which
+// path was taken: 'local', 'local-picker', or 'tba'.
+async function loadByEventKey(eventKey) {
+  showStatus('Loading event ' + eventKey + '…', 'info');
+  try {
+    const r = await fetch('/api/events/by-key/' + encodeURIComponent(eventKey) + '/view-payload');
+    if (!r.ok) {
+      if (r.status === 404) {
+        throw new Error('Event "' + eventKey + '" not found locally or on TBA');
+      }
+      throw new Error('HTTP ' + r.status);
+    }
+    const data = await r.json();
+    if (data.source === 'local-picker') {
+      // Multiple schedules exist for this event but none is active. Show a
+      // picker so the user can choose which to view.
+      showSchedulePicker(eventKey, data);
+      return;
+    }
+    await _applyLoadedSchedule(data, data.source || 'local');
+  } catch (err) {
+    showStatus('Could not load event: ' + err.message, 'error');
+    showEmptyState();
+  }
+}
+
+// Render a picker UI for the case where multiple local AssignedSchedules exist
+// but none is marked active. User clicks one to load it.
+function showSchedulePicker(eventKey, data) {
+  clearStatus();
+  // Update brand header from the event info we did get
+  STATE.schedule = { event: data.event };  // partial — enough for branding
+  STATE.branding = (data.event && data.event.branding) || {};
+  applyBranding();
+
+  document.getElementById('mainContent').style.display = 'none';
+  const empty = document.getElementById('emptyState');
+  empty.style.display = 'block';
+  empty.innerHTML =
+    '<h2>Choose a schedule</h2>' +
+    '<p>Multiple schedules exist for ' + escapeHtml(data.event.name || eventKey) +
+    '. None is currently marked active. Pick one to view:</p>' +
+    '<div class="picker-list">' +
+    data.candidates.map(c =>
+      '<button class="btn picker-item" onclick="loadAssigned(' + c.id + ')">' +
+      '  <div class="picker-name">' + escapeHtml(c.name || ('Schedule #' + c.id)) + '</div>' +
+      '  <div class="picker-meta">' + new Date(c.created_at).toLocaleString() +
+      (c.created_by ? ' · ' + escapeHtml(c.created_by) : '') + '</div>' +
+      '</button>'
+    ).join('') +
+    '</div>';
+}
+
+// Common post-load handling: stash data on STATE, apply branding, compute
+// times, render, and trigger live polling. Called by both loadAssigned and
+// loadByEventKey to keep the post-fetch path consistent.
+async function _applyLoadedSchedule(data, source) {
+  STATE.schedule = data;
+  STATE.scheduleSource = source;  // 'local' | 'tba'
+  if (data.event) {
+    STATE.branding = Object.assign({}, STATE.branding, data.event.branding || {});
+  }
+  applyBranding();
+  computeMatchTimes();
+  rerender();
+  clearStatus();
+  document.getElementById('mainContent').style.display = '';
+  // Kick off live data polling. For TBA-only events use the by-key live endpoint.
+  if (STATE.schedule && (STATE.schedule.event_id || (STATE.schedule.event && STATE.schedule.event.key))) {
+    if (STATE.simMode && STATE.schedule.event_id) await maybeStartSimulation();
+    if (STATE.liveMode) startLivePolling();
+    else pollLive();  // one-shot for source detection
   }
 }
 
@@ -698,15 +780,17 @@ async function loadAbstract(id) {
 function loadByPastedId() {
   const v = (document.getElementById('pastedId').value || '').trim();
   if (!v) return;
-  // Accept full URL or bare ID
-  const m = v.match(/[?&](aid|id|sid)=([^&]+)/);
+  // Accept full URL, bare numeric ID, or event key
+  const m = v.match(/[?&](aid|id|sid|event)=([^&]+)/);
   if (m) {
-    const k = m[1] === 'aid' ? 'aid' : 'id';
-    window.location.search = '?' + k + '=' + encodeURIComponent(m[2]);
+    window.location.search = '?' + m[1] + '=' + encodeURIComponent(m[2]);
   } else if (/^\d+$/.test(v)) {
     window.location.search = '?aid=' + encodeURIComponent(v);
+  } else if (/^\d{4}[a-z0-9]+$/i.test(v)) {
+    // TBA event key pattern: 4-digit year + lowercase event code (e.g. 2026mnst)
+    window.location.search = '?event=' + encodeURIComponent(v.toLowerCase());
   } else {
-    showStatus('Could not parse ID from input', 'error');
+    showStatus('Could not parse — expected event key like "2026mnst", a numeric ID, or a share URL', 'error');
   }
 }
 
@@ -1929,9 +2013,19 @@ function stopLivePolling() {
 }
 
 async function pollLive() {
-  if (!STATE.schedule || !STATE.schedule.event_id) return;
+  if (!STATE.schedule) return;
+  // Pick endpoint: numeric event_id if we have it, else event key
+  let endpoint;
+  if (STATE.schedule.event_id) {
+    endpoint = '/api/events/' + STATE.schedule.event_id + '/live?refresh=true';
+  } else if (STATE.schedule.event && STATE.schedule.event.key) {
+    endpoint = '/api/events/by-key/' +
+               encodeURIComponent(STATE.schedule.event.key) + '/live?refresh=true';
+  } else {
+    return;
+  }
   try {
-    const r = await fetch('/api/events/' + STATE.schedule.event_id + '/live?refresh=true');
+    const r = await fetch(endpoint);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     STATE.live           = data;
