@@ -871,6 +871,14 @@ async def get_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get
          "red_surrogate": m["red_surrogate"], "blue_surrogate": m["blue_surrogate"]}
         for m in abstract.matches
     ]
+    # Practice matches are stored with slot indices (1..N) because they're
+    # generated client-side using the abstract scheduler. Translate them
+    # to real team numbers using the same slot_map so they render with
+    # team numbers like the qual matches. Falls through unchanged for
+    # entries that already contain team numbers (e.g. older saved schedules
+    # or external imports), since slot_map.get returns None and we keep
+    # the original value as a fallback.
+    resolved_practice_matches = _resolve_practice_matches(assigned.practice_matches, slot_map)
     # Pull event info too — saves an extra round-trip for the /view page
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
     event_info = None
@@ -888,7 +896,7 @@ async def get_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get
         "cooldown": abstract.cooldown, "seed": abstract.seed,
         "assign_seed": assigned.assign_seed, "created_by": assigned.created_by,
         "slot_map": assigned.slot_map, "matches": resolved_matches,
-        "practice_matches": assigned.practice_matches or [],
+        "practice_matches": resolved_practice_matches,
         "surrogate_count": abstract.surrogate_count,
         "round_boundaries": abstract.round_boundaries,
         "day_config": assigned.day_config,
@@ -1183,6 +1191,35 @@ def _surrogate_flags(team_list: list[int], surrogate_keys: list[str] | None) -> 
     return flags[:3]
 
 
+def _resolve_practice_matches(
+    practice_matches: list[dict] | None, slot_map: dict[int, int]
+) -> list[dict]:
+    """Translate practice match slot indices to real team numbers using slot_map.
+
+    Practice matches are generated client-side from the abstract scheduler,
+    so they're stored with slot indices (1..N) just like the qual abstract
+    schedule. When returning an assigned schedule, both qual and practice
+    matches need their slots translated to team numbers — otherwise the
+    practice tab on /view shows slot numbers (looks broken) instead of real
+    team numbers.
+
+    Falls back to leaving values unchanged for any slot not in slot_map —
+    older saved schedules might already contain real team numbers, and we
+    don't want to lose them by mapping through a missing key.
+    """
+    if not practice_matches:
+        return []
+    out = []
+    for m in practice_matches:
+        out.append({
+            "red":  [slot_map.get(s, s) for s in (m.get("red") or [])],
+            "blue": [slot_map.get(s, s) for s in (m.get("blue") or [])],
+            "red_surrogate":  m.get("red_surrogate")  or [False, False, False],
+            "blue_surrogate": m.get("blue_surrogate") or [False, False, False],
+        })
+    return out
+
+
 def _synthesize_day_config_from_tba(qual_matches: list[dict]) -> dict | None:
     """Build a minimal day_config from TBA match times. The view page uses this
     for break/cycle-time logic; for TBA data we just want a reasonable default
@@ -1232,6 +1269,7 @@ async def _build_assigned_payload(
          "red_surrogate": m["red_surrogate"], "blue_surrogate": m["blue_surrogate"]}
         for m in (abstract.matches or [])
     ]
+    resolved_practice_matches = _resolve_practice_matches(assigned.practice_matches, slot_map)
     return {
         "id": assigned.id, "name": assigned.name, "is_active": assigned.is_active,
         "event_id": assigned.event_id,
@@ -1245,7 +1283,7 @@ async def _build_assigned_payload(
         "cooldown": abstract.cooldown, "seed": abstract.seed,
         "assign_seed": assigned.assign_seed, "created_by": assigned.created_by,
         "slot_map": assigned.slot_map, "matches": resolved_matches,
-        "practice_matches": assigned.practice_matches or [],
+        "practice_matches": resolved_practice_matches,
         "surrogate_count": abstract.surrogate_count,
         "round_boundaries": abstract.round_boundaries,
         "day_config": assigned.day_config,
