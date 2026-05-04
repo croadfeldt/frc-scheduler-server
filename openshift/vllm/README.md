@@ -146,7 +146,7 @@ Apply and roll out the scheduler.
 
 vLLM has a separate ROCm container image. Edit `02-deployment.yaml`:
 
-- Change image from `vllm/vllm-openai:v0.6.4` to `rocm/vllm:latest`
+- Change image from `vllm/vllm-openai:v0.7.3` to `rocm/vllm:latest`
   (or pin to a specific version)
 - Change resource request from `nvidia.com/gpu: 1` to `amd.com/gpu: 1`
 - Add env var `HIP_VISIBLE_DEVICES: "0"` if needed
