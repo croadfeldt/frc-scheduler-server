@@ -281,6 +281,22 @@
   .team-chip.primary { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--primary); }
   .team-chip .chip-x { font-size: 14px; line-height: 1; opacity: 0.8; }
 
+  /* Clear all chips button — sits alongside the team chips when 2+ are selected.
+     Visually distinct (text-only, muted) so it doesn't compete with the team
+     chips for attention but is still discoverable as an action. */
+  .team-chip-clear {
+    display: inline-flex; align-items: center;
+    padding: 3px 10px; font-size: 11px; font-weight: 600;
+    background: transparent; color: var(--text-muted);
+    border: 1px dashed var(--border); border-radius: 12px;
+    cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .team-chip-clear:hover {
+    color: var(--danger, #cf222e); border-color: var(--danger, #cf222e);
+    border-style: solid;
+  }
+
   /* Make table cells visibly clickable as toggles */
   .team-cell-clickable { cursor: pointer; user-select: none; }
   .team-cell-clickable:hover {
@@ -1813,13 +1829,20 @@ function renderSelectedTeamChips() {
   }
   const sorted = [...STATE.myTeams].sort((a, b) => a - b);
   wrap.style.display = '';
-  wrap.innerHTML = sorted.map(t => {
+  let html = sorted.map(t => {
     const isPrimary = t === STATE.myPrimary;
     return '<button class="team-chip' + (isPrimary ? ' primary' : '') + '" ' +
            'onclick="toggleTeamSelection(' + t + ')" ' +
            'title="Remove team ' + t + ' from selection">' +
            t + ' <span class="chip-x">×</span></button>';
   }).join('');
+  // Show a Clear all button when 2+ teams are selected. With one team, the
+  // chip's own × is sufficient; the Clear all button would be redundant.
+  if (STATE.myTeams.size >= 2) {
+    html += '<button class="team-chip-clear" onclick="clearAllTeamSelection()" ' +
+            'title="Remove all selected teams">Clear all</button>';
+  }
+  wrap.innerHTML = html;
 }
 
 function updateNextMatch(nowMatchNum) {
