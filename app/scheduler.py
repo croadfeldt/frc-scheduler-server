@@ -221,28 +221,88 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                 s -= (2 * par[blue[i]][blue[j]] + 1) * w_partner
         return s
 
-    def station_imbalance_penalty(red: list[int], blue: list[int]) -> float:
-        """Penalize tentatively assigning these 6 teams to stations 0..5
-        (R1, R2, R3, B1, B2, B3 in that order). Cost is the marginal increase
-        in max-min station spread for each team."""
-        s = 0.0
-        for i, t in enumerate(red):
-            # Station i (0..2 for red 1..3) would gain one appearance
-            new_counts = list(station_counts[t])
-            new_counts[i] += 1
-            s -= w_station * (max(new_counts) - min(new_counts))
-        for i, t in enumerate(blue):
-            new_counts = list(station_counts[t])
-            new_counts[3 + i] += 1
-            s -= w_station * (max(new_counts) - min(new_counts))
-        return s
+    def precompute_station_costs(six: list[int]) -> list[list[float]]:
+        """For each team in `six` and each of the 6 stations, return the
+        MARGINAL increase in (max - min) station-count spread that would
+        result from placing that team at that station.
+
+        Computed ONCE per assign_alliances call, then reused across all 20
+        splits × 12 within-alliance perms. Replaces the old approach of
+        re-running station_imbalance_penalty inside the inner loop, which
+        did 36 list copies + 36 max/min calls per evaluation.
+
+        Result indexing: cost[team_idx_in_six][station] where team_idx is
+        the position in `six` (0..5) and station is 0..5 (R1, R2, R3, B1, B2, B3).
+        """
+        cost = [[0.0] * 6 for _ in range(6)]
+        for ti, t in enumerate(six):
+            sc = station_counts[t]
+            cur_max = sc[0]; cur_min = sc[0]
+            for v in sc[1:]:
+                if v > cur_max: cur_max = v
+                if v < cur_min: cur_min = v
+            cur_imb = cur_max - cur_min
+            for s in range(6):
+                new_at_s = sc[s] + 1
+                # New max: either old max or the incremented station
+                new_max = cur_max if new_at_s <= cur_max else new_at_s
+                # New min: only changes if we incremented THE unique min station
+                if sc[s] == cur_min:
+                    # Find the second-lowest by scanning the other 5 stations
+                    rest_min = sc[(s + 1) % 6] if s != 0 else sc[1]
+                    for k in range(6):
+                        if k != s and sc[k] < rest_min:
+                            rest_min = sc[k]
+                    new_min = rest_min if rest_min < new_at_s else new_at_s
+                else:
+                    new_min = cur_min
+                cost[ti][s] = (new_max - new_min) - cur_imb
+        return cost
+
+    def best_alliance_perm(team_indices: tuple, station_offset: int,
+                          sta_cost: list[list[float]]) -> tuple[float, tuple[int, int, int]]:
+        """For the 3 teams referenced by `team_indices` (indices into `six`),
+        find the within-alliance ordering that minimizes total station-imbalance
+        cost. Stations are `station_offset` + (0, 1, 2) — i.e., 0/1/2 for red
+        and 3/4/5 for blue. Returns (total_cost, best_perm).
+
+        Red and blue alliances optimize independently because each team's
+        imbalance contribution depends only on which station THEY land at;
+        the other alliance's choices don't affect it. So we can solve red and
+        blue separately, dropping from 36 combined perms to 6+6=12.
+        """
+        i0, i1, i2 = team_indices
+        s0 = station_offset
+        s1 = station_offset + 1
+        s2 = station_offset + 2
+        # Inline all 6 perms with direct lookups — fastest path
+        c0 = sta_cost[i0][s0] + sta_cost[i1][s1] + sta_cost[i2][s2]
+        c1 = sta_cost[i0][s0] + sta_cost[i2][s1] + sta_cost[i1][s2]
+        c2 = sta_cost[i1][s0] + sta_cost[i0][s1] + sta_cost[i2][s2]
+        c3 = sta_cost[i1][s0] + sta_cost[i2][s1] + sta_cost[i0][s2]
+        c4 = sta_cost[i2][s0] + sta_cost[i0][s1] + sta_cost[i1][s2]
+        c5 = sta_cost[i2][s0] + sta_cost[i1][s1] + sta_cost[i0][s2]
+        best = c0; perm = (i0, i1, i2)
+        if c1 < best: best = c1; perm = (i0, i2, i1)
+        if c2 < best: best = c2; perm = (i1, i0, i2)
+        if c3 < best: best = c3; perm = (i1, i2, i0)
+        if c4 < best: best = c4; perm = (i2, i0, i1)
+        if c5 < best: best = c5; perm = (i2, i1, i0)
+        return best, perm
 
     def assign_alliances(six: list[int]) -> tuple[list[int], list[int]] | None:
         """Pick the best 3-red / 3-blue split AND best within-alliance ordering
-        for these 6 teams. Tries every combination (20 splits × 36 orderings =
-        720 candidates per match). Cheap, runs once per match."""
+        for these 6 teams.
+
+        Performance: 20 splits × 12 perms (6 red + 6 blue, decoupled) with
+        precomputed station-cost matrix. Previously enumerated all 36 red×blue
+        combinations per split with per-call list copies and max/min — that
+        was ~30× slower for no benefit, since the two alliances' imbalance
+        contributions are independent.
+        """
         if len(six) != 6 or len(set(six)) != 6:
             return None
+        sta_cost = precompute_station_costs(six)
         best_score = -float('inf')
         best_r, best_b = None, None
         for ri, bi in _SPLITS:
@@ -253,32 +313,29 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                 sum(abs(rc[t] - (bc[t] + 1)) for t in b)
             )
             div = diversity_score(r, b)
-            # Try a few orderings within each alliance to find best station
-            # placement. We don't enumerate all 6 (3! × 3! = 36) — that's
-            # cheap but we usually find a good one in ~6 tries with the
-            # heuristic: prefer placing teams at their LEAST-occupied stations.
-            best_ord_score = -float('inf')
-            best_ord_r, best_ord_b = r, b
-            for r_ord in _PERM3:
-                for b_ord in _PERM3:
-                    rr = [r[k] for k in r_ord]
-                    bb = [b[k] for k in b_ord]
-                    sta = station_imbalance_penalty(rr, bb)
-                    if sta > best_ord_score:
-                        best_ord_score = sta
-                        best_ord_r, best_ord_b = rr, bb
-            total = bal + div + best_ord_score
+            # Solve red and blue station orderings independently — each
+            # alliance's contribution is independent of the other's choice.
+            red_cost, red_perm = best_alliance_perm((ri[0], ri[1], ri[2]), 0, sta_cost)
+            blue_cost, blue_perm = best_alliance_perm((bi[0], bi[1], bi[2]), 3, sta_cost)
+            sta = -w_station * (red_cost + blue_cost)
+            total = bal + div + sta
             if total > best_score:
                 best_score = total
-                best_r, best_b = best_ord_r, best_ord_b
+                best_r = [six[red_perm[0]], six[red_perm[1]], six[red_perm[2]]]
+                best_b = [six[blue_perm[0]], six[blue_perm[1]], six[blue_perm[2]]]
         return (best_r, best_b) if best_r is not None else None
 
     def assign_alliances_r1(six: list[int]) -> tuple[list[int], list[int]] | None:
         """Round-1-aware variant: also penalizes uneven distribution of
         second-time players across the two alliances in the round-1 boundary
-        match. Used only at the round-1/round-2 transition."""
+        match. Used only at the round-1/round-2 transition.
+
+        Same performance optimization as assign_alliances — precomputed
+        station-cost matrix + decoupled red/blue ordering.
+        """
         if len(six) != 6 or len(set(six)) != 6:
             return None
+        sta_cost = precompute_station_costs(six)
         best_score = -float('inf')
         best_r, best_b = None, None
         for ri, bi in _SPLITS:
@@ -292,20 +349,14 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                 sum(abs(rc[t] - (bc[t] + 1)) for t in b)
             )
             div = diversity_score(r, b)
-            best_ord_score = -float('inf')
-            best_ord_r, best_ord_b = r, b
-            for r_ord in _PERM3:
-                for b_ord in _PERM3:
-                    rr = [r[k] for k in r_ord]
-                    bb = [b[k] for k in b_ord]
-                    sta = station_imbalance_penalty(rr, bb)
-                    if sta > best_ord_score:
-                        best_ord_score = sta
-                        best_ord_r, best_ord_b = rr, bb
-            total = sec_penalty + bal + div + best_ord_score
+            red_cost, red_perm = best_alliance_perm((ri[0], ri[1], ri[2]), 0, sta_cost)
+            blue_cost, blue_perm = best_alliance_perm((bi[0], bi[1], bi[2]), 3, sta_cost)
+            sta = -w_station * (red_cost + blue_cost)
+            total = sec_penalty + bal + div + sta
             if total > best_score:
                 best_score = total
-                best_r, best_b = best_ord_r, best_ord_b
+                best_r = [six[red_perm[0]], six[red_perm[1]], six[red_perm[2]]]
+                best_b = [six[blue_perm[0]], six[blue_perm[1]], six[blue_perm[2]]]
         return (best_r, best_b) if best_r is not None else None
 
     def commit_match(red: list[int], blue: list[int], now: int) -> None:
@@ -351,8 +402,12 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
     ) -> tuple[list[int], list[int]]:
         cands = []
         for _ in range(n_attempts):
-            fp = random.sample(first_pool, min(first_slots, len(first_pool)))
-            sp = random.sample(second_pool, min(extra_slots, len(second_pool))) if extra_slots else []
+            # Use the seeded `rng` (not global `random`) so the same seed
+            # always produces the same schedule. Previously this used
+            # global random.sample, which made same-seed reruns within a
+            # single process produce different results — bug fixed here.
+            fp = rng.sample(first_pool, min(first_slots, len(first_pool)))
+            sp = rng.sample(second_pool, min(extra_slots, len(second_pool))) if extra_slots else []
             six = fp + sp
             if len(six) == 6 and len(set(six)) == 6:
                 res = assign_alliances_r1(six) if is_last else assign_alliances(six)
