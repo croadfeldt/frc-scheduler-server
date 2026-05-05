@@ -14,13 +14,16 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # System deps + gosu for privilege dropping (linuxserver pattern).
-# tesseract-ocr is needed for the PDF import OCR strategy (image-based PDFs
-# like the MSHSL state schedule have no extractable text — Tesseract OCRs
-# them so the LLM can interpret the result). The -eng language pack covers
-# everything our schedules ever contain.
+#   - tesseract-ocr / -eng: PDF import OCR strategy (image-based PDFs)
+#   - libpango-1.0-0, libpangoft2-1.0-0, libharfbuzz0b: WeasyPrint runtime
+#     deps for HTML→PDF rendering. WeasyPrint v60+ dropped Cairo so we
+#     don't need libcairo. fonts-dejavu provides a reasonable default
+#     font that fontconfig will pick up.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libpq-dev gosu \
     tesseract-ocr tesseract-ocr-eng \
+    libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b \
+    fonts-dejavu fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

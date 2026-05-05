@@ -41,6 +41,7 @@ from app import tba as tba_client
 from app import frc_events as frc_client
 from app import pdf_extract
 from app import pdf_dayplan
+from app import pdf_render
 from app import pdf_validate
 from app import xlsx_extract
 from app import csv_extract
@@ -2414,6 +2415,62 @@ async def import_csv_endpoint(
         "derived":         _safe_derive(matches),
         "_cache":          "miss",
     }
+
+
+@app.post("/api/schedules/render-pdf")
+async def render_schedule_pdf_endpoint(
+    body: dict,
+    current_user: dict | None = Depends(get_current_user),
+):
+    """Render a schedule to PDF.
+
+    Body shape (see app.pdf_render docstring for details):
+        {
+            "schedule": {event_name, event_year, num_teams, ..., days: [...]},
+            "options":  {scope, page_break_after_practice, ..., show_*},
+            "branding": {primary_color, logo_text, title, subtitle}  // optional
+        }
+
+    Returns:
+        PDF binary stream with appropriate content-disposition headers.
+
+    Replaces the previous client-side html2pdf flow which suffered
+    from cross-browser inconsistencies, font-loading races, and
+    unreliable table page-breaks. WeasyPrint produces deterministic,
+    text-based PDFs.
+    """
+    if not isinstance(body, dict) or "schedule" not in body:
+        raise HTTPException(400, "Missing 'schedule' in request body")
+
+    try:
+        pdf_bytes = pdf_render.render_schedule_pdf(
+            body, branding=body.get("branding"),
+        )
+    except ValueError as e:
+        raise HTTPException(422, f"Invalid schedule data: {e}")
+    except RuntimeError as e:
+        # weasyprint import / system-dep error
+        log.exception("PDF rendering runtime error")
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        log.exception("Unexpected error rendering PDF")
+        raise HTTPException(500, f"PDF render error: {type(e).__name__}: {e}")
+
+    # Filename: prefer event-derived, fall back to generic.
+    schedule = body.get("schedule") or {}
+    event_name = schedule.get("event_name") or "schedule"
+    year = schedule.get("event_year")
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in event_name).strip("_")
+    filename = f"{safe or 'schedule'}_{year or ''}.pdf".replace("__", "_").strip("_")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
 
 
 @app.post("/api/schedules/import-pdf/commit")

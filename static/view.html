@@ -698,7 +698,7 @@
     <!-- Toolbar — single Export button opens unified modal -->
     <div class="toolbar no-print">
       <span class="group-label">Export</span>
-      <button class="btn btn-secondary" onclick="openExportModal()" title="Print, save as PDF, or download as XLSX/CSV/JSON/FMS">⬇ Export…</button>
+      <button class="btn btn-secondary" onclick="openExportModal()" title="Print, save as PDF, or download as XLSX/CSV/JSON/FMS">⬇ Print / Export…</button>
       <span style="flex:1"></span>
       <span class="group-label">Share</span>
       <button class="btn btn-secondary" onclick="openShareModal()" title="Show QR code">📱 QR</button>
@@ -871,9 +871,11 @@
 .export-format-radio input[type="radio"] { margin: 0; }
 </style>
 
-<!-- External libraries (loaded lazily — failures degrade gracefully) -->
+<!-- External libraries (loaded lazily — failures degrade gracefully).
+     html2pdf was previously included for client-side PDF generation;
+     replaced by server-side rendering via /api/schedules/render-pdf
+     (WeasyPrint). xlsx-js-style still needed for client-side XLSX. -->
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 
 <script>
@@ -2561,6 +2563,307 @@ function onExportFormatChange() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Print + PDF
+//
+// PDF: server-side render via /api/schedules/render-pdf (WeasyPrint).
+//   The frontend POSTs the schedule data + options; the server returns
+//   real PDF bytes which we trigger as a download. Replaces the old
+//   client-side html2canvas/html2pdf pipeline that produced blank
+//   pages, off-page content, and font-loading races.
+//
+// Print: tbody-splitting approach. We rebuild #matchesTbody so that
+//   each "page" of matches sits in its own <tbody> element, with
+//   `page-break-before: always` set inline on each non-first tbody.
+//   Browsers honor page-break-before on <tbody> reliably across
+//   Chrome/Firefox/Safari, unlike <tr> where it's flaky. After
+//   afterprint fires, we collapse the multiple tbodies back into one.
+// ─────────────────────────────────────────────────────────────────────
+
+function _viewBuildPdfPayload(opts) {
+  // Convert STATE.computed (flat array of match/break/day-divider
+  // entries) into the day-grouped shape the server's pdf_render
+  // module expects.
+  var computed = STATE.computed || [];
+  var sched = STATE.schedule || {};
+  var ev    = sched.event || {};
+  var onlyMine = document.getElementById('onlyMine').checked;
+  var hasSel = STATE.myTeams && STATE.myTeams.size > 0;
+
+  function minToHHMM(m) {
+    if (m == null) return '';
+    var h = Math.floor(m / 60), mm = m % 60;
+    return (h<10?'0':'')+h + ':' + (mm<10?'0':'')+mm;
+  }
+
+  // Group entries by dayNum, marking practice-day separately.
+  // The view's STATE.computed includes day-divider rows; we use those
+  // to know where days start/end. Practice rows have isPractice=true.
+  var days = [];
+  var currentDay = null;
+
+  function startDay(dayNum, isPractice, label) {
+    currentDay = {
+      day_num: dayNum,
+      is_practice_day: isPractice,
+      label: label || (isPractice ? 'Practice' : 'Day ' + dayNum),
+      cycle_info: null,
+      entries: [],
+    };
+    days.push(currentDay);
+  }
+
+  computed.forEach(function(entry) {
+    if (entry.type === 'day-divider') {
+      // Day boundary — start a new day section. The label text
+      // already reads "Day N" or "Practice".
+      var label = entry.label || '';
+      var isPractice = /practice/i.test(label);
+      // Try to extract day number; fall back to current count.
+      var m = label.match(/(\d+)/);
+      var dayNum = m ? parseInt(m[1]) : (isPractice ? 0 : days.length + 1);
+      startDay(dayNum, isPractice, label);
+      return;
+    }
+
+    if (!currentDay) {
+      // Some schedules have no day dividers (single-day events).
+      // Open a default day for the first entry we see.
+      startDay(1, !!entry.isPractice, null);
+    }
+
+    if (entry.type === 'match') {
+      // Apply onlyMine filter — server PDF should reflect what the
+      // user is looking at.
+      if (onlyMine && hasSel && !matchHasAnySelectedTeam(entry)) return;
+      currentDay.entries.push({
+        type: 'match',
+        num:  entry.matchNum,
+        time: minToHHMM(entry.startMin),
+        is_practice: !!entry.isPractice,
+        red:  entry.red  || [0, 0, 0],
+        blue: entry.blue || [0, 0, 0],
+        red_surrogate:  entry.redSur  || [false, false, false],
+        blue_surrogate: entry.blueSur || [false, false, false],
+        round: null,  // view doesn't track round boundaries
+      });
+      return;
+    }
+
+    if (entry.type === 'break') {
+      if (onlyMine && hasSel) return;  // breaks hidden when filtered
+      currentDay.entries.push({
+        type: 'break',
+        name: entry.name || 'Break',
+        start: minToHHMM(entry.start),
+        end:   minToHHMM(entry.end),
+      });
+    }
+    // info-block entries don't have a clean PDF representation —
+    // skip them. They're a view-only flair.
+  });
+
+  return {
+    schedule: {
+      event_name: ev.name || null,
+      event_year: ev.year || null,
+      event_location: ev.location || null,
+      num_teams:  sched.num_teams || 0,
+      matches_per_team: sched.matches_per_team || 0,
+      days: days,
+    },
+    options: {
+      scope: 'both',
+      show_team_numbers: true,
+      show_cycle_times:  true,
+      show_cycle_changes: true,
+      show_breaks:       true,
+      show_day_breaks:   true,
+      show_round_dividers: false,
+      page_break_after_practice: !!opts.breakAfterPractice,
+      page_break_between_days:   !!opts.breakBetweenDays,
+    },
+    branding: {
+      primary_color: (STATE.branding && STATE.branding.primary_color) || null,
+      logo_text:     (STATE.branding && STATE.branding.logo_text)     || null,
+      title:         (STATE.branding && STATE.branding.title)         || null,
+      subtitle:      (STATE.branding && STATE.branding.subtitle)      || null,
+    },
+  };
+}
+
+async function serverRenderPdf(opts) {
+  // POST schedule to /api/schedules/render-pdf, get PDF bytes back,
+  // trigger a download.
+  var payload = _viewBuildPdfPayload(opts || {});
+  if (!payload.schedule.days.length) {
+    alert('No schedule to download.');
+    return;
+  }
+
+  // Show a transient "generating" message — replaces the table
+  // count briefly so the user knows something's happening.
+  var countEl = document.getElementById('tableCount');
+  var origCount = countEl ? countEl.textContent : '';
+  if (countEl) countEl.textContent = 'Generating PDF…';
+
+  try {
+    var r = await fetch('/api/schedules/render-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      var errText = await r.text();
+      var msg = errText || ('HTTP ' + r.status);
+      try {
+        var j = JSON.parse(errText);
+        if (j && j.detail) msg = (typeof j.detail === 'string') ? j.detail : JSON.stringify(j.detail);
+      } catch(_) {}
+      throw new Error(msg);
+    }
+    var blob = await r.blob();
+    triggerDownload(blob, getFilenameSlug('.pdf'));
+  } catch (err) {
+    console.error('PDF generation failed:', err);
+    alert('PDF generation failed: ' + (err && err.message ? err.message : err));
+  } finally {
+    if (countEl) countEl.textContent = origCount;
+  }
+}
+
+// Legacy entry point for any code still calling exportPdf().
+function exportPdf(pdfOpts) {
+  pdfOpts = pdfOpts || {};
+  serverRenderPdf({
+    breakAfterPractice: pdfOpts.breakAfterPractice !== false,
+    breakBetweenDays:   pdfOpts.breakBetweenDays   !== false,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Print: tbody-splitting approach
+//
+// Single <tbody> with page breaks on rows is browser-fragile. We
+// instead split the tbody at page-break boundaries and set inline
+// page-break-before:always on each non-first tbody. Restore on cleanup.
+// ─────────────────────────────────────────────────────────────────────
+
+function _applyPrintMarkers(opts) {
+  var table = document.querySelector('table.matches');
+  var origTbody = document.getElementById('matchesTbody');
+  if (!table || !origTbody) {
+    console.warn('[print-markers] table or tbody not found');
+    return null;
+  }
+
+  // Walk rows once to identify break boundaries. Each "section" is a
+  // contiguous run of rows that should print together.
+  var allRows = Array.from(origTbody.querySelectorAll('tr'));
+  if (!allRows.length) return null;
+
+  // Boundaries are row indices where a page break should occur BEFORE
+  // them. We collect these, then split the tbody after the marker
+  // walk completes.
+  var boundaries = [];
+  var seenPractice = false;
+  var seenQual = false;
+  var lastDayLabel = null;
+
+  allRows.forEach(function(tr, idx) {
+    if (tr.classList.contains('day-divider')) {
+      var label = tr.textContent.trim();
+      if (opts.breakBetweenDays && lastDayLabel !== null && label !== lastDayLabel) {
+        boundaries.push(idx);
+      }
+      lastDayLabel = label;
+      return;
+    }
+    if (!tr.classList.contains('match-row')) return;
+
+    var matchCell = tr.querySelector('.col-match') || tr.cells[1];
+    var label = matchCell ? matchCell.textContent.trim() : '';
+    var isPractice = label.charAt(0) === 'P';
+
+    if (isPractice) {
+      seenPractice = true;
+    } else {
+      if (opts.breakAfterPractice && seenPractice && !seenQual) {
+        boundaries.push(idx);
+      }
+      seenQual = true;
+    }
+  });
+
+  console.log('[print-markers] boundaries at row indices:', boundaries,
+              'total rows:', allRows.length);
+
+  if (!boundaries.length) {
+    // No splits needed — single tbody is fine.
+    return { newTbodies: [], origTbody: origTbody, origRows: allRows };
+  }
+
+  // Split into multiple tbodies. Section i contains rows from
+  // boundaries[i-1] (or 0) to boundaries[i] (exclusive).
+  var sectionStarts = [0].concat(boundaries);
+  var sectionEnds   = boundaries.concat([allRows.length]);
+
+  // Build new tbodies, then swap them in.
+  var newTbodies = [];
+  for (var s = 0; s < sectionStarts.length; s++) {
+    var tbody = document.createElement('tbody');
+    if (s === 0) {
+      // Reuse the original tbody for the first section so its id stays
+      // pointing at something rendered on screen; we'll restore later.
+      tbody = origTbody.cloneNode(false);  // shallow clone (no children)
+      tbody.id = 'matchesTbody-pb-0';
+    } else {
+      tbody.id = 'matchesTbody-pb-' + s;
+      // Inline style: page-break-before:always wins over any cascade.
+      tbody.style.pageBreakBefore = 'always';
+      tbody.style.breakBefore     = 'page';
+    }
+    for (var i = sectionStarts[s]; i < sectionEnds[s]; i++) {
+      tbody.appendChild(allRows[i]);
+    }
+    newTbodies.push(tbody);
+  }
+
+  // Replace original tbody with the first new tbody, then insert the
+  // rest after it. Order matters: insert in reverse so each insertion
+  // goes after the original.
+  origTbody.parentNode.replaceChild(newTbodies[0], origTbody);
+  for (var k = newTbodies.length - 1; k >= 1; k--) {
+    newTbodies[0].parentNode.insertBefore(newTbodies[k], newTbodies[0].nextSibling);
+  }
+
+  return {
+    newTbodies: newTbodies,
+    origTbody:  origTbody,
+    origRows:   allRows,
+  };
+}
+
+function _removePrintMarkers(token) {
+  if (!token || !token.newTbodies || !token.newTbodies.length) return;
+  // Move all rows back into the original tbody, then put the original
+  // tbody back where the first new tbody is and remove the rest.
+  var first = token.newTbodies[0];
+  if (!first || !first.parentNode) return;
+  token.origRows.forEach(function(tr) {
+    token.origTbody.appendChild(tr);
+  });
+  // Restore id (the first new tbody had taken matchesTbody-pb-0)
+  token.origTbody.id = 'matchesTbody';
+  first.parentNode.replaceChild(token.origTbody, first);
+  for (var i = 1; i < token.newTbodies.length; i++) {
+    if (token.newTbodies[i].parentNode) {
+      token.newTbodies[i].parentNode.removeChild(token.newTbodies[i]);
+    }
+  }
+  console.log('[print-markers] cleanup complete');
+}
+
 function runExportAction(action) {
   // action: 'print' | 'pdf' | 'download'
   var selected = document.querySelector('input[name="exportFormat"]:checked');
@@ -2576,36 +2879,43 @@ function runExportAction(action) {
     optBreakBetweenDays   = cb2 ? cb2.checked : true;
   }
 
-  // Close the modal up front. Most actions open a popup or trigger
-  // a download; both work better with the modal already gone.
+  // Close the modal up front. Most actions trigger a download or a
+  // popup; both work better with the modal already gone.
   var modal = document.getElementById('exportModal');
   if (modal) modal.classList.remove('open');
 
-  // Small async gap so the modal close animation (if any) settles
-  // before we trigger heavy-DOM operations.
+  // Print path is special: window.print() must run within the user-
+  // gesture window or some browsers (Safari, certain Chromium
+  // configs) silently no-op. We do NOT wrap it in setTimeout for
+  // that reason. Other formats use setTimeout to let the modal
+  // close animation complete.
+  if (fmt === 'print_pdf' && action === 'print') {
+    var token = _applyPrintMarkers({
+      breakAfterPractice: optBreakAfterPractice,
+      breakBetweenDays:   optBreakBetweenDays,
+    });
+    var cleanup = function() {
+      _removePrintMarkers(token);
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    // Defensive cleanup: some browsers don't fire afterprint reliably
+    // (notably Safari). 30 seconds covers any normal interaction
+    // without prematurely removing markers if the user is reviewing.
+    setTimeout(function() { _removePrintMarkers(token); }, 30000);
+    window.print();
+    return;
+  }
+
   setTimeout(function() {
     if (fmt === 'print_pdf') {
-      if (action === 'print') {
-        // Tag live DOM with page-break markers; window.print() picks
-        // them up via @media print CSS; cleanup on afterprint.
-        var token = _applyPrintMarkers({
-          breakAfterPractice: optBreakAfterPractice,
-          breakBetweenDays:   optBreakBetweenDays,
-        });
-        var cleanup = function() {
-          _removePrintMarkers(token);
-          window.removeEventListener('afterprint', cleanup);
-        };
-        window.addEventListener('afterprint', cleanup);
-        window.print();
-      } else {
-        // PDF path: pass opts to exportPdf which injects inline
-        // page-break styles in the rebuilt detached DOM.
-        exportPdf({
-          breakAfterPractice: optBreakAfterPractice,
-          breakBetweenDays:   optBreakBetweenDays,
-        });
-      }
+      // action === 'pdf' here (the print branch returned above).
+      // Server-side render — no html2canvas, no font-loading races,
+      // reliable page breaks.
+      serverRenderPdf({
+        breakAfterPractice: optBreakAfterPractice,
+        breakBetweenDays:   optBreakBetweenDays,
+      });
       return;
     }
     if (fmt === 'xlsx')  { exportXlsx(); return; }
@@ -2615,410 +2925,6 @@ function runExportAction(action) {
   }, 50);
 }
 
-function _applyPrintMarkers(opts) {
-  // Walk the matches table once, tagging rows where page breaks
-  // should occur. Returns the list of (element, className) pairs we
-  // added so cleanup can undo them precisely.
-  //
-  // BUGFIX: previous version checked tr.querySelector('td').textContent
-  // for "P"/"Q" — but the first <td> is the time cell (col-time), not
-  // the match number. So `seenPractice` never flipped, no markers
-  // were ever added, and the page-break-after-practice toggle was a
-  // silent no-op. Fixed by reading the .col-match cell explicitly.
-  var added = [];
-  var tbody = document.getElementById('matchesTbody');
-  if (!tbody) return added;
-
-  var rows = tbody.querySelectorAll('tr');
-  var seenPractice = false;
-  var seenQual     = false;
-  var lastDayLabel = null;
-
-  rows.forEach(function(tr) {
-    if (tr.classList.contains('day-divider')) {
-      var label = tr.textContent.trim();
-      if (opts.breakBetweenDays && lastDayLabel !== null && label !== lastDayLabel) {
-        tr.classList.add('print-pb-before');
-        added.push([tr, 'print-pb-before']);
-      }
-      lastDayLabel = label;
-      return;
-    }
-    if (!tr.classList.contains('match-row')) return;
-
-    // Read the match-number cell directly by class. Practice rows
-    // show "P<n>" in this cell; qual rows show "Q<n>". Falling back
-    // to the second TD covers any cases where col-match isn't on
-    // the cell (defensive).
-    var matchCell = tr.querySelector('.col-match') || tr.cells[1];
-    var label = matchCell ? matchCell.textContent.trim() : '';
-    var isPractice = label.charAt(0) === 'P';
-
-    if (isPractice) {
-      seenPractice = true;
-    } else {
-      // First qual row after any practice rows is the boundary.
-      if (opts.breakAfterPractice && seenPractice && !seenQual) {
-        tr.classList.add('print-pb-before');
-        added.push([tr, 'print-pb-before']);
-      }
-      seenQual = true;
-    }
-  });
-
-  return added;
-}
-
-function _removePrintMarkers(added) {
-  if (!added) return;
-  added.forEach(function(pair) {
-    pair[0].classList.remove(pair[1]);
-  });
-}
-
-function exportPdf(pdfOpts) {
-  // pdfOpts (optional): {
-  //   breakAfterPractice: bool,   // default true
-  //   breakBetweenDays:   bool,   // default true
-  // }
-  // Called both with no args (legacy / direct invocation) and with an
-  // opts object (from the Print/PDF options modal).
-  pdfOpts = pdfOpts || {};
-  var optBreakAfterPractice = (pdfOpts.breakAfterPractice !== false);
-  var optBreakBetweenDays   = (pdfOpts.breakBetweenDays   !== false);
-
-  if (typeof html2pdf === 'undefined') {
-    alert('PDF library failed to load. Use Print and choose Save as PDF.');
-    return;
-  }
-
-  // html2pdf renders the live DOM via html2canvas. `@media print` rules don't
-  // apply (it isn't actually printing), and the dark-mode media query from
-  // `prefers-color-scheme: dark` continues to match. To get a clean light PDF
-  // we build a fresh detached DOM with explicit light colors set as inline
-  // styles on every relevant element — variables won't help here because
-  // var() resolution still walks back to :root.
-
-  var b = STATE.branding || {};
-  var primaryColor = b.primary_color || '#0969da';
-
-  // Container with explicit light styling
-  var wrap = document.createElement('div');
-  wrap.style.cssText = [
-    'background: #ffffff',
-    'color: #1c2128',
-    'padding: 0',
-    'margin: 0',
-    'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif',
-    'font-size: 11pt',
-    'line-height: 1.4',
-    '-webkit-print-color-adjust: exact',
-    'print-color-adjust: exact',
-  ].join(';');
-
-  // ── Header (rebuilt fresh, not cloned, so dark-mode styles don't leak) ─
-  var ev = (STATE.schedule && STATE.schedule.event) || {};
-  var titleText = b.title || ev.name || 'FRC Match Schedule';
-  var subtitleParts = [];
-  if (ev.year)     subtitleParts.push(String(ev.year));
-  if (ev.location) subtitleParts.push(ev.location);
-  if (b.venue && subtitleParts.indexOf(b.venue) < 0) subtitleParts.push(b.venue);
-  if (b.subtitle)  subtitleParts = [b.subtitle];
-
-  var logoText = b.logo_text || (ev.year ? String(ev.year) : 'FRC');
-  var logoFontSize = logoText.length >= 4 ? '15px' : '22px';
-  var logoInner = b.logo_url
-    ? '<img src="' + escapeAttr(b.logo_url) + '" alt="" style="max-width:60px;max-height:60px;object-fit:contain;">'
-    : '<span style="font-size:' + logoFontSize + ';font-weight:700;letter-spacing:-0.02em;color:#fff;">' + escapeHtml(logoText) + '</span>';
-
-  var header = document.createElement('div');
-  header.style.cssText = [
-    'background: ' + primaryColor,
-    'color: #ffffff',
-    'padding: 0.75rem 1rem',
-    'margin: 0 0 0.6rem 0',
-    'border-radius: 6px',
-    'display: table',
-    'width: 100%',
-    'box-sizing: border-box',
-    '-webkit-print-color-adjust: exact',
-    'print-color-adjust: exact',
-  ].join(';');
-  header.innerHTML =
-    '<div style="display:table-cell;vertical-align:middle;width:64px;padding-right:1rem;">' +
-    '  <div style="width:60px;height:60px;background:rgba(255,255,255,0.18);border-radius:6px;display:flex;align-items:center;justify-content:center;">' +
-        logoInner +
-    '  </div>' +
-    '</div>' +
-    '<div style="display:table-cell;vertical-align:middle;">' +
-    '  <div style="font-size:18pt;font-weight:700;line-height:1.15;color:#fff;">' + escapeHtml(titleText) + '</div>' +
-    (subtitleParts.length ? '<div style="font-size:10pt;opacity:0.9;color:#fff;margin-top:2px;">' + escapeHtml(subtitleParts.join(' · ')) + '</div>' : '') +
-    '</div>';
-  wrap.appendChild(header);
-
-  // ── Match table (rebuilt with inline styles for portability) ───────────
-  var rows = STATE.computed || [];
-  var onlyMine = document.getElementById('onlyMine').checked;
-  var myTeams = STATE.myTeams || new Set();
-  var hasSel  = myTeams.size > 0;
-  function matchHasMine(e) {
-    for (var t of e.red)  if (myTeams.has(t)) return true;
-    for (var t of e.blue) if (myTeams.has(t)) return true;
-    return false;
-  }
-
-  var tbl = document.createElement('table');
-  tbl.style.cssText = [
-    'width: 100%',
-    'border-collapse: collapse',
-    'font-size: 10pt',
-    'font-variant-numeric: tabular-nums',
-    'background: #ffffff',
-    'color: #1c2128',
-  ].join(';');
-
-  var thStyle = 'background:#f0f3f6;padding:6px 4px;font-weight:700;font-size:8pt;text-transform:uppercase;letter-spacing:0.04em;border-bottom:2px solid #1c2128;text-align:center;color:#424a53;-webkit-print-color-adjust:exact;print-color-adjust:exact;';
-  var thLeft  = thStyle + 'text-align:left;padding-left:10px;';
-  var thBlue  = thStyle + 'color:#0550ae;';
-  var thRed   = thStyle + 'color:#a3261a;';
-  tbl.innerHTML =
-    '<thead><tr>' +
-    '<th style="' + thLeft + '">Time</th>' +
-    '<th style="' + thLeft + '">Match</th>' +
-    '<th style="' + thBlue + '">Blue 1</th>' +
-    '<th style="' + thBlue + '">Blue 2</th>' +
-    '<th style="' + thBlue + '">Blue 3</th>' +
-    '<th style="' + thRed  + '">Red 1</th>' +
-    '<th style="' + thRed  + '">Red 2</th>' +
-    '<th style="' + thRed  + '">Red 3</th>' +
-    '</tr></thead><tbody></tbody>';
-
-  var tbody = tbl.querySelector('tbody');
-  var zebra = 0;
-  var totalMatches = 0, shown = 0;
-  // Page-break tracking. We tag rows that should force a page break
-  // before themselves with inline CSS — html2canvas honours the
-  // legacy `page-break-before` property when rendering.
-  var seenPractice = false;
-  var seenQual     = false;
-  var lastDayLabel = null;
-
-  rows.forEach(function(entry) {
-    if (entry.type === 'match') totalMatches++;
-    if (onlyMine && hasSel) {
-      if (entry.type === 'match' && !matchHasMine(entry)) return;
-      if (entry.type === 'break' || entry.type === 'day-divider') return;
-    }
-    var tr = document.createElement('tr');
-
-    // Decide whether this row should carry a page break BEFORE itself.
-    // Done before innerHTML so we can prepend the style declaration.
-    var pageBreakBefore = false;
-    if (entry.type === 'day-divider') {
-      if (optBreakBetweenDays && lastDayLabel !== null && entry.label !== lastDayLabel) {
-        pageBreakBefore = true;
-      }
-      lastDayLabel = entry.label;
-    } else if (entry.type === 'match') {
-      if (entry.isPractice) {
-        seenPractice = true;
-      } else {
-        if (optBreakAfterPractice && seenPractice && !seenQual) {
-          pageBreakBefore = true;
-        }
-        seenQual = true;
-      }
-    }
-
-    if (entry.type === 'day-divider') {
-      tr.innerHTML = '<td colspan="8" style="background:' + primaryColor +
-        ';color:#fff;padding:5px 10px;font-weight:700;font-size:9pt;text-transform:uppercase;letter-spacing:0.05em;-webkit-print-color-adjust:exact;print-color-adjust:exact;">' +
-        escapeHtml(entry.label) + '</td>';
-      zebra = 0;
-    } else if (entry.type === 'break') {
-      tr.innerHTML = '<td colspan="8" style="background:#fff8c5;color:#7d4e00;padding:6px 10px;text-align:center;font-style:italic;font-weight:500;-webkit-print-color-adjust:exact;print-color-adjust:exact;">⏸ ' +
-        escapeHtml(entry.name) + ' · ' + minToTime12(entry.start) + ' – ' + minToTime12(entry.end) + '</td>';
-    } else {
-      var rowBg = (zebra++ % 2) ? '#f6f8fa' : '#ffffff';
-      var matched = hasSel && matchHasMine(entry);
-      if (matched) rowBg = '#e6f4eb';
-      var rowStyle = 'background:' + rowBg + ';-webkit-print-color-adjust:exact;print-color-adjust:exact;';
-      if (matched) rowStyle += 'box-shadow:inset 4px 0 0 #5daf78;';
-      tr.style.cssText = rowStyle;
-
-      var tdBase  = 'padding:5px 4px;text-align:center;border-bottom:1px solid #eaeef2;';
-      var tdLeft  = tdBase + 'text-align:left;padding-left:10px;';
-      var tdMatch = tdLeft + 'font-weight:700;';
-      var tdBlue  = tdBase + 'color:#0550ae;font-weight:500;';
-      var tdRed   = tdBase + 'color:#a3261a;font-weight:500;';
-
-      function teamCell(val, isSur, side) {
-        var st = side === 'blue' ? tdBlue : tdRed;
-        if (myTeams.has(val)) {
-          st = tdBase + 'background:#5daf78;color:#fff !important;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;';
-        }
-        var marker = isSur ? '<span style="font-size:7pt;background:#fff3cd;color:#856404;padding:1px 3px;border-radius:2px;margin-left:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">S</span>' : '';
-        return '<td style="' + st + '">' + val + marker + '</td>';
-      }
-      tr.innerHTML =
-        '<td style="' + tdLeft + 'color:#57606a;font-size:9pt;">' + minToTime12(entry.startMin) + '</td>' +
-        '<td style="' + tdMatch + '">' + (entry.isPractice ? 'P' : 'Q') + entry.matchNum + '</td>' +
-        teamCell(entry.blue[0], entry.blueSur[0], 'blue') +
-        teamCell(entry.blue[1], entry.blueSur[1], 'blue') +
-        teamCell(entry.blue[2], entry.blueSur[2], 'blue') +
-        teamCell(entry.red[0],  entry.redSur[0],  'red') +
-        teamCell(entry.red[1],  entry.redSur[1],  'red') +
-        teamCell(entry.red[2],  entry.redSur[2],  'red');
-      shown++;
-    }
-
-    // Page-break injection. Both modern (`break-before:page`) and legacy
-    // (`page-break-before:always`) variants — html2canvas reads the
-    // legacy property; modern browsers honour both. Pre-existing
-    // tr.style.cssText (zebra/match-row styling) is preserved.
-    if (pageBreakBefore) {
-      var existing = tr.style.cssText;
-      tr.style.cssText = (existing ? existing + ';' : '') +
-                         'page-break-before:always;break-before:page;';
-    }
-
-    tbody.appendChild(tr);
-  });
-
-  wrap.appendChild(tbl);
-
-  // Footer
-  var foot = document.createElement('div');
-  foot.style.cssText = 'margin-top:10pt;padding-top:6pt;border-top:1px solid #d0d7de;font-size:8pt;color:#57606a;text-align:center;';
-  var footBits = [];
-  if (STATE.schedule.num_teams)        footBits.push(STATE.schedule.num_teams + ' teams');
-  if (STATE.schedule.matches_per_team) footBits.push(STATE.schedule.matches_per_team + ' matches/team');
-  footBits.push(totalMatches + ' total matches');
-  if (onlyMine && hasSel) {
-    var sortedSel = [...myTeams].sort(function(a,b){return a-b;});
-    footBits.push('Filtered: team' + (sortedSel.length === 1 ? ' ' : 's ') +
-                  sortedSel.join(', ') + ' (' + shown + ' shown)');
-  }
-  foot.textContent = footBits.join(' · ');
-  wrap.appendChild(foot);
-
-  // Mount the source so html2canvas can lay it out and capture it.
-  //
-  // History:
-  //   v1: position:absolute; left:-9999px — far-off-screen coords break
-  //       html2canvas geometry in some browser/library combos.
-  //   v2: position:absolute; visibility:hidden — html2canvas honours
-  //       CSS visibility:hidden and produces a BLANK canvas. (This is
-  //       what the user just hit.) Confirmed by the empty content
-  //       stream in the produced PDF (jsPDF wrote a one-page file
-  //       containing only a stroke-color directive — no text, no
-  //       images, no draw commands).
-  //   v3 (now): mount inside a 0×0 overflow:hidden parent. The parent
-  //       sits at (0,0) and shows nothing because it has zero size
-  //       and clips its overflow. The child (`wrap`) is rendered at
-  //       its full natural dimensions inside the parent — fully
-  //       painted, fully laid out, fully captureable by html2canvas —
-  //       just visually clipped to nothing. No `visibility:hidden`,
-  //       no `display:none`, no off-screen coordinates: the element
-  //       is paintably real.
-  var clipper = document.createElement('div');
-  clipper.style.cssText = [
-    'position: absolute',
-    'top: 0',
-    'left: 0',
-    'width: 0',
-    'height: 0',
-    'overflow: hidden',
-    'pointer-events: none',
-    'z-index: -1',
-  ].join(';');
-  // wrap itself stays plain (no positioning, no visibility games);
-  // it just lives inside the 0×0 clipper. We give it an explicit
-  // width matching the eventual PDF content width so its natural
-  // layout matches the captured canvas size.
-  wrap.style.width = '7.5in';  // letter width minus 0.5in margins
-  clipper.appendChild(wrap);
-  document.body.appendChild(clipper);
-
-  // Wait for fonts to be ready before snapshotting. html2canvas
-  // captures whatever has computed layout at the moment .from() is
-  // called — if web fonts haven't applied yet, captured text may be
-  // unstyled/unsized, producing pages of effectively-blank output.
-  // document.fonts.ready resolves once font loading settles. Hard
-  // fallback at 4 seconds so a font-load hang doesn't break export
-  // entirely.
-  function _runHtml2Pdf() {
-    // Use the chained .toPdf() API (instead of .save()) so we can
-    // inspect the canvas after html2canvas runs. If it produced
-    // empty/zero-pixel output, surface a clear error rather than
-    // saving a silently-blank PDF — the most confusing failure mode
-    // we've hit twice now.
-    var worker = html2pdf().set({
-      margin: [0.4, 0.4, 0.4, 0.4],
-      filename: getFilenameSlug('.pdf'),
-      image: { type: 'jpeg', quality: 0.95 },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        // Pin the measurement width to the wrap's natural width.
-        // Without this, html2canvas defaults to viewport width which
-        // mismatches the inline 7.5in size. Read from wrap (not
-        // clipper, which is 0×0) so we get real dimensions.
-        windowWidth: wrap.scrollWidth || 720,
-      },
-      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' },
-    }).from(wrap);
-
-    worker.toCanvas().then(function() {
-      // After toCanvas() resolves, the worker has a `canvas` field
-      // we can inspect. Empty canvas = 0 width or 0 height; effectively
-      // empty = all-white (rare but possible if styles failed to
-      // apply). We only check dimensions here; an all-white canvas
-      // would still produce a "blank" PDF but that's a different
-      // class of bug and we don't want to slow every export with a
-      // pixel scan.
-      var canvas = worker.prop && worker.prop.canvas;
-      if (!canvas || !canvas.width || !canvas.height) {
-        if (clipper.parentNode) clipper.parentNode.removeChild(clipper);
-        alert(
-          'PDF generation produced an empty canvas (' +
-          (canvas ? canvas.width + 'x' + canvas.height : 'no canvas') + '). ' +
-          'This usually means a CSS or font issue with the rendered HTML. ' +
-          'Open the browser console to see html2canvas warnings, or use ' +
-          'the Print button and choose "Save as PDF" instead.'
-        );
-        return;
-      }
-      // Canvas looks valid — proceed to PDF stage.
-      return worker.toPdf().save().then(function() {
-        if (clipper.parentNode) clipper.parentNode.removeChild(clipper);
-      });
-    }).catch(function(err) {
-      console.error('PDF generation failed:', err);
-      if (clipper.parentNode) clipper.parentNode.removeChild(clipper);
-      alert('PDF generation failed: ' + (err && err.message ? err.message : err));
-    });
-  }
-
-  var fontsP = (document.fonts && document.fonts.ready &&
-                typeof document.fonts.ready.then === 'function')
-                 ? document.fonts.ready
-                 : Promise.resolve();
-  // Race fonts.ready against a 4s ceiling so a hung font load doesn't
-  // permanently block export.
-  var ceiling = new Promise(function(resolve) { setTimeout(resolve, 4000); });
-  Promise.race([fontsP, ceiling]).then(function() {
-    // Two RAFs after fonts settle — gives the browser one frame to
-    // apply font metrics and another to recompute layout before
-    // html2canvas snapshots.
-    requestAnimationFrame(function() {
-      requestAnimationFrame(_runHtml2Pdf);
-    });
-  });
-}
 
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);

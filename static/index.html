@@ -1700,7 +1700,7 @@
                buttons. The id is preserved as #btnExport so the
                existing JS toggle that shows/hides the export bar
                (renderScheduleAfterRun, etc.) continues to work. -->
-          <button class="btn-export" id="btnExport" onclick="openExportModal()" title="Export — print, save as PDF, or download as XLSX/CSV/JSON/FMS">&#11015; Export&hellip;</button>
+          <button class="btn-export" id="btnExport" onclick="openExportModal()" title="Print, save as PDF, or download as XLSX/CSV/JSON/FMS">&#11015; Print / Export&hellip;</button>
         </div>
       </div>
       <div class="stats-bar">
@@ -10591,26 +10591,206 @@ function onExportFormatChange() {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Server-side PDF rendering
+//
+// Replaces the previous client-side html2canvas/html2pdf flow which
+// suffered from blank PDFs, off-page content, font-loading races, and
+// table page-break unreliability. We now POST the schedule data + the
+// user's options to /api/schedules/render-pdf; the backend renders a
+// real text-based PDF via WeasyPrint and returns it. The frontend
+// just triggers a download.
+// ─────────────────────────────────────────────────────────────────────
+
+function _buildPdfPayload(opts) {
+  // Convert window._frcScheduled + form parameters into the shape
+  // expected by /api/schedules/render-pdf. See app/pdf_render.py for
+  // the full schema.
+  var scheduled = window._frcScheduled || [];
+  var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
+  var showTeamNums  = hasAssignment && opts.teamNums;
+
+  // Resolve team-number rendering. If teams are assigned, use the
+  // numbers in the entry; otherwise emit zeros so the PDF renderer
+  // shows dashes (the renderer treats team=0 as missing).
+  function teamArray(arr) {
+    if (!arr) return [0, 0, 0];
+    if (!showTeamNums) return [0, 0, 0];
+    return [arr[0] || 0, arr[1] || 0, arr[2] || 0];
+  }
+  function surArray(arr) {
+    if (!arr) return [false, false, false];
+    return [!!arr[0], !!arr[1], !!arr[2]];
+  }
+  function minToHHMM(m) {
+    if (m == null) return '';
+    var h = Math.floor(m / 60), mm = m % 60;
+    return (h<10?'0':'')+h + ':' + (mm<10?'0':'')+mm;
+  }
+
+  var rb = window._frcRoundBoundaries || new Map();
+  var matchNumToRound = new Map();
+  rb.forEach(function(matchIdx, round) { matchNumToRound.set(matchIdx + 1, round); });
+
+  var days = scheduled.map(function(day) {
+    var dayMatches = (day.entries || []).filter(function(e) { return e.type === 'match'; });
+
+    // Cycle-info string for the day header (matches printSchedule's logic).
+    var ctInfo = null;
+    if (opts.cycleTimes && dayMatches.length > 0) {
+      var firstCt = (dayMatches[0].endMin || 0) - (dayMatches[0].startMin || 0);
+      var dayCCs = (day.entries || []).filter(function(e) { return e.type === 'cycle-change'; });
+      if (dayCCs.length > 0 && opts.cycleChanges) {
+        var parts = [firstCt];
+        dayCCs.forEach(function(cc) { if (cc.newTime !== parts[parts.length-1]) parts.push(cc.newTime); });
+        ctInfo = 'cycle: ' + parts.map(function(t){ return (t%1===0?t:t.toFixed(1))+'min'; }).join(' → ');
+      } else {
+        ctInfo = (firstCt%1===0?firstCt:firstCt.toFixed(1)) + 'min/match';
+      }
+    }
+
+    var entries = (day.entries || []).map(function(e) {
+      if (e.type === 'match') {
+        return {
+          type: 'match',
+          num: e.num,
+          time: minToHHMM(e.startMin),
+          is_practice: !!day.isPracticeDay,
+          red:  teamArray(e.red),
+          blue: teamArray(e.blue),
+          red_surrogate:  surArray(e.redSurrogate),
+          blue_surrogate: surArray(e.blueSurrogate),
+          round: matchNumToRound.has(e.num) ? matchNumToRound.get(e.num) : null,
+        };
+      }
+      if (e.type === 'break') {
+        return {
+          type: 'break',
+          name: e.name || 'Break',
+          start: minToHHMM(e.start),
+          end:   minToHHMM(e.end),
+        };
+      }
+      if (e.type === 'cycle-change') {
+        return {
+          type: 'cycle-change',
+          after_match: e.afterMatch,
+          new_cycle_min: e.newTime,
+          at: minToHHMM(e.atMin),
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
+    return {
+      day_num: day.dayNum,
+      is_practice_day: !!day.isPracticeDay,
+      label: day.isPracticeDay ? 'Practice' : ('Day ' + day.dayNum),
+      cycle_info: ctInfo,
+      entries: entries,
+    };
+  });
+
+  // Event metadata for the header.
+  var eventName = '';
+  var eventNameEl = document.getElementById('eventName');
+  if (eventNameEl) eventName = eventNameEl.textContent.trim();
+  var eventYearEl = document.getElementById('eventYear');
+  var eventYear = eventYearEl ? parseInt(eventYearEl.value) : null;
+
+  return {
+    schedule: {
+      event_name: eventName || null,
+      event_year: eventYear || null,
+      num_teams:  parseInt(document.getElementById('numTeams').value) || 0,
+      matches_per_team: parseFloat(document.getElementById('matchesPerTeam').value) || 0,
+      days: days,
+    },
+    options: {
+      scope: 'both',  // editor exports always include both; XLSX has its own scope
+      show_team_numbers: showTeamNums,
+      show_cycle_times:  !!opts.cycleTimes,
+      show_cycle_changes: !!opts.cycleChanges,
+      show_breaks:       !!opts.breaks,
+      show_day_breaks:   !!opts.dayBreaks,
+      show_round_dividers: !!opts.roundDividers,
+      page_break_after_practice: !!opts.pageBreakAfterPractice,
+      page_break_between_days:   !!opts.pageBreak,
+    },
+  };
+}
+
+async function serverRenderPdf() {
+  // Read the same options as printSchedule reads, build the payload,
+  // POST to /api/schedules/render-pdf, trigger a download.
+  if (!window._frcScheduled) { showApiStatus('No schedule to download', true); return; }
+
+  var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
+  var opts = {
+    cycleTimes:     document.getElementById('printOptCycleTimes').checked,
+    cycleChanges:   document.getElementById('printOptCycleChanges').checked,
+    breaks:         document.getElementById('printOptBreaks').checked,
+    dayBreaks:      document.getElementById('printOptDayBreaks').checked,
+    teamNums:       hasAssignment && document.getElementById('printOptTeamNums').checked,
+    roundDividers:  document.getElementById('printOptRoundDividers').checked,
+    pageBreak:      document.getElementById('printOptPageBreak').checked,
+    pageBreakAfterPractice: !!(
+      document.getElementById('printOptPageBreakAfterPractice') &&
+      document.getElementById('printOptPageBreakAfterPractice').checked
+    ),
+  };
+
+  var payload = _buildPdfPayload(opts);
+  showApiStatus('⏳ Generating PDF…');
+
+  try {
+    var headers = { 'Content-Type': 'application/json' };
+    var tok = getToken(); if (tok) headers['Authorization'] = 'Bearer ' + tok;
+    var r = await fetch(API + '/api/schedules/render-pdf', {
+      method: 'POST', headers: headers, body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      var errText = await r.text();
+      var msg = errText || ('HTTP ' + r.status);
+      try {
+        var j = JSON.parse(errText);
+        if (j && j.detail) msg = (typeof j.detail === 'string') ? j.detail : JSON.stringify(j.detail);
+      } catch(_) {}
+      throw new Error(msg);
+    }
+    var blob = await r.blob();
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (typeof getScheduleFilenameSlug === 'function')
+                   ? getScheduleFilenameSlug('.pdf') : 'frc_schedule.pdf';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    showApiStatus('✓ PDF downloaded');
+  } catch (e) {
+    showApiStatus('PDF generation failed: ' + e.message, true);
+  }
+}
+
 function runExportAction(action) {
   // action: 'print' | 'pdf' | 'download' | 'open'
-  // Dispatches to the appropriate existing exporter based on the
-  // currently-selected format and action.
+  // Dispatches to the appropriate exporter based on the currently-
+  // selected format.
   var selected = document.querySelector('input[name="exportFormat"]:checked');
   var fmt = selected ? selected.value : 'print_pdf';
 
   closeModal('modalExport');
 
   // Small async gap so the modal close animation doesn't fight with
-  // popup-window opening (some browsers throttle popup creation
-  // when triggered too close to a click in a still-animating UI).
+  // popup-window opening (some browsers throttle popup creation when
+  // triggered too close to a click in a still-animating UI).
   setTimeout(function() {
     if (fmt === 'print_pdf') {
       if (action === 'pdf') {
-        window._frcPrintAsPdf = true;
+        serverRenderPdf();   // async; will show its own status
       } else {
-        window._frcPrintAsPdf = false;
+        printSchedule();     // browser print via popup window
       }
-      printSchedule();
       return;
     }
     if (fmt === 'xlsx')      { downloadXLSX();      return; }
@@ -10821,83 +11001,16 @@ function printSchedule() {
   var w = window.open('', '_blank');
   if (!w) { showApiStatus('Pop-up blocked — allow pop-ups to print', true); return; }
 
-  // PDF mode: inject html2pdf and call .save() instead of window.print()
-  var asPdf = !!window._frcPrintAsPdf;
-  window._frcPrintAsPdf = false;
-  if (asPdf) {
-    var pdfFile = (typeof getScheduleFilenameSlug === 'function')
-                    ? getScheduleFilenameSlug('.pdf') : 'frc_schedule.pdf';
-    // Inject html2pdf script + invoker just before </body>.
-    //
-    // History: previous version called .from(document.body) which
-    // captured the injected <script> tags and the html2pdf library
-    // chunk as DOM nodes. In some browsers this caused html2canvas to
-    // render a tall blank canvas (just whitespace where the scripts
-    // would otherwise be), producing a "blank PDF." Targeting a
-    // dedicated #frcPrintRoot wrapper avoids that.
-    //
-    // Also: previous version used a fixed setTimeout(200ms) which
-    // is too short — fonts/CSS may not have applied. We now await
-    // both element availability AND document.fonts.ready before
-    // calling html2pdf, with a long fallback so a font-loading
-    // hang still produces output rather than nothing.
-    var injection =
-      '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>' +
-      '<script>' +
-      '  (function() {' +
-      '    var fname = ' + JSON.stringify(pdfFile) + ';' +
-      '    var fired = false;' +
-      '    function fail(msg) {' +
-      '      if (fired) return; fired = true;' +
-      '      document.title = "PDF generation failed";' +
-      '      var d = document.createElement("div");' +
-      '      d.style.cssText = "padding:1rem;background:#ffe1e1;color:#a3261a;font:14px system-ui;border-radius:4px;margin:1rem;";' +
-      '      d.textContent = msg + " Use the Print button and choose Save as PDF instead.";' +
-      '      document.body.insertBefore(d, document.body.firstChild);' +
-      '    }' +
-      '    function go() {' +
-      '      if (fired) return;' +
-      '      var root = document.getElementById("frcPrintRoot");' +
-      '      if (!root) { fail("Print root element missing."); return; }' +
-      '      if (typeof html2pdf !== "function") { fail("PDF library failed to load."); return; }' +
-      '      fired = true;' +
-      '      html2pdf().set({' +
-      '        margin: [0.4, 0.4, 0.4, 0.4],' +
-      '        filename: fname,' +
-      '        image: { type: "jpeg", quality: 0.95 },' +
-      '        html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: root.scrollWidth || 900 },' +
-      '        jsPDF: { unit: "in", format: "letter", orientation: "portrait" },' +
-      '        pagebreak: { mode: ["css", "legacy"], avoid: ["tr", ".day-title"] }' +
-      '      }).from(root).save().then(function() {' +
-      '        setTimeout(function() { window.close(); }, 800);' +
-      '      }).catch(function(err) {' +
-      '        fail("PDF generation error: " + (err && err.message ? err.message : "unknown") + ".");' +
-      '      });' +
-      '    }' +
-      '    function ready() {' +
-      // Wait for fonts (so html2canvas captures laid-out text), then run.
-      // Some browsers don't have document.fonts; fall back to direct go().
-      '      if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {' +
-      '        document.fonts.ready.then(go);' +
-      '      } else {' +
-      '        go();' +
-      '      }' +
-      '    }' +
-      '    if (document.readyState === "complete") { setTimeout(ready, 50); }' +
-      '    else { window.addEventListener("load", function() { setTimeout(ready, 50); }); }' +
-      // Hard fallback: if neither path fires within 8 seconds, force render.
-      '    setTimeout(function() { if (!fired) ready(); }, 8000);' +
-      '  })();' +
-      '<\/script>';
-    html = html.replace('</body></html>', injection + '</body></html>');
-  }
-
+  // Browser print path. PDF is no longer generated client-side here —
+  // the modal's "Save as PDF" button calls serverRenderPdf() which
+  // POSTs to /api/schedules/render-pdf and gets a real PDF back.
+  // Eliminates the html2canvas/html2pdf failure modes (blank pages,
+  // off-page content, font-loading races).
   w.document.write(html);
   w.document.close();
   w.focus();
-  if (!asPdf) {
-    setTimeout(function() { w.print(); }, 300);
-  }
+  // Small delay so popup styles settle before triggering print dialog.
+  setTimeout(function() { w.print(); }, 300);
 }
 </script>
 <script type="text/plain" id="workerSrc">
