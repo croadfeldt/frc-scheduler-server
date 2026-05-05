@@ -380,20 +380,19 @@ DAYPLAN_SCHEMA = {
                         ],
                     },
                     "day_index": {"type": "integer"},
-                    # HH:MM 24-hour format, OR empty string when the PDF
-                    # gives only a start time (e.g. "Playoffs Begin
-                    # 4:00 PM" has no end). Pattern enforces the
-                    # format at decode time so the model can't emit
-                    # "20:0" or "8 AM" or other almost-valid garbage.
-                    # Adapter handles "" the same as missing.
-                    "start": {
-                        "type": "string",
-                        "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$|^$",
-                    },
-                    "end": {
-                        "type": "string",
-                        "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$|^$",
-                    },
+                    # Time fields: schema-level format constraint was
+                    # tempting (regex pattern for HH:MM) but xgrammar
+                    # doesn't support `pattern` and falls back to
+                    # outlines, whose regex engine (interegular)
+                    # crashes on `^`/`$` anchors with
+                    # interegular.patterns.Unsupported: '$'.
+                    # Pattern-less schema keeps us on xgrammar (fast,
+                    # reliable). Time validation happens downstream
+                    # in the adapter — invalid HH:MM values become
+                    # empty string there, so the rest of the
+                    # pipeline doesn't see garbage.
+                    "start":   {"type": "string"},
+                    "end":     {"type": "string"},
                     "label":   {"type": "string"},
                     "details": {"type": "string"},
                 },

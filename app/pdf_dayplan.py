@@ -174,6 +174,35 @@ async def extract_dayplan(text: str) -> dict[str, Any] | None:
 
 # ── Adapter to existing day_config schema ────────────────────────────────────
 
+import re as _re_module
+
+# Strict HH:MM-or-empty matcher used to scrub start/end fields. We can't
+# enforce this in the LLM's JSON schema (xgrammar lacks `pattern`
+# support and falls back to outlines, whose regex parser crashes on
+# anchors), so we validate downstream. Anything that doesn't match
+# becomes empty string, which the rest of the adapter treats as
+# "unspecified time."
+_HHMM_RE = _re_module.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+
+def _valid_hhmm(s: Any) -> str:
+    """Coerce a putative HH:MM string to a valid one or empty string.
+
+    Accepts:
+      - "HH:MM" 24-hour values like "08:30", "13:30", "00:00", "23:59"
+
+    Rejects (returns ""):
+      - None, empty string, or non-string
+      - "20:0" (single-digit minute) — the exact garbage we saw
+      - "8:30" (no leading zero on hour)
+      - "24:00", "ab:cd", anything else malformed
+    """
+    if not isinstance(s, str):
+        return ""
+    s = s.strip()
+    return s if _HHMM_RE.match(s) else ""
+
+
 def _hhmm_to_min(hhmm: str | None) -> int | None:
     """'13:30' → 810. None or blank → None."""
     if not hhmm:
@@ -209,6 +238,16 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
     blocks = extracted.get("blocks") or []
     if not isinstance(blocks, list):
         blocks = []
+
+    # Normalize start/end fields. The LLM's schema can't enforce HH:MM
+    # format (xgrammar limitation — see DAYPLAN_SCHEMA comment) so we
+    # scrub it here. Anything that isn't a valid HH:MM 24-hour string
+    # becomes "" — the adapter treats "" the same as "no time given".
+    # This catches cascade-failure outputs like "20:0", "8 AM", garbage.
+    for b in blocks:
+        if isinstance(b, dict):
+            b["start"] = _valid_hhmm(b.get("start"))
+            b["end"]   = _valid_hhmm(b.get("end"))
 
     # Deduplicate blocks. Defense-in-depth against the model emitting
     # duplicate blocks (a known small-model failure mode under guided
@@ -342,7 +381,15 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
         # Span = earliest qual start → latest qual end. Lunch and break
         # blocks become entries in `breaks`; the span never includes them
         # at the edges, only between qual segments.
-        qual_blocks = [b for b in day_blocks if _norm(b.get("kind")) == "qual"]
+        # Filter out qual blocks that lack a valid start AND end. These
+        # come from degraded LLM outputs where time fields got scrubbed
+        # by _valid_hhmm because the model emitted "20:0" or similar.
+        # Without this filter, an empty-start qual would sort to position
+        # 0 and corrupt the day's overall span.
+        qual_blocks = [
+            b for b in day_blocks
+            if _norm(b.get("kind")) == "qual" and b.get("start") and b.get("end")
+        ]
         non_qual    = [b for b in day_blocks if _norm(b.get("kind")) in ("lunch", "break")]
 
         if not qual_blocks:
