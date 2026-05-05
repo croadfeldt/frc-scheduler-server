@@ -103,6 +103,37 @@ spec:
             # Uses the experimental `hf_transfer` package; safe to leave on.
             - name: HF_HUB_ENABLE_HF_TRANSFER
               value: "1"
+            # ── Writable cache dirs for the OpenShift restricted SCC ──────
+            # The container runs as a non-root UID with no write access to
+            # `/`. Several libraries default to writing under `/.config`,
+            # `/.triton`, `/.cache`, etc., and crash with PermissionError.
+            #
+            # Most of these are harmless (anonymous telemetry that just
+            # silently fails). But xgrammar's apply_token_bitmask_inplace
+            # is JIT-compiled by Triton at first guided-decoding request,
+            # and Triton tries to write its compile cache to /.triton.
+            # When that fails, the engine dies mid-request and vLLM
+            # returns an empty 500. This is the "MQLLMEngine is already
+            # dead" crash you see in the logs.
+            #
+            # All four point at the writable /home/vllm-cache emptyDir
+            # below. Keep them in sync if you change the mount path.
+            - name: TRITON_CACHE_DIR
+              value: /home/vllm-cache/triton
+            - name: XDG_CACHE_HOME
+              value: /home/vllm-cache/.cache
+            - name: XDG_CONFIG_HOME
+              value: /home/vllm-cache/.config
+            - name: HOME
+              value: /home/vllm-cache
+            # Disable vLLM's anonymous usage telemetry — it tries to
+            # write to /.config and the failed write spams logs even
+            # though it doesn't crash anything. Belt-and-suspenders
+            # given we've redirected XDG_CONFIG_HOME above.
+            - name: VLLM_NO_USAGE_STATS
+              value: "1"
+            - name: DO_NOT_TRACK
+              value: "1"
             # If you have a Hugging Face token (not needed for Qwen2.5-VL
             # since it's not gated, but harmless to have for future models):
             # - name: HF_TOKEN
@@ -165,6 +196,13 @@ spec:
             # above the default 64MiB avoids cryptic crashes.
             - name: dshm
               mountPath: /dev/shm
+            # Writable scratch dir for Triton JIT cache, HF cache fallback,
+            # and any library that tries to write under $HOME or XDG dirs.
+            # Pointed at by HOME, XDG_*, and TRITON_CACHE_DIR env vars
+            # above. emptyDir (not PVC) — Triton recompiles per-pod is
+            # cheap, and we don't need it to persist.
+            - name: vllm-cache
+              mountPath: /home/vllm-cache
 
       volumes:
         - name: model-cache
@@ -174,6 +212,9 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 4Gi
+        - name: vllm-cache
+          emptyDir:
+            sizeLimit: 2Gi
 
       # vLLM container needs a few minutes to gracefully release the GPU
       # on shutdown. Give it that time.
