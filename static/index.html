@@ -1024,18 +1024,19 @@
           <div id="tbaDropdownList" style="display:flex;flex-direction:column;"></div>
         </div>
       </div>
-      <button class="btn-sm btn-accent" onclick="loadEventByCode()" id="btnLoadEvent">Load</button>
+      <button class="btn-sm btn-accent" onclick="loadEventByCode()" id="btnLoadEvent"
+        title="Load an official FIRST event by its code or name.&#10;&#10;• Pulls schedule, teams, and results from The Blue Alliance (TBA) or FRC Events&#10;• Reliable: uses the canonical event data published by FIRST&#10;• Required for events with TBA records (most district / regional / state events)&#10;• Sets the event year and source dropdown above as needed">Load FIRST event</button>
       <div id="eventCodeStatus" style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;"></div>
       <button class="btn-sm" id="btnAdhoc" onclick="loadAdhocEvent()"
-        title="Create an ad-hoc schedule without importing an event.&#10;&#10;• Creates a persistent event in the database&#10;• Starts with 12 teams — add or remove via the Teams button&#10;• Generates a working schedule immediately&#10;• All schedules are saved and recallable via URL&#10;• Use Assign Teams to map real team numbers onto the schedule"
+        title="Start fresh — create an ad-hoc schedule without importing from anywhere.&#10;&#10;Use Load FIRST event for official events, or Import custom PDF for non-FIRST schedules.&#10;&#10;• Creates a persistent event in the database&#10;• Starts with 12 teams — add or remove via the Teams button&#10;• Generates a working schedule immediately&#10;• All schedules are saved and recallable via URL&#10;• Use Assign Teams to map real team numbers onto the schedule"
         style="white-space:nowrap;">&#9998; Quick Schedule</button>
-      <!-- PDF Import button — shown only when an LLM endpoint is configured.
-           Hidden until checkLlmStatus() confirms the LLM is reachable.
-           Sits next to Quick Schedule because both are alternative ways to
-           bring a schedule into the system (vs generating from scratch). -->
+      <!-- Import-from-PDF button — for arbitrary / custom schedule PDFs
+           that aren't on TBA or FRC Events. Marked BETA because the
+           LLM extraction is unreliable on tabular content. Hidden until
+           checkLlmStatus() confirms the LLM endpoint is reachable. -->
       <button class="btn-sm" id="btnImportPdf" onclick="openPdfImportModal()"
-        title="Import a qualification schedule from a PDF.&#10;&#10;• Best for MSHSL state, off-season events, anything not on TBA&#10;• Uses a self-hosted LLM to parse arbitrary table layouts&#10;• You'll review the parsed result before committing&#10;• Validates against the loaded event's roster"
-        style="display:none;white-space:nowrap;">&#128195; Import PDF</button>
+        title="EXPERIMENTAL — for custom or arbitrary schedule PDFs not available on TBA or FRC Events.&#10;&#10;Use Load FIRST event for official events. Use Quick Schedule to start fresh.&#10;&#10;Known limitation: the model often repeats the morning qualification block and misses afternoon/playoff times. Always review the preview carefully before applying, and edit the form afterwards if needed.&#10;&#10;• Best for MSHSL state, off-season events, anything not on TBA&#10;• Uses a self-hosted LLM to parse arbitrary table layouts&#10;• You'll review the parsed result before committing&#10;• Validates against the loaded event's roster"
+        style="display:none;white-space:nowrap;">&#128195; Import custom PDF <span style="font-size:0.55rem;font-weight:600;letter-spacing:0.05em;padding:0.05rem 0.25rem;margin-left:0.15rem;background:#b35a00;color:#fff;border-radius:2px;vertical-align:middle;">BETA</span></button>
       <span id="llmStatusIndicator" style="display:none;font-size:0.65rem;color:var(--text-muted);white-space:nowrap;">
         <span id="llmStatusBadge" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-muted);vertical-align:middle;margin-right:0.2rem;"></span><span id="llmStatusText">checking&hellip;</span>
       </span>
@@ -1203,10 +1204,18 @@
   <div class="modal-overlay" id="modalPdfImport">
     <div class="modal" style="width:min(960px,95vw);max-height:90vh;display:flex;flex-direction:column;">
       <button class="modal-close" onclick="closePdfImportModal()">&#x2715;</button>
-      <div class="modal-title">Import Schedule from PDF</div>
+      <div class="modal-title">Import custom schedule from PDF</div>
 
       <!-- Stage 1: file picker -->
       <div id="pdfImportStage1">
+        <div style="font-size:0.78rem;color:var(--text);margin:0 0 0.85rem 0;line-height:1.5;background:rgba(179,90,0,0.14);padding:0.6rem 0.8rem;border-left:3px solid #b35a00;border-radius:3px;">
+          <div style="font-weight:700;color:#b35a00;margin-bottom:0.25rem;letter-spacing:0.04em;font-size:0.7rem;">EXPERIMENTAL FEATURE</div>
+          PDF import is unreliable, especially on day-plan / itinerary-style PDFs with merged cells.
+          A known issue: the model can <strong>repeat the morning qualification block</strong> and miss afternoon
+          quals, ceremonies, or playoffs entirely.
+          <strong>Always review the preview carefully</strong>, edit the form after applying, and don't trust the times blindly.
+          For reliable imports, use TBA event keys, FIRST FMS export, or paste matches directly.
+        </div>
         <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 0.75rem 0;line-height:1.45;">
           Upload a qualification schedule PDF. The schedule will be parsed by a self-hosted LLM and shown for review before importing.
           Best results: PDFs with clear table structure (column headers like Match #, Time, Red 1, etc.). Re-uploading the same file is free (cached).
@@ -2005,7 +2014,19 @@ function renderDayplanPreview(d) {
   }
   html += '</div>';
 
-  // Notice about what gets applied
+  // Experimental warning + what gets applied. The PDF import LLM is
+  // particularly weak at day-plan / itinerary PDFs with merged cells
+  // — it tends to repeat the morning qual block and miss afternoon
+  // and playoff times. Make this very visible at preview time so
+  // users don't apply garbage to their event without checking.
+  html += '<div style="background:rgba(179,90,0,0.14);border-left:3px solid #b35a00;' +
+          'padding:0.5rem 0.75rem;margin-bottom:0.6rem;font-size:0.72rem;line-height:1.5;">';
+  html += '<strong style="color:#b35a00;letter-spacing:0.04em;">EXPERIMENTAL — VERIFY EVERYTHING</strong><br>';
+  html += 'PDF import is unreliable. The model often repeats the morning qual block ' +
+          'and misses afternoon quals or playoffs. Compare every row below against the ' +
+          'actual PDF before applying. You can edit the form after applying, or just ' +
+          'use this as a starting point and fix the times manually.';
+  html += '</div>';
   html += '<div style="background:rgba(58,123,213,0.1);border-left:3px solid var(--accent2, #3a7bd5);' +
           'padding:0.5rem 0.75rem;margin-bottom:1rem;font-size:0.72rem;line-height:1.4;">';
   html += '<strong>Practice and qualification times</strong> will populate the form. ' +

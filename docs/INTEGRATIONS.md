@@ -338,7 +338,20 @@ no event key to construct URLs from.
 
 ---
 
-## LLM endpoint (PDF schedule import)
+## LLM endpoint (PDF schedule import) — EXPERIMENTAL
+
+> ⚠️ **Status: experimental.** PDF import works end-to-end but is
+> unreliable on real-world tournament PDFs, especially day-plan /
+> itinerary PDFs with merged-cell tables. The model frequently repeats
+> the morning qualification block and misses afternoon quals,
+> ceremonies, or playoffs entirely. **Always review the preview
+> carefully** and edit the form after applying — never trust the
+> output blindly. For reliable imports, prefer TBA event keys, a FIRST
+> FMS export, or paste matches directly.
+>
+> The integration stays in the codebase as a starting point for future
+> work (better models, better prompting, post-extraction validation),
+> but it's not currently a polished feature.
 
 **What it does:** parses arbitrary qualification schedule PDFs and
 event-day program PDFs into the scheduler's structured formats, so events
@@ -351,6 +364,15 @@ before import.
 Match-list PDFs (per-match team assignments) and day-plan PDFs (event-day
 itineraries with practice / qual / lunch / playoff time blocks) are
 auto-detected and routed to the appropriate extractor.
+
+**Known limitations** (all worse on day-plan PDFs than match-list PDFs):
+- Repetition loops on tabular content with repeating time strings
+  (model emits the same qual block over and over)
+- Misses afternoon qual sessions when a morning session and a lunch
+  break appear earlier in the table
+- Misses or hallucinates playoff/ceremony times
+- Digit confusion (8↔3, 0↔6, 1↔7) on dense match tables
+- Surrogate-flag notation rarely captured correctly
 
 **Required for:**
 - The "Import schedule from PDF…" button in the editor
