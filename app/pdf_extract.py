@@ -291,19 +291,25 @@ def _extract_ocr(content: bytes) -> dict[str, Any] | None:
 # ── Strategy 3: Vision LLM (rasterize → send images to vLLM) ────────────────
 
 async def _extract_vision(content: bytes) -> dict[str, Any] | None:
-    """Send rasterized pages to a vision-capable LLM endpoint.
+    """Send rasterized pages to the LLM endpoint (which must be vision-capable).
 
-    Returns None if LLM_VISION_ENDPOINT isn't configured (caller treats
-    vision as an unavailable strategy). On success, returns a parsed
-    schedule dict in the same shape as llm_client.parse_schedule()'s
-    output — not a text+tables payload.
+    Returns None if the LLM isn't configured (caller treats vision as an
+    unavailable strategy). On success, returns a parsed schedule dict in
+    the same shape as llm_client.parse_schedule()'s output — not a
+    text+tables payload.
+
+    Note: with the consolidated single-endpoint architecture, "vision is
+    available" is the same as "LLM is configured" — the LLM is assumed to
+    be vision-capable. If you point LLM_ENDPOINT at a text-only model and
+    a PDF requires vision strategy, the model will reject image content
+    blocks at request time.
     """
-    if not os.getenv("LLM_VISION_ENDPOINT", "").strip():
-        log.info("Vision strategy unavailable: LLM_VISION_ENDPOINT not configured")
-        return None
-
     # Lazy import to keep llm_client decoupled from extraction in tests
     from app import llm_client
+
+    if not llm_client.is_configured():
+        log.info("Vision strategy unavailable: LLM not configured")
+        return None
 
     images = _rasterize_pages(content, VISION_DPI)
     page_count = len(images)

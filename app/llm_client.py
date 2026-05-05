@@ -1,33 +1,31 @@
 """LLM client for parsing arbitrary schedule PDFs.
 
-Targets any OpenAI-compatible endpoint (vLLM, llama.cpp's llama-server,
-Anthropic API, OpenAI, etc.). Configured via env vars:
+Targets any OpenAI-compatible chat-completions endpoint (vLLM, Anthropic,
+OpenAI, Google, etc.). Configured via env vars:
 
-    LLM_ENDPOINT   — base URL, e.g. http://vis.example.com:8000/v1
-    LLM_MODEL      — model name as the server expects, e.g. "qwen"
-    LLM_API_KEY    — optional, for endpoints that require auth
+    LLM_ENDPOINT — base URL ending in /v1, e.g. http://vllm-host:8000/v1
+    LLM_MODEL    — model name as the server expects
+    LLM_API_KEY  — optional, for endpoints that require auth
 
-When LLM_ENDPOINT is empty, the parse_schedule() function returns None
-and callers fall back to deterministic format-specific parsers.
+Backwards-compat: if LLM_ENDPOINT is unset but LLM_VISION_ENDPOINT (the
+old separate-vision-endpoint config) is set, those values are used. This
+lets existing deployments roll forward without secret edits.
 
-Implementation notes specific to llama.cpp + Qwen3 (the primary target):
+Architecture note: this client used to maintain two separate endpoints
+(text-only LLM for extracted text, vision LLM for page images). Empirically
+the vision-capable models on the user's vLLM hardware (Qwen2.5-VL-7B-AWQ)
+are FASTER for short structured-output tasks than the larger text-only
+model on layer-split llama.cpp. So we now use one vision-capable endpoint
+for both text-only prompts (day-plan extraction, schedule parsing from
+extracted text) AND image prompts (vision strategy when text extraction
+fails). One endpoint, one health check, one config block.
 
-- All sampling params must be EXPLICIT. The server has CLI defaults
-  (top_k=1, temperature=0) that act as a "greedy fallback" when body
-  params are unspecified. We always send the full set so we never
-  accidentally inherit the wrong defaults.
-- We use Mode 2 (cache-accelerated greedy) per the endpoint doc:
-  temperature=0, top_k=1, cache_prompt=true, enable_thinking=false.
-  Determinism + speed for repeated prefixes.
-- We don't rely on tool calling — Qwen3 + llama.cpp's tool support is
-  newer and varies. Instead, we prompt for strict JSON output and
-  parse + validate in Python.
-- thinking is disabled because it consumes max_tokens budget on
-  schedules where we don't need reasoning.
+Determinism: all callers use temperature=0, top_p=1.0. Response is
+required to be strict JSON; we parse with tolerance for common minor
+format issues (markdown code fences, leading prose).
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -38,28 +36,37 @@ import httpx
 
 log = logging.getLogger(__name__)
 
-LLM_ENDPOINT = os.getenv("LLM_ENDPOINT", "").rstrip("/")
-LLM_MODEL    = os.getenv("LLM_MODEL", "")
-LLM_API_KEY  = os.getenv("LLM_API_KEY", "")
 
-# Optional separate vision endpoint. When set, the strategy router can
-# fall through to image-based interpretation for PDFs that defeat both
-# native text extraction and OCR. Hits an OpenAI-compatible /chat/completions
-# endpoint with image_url content blocks — works with vLLM serving Qwen2.5-VL,
-# Llava, etc., or with commercial APIs (Anthropic, OpenAI, Google).
-LLM_VISION_ENDPOINT = os.getenv("LLM_VISION_ENDPOINT", "").rstrip("/")
-LLM_VISION_MODEL    = os.getenv("LLM_VISION_MODEL", "")
-LLM_VISION_API_KEY  = os.getenv("LLM_VISION_API_KEY", "")
+def _resolve_endpoint() -> tuple[str, str, str]:
+    """Pick LLM endpoint config, preferring LLM_ENDPOINT but falling back to
+    the legacy LLM_VISION_ENDPOINT vars so existing deployments work.
 
-# Vision inference is slower per token because image tokens are expensive
-# (roughly 256-1280 visual tokens per page for Qwen2.5-VL). A 5-page MSHSL
-# schedule can take 60-90s end-to-end on a single 7B model. Allow more time
-# than the text endpoint.
-VISION_TIMEOUT_SECONDS = 300.0
+    Returns (endpoint, model, api_key) as strings; empty if neither set.
+    """
+    endpoint = os.getenv("LLM_ENDPOINT", "").rstrip("/")
+    model    = os.getenv("LLM_MODEL", "")
+    api_key  = os.getenv("LLM_API_KEY", "")
+    if endpoint and model:
+        return endpoint, model, api_key
 
-# How long to wait for the LLM. Schedules can take 30-60s to extract on
-# a single-parallel endpoint, especially if other workloads are queued.
-# Anything beyond 3 minutes is probably stuck and we should give up.
+    # Legacy fallback for deployments that still have the split-endpoint config
+    legacy_ep = os.getenv("LLM_VISION_ENDPOINT", "").rstrip("/")
+    legacy_md = os.getenv("LLM_VISION_MODEL", "")
+    legacy_ak = os.getenv("LLM_VISION_API_KEY", "")
+    if legacy_ep and legacy_md:
+        return legacy_ep, legacy_md, legacy_ak
+
+    return "", "", ""
+
+
+# Capture once at import. Live env changes during a process aren't supported —
+# pod restart is the right way to pick up new secrets.
+LLM_ENDPOINT, LLM_MODEL, LLM_API_KEY = _resolve_endpoint()
+
+
+# Timeout for structured-output calls. Vision-on-images can take 30-60s for
+# multi-page schedules; text-only structured output usually finishes in <10s.
+# 180s ceiling is "give up, the server is wedged."
 LLM_TIMEOUT_SECONDS = 180.0
 
 
@@ -68,10 +75,10 @@ def is_configured() -> bool:
     return bool(LLM_ENDPOINT and LLM_MODEL)
 
 
-# Prompt — kept stable across calls so cache_prompt has a consistent prefix.
-# Putting the schema definition before the variable PDF content lets the
-# server's KV cache reuse most of the prompt across requests.
-SYSTEM_PROMPT = """You are a JSON extraction tool. You are given the text content of an FRC qualification match schedule PDF. You must extract the match list as strict JSON.
+# ── Prompts ──────────────────────────────────────────────────────────────────
+
+# Match-list prompt for text-extracted PDF content (pdfplumber + OCR strategies).
+TEXT_SYSTEM_PROMPT = """You are a JSON extraction tool. You are given the text content of an FRC qualification match schedule PDF. You must extract the match list as strict JSON.
 
 Output schema (REQUIRED — your entire reply must be valid JSON matching this shape, with no other text):
 
@@ -101,130 +108,8 @@ Rules:
 """
 
 
-def build_user_prompt(pdf_text: str) -> str:
-    """The variable part of the prompt — only this changes between requests,
-    so the cache_prompt prefix stays warm for the system prompt and schema.
-    """
-    return f"""Here is the extracted text from the schedule PDF. Extract the match list as JSON per the schema.
-
-PDF CONTENT:
-{pdf_text}
-
-Output the JSON object now."""
-
-
-def _parse_json_response(text: str) -> dict[str, Any]:
-    """Parse the LLM's response, tolerating common minor format issues
-    (markdown code fences, leading/trailing whitespace, "Here is the JSON..." preamble).
-
-    Raises ValueError if no valid JSON can be extracted.
-    """
-    text = text.strip()
-    # Strip markdown code fences if present
-    if text.startswith("```"):
-        # Remove leading ```json or ```
-        text = re.sub(r"^```(?:json)?\s*\n", "", text)
-        text = re.sub(r"\n```\s*$", "", text)
-    # Some models prepend prose despite instructions. Find first { and last }.
-    start = text.find("{")
-    end   = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError("No JSON object found in LLM response")
-    candidate = text[start:end + 1]
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON from LLM: {e}")
-
-
-async def parse_schedule(pdf_text: str) -> dict[str, Any] | None:
-    """Send extracted PDF text to the LLM, return parsed schedule dict.
-
-    Returns None if LLM is not configured. Raises on actual extraction
-    failures (timeout, network error, malformed response).
-    """
-    if not is_configured():
-        return None
-
-    headers = {"Content-Type": "application/json"}
-    if LLM_API_KEY:
-        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
-
-    body = {
-        "model": LLM_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": build_user_prompt(pdf_text)},
-        ],
-        # Enough room for the schema + ~120 matches. JSON is verbose; a
-        # 92-match schedule serializes to roughly 8K tokens of output.
-        "max_tokens": 16000,
-        # Mode 2 (cache-accelerated greedy) per endpoint doc — we want
-        # deterministic outputs but with KV cache reuse for the system
-        # prompt prefix across requests.
-        "temperature": 0,
-        "top_p":       1.0,
-        # llama.cpp-specific knobs. The OpenAI Python SDK calls these
-        # extra_body; via raw httpx we just put them at the top level.
-        "top_k":         1,
-        "min_p":         0.0,
-        "seed":          42,
-        "cache_prompt":  True,
-        "chat_template_kwargs": {"enable_thinking": False},
-    }
-
-    url = f"{LLM_ENDPOINT}/chat/completions"
-    log.info("Calling LLM endpoint %s with model %s", url, LLM_MODEL)
-
-    async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-        try:
-            r = await client.post(url, json=body, headers=headers)
-            r.raise_for_status()
-        except httpx.TimeoutException:
-            raise RuntimeError(
-                f"LLM endpoint timed out after {LLM_TIMEOUT_SECONDS}s. The server may be "
-                f"queued behind another workload. Try again in a minute."
-            )
-        except httpx.HTTPStatusError as e:
-            raise RuntimeError(f"LLM endpoint returned {e.response.status_code}: {e.response.text[:200]}")
-        except httpx.RequestError as e:
-            raise RuntimeError(f"LLM endpoint unreachable: {e}")
-
-        data = r.json()
-
-    # Standard OpenAI completion shape
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise RuntimeError(f"Unexpected LLM response shape: {json.dumps(data)[:500]}")
-
-    if not content or not content.strip():
-        # llama.cpp will sometimes return empty content if thinking consumed
-        # the budget — even though we set enable_thinking=false. Check
-        # reasoning_content as a fallback.
-        try:
-            reasoning = data["choices"][0]["message"].get("reasoning_content", "")
-            if reasoning and reasoning.strip():
-                content = reasoning
-        except Exception:
-            pass
-
-    if not content or not content.strip():
-        raise RuntimeError("LLM returned empty response")
-
-    return _parse_json_response(content)
-
-
-# ── Vision LLM (image-based extraction) ──────────────────────────────────────
-
-def is_vision_configured() -> bool:
-    """True if vision-LLM extraction is available."""
-    return bool(LLM_VISION_ENDPOINT and LLM_VISION_MODEL)
-
-
-# Vision prompt — different from the text prompt because the model is
-# looking at rendered pages, not extracted text. Asks for the same JSON
-# schema so downstream validation/preview code is identical.
+# Match-list prompt for image-input (vision strategy when text extraction
+# returns nothing useful).
 VISION_SYSTEM_PROMPT = """You are a JSON extraction tool. You are given one or more rendered pages of an FRC qualification match schedule. Read the pages carefully and extract the match list as strict JSON.
 
 Output schema (REQUIRED — your entire reply must be valid JSON matching this shape, with no other text):
@@ -254,6 +139,114 @@ Rules:
 6. Output JSON ONLY. No prose before or after. No markdown code fences. Just the JSON object."""
 
 
+def _build_text_user_prompt(pdf_text: str) -> str:
+    return f"""Here is the extracted text from the schedule PDF. Extract the match list as JSON per the schema.
+
+PDF CONTENT:
+{pdf_text}
+
+Output the JSON object now."""
+
+
+def _parse_json_response(text: str) -> dict[str, Any]:
+    """Tolerantly parse JSON out of an LLM response.
+
+    Handles markdown code fences, leading prose, and trailing junk. Raises
+    ValueError if no parseable JSON object can be found.
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*\n", "", text)
+        text = re.sub(r"\n```\s*$", "", text)
+    start = text.find("{")
+    end   = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("No JSON object found in LLM response")
+    candidate = text[start:end + 1]
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON from LLM: {e}")
+
+
+# ── Core call ────────────────────────────────────────────────────────────────
+
+async def _post(messages: list[dict[str, Any]], *,
+                max_tokens: int = 8000) -> dict[str, Any]:
+    """Send a chat-completion request and return the parsed JSON content.
+
+    All structured-extraction call sites go through this. Centralizes the
+    timeout, error-handling, and JSON-tolerant parsing.
+    """
+    if not is_configured():
+        raise RuntimeError("LLM not configured (set LLM_ENDPOINT and LLM_MODEL)")
+
+    headers = {"Content-Type": "application/json"}
+    if LLM_API_KEY:
+        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+
+    body = {
+        "model":       LLM_MODEL,
+        "messages":    messages,
+        "max_tokens":  max_tokens,
+        "temperature": 0,
+        "top_p":       1.0,
+    }
+
+    url = f"{LLM_ENDPOINT}/chat/completions"
+    log.info("Calling LLM at %s (model=%s, max_tokens=%d)", url, LLM_MODEL, max_tokens)
+
+    async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
+        try:
+            r = await client.post(url, json=body, headers=headers)
+            r.raise_for_status()
+        except httpx.TimeoutException:
+            raise RuntimeError(
+                f"LLM timed out after {LLM_TIMEOUT_SECONDS}s. The endpoint may "
+                f"be queued behind another workload, loading a cold model, "
+                f"or wedged. Try again or check the inference server logs."
+            )
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"LLM returned {e.response.status_code}: {e.response.text[:300]}"
+            )
+        except httpx.RequestError as e:
+            raise RuntimeError(f"LLM unreachable: {e}")
+
+        data = r.json()
+
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(f"Unexpected LLM response shape: {json.dumps(data)[:500]}")
+
+    if not content or not content.strip():
+        raise RuntimeError("LLM returned empty response")
+
+    return _parse_json_response(content)
+
+
+# ── Public API: schedule extraction (text or image input) ────────────────────
+
+async def parse_schedule(pdf_text: str) -> dict[str, Any] | None:
+    """Send extracted PDF text to the LLM, return parsed schedule dict.
+
+    Returns None if not configured. Raises RuntimeError on extraction
+    failures (timeout, network, malformed response).
+    """
+    if not is_configured():
+        return None
+
+    return await _post(
+        messages=[
+            {"role": "system", "content": TEXT_SYSTEM_PROMPT},
+            {"role": "user",   "content": _build_text_user_prompt(pdf_text)},
+        ],
+        # Match-list output for a 92-match schedule is roughly 8K tokens of JSON
+        max_tokens=16000,
+    )
+
+
 def _image_to_data_url(img) -> str:
     """Convert a Pillow Image to a data: URL the OpenAI vision API accepts.
 
@@ -269,28 +262,16 @@ def _image_to_data_url(img) -> str:
 
 
 async def parse_schedule_from_images(images: list) -> dict[str, Any] | None:
-    """Send rasterized PDF pages to a vision LLM, return parsed schedule dict.
+    """Send rasterized PDF pages to the LLM (which must be vision-capable),
+    return parsed schedule dict.
 
-    `images` is a list of Pillow Image objects, one per PDF page.
-
-    Returns None if vision LLM isn't configured. Raises on extraction
-    failures (timeout, network error, malformed response). Output shape
-    matches parse_schedule() so downstream code is the same.
+    Returns None if not configured. Raises on extraction failures.
     """
-    if not is_vision_configured():
+    if not is_configured():
         return None
-
     if not images:
-        raise RuntimeError("No images supplied to vision LLM")
+        raise RuntimeError("No images supplied")
 
-    headers = {"Content-Type": "application/json"}
-    if LLM_VISION_API_KEY:
-        headers["Authorization"] = f"Bearer {LLM_VISION_API_KEY}"
-
-    # Build user content as alternating image + text blocks. Vision APIs
-    # accept multiple images in one user message; the model sees them in
-    # order. We add a "Page N" text marker before each image to help the
-    # model reference pages in its `notes` field.
     user_content: list[dict[str, Any]] = []
     for idx, img in enumerate(images, start=1):
         user_content.append({"type": "text", "text": f"Page {idx}:"})
@@ -306,101 +287,36 @@ async def parse_schedule_from_images(images: list) -> dict[str, Any] | None:
         ),
     })
 
-    body = {
-        "model": LLM_VISION_MODEL,
-        "messages": [
+    return await _post(
+        messages=[
             {"role": "system", "content": VISION_SYSTEM_PROMPT},
             {"role": "user",   "content": user_content},
         ],
-        "max_tokens": 16000,
-        # Greedy decoding for determinism — same reasoning as the text path.
-        # vLLM accepts these fields directly.
-        "temperature": 0,
-        "top_p":       1.0,
-    }
-
-    url = f"{LLM_VISION_ENDPOINT}/chat/completions"
-    log.info(
-        "Calling vision LLM endpoint %s with model %s, %d page(s)",
-        url, LLM_VISION_MODEL, len(images),
+        max_tokens=16000,
     )
 
-    async with httpx.AsyncClient(timeout=VISION_TIMEOUT_SECONDS) as client:
-        try:
-            r = await client.post(url, json=body, headers=headers)
-            r.raise_for_status()
-        except httpx.TimeoutException:
-            raise RuntimeError(
-                f"Vision LLM timed out after {VISION_TIMEOUT_SECONDS}s. "
-                f"The server may be loading the model on first call, "
-                f"or the schedule has too many pages. Try again."
-            )
-        except httpx.HTTPStatusError as e:
-            raise RuntimeError(
-                f"Vision LLM returned {e.response.status_code}: "
-                f"{e.response.text[:200]}"
-            )
-        except httpx.RequestError as e:
-            raise RuntimeError(f"Vision LLM unreachable: {e}")
 
-        data = r.json()
+# ── Health check ─────────────────────────────────────────────────────────────
 
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise RuntimeError(f"Unexpected vision LLM response shape: {json.dumps(data)[:500]}")
+async def health_check() -> dict[str, Any]:
+    """Probe the LLM endpoint and return availability status.
 
-    if not content or not content.strip():
-        raise RuntimeError("Vision LLM returned empty response")
-
-    return _parse_json_response(content)
-
-
-async def vision_health_check() -> dict[str, Any]:
-    """Probe the vision LLM endpoint. Used by /api/llm/status."""
-    if not is_vision_configured():
+    Used by /api/llm/status to surface availability to the UI. vLLM and
+    llama.cpp both expose /health at server root (NOT /v1/health), so we
+    strip /v1 from the configured endpoint and probe the parent host.
+    """
+    if not is_configured():
         return {"configured": False, "available": False}
 
-    base = LLM_VISION_ENDPOINT.rsplit("/v1", 1)[0] if LLM_VISION_ENDPOINT.endswith("/v1") else LLM_VISION_ENDPOINT
+    base = LLM_ENDPOINT.rsplit("/v1", 1)[0] if LLM_ENDPOINT.endswith("/v1") else LLM_ENDPOINT
     health_url = f"{base}/health"
+
     async with httpx.AsyncClient(timeout=3.0) as client:
         try:
             r = await client.get(health_url)
             return {
                 "configured": True,
                 "available":  r.status_code == 200,
-                "endpoint":   LLM_VISION_ENDPOINT,
-                "model":      LLM_VISION_MODEL,
-            }
-        except httpx.RequestError as e:
-            return {
-                "configured": True,
-                "available":  False,
-                "endpoint":   LLM_VISION_ENDPOINT,
-                "model":      LLM_VISION_MODEL,
-                "error":      str(e),
-            }
-
-
-async def health_check() -> dict[str, Any]:
-    """Probe the LLM endpoint's /health (or equivalent) and return a status dict.
-
-    Used by /api/health to surface LLM availability to the UI without making
-    a real extraction call.
-    """
-    if not is_configured():
-        return {"configured": False, "available": False}
-
-    # llama.cpp exposes /health (NOT /v1/health) — probe the parent host
-    base = LLM_ENDPOINT.rsplit("/v1", 1)[0] if LLM_ENDPOINT.endswith("/v1") else LLM_ENDPOINT
-    health_url = f"{base}/health"
-    async with httpx.AsyncClient(timeout=3.0) as client:
-        try:
-            r = await client.get(health_url)
-            ok = r.status_code == 200
-            return {
-                "configured": True,
-                "available":  ok,
                 "endpoint":   LLM_ENDPOINT,
                 "model":      LLM_MODEL,
             }

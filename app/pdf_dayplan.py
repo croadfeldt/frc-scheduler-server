@@ -46,12 +46,8 @@ the qual day, the qual day's `end` is capped at the playoff block's `start`.
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
 from typing import Any
-
-import httpx
 
 log = logging.getLogger(__name__)
 
@@ -141,85 +137,29 @@ def _build_user_prompt(text: str) -> str:
     )
 
 
-def _parse_json_response(content: str) -> dict[str, Any]:
-    """Strip markdown fences and parse the model's JSON response."""
-    s = content.strip()
-    # Strip ```json ... ``` if present
-    if s.startswith("```"):
-        # Drop the opening fence and language hint
-        first_nl = s.find("\n")
-        if first_nl > 0:
-            s = s[first_nl + 1:]
-        # Drop trailing fence
-        if s.rstrip().endswith("```"):
-            s = s.rstrip()[:-3].rstrip()
-    try:
-        return json.loads(s)
-    except json.JSONDecodeError as e:
-        # Try once more after extracting the first {...} block
-        start = s.find("{")
-        end   = s.rfind("}")
-        if start >= 0 and end > start:
-            return json.loads(s[start:end + 1])
-        raise ValueError(f"Could not parse model JSON: {e}: {s[:300]}")
-
-
 async def extract_dayplan(text: str) -> dict[str, Any] | None:
-    """Send extracted PDF text to the text LLM and parse the response.
+    """Send extracted PDF text to the LLM and parse the response.
 
-    Returns None if LLM_ENDPOINT is not configured. Raises on extraction
+    Returns None if the LLM is not configured. Raises on extraction
     failures (timeout, network error, malformed response).
-    """
-    endpoint = os.getenv("LLM_ENDPOINT", "").rstrip("/")
-    model    = os.getenv("LLM_MODEL", "")
-    api_key  = os.getenv("LLM_API_KEY", "")
 
-    if not endpoint or not model:
+    Uses the consolidated llm_client._post() so timeout, error handling,
+    and JSON-tolerant parsing are unified across all LLM call sites.
+    """
+    from app import llm_client
+    if not llm_client.is_configured():
         return None
 
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    body = {
-        "model":       model,
-        "messages": [
+    return await llm_client._post(
+        messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": _build_user_prompt(text)},
         ],
-        "max_tokens":  4000,
-        "temperature": 0,
-        "top_p":       1.0,
-    }
-
-    url = f"{endpoint}/chat/completions"
-    log.info("Calling text LLM for day-plan extraction at %s", url)
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        try:
-            r = await client.post(url, json=body, headers=headers)
-            r.raise_for_status()
-        except httpx.TimeoutException:
-            raise RuntimeError("Day-plan LLM request timed out")
-        except httpx.HTTPStatusError as e:
-            raise RuntimeError(
-                f"Day-plan LLM returned {e.response.status_code}: "
-                f"{e.response.text[:200]}"
-            )
-        except httpx.RequestError as e:
-            raise RuntimeError(f"Day-plan LLM unreachable: {e}")
-
-        data = r.json()
-
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise RuntimeError(f"Unexpected LLM response shape: {json.dumps(data)[:500]}")
-
-    if not content or not content.strip():
-        raise RuntimeError("Day-plan LLM returned empty response")
-
-    return _parse_json_response(content)
+        # Day plans are short — a few hundred tokens of structured output.
+        # Smaller cap than match-list extraction since there's no per-match
+        # repetition.
+        max_tokens=4000,
+    )
 
 
 # ── Adapter to existing day_config schema ────────────────────────────────────

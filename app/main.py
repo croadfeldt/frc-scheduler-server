@@ -2089,14 +2089,7 @@ async def llm_status():
     strategies can't handle).
     """
     text   = await llm_client.health_check()
-    vision = await llm_client.vision_health_check()
-    # Backwards-compat top-level fields keep the existing UI working.
-    # New `text` and `vision` sub-objects let the UI distinguish them.
-    return {
-        **text,
-        "text":   text,
-        "vision": vision,
-    }
+    return text
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

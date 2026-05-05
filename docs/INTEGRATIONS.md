@@ -340,38 +340,57 @@ no event key to construct URLs from.
 
 ## LLM endpoint (PDF schedule import)
 
-**What it does:** parses arbitrary qualification schedule PDFs into the
-scheduler's match format, so events can be imported from sources that
-aren't TBA-tracked. The PDF text is extracted server-side via pdfplumber,
-then sent to an OpenAI-compatible LLM endpoint for parsing into structured
-JSON. The user reviews the parsed result (with editable cells) and confirms
+**What it does:** parses arbitrary qualification schedule PDFs and
+event-day program PDFs into the scheduler's structured formats, so events
+can be imported from sources that aren't TBA-tracked. The pipeline tries
+extraction strategies in cost order — pdfplumber (native text) → Tesseract
+OCR (image-based PDFs) → vision LLM (vision-capable model interprets
+rasterized pages directly). The user reviews the parsed result and confirms
 before import.
+
+Match-list PDFs (per-match team assignments) and day-plan PDFs (event-day
+itineraries with practice / qual / lunch / playoff time blocks) are
+auto-detected and routed to the appropriate extractor.
 
 **Required for:**
 - The "Import schedule from PDF…" button in the editor
 - Importing schedules from MSHSL state, off-season events, or any source
   that publishes a PDF schedule but isn't in TBA
+- Importing event-day timelines (start/end times for practice, quals,
+  lunch break, playoff window) from a published itinerary PDF
 
 **Setup — endpoint side:**
 
-You need any OpenAI-compatible endpoint. Two common self-hosted options:
+You need a **vision-capable** OpenAI-compatible endpoint. The recommended
+self-hosted option is **vLLM serving Qwen2.5-VL-7B-Instruct-AWQ**:
 
-- **vLLM** — `vllm serve <model>` exposes `/v1/chat/completions` natively
-- **llama.cpp** — `llama-server --model <path>.gguf` with `--port 8000`
+```sh
+vllm serve Qwen/Qwen2.5-VL-7B-Instruct-AWQ \
+  --quantization awq_marlin \
+  --max-model-len 8192 \
+  --trust-remote-code \
+  --gpu-memory-utilization 0.90
+```
 
-Both serve OpenAI-compatible HTTP. We've tested with **Qwen3-32B Q8** running
-on llama.cpp; the LLM client passes llama.cpp-specific knobs
-(`top_k`, `min_p`, `cache_prompt`, `chat_template_kwargs`) at the top level
-of the request body, which other servers will ignore harmlessly.
+The deployment manifests in `openshift/vllm/` set this up on a GPU node.
+Any other vision-capable OpenAI-compatible endpoint also works (Anthropic,
+OpenAI, Google).
+
+**Why vision-capable:** the consolidated client uses one endpoint for both
+text-only prompts (day-plan extraction, schedule extraction from
+pdfplumber/OCR text) and image input (vision strategy when text extraction
+returns nothing). Vision models handle text-only prompts fine, and a 7B
+vision model is typically faster than a larger text-only model for short
+structured-extraction tasks.
 
 **Setup — scheduler side:**
 
 ```yaml
 # openshift/01-secrets.yaml
 stringData:
-  LLM_ENDPOINT:  "http://your-llm-host:8000/v1"
-  LLM_MODEL:     "qwen"        # whatever name your server expects
-  LLM_API_KEY:   ""            # most self-hosted endpoints don't auth
+  LLM_ENDPOINT:  "http://vllm-vision.vllm-vision.svc.cluster.local:8000/v1"
+  LLM_MODEL:     "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
+  LLM_API_KEY:   ""            # leave empty for self-hosted vLLM
 ```
 
 Apply secrets and restart:
