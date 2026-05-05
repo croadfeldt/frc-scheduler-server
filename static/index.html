@@ -240,7 +240,7 @@
     text-transform: uppercase; font-weight: 700;
   }
   .diversity-report .dr-headline {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
     gap: 0.5rem; margin-bottom: 0.85rem;
   }
   .diversity-report .dr-stat {
@@ -368,11 +368,28 @@
 
   .results-panel { position: sticky; top: 2rem; }
 
-  .stats-bar { display: grid; grid-template-columns: repeat(6, 1fr); border-bottom: 1px solid var(--border); }
-  .stat { padding: 0.5rem 0.4rem; text-align: center; border-right: 1px solid var(--border); }
-  .stat:last-child { border-right: none; }
-  .stat-value { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 1.25rem; color: var(--text-strong); line-height: 1; }
-  .stat-label { font-size: 0.6rem; color: var(--text-muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 0.2rem; }
+  /* Schedule meta line — basic facts (matches/teams/per-team/days)
+     shown as a single thin row right above the schedule table.
+     Replaces the old 6-tile .stats-bar; quality stats (B2B,
+     surrogates, partner/opponent repeats) all live in the diversity
+     report card above the panel header now. */
+  .schedule-meta {
+    display: flex; align-items: baseline; flex-wrap: wrap;
+    gap: 0.4rem 0.7rem;
+    padding: 0.4rem 1.25rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.78rem; color: var(--text-muted);
+    font-family: 'Barlow', sans-serif;
+  }
+  .schedule-meta strong {
+    color: var(--text-strong);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 600; font-size: 0.95rem;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+    margin-right: 0.15rem;
+  }
+  .schedule-meta .sep { color: var(--border); user-select: none; }
 
   .schedule-output { padding: 1.25rem; max-height: 70vh; overflow-y: auto; }
   .schedule-output::-webkit-scrollbar { width: 5px; }
@@ -694,7 +711,6 @@
   @media (max-width: 900px) {
     .layout { grid-template-columns: 1fr; }
     .results-panel { position: static; }
-    .stats-bar { grid-template-columns: repeat(3, 1fr); }
   }
 
   /* ── Mobile ── */
@@ -772,11 +788,6 @@
 
     /* Cycle change rows — stack vertically */
     .cycle-change-row { grid-template-columns: 1fr 1fr auto; }
-
-    /* Stats bar — 2-col on mobile */
-    .stats-bar { grid-template-columns: repeat(2, 1fr); gap: 0.4rem; }
-    .stat { padding: 0.6rem 0.5rem; }
-    .stat-value { font-size: 1.3rem; }
 
     /* Schedule table — horizontal scroll */
     .results-panel .panel-body { padding: 0; }
@@ -1705,6 +1716,12 @@
           </div>
         </div>
       </div>
+      <!-- Diversity Report — repositioned above the Schedule Output
+           header so all schedule-quality stats sit together as one
+           visual unit. The card is built dynamically by JS after
+           Stage 1 generation completes (renderDiversityReport in
+           static/index.html); kept hidden until then. -->
+      <div id="diversityReportCard" class="diversity-report" style="display:none;"></div>
       <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;border-top:none;">
         <span>Schedule Output</span>
         <div id="downloadBar" style="display:none;gap:0.4rem;display:none;align-items:center;">
@@ -1717,20 +1734,21 @@
           <button class="btn-export" id="btnExport" onclick="openExportModal()" title="Print, save as PDF, or download as XLSX/CSV/JSON/FMS">&#11015; Print / Export&hellip;</button>
         </div>
       </div>
-      <div class="stats-bar">
-        <div class="stat"><div class="stat-value" id="statMatches">&#8212;</div><div class="stat-label">Total Matches</div></div>
-        <div class="stat"><div class="stat-value" id="statTeams">&#8212;</div><div class="stat-label">Teams</div></div>
-        <div class="stat"><div class="stat-value" id="statPerTeam">&#8212;</div><div class="stat-label">Matches/Team</div></div>
-        <div class="stat"><div class="stat-value" id="statDays">&#8212;</div><div class="stat-label">Days</div></div>
-        <div class="stat stat-clickable" id="statB2BContainer" onclick="toggleStatFilter('b2b')" title="A back-to-back is when a team plays two matches in a row with no break. Lower is better. Click to filter."><div class="stat-value" id="statB2B" style="color:var(--text-muted)">&#8212;</div><div class="stat-label">Back-to-Backs &#9660;</div></div>
-        <div class="stat stat-clickable" id="statSurrogatesContainer" onclick="toggleStatFilter('surrogate')" title="A surrogate plays an extra match to fill a structural gap in the schedule. Click to filter surrogate matches."><div class="stat-value" id="statSurrogates" style="color:var(--text-muted)">&#8212;</div><div class="stat-label">Surrogate Plays &#9660;</div><div id="statSurrogatesMin" style="font-size:0.65rem;font-weight:700;font-family:'Barlow Condensed',sans-serif;letter-spacing:0.04em;margin-top:0.2rem;" title=""></div></div>
+      <!-- Schedule meta line — basic facts (matches/teams/etc).
+           Replaces the previous 6-tile stats-bar; quality stats
+           (B2B, surrogates, partner repeats, etc) all live in the
+           diversity report card above. The IDs match the old
+           stat-value spans so existing populate/reset JS continues
+           to work without changes. -->
+      <div class="schedule-meta" id="scheduleMeta" style="display:none;">
+        <span><strong id="statMatches">&#8212;</strong> matches</span>
+        <span class="sep">&middot;</span>
+        <span><strong id="statTeams">&#8212;</strong> teams</span>
+        <span class="sep">&middot;</span>
+        <span><strong id="statPerTeam">&#8212;</strong> matches/team</span>
+        <span class="sep">&middot;</span>
+        <span><strong id="statDays">&#8212;</strong> days</span>
       </div>
-      <!-- Diversity Report — shows partner/opponent repeat distribution, station
-           balance, surrogate placement, and worst-case callouts. Populated after
-           Stage 1 generation completes. Hidden by default.
-           Positioned ABOVE the schedule (right below the stats bar) so all
-           the schedule-quality numbers sit together as one unit. -->
-      <div id="diversityReportCard" class="diversity-report" style="display:none;"></div>
       <div class="filter-bar" id="filterBar" style="display:none">
         <span class="filter-bar-label">Filters:</span>
         <span class="filter-empty" id="filterEmpty">None active &mdash; click column headers or team numbers to filter</span>
@@ -3052,96 +3070,181 @@ async function loadDiversityReport(scheduleId) {
   }
 }
 
-function renderDiversityReport(card, d) {
-  const p = d.partner;
-  const o = d.opponent;
-  // Build histograms with bars sized to the largest bucket
-  function maxVal(hist) { return Math.max(0, ...Object.values(hist || {})); }
-  function histRows(hist, floor, total) {
-    const max = maxVal(hist);
-    const counts = Object.keys(hist).map(Number).sort((a, b) => a - b);
-    return counts.map(function(c) {
-      const n = hist[c];
-      const pct = max > 0 ? Math.round((n / max) * 100) : 0;
-      let cls = 'dr-histogram-bar';
-      if (c === 0) cls += ' zero';
-      else if (c > floor + 1) cls += ' way-over';
-      else if (c > floor) cls += ' over-floor';
-      const lbl = c === 0 ? '0 (never met)' : (c + ' time' + (c > 1 ? 's' : ''));
-      const sharePct = total > 0 ? Math.round((n / total) * 100) : 0;
-      return '<div class="dr-histogram">' +
-             '  <span class="dr-histogram-label">' + lbl + '</span>' +
-             '  <div><div class="' + cls + '" style="width:' + pct + '%"></div></div>' +
-             '  <span class="dr-histogram-count">' + n + ' (' + sharePct + '%)</span>' +
-             '</div>';
-    }).join('');
+// Render the diversity card. The card has two parts:
+//   1) Headline stat tiles — basic facts + quality stats (B2B,
+//      surrogates, station balance, repeat avgs). These can render
+//      from client-side state alone (window._frcScheduled), with
+//      richer detail when server-side diversity data is available.
+//   2) Histogram + issues sections — only meaningful with the
+//      server-computed diversity data. Hidden when absent.
+//
+// Called from two places:
+//   - _finishGenerationInner (immediately after generation, no
+//     server data yet) — renders headline only.
+//   - loadDiversityReport (after fetching from server) — re-renders
+//     with server data so histograms appear.
+//
+// Stash the latest server data on window so that re-renders triggered
+// by filter toggles or other events still have access to it.
+function renderDiversityCard(card, serverData) {
+  if (serverData) {
+    window._latestDiversityData = serverData;
   }
-  // Issues
-  const issues = [];
-  if (p.worst_pairs && p.worst_pairs.length) {
-    issues.push(p.worst_pairs.length + ' pair' + (p.worst_pairs.length > 1 ? 's' : '') +
-                ' partnered more than the floor (' + p.floor + ')');
-  }
-  if (o.worst_pairs && o.worst_pairs.length) {
-    issues.push(o.worst_pairs.length + ' pair' + (o.worst_pairs.length > 1 ? 's' : '') +
-                ' opposed more than the floor (' + o.floor + ')');
-  }
-  if (d.stations.imbalanced_slots > 0) {
-    issues.push(d.stations.imbalanced_slots + ' slot' + (d.stations.imbalanced_slots > 1 ? 's have' : ' has') +
-                ' uneven station distribution (max imbalance: ' + d.stations.max_imbalance + ')');
-  }
-  if (d.surrogates.concentrated_slots > 0) {
-    issues.push(d.surrogates.concentrated_slots + ' slot' +
-                (d.surrogates.concentrated_slots > 1 ? 's have' : ' has') + ' more than 1 surrogate match');
-  }
-  const issuesHtml = issues.length
-    ? '<div class="dr-issues"><strong>&#9888; Notable:</strong><ul>' +
-      issues.map(function(i) { return '<li>' + i + '</li>'; }).join('') + '</ul></div>'
-    : '<div class="dr-issues clean"><strong>&#9989; Clean:</strong> all distributions at or near theoretical floor.</div>';
+  var d = serverData || window._latestDiversityData || null;
 
-  const totalPartnerSlots  = 2 * d.matches_per_team;
-  const totalOpponentSlots = 3 * d.matches_per_team;
+  // ── Compute B2B count from client-side scheduled state ──────────
+  // The server's diversity computation doesn't include B2B because
+  // it's a function of the time-ordered match list rather than the
+  // pure slot structure. Mirror updateB2BStat's logic: in abstract
+  // mode, B2B is meaningless because slot indices aren't real teams.
+  var _b2bMatches = (window._frcScheduled || []).flatMap(function(day) {
+    return day.entries.filter(function(e) { return e.type === 'match'; });
+  });
+  var b2bCount = 0;
+  if (!window._frcAbstractMode && _b2bMatches.length > 0) {
+    for (var bi = 1; bi < _b2bMatches.length; bi++) {
+      var prevTeams = new Set([].concat(_b2bMatches[bi-1].red, _b2bMatches[bi-1].blue));
+      if ([].concat(_b2bMatches[bi].red, _b2bMatches[bi].blue).some(function(t) { return prevTeams.has(t); })) {
+        b2bCount++;
+      }
+    }
+  }
+  // B2B color: green if 0, amber if 1-2, danger otherwise. Matches
+  // what the old stats-bar tile did.
+  var b2bColor = b2bCount === 0 ? 'var(--accent3)' : b2bCount <= 2 ? 'var(--amber)' : 'var(--danger)';
+
+  // ── Headline tiles ───────────────────────────────────────────────
+  // Always shown. Server data adds richer detail (partner/opponent
+  // averages, station imbalance specifics) but the client-side
+  // fallback values are enough to populate basic tiles.
+  var tiles = [];
+
+  if (d) {
+    var p = d.partner, o = d.opponent;
+    tiles.push(
+      '<div class="dr-stat">' +
+      '  <div class="dr-stat-label">Avg partner repeats</div>' +
+      '  <div class="dr-stat-value">' + p.average + '</div>' +
+      '  <div class="dr-stat-detail">floor: ' + (p.floor === 0 ? '0' : p.floor) + ' \u00b7 max: ' + p.max + '</div>' +
+      '</div>',
+      '<div class="dr-stat">' +
+      '  <div class="dr-stat-label">Avg opponent repeats</div>' +
+      '  <div class="dr-stat-value">' + o.average + '</div>' +
+      '  <div class="dr-stat-detail">floor: ' + (o.floor === 0 ? '0' : o.floor) + ' \u00b7 max: ' + o.max + '</div>' +
+      '</div>',
+      '<div class="dr-stat">' +
+      '  <div class="dr-stat-label">Pairs never met</div>' +
+      '  <div class="dr-stat-value">' + p.zero_pairs + '</div>' +
+      '  <div class="dr-stat-detail">of ' + d.total_pairs + ' possible</div>' +
+      '</div>',
+      '<div class="dr-stat">' +
+      '  <div class="dr-stat-label">Station balance</div>' +
+      '  <div class="dr-stat-value">' + (d.stations.max_imbalance === 0 ? '\u2713' : '\u00b1' + d.stations.max_imbalance) + '</div>' +
+      '  <div class="dr-stat-detail">' + (d.stations.imbalanced_slots > 0 ? d.stations.imbalanced_slots + ' uneven' : 'all 6 balanced') + '</div>' +
+      '</div>'
+    );
+  }
+
+  // B2B and Surrogates tiles — always shown, computed client-side.
+  // IDs preserved (#statB2BContainer / #statB2B / #statSurrogates*)
+  // so toggleStatFilter and any other code that targets them keeps
+  // working.
+  var surTotal = d ? d.surrogates.total : countSurrogates(_b2bMatches);
+  var surColor = surTotal === 0 ? 'var(--accent3)' : 'var(--amber)';
+  // Surrogate min-required calculation (matches the old stats-bar tile).
+  var surNumTeams = (d && d.num_teams) || parseInt(document.getElementById('numTeams').value) || 0;
+  var surMpt      = (d && d.matches_per_team) || parseInt(document.getElementById('matchesPerTeam').value) || 0;
+  var surTotalPlays = surNumTeams * surMpt;
+  var surTotalMatches = Math.ceil(surTotalPlays / 6);
+  var surMinRequired = (surTotalMatches * 6) - surTotalPlays;
+  var surGap = surTotal - surMinRequired;
+  var surDetail = (surMinRequired === 0)
+    ? 'none required'
+    : surMinRequired + ' min \u00b7 ' + (surGap === 0 ? 'optimal' : '+' + surGap + ' extra');
+
+  tiles.push(
+    '<div class="dr-stat stat-clickable" id="statB2BContainer" onclick="toggleStatFilter(\'b2b\')" title="A back-to-back is when a team plays two matches in a row with no break. Lower is better. Click to filter.">' +
+    '  <div class="dr-stat-label">Back-to-backs</div>' +
+    '  <div class="dr-stat-value" id="statB2B" style="color:' + b2bColor + ';">' + b2bCount + '</div>' +
+    '  <div class="dr-stat-detail">' + (b2bCount === 0 ? 'none' : 'click to filter') + '</div>' +
+    '</div>',
+    '<div class="dr-stat stat-clickable" id="statSurrogatesContainer" onclick="toggleStatFilter(\'surrogate\')" title="A surrogate plays an extra match to fill a structural gap in the schedule. Click to filter surrogate matches.">' +
+    '  <div class="dr-stat-label">Surrogates</div>' +
+    '  <div class="dr-stat-value" id="statSurrogates" style="color:' + surColor + ';">' + surTotal + '</div>' +
+    '  <div class="dr-stat-detail" id="statSurrogatesMin">' + surDetail + '</div>' +
+    '</div>'
+  );
+
+  // ── Server-data-only sections: histograms + issues ───────────────
+  var sectionsHtml = '';
+  if (d) {
+    function maxVal(hist) { return Math.max(0, ...Object.values(hist || {})); }
+    function histRows(hist, floor, total) {
+      var max = maxVal(hist);
+      var counts = Object.keys(hist).map(Number).sort(function(a, b) { return a - b; });
+      return counts.map(function(c) {
+        var n = hist[c];
+        var pct = max > 0 ? Math.round((n / max) * 100) : 0;
+        var cls = 'dr-histogram-bar';
+        if (c === 0) cls += ' zero';
+        else if (c > floor + 1) cls += ' way-over';
+        else if (c > floor) cls += ' over-floor';
+        var lbl = c === 0 ? '0 (never met)' : (c + ' time' + (c > 1 ? 's' : ''));
+        var sharePct = total > 0 ? Math.round((n / total) * 100) : 0;
+        return '<div class="dr-histogram">' +
+               '  <span class="dr-histogram-label">' + lbl + '</span>' +
+               '  <div><div class="' + cls + '" style="width:' + pct + '%"></div></div>' +
+               '  <span class="dr-histogram-count">' + n + ' (' + sharePct + '%)</span>' +
+               '</div>';
+      }).join('');
+    }
+    var issues = [];
+    if (d.partner.worst_pairs && d.partner.worst_pairs.length) {
+      issues.push(d.partner.worst_pairs.length + ' pair' + (d.partner.worst_pairs.length > 1 ? 's' : '') +
+                  ' partnered more than the floor (' + d.partner.floor + ')');
+    }
+    if (d.opponent.worst_pairs && d.opponent.worst_pairs.length) {
+      issues.push(d.opponent.worst_pairs.length + ' pair' + (d.opponent.worst_pairs.length > 1 ? 's' : '') +
+                  ' opposed more than the floor (' + d.opponent.floor + ')');
+    }
+    if (d.stations.imbalanced_slots > 0) {
+      issues.push(d.stations.imbalanced_slots + ' slot' + (d.stations.imbalanced_slots > 1 ? 's have' : ' has') +
+                  ' uneven station distribution (max imbalance: ' + d.stations.max_imbalance + ')');
+    }
+    if (d.surrogates.concentrated_slots > 0) {
+      issues.push(d.surrogates.concentrated_slots + ' slot' +
+                  (d.surrogates.concentrated_slots > 1 ? 's have' : ' has') + ' more than 1 surrogate match');
+    }
+    var issuesHtml = issues.length
+      ? '<div class="dr-issues"><strong>\u26A0 Notable:</strong><ul>' +
+        issues.map(function(i) { return '<li>' + i + '</li>'; }).join('') + '</ul></div>'
+      : '<div class="dr-issues clean"><strong>\u2705 Clean:</strong> all distributions at or near theoretical floor.</div>';
+    var totalPartnerSlots  = 2 * d.matches_per_team;
+    var totalOpponentSlots = 3 * d.matches_per_team;
+    sectionsHtml =
+      '<div class="dr-section">' +
+      '  <h3 style="margin-bottom:0.4rem;">Partner pair distribution</h3>' +
+      '  <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.3rem;">Each team plays alongside ' + totalPartnerSlots + ' partner-slots across the schedule.</div>' +
+      histRows(d.partner.histogram, d.partner.floor, d.total_pairs) +
+      '</div>' +
+      '<div class="dr-section">' +
+      '  <h3 style="margin-bottom:0.4rem;">Opponent pair distribution</h3>' +
+      '  <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.3rem;">Each team faces ' + totalOpponentSlots + ' opponent-slots across the schedule.</div>' +
+      histRows(d.opponent.histogram, d.opponent.floor, d.total_pairs) +
+      '</div>' +
+      issuesHtml;
+  }
 
   card.innerHTML =
-    '<h3>Diversity Report</h3>' +
-    '<div class="dr-headline">' +
-    '  <div class="dr-stat">' +
-    '    <div class="dr-stat-label">Avg partner repeats</div>' +
-    '    <div class="dr-stat-value">' + p.average + '</div>' +
-    '    <div class="dr-stat-detail">floor: ' + (p.floor === 0 ? '0 (none required)' : p.floor) + ' · max: ' + p.max + '</div>' +
-    '  </div>' +
-    '  <div class="dr-stat">' +
-    '    <div class="dr-stat-label">Avg opponent repeats</div>' +
-    '    <div class="dr-stat-value">' + o.average + '</div>' +
-    '    <div class="dr-stat-detail">floor: ' + (o.floor === 0 ? '0 (none required)' : o.floor) + ' · max: ' + o.max + '</div>' +
-    '  </div>' +
-    '  <div class="dr-stat">' +
-    '    <div class="dr-stat-label">Pairs never met</div>' +
-    '    <div class="dr-stat-value">' + p.zero_pairs + '</div>' +
-    '    <div class="dr-stat-detail">of ' + d.total_pairs + ' possible pairs</div>' +
-    '  </div>' +
-    '  <div class="dr-stat">' +
-    '    <div class="dr-stat-label">Station balance</div>' +
-    '    <div class="dr-stat-value">' + (d.stations.max_imbalance === 0 ? '✓' : '±' + d.stations.max_imbalance) + '</div>' +
-    '    <div class="dr-stat-detail">' + (d.stations.imbalanced_slots > 0 ? d.stations.imbalanced_slots + ' slot(s) uneven' : 'all 6 stations balanced') + '</div>' +
-    '  </div>' +
-    '  <div class="dr-stat">' +
-    '    <div class="dr-stat-label">Surrogates</div>' +
-    '    <div class="dr-stat-value">' + d.surrogates.total + '</div>' +
-    '    <div class="dr-stat-detail">' + (d.surrogates.total === 0 ? 'none required' : 'max ' + d.surrogates.max_per_slot + ' per slot') + '</div>' +
-    '  </div>' +
-    '</div>' +
-    '<div class="dr-section">' +
-    '  <h3 style="margin-bottom:0.4rem;">Partner pair distribution</h3>' +
-    '  <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.3rem;">Each team plays alongside ' + totalPartnerSlots + ' partner-slots across the schedule.</div>' +
-    histRows(p.histogram, p.floor, d.total_pairs) +
-    '</div>' +
-    '<div class="dr-section">' +
-    '  <h3 style="margin-bottom:0.4rem;">Opponent pair distribution</h3>' +
-    '  <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.3rem;">Each team faces ' + totalOpponentSlots + ' opponent-slots across the schedule.</div>' +
-    histRows(o.histogram, o.floor, d.total_pairs) +
-    '</div>' +
-    issuesHtml;
+    '<h3>Schedule Quality</h3>' +
+    '<div class="dr-headline">' + tiles.join('') + '</div>' +
+    sectionsHtml;
+}
+
+// Backwards-compat alias — old call sites may still reference
+// renderDiversityReport. Routes to the new unified function.
+function renderDiversityReport(card, d) {
+  return renderDiversityCard(card, d);
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -4717,16 +4820,21 @@ function fullReset() {
   // Hide the diversity report panel
   var drCard = document.getElementById('diversityReportCard');
   if (drCard) { drCard.style.display = 'none'; drCard.innerHTML = ''; }
+  // Forget any cached server-side diversity data so a future render
+  // doesn't show stale histograms from a previous schedule.
+  window._latestDiversityData = null;
   var dlBar = document.getElementById('downloadBar');
   if (dlBar) dlBar.style.display = 'none';
 
-  // Reset stats bar
-  ['statMatches','statTeams','statPerTeam','statDays','statB2B','statSurrogates'].forEach(function(id) {
+  // Reset meta line text and hide it. The B2B/Surrogates IDs only
+  // exist when the diversity card has been rendered; resetting the
+  // diversity card above already cleared them.
+  ['statMatches','statTeams','statPerTeam','statDays'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) { el.textContent = '\u2014'; el.style.color = ''; }
   });
-  var minEl = document.getElementById('statSurrogatesMin');
-  if (minEl) { minEl.textContent = ''; }
+  var metaEl = document.getElementById('scheduleMeta');
+  if (metaEl) metaEl.style.display = 'none';
 
   // Hide filter bar
   document.getElementById('filterBar').style.display = 'none';
@@ -6271,20 +6379,16 @@ function scrollToMatch(matchNum) {
 }
 
 function updateB2BStat() {
-  var el = document.getElementById('statB2B');
-  if (!el) return;
-  var matches = (window._frcScheduled || []).flatMap(function(d) {
-    return d.entries.filter(function(e) { return e.type === 'match'; });
-  });
-  var b2bRaw = 0;
-  if (!window._frcAbstractMode && matches.length > 0) {
-    for (var i = 1; i < matches.length; i++) {
-      var prev = new Set([].concat(matches[i-1].red, matches[i-1].blue));
-      if ([].concat(matches[i].red, matches[i].blue).some(function(t) { return prev.has(t); })) b2bRaw++;
-    }
-  }
-  el.textContent = b2bRaw;
-  el.style.color = b2bRaw === 0 ? 'var(--accent3)' : b2bRaw <= 2 ? 'var(--amber)' : 'var(--danger)';
+  // The B2B value lives inside the diversity card (#statB2B). Recompute
+  // by re-rendering the card — that keeps the value, the color, and
+  // the subtitle ("none" vs "click to filter") consistent. If the
+  // diversity card isn't rendered yet (no schedule generated), this
+  // is a no-op.
+  var card = document.getElementById('diversityReportCard');
+  if (!card || card.style.display === 'none') return;
+  // Re-render with whatever server data is cached (may be null —
+  // headline tiles still render correctly without it).
+  renderDiversityCard(card, window._latestDiversityData || null);
 }
 
 function onParamChanged() {
@@ -8800,11 +8904,30 @@ async function commitSchedule() {
       })(),
       match_count: sched.matches ? sched.matches.length : null,
       surrogate_count: sched.surrogate_count,
-      stats: {
-        total_matches: parseInt(document.getElementById('statMatches').textContent) || null,
-        back_to_backs: parseInt(document.getElementById('statB2B').textContent) || 0,
-        surrogates:    parseInt(document.getElementById('statSurrogates').textContent) || 0,
-      },
+      stats: (function() {
+        // Read from window globals + sched response, not the DOM —
+        // the diversity card may not yet be rendered (the IDs
+        // statB2B/statSurrogates only exist inside it). Falls back
+        // to DOM lookup with a null-safe pattern as a defensive
+        // backstop in case generation order differs.
+        var matchesArr = (window._frcScheduled || []).flatMap(function(d) {
+          return d.entries.filter(function(e) { return e.type === 'match'; });
+        });
+        var b2b = 0;
+        if (!window._frcAbstractMode && matchesArr.length > 0) {
+          for (var bi = 1; bi < matchesArr.length; bi++) {
+            var prev = new Set([].concat(matchesArr[bi-1].red, matchesArr[bi-1].blue));
+            if ([].concat(matchesArr[bi].red, matchesArr[bi].blue).some(function(t) { return prev.has(t); })) b2b++;
+          }
+        }
+        var totalMatches = matchesArr.length;
+        var totalSurrogates = sched.surrogate_count != null ? sched.surrogate_count : 0;
+        return {
+          total_matches: totalMatches || null,
+          back_to_backs: b2b,
+          surrogates:    totalSurrogates,
+        };
+      })(),
     };
 
     console.log('FRC_SCHEDULE_COMMITTED', JSON.stringify(log, null, 2));
@@ -9553,37 +9676,35 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
     scheduled.push({dayNum: d+1, start: day.start, end: day.end, entries});
   }
 
-  // Update stats
-  const b2bRaw = countBackToBacks(matches);
-  // In abstract mode slot indices are not real teams — B2B count is meaningless.
-  // Only show it when real teams are assigned or fake teams are being displayed.
-  const b2b = window._frcAbstractMode ? 0 : b2bRaw;
-  const totalSurrogates = countSurrogates(matches);
+  // Update stats. The meta line (#scheduleMeta) holds basic facts;
+  // quality stats (B2B, surrogates, etc) live in the diversity card
+  // which is rendered immediately below. Both populate from client-
+  // side state — server-side diversity data, when it arrives later
+  // via loadDiversityReport, will re-render the diversity card with
+  // additional histogram + issues sections.
   document.getElementById('statMatches').textContent = totalMatches;
-  document.getElementById('statTeams').textContent = numTeams;
+  document.getElementById('statTeams').textContent   = numTeams;
   document.getElementById('statPerTeam').textContent = matchesPerTeam;
-  document.getElementById('statDays').textContent = days.length;
-  document.getElementById('statB2B').textContent = b2b;
-  document.getElementById('statB2B').style.color = b2b === 0 ? 'var(--accent3)' : b2b <= 2 ? 'var(--amber)' : 'var(--danger)';
-  const totalPlays    = numTeams * matchesPerTeam;
-  const matchesPerRound = Math.ceil(numTeams / 6);
-  const totalMatches2 = Math.ceil(totalPlays / 6);
-  const totalSlots    = totalMatches2 * 6;
-  const minSurrogates = totalSlots - totalPlays;
-  document.getElementById('statSurrogates').textContent = totalSurrogates;
-  document.getElementById('statSurrogates').style.color = totalSurrogates === 0 ? 'var(--accent3)' : 'var(--amber)';
-  const minEl = document.getElementById('statSurrogatesMin');
-  if (minSurrogates === 0) {
-    minEl.textContent = 'none required';
-    minEl.style.color = 'var(--accent3)';
-  } else {
-    const gap = totalSurrogates - minSurrogates;
-    minEl.textContent = minSurrogates + ' min · ' + (gap === 0 ? 'optimal' : '+' + gap + ' extra');
-    minEl.style.color = gap === 0 ? 'var(--accent3)' : gap <= 3 ? 'var(--amber)' : 'var(--danger)';
+  document.getElementById('statDays').textContent    = days.length;
+  // Show the meta line — starts hidden so empty schedules don't show
+  // "— matches · — teams" placeholder text.
+  var metaEl = document.getElementById('scheduleMeta');
+  if (metaEl) metaEl.style.display = 'flex';
+
+  // Render the diversity card immediately with client-side data. If
+  // server-side diversity data was previously fetched and stashed on
+  // window._latestDiversityData, renderDiversityCard will use it; if
+  // not, we get the headline tiles only (which is fine — histograms
+  // and issues are the server-data-only sections).
+  // Reset the stashed server data when generating a fresh schedule —
+  // it was for a different abstract schedule and would be misleading
+  // until loadDiversityReport runs again.
+  window._latestDiversityData = null;
+  var divCardEl = document.getElementById('diversityReportCard');
+  if (divCardEl) {
+    renderDiversityCard(divCardEl, null);
+    divCardEl.style.display = 'block';
   }
-  minEl.title = numTeams + ' teams × ' + matchesPerTeam + ' matches = ' + totalPlays + ' plays. ' +
-    'ceil(' + totalPlays + '/6) = ' + totalMatches2 + ' matches × 6 = ' + totalSlots + ' slots. ' +
-    'Minimum surrogates = ' + minSurrogates + '. Scheduled = ' + totalSurrogates + '.';
 
   const output = document.getElementById('scheduleOutput');
   output.innerHTML = '';

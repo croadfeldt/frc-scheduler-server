@@ -218,6 +218,12 @@ table.matches td.match { font-weight: 700; }
 table.matches td.blue  { color: #0550ae; font-weight: 500; }
 table.matches td.red   { color: #a3261a; font-weight: 500; }
 table.matches tr:nth-child(even) td { background: #f7f8f9; }
+/* Highlighted cells — alliance-tinted backgrounds used when the
+   user's print/PDF options select "highlight selected teams". The
+   tint is light enough that the existing red/blue text stays
+   readable. !important wins over the zebra-striped even-row gray. */
+table.matches td.red.highlighted  { background: rgba(220, 80, 80, 0.18) !important; }
+table.matches td.blue.highlighted { background: rgba(80, 130, 220, 0.18) !important; }
 table.matches tr.match-row.surrogate-only-row td { font-style: italic; }
 
 /* Surrogate badge — small inline marker after the team number */
@@ -284,12 +290,24 @@ def _esc(s: Any) -> str:
     return html.escape(str(s)) if s is not None else ""
 
 
-def _team_cell(team: int, surrogate: bool, alliance: str) -> str:
-    """Render a single team cell. alliance = 'red' or 'blue'."""
+def _team_cell(team: int, surrogate: bool, alliance: str, highlight: bool = False) -> str:
+    """Render a single team cell.
+
+    Args:
+        team:      team number, or 0 for an empty slot.
+        surrogate: whether this match is a surrogate play for the team.
+        alliance:  'red' or 'blue' (drives the cell color).
+        highlight: when True, add a 'highlighted' class so the cell
+                   gets an alliance-tinted background. Used when the
+                   user has selected a subset of teams (e.g. via the
+                   view page's "Highlight selected teams" option) and
+                   wants to scan-find their matches in a printed sheet.
+    """
     if not team:
         return f'<td class="{alliance}">&mdash;</td>'
     sur = '<span class="sur">S</span>' if surrogate else ''
-    return f'<td class="{alliance}">{_esc(team)}{sur}</td>'
+    cls = f'{alliance} highlighted' if highlight else alliance
+    return f'<td class="{cls}">{_esc(team)}{sur}</td>'
 
 
 def _build_day_section(
@@ -392,10 +410,15 @@ def _build_day_section(
             # If team numbers shouldn't be shown, render dashes. Useful
             # for "abstract" mode previews where slot assignments
             # haven't been made yet.
+            #
+            # When highlight_teams is set in options, cells whose team
+            # appears in that set get an alliance-tinted background so
+            # the user can scan-find their matches in a printed sheet.
+            highlight_set = set(options.get("highlight_teams") or [])
             def cell(team: int, surrogate: bool, alliance: str) -> str:
                 if not show_team_numbers:
                     return f'<td class="{alliance}">&mdash;</td>'
-                return _team_cell(team, surrogate, alliance)
+                return _team_cell(team, surrogate, alliance, highlight=team in highlight_set)
 
             match_label = f'{"P" if entry.get("is_practice") else "Q"}{_esc(num)}'
 

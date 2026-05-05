@@ -799,6 +799,22 @@
               Page break between days
             </label>
           </div>
+          <!-- Highlight selected teams — alliance-tinted cell background.
+               When enabled, every cell containing one of the user's
+               selected teams (the team chips picked above the schedule)
+               gets a subtle red or blue wash so the user can scan-find
+               their matches in a printed sheet. The default is keyed
+               to the "Only my matches" toggle: if that's on, the user
+               clearly cares about their teams and probably wants the
+               highlights too; otherwise off. Set in openExportModal(). -->
+          <div style="margin-top:0.75rem;font-weight:600;font-size:0.85rem;color:var(--text-muted, #555);margin-bottom:0.5rem;">Selected teams</div>
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:14px;cursor:pointer;">
+            <input type="checkbox" id="vPrintOptHighlightTeams">
+            Highlight selected teams in printout
+          </label>
+          <div id="vPrintOptHighlightTeamsHint" style="margin-top:0.4rem;font-size:0.75rem;color:var(--text-muted, #555);line-height:1.4;display:none;">
+            <span id="vPrintOptHighlightTeamsList"></span> highlighted with their alliance color in each match.
+          </div>
           <div style="margin-top:0.75rem;font-size:0.8rem;color:var(--text-muted, #555);line-height:1.45;">
             Print and PDF produce the same content; only the destination differs.
           </div>
@@ -2564,6 +2580,38 @@ function openExportModal() {
   var defaultRadio = document.querySelector('input[name="exportFormat"][value="print_pdf"]');
   if (defaultRadio) defaultRadio.checked = true;
   onExportFormatChange();
+
+  // Default the "Highlight selected teams" checkbox based on the
+  // user's current view filter. If they have "Only my matches" on,
+  // they clearly care about their teams and likely want them
+  // highlighted in the printout. Otherwise, default off — we don't
+  // want to surprise users with extra ink.
+  // The checkbox is also disabled (and the hint hidden) when no
+  // teams are selected, since there'd be nothing to highlight.
+  var hl   = document.getElementById('vPrintOptHighlightTeams');
+  var hint = document.getElementById('vPrintOptHighlightTeamsHint');
+  var hintList = document.getElementById('vPrintOptHighlightTeamsList');
+  var onlyMine = document.getElementById('onlyMine');
+  var hasTeams = STATE.myTeams && STATE.myTeams.size > 0;
+  if (hl) {
+    hl.disabled = !hasTeams;
+    hl.checked  = !!(hasTeams && onlyMine && onlyMine.checked);
+  }
+  if (hint && hintList) {
+    if (hasTeams) {
+      // Show the team-list preview right under the checkbox.
+      var teams = Array.from(STATE.myTeams).sort(function(a,b){ return a-b; });
+      var preview = teams.length <= 5
+        ? 'Teams ' + teams.join(', ')
+        : 'Teams ' + teams.slice(0,4).join(', ') + ', +' + (teams.length-4) + ' more';
+      hintList.textContent = preview;
+      hint.style.display = '';
+    } else {
+      hintList.textContent = '';
+      hint.style.display = 'none';
+    }
+  }
+
   var modal = document.getElementById('exportModal');
   if (modal) modal.classList.add('open');
 }
@@ -2704,6 +2752,18 @@ function _viewBuildPdfPayload(opts) {
     // skip them. They're a view-only flair.
   });
 
+  // Highlight selected teams: only emit when (a) the user actively
+  // checked the option in the export modal AND (b) they actually
+  // have teams selected. Empty list = no highlighting in the
+  // server's render. The opts.highlightTeams flag comes through
+  // from runExportAction → serverRender → here so the checkbox
+  // state is captured at click time, not read live (in case the
+  // modal closed before the async dispatch fires).
+  var hlTeams = [];
+  if (opts.highlightTeams && hasSel) {
+    hlTeams = Array.from(STATE.myTeams);
+  }
+
   return {
     schedule: {
       event_name: ev.name || null,
@@ -2723,6 +2783,7 @@ function _viewBuildPdfPayload(opts) {
       show_round_dividers: false,
       page_break_after_practice: !!opts.breakAfterPractice,
       page_break_between_days:   !!opts.breakBetweenDays,
+      highlight_teams:           hlTeams,
     },
     branding: {
       primary_color: (STATE.branding && STATE.branding.primary_color) || null,
@@ -2855,11 +2916,14 @@ function runExportAction(action) {
 
   // Read print options up front (modal might close before dispatch).
   var optBreakAfterPractice = false, optBreakBetweenDays = false;
+  var optHighlightTeams = false;
   if (fmt === 'print_pdf') {
     var cb1 = document.getElementById('vPrintOptPageBreakAfterPractice');
     var cb2 = document.getElementById('vPrintOptPageBreakBetweenDays');
+    var cb3 = document.getElementById('vPrintOptHighlightTeams');
     optBreakAfterPractice = cb1 ? cb1.checked : true;
     optBreakBetweenDays   = cb2 ? cb2.checked : true;
+    optHighlightTeams     = cb3 ? cb3.checked : false;
   }
 
   setTimeout(function() {
@@ -2867,6 +2931,7 @@ function runExportAction(action) {
       var renderOpts = {
         breakAfterPractice: optBreakAfterPractice,
         breakBetweenDays:   optBreakBetweenDays,
+        highlightTeams:     optHighlightTeams,
       };
       if (action === 'pdf') serverRender('pdf',  renderOpts);
       else                  serverRender('html', renderOpts);
