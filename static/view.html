@@ -2781,21 +2781,43 @@ function exportPdf(pdfOpts) {
   foot.textContent = footBits.join(' · ');
   wrap.appendChild(foot);
 
-  // Mount the source so html2canvas can lay it out. We use
-  // visibility:hidden + clip rather than position:absolute;left:-9999px:
-  // off-screen positioning can cause html2canvas to capture
-  // zero-dimensional output in some browser/library combos, producing
-  // a blank PDF. visibility:hidden keeps the element in the layout
-  // flow (so it has computed dimensions) but invisible to the user;
-  // clip-path takes it out of the visible viewport even further.
-  wrap.style.position   = 'absolute';
-  wrap.style.left       = '0';
-  wrap.style.top        = '0';
-  wrap.style.width      = '7.5in';  // letter width minus 0.5in margins
-  wrap.style.visibility = 'hidden';
-  wrap.style.pointerEvents = 'none';
-  wrap.style.zIndex     = '-1';
-  document.body.appendChild(wrap);
+  // Mount the source so html2canvas can lay it out and capture it.
+  //
+  // History:
+  //   v1: position:absolute; left:-9999px — far-off-screen coords break
+  //       html2canvas geometry in some browser/library combos.
+  //   v2: position:absolute; visibility:hidden — html2canvas honours
+  //       CSS visibility:hidden and produces a BLANK canvas. (This is
+  //       what the user just hit.) Confirmed by the empty content
+  //       stream in the produced PDF (jsPDF wrote a one-page file
+  //       containing only a stroke-color directive — no text, no
+  //       images, no draw commands).
+  //   v3 (now): mount inside a 0×0 overflow:hidden parent. The parent
+  //       sits at (0,0) and shows nothing because it has zero size
+  //       and clips its overflow. The child (`wrap`) is rendered at
+  //       its full natural dimensions inside the parent — fully
+  //       painted, fully laid out, fully captureable by html2canvas —
+  //       just visually clipped to nothing. No `visibility:hidden`,
+  //       no `display:none`, no off-screen coordinates: the element
+  //       is paintably real.
+  var clipper = document.createElement('div');
+  clipper.style.cssText = [
+    'position: absolute',
+    'top: 0',
+    'left: 0',
+    'width: 0',
+    'height: 0',
+    'overflow: hidden',
+    'pointer-events: none',
+    'z-index: -1',
+  ].join(';');
+  // wrap itself stays plain (no positioning, no visibility games);
+  // it just lives inside the 0×0 clipper. We give it an explicit
+  // width matching the eventual PDF content width so its natural
+  // layout matches the captured canvas size.
+  wrap.style.width = '7.5in';  // letter width minus 0.5in margins
+  clipper.appendChild(wrap);
+  document.body.appendChild(clipper);
 
   // Wait for fonts to be ready before snapshotting. html2canvas
   // captures whatever has computed layout at the moment .from() is
@@ -2805,7 +2827,12 @@ function exportPdf(pdfOpts) {
   // fallback at 4 seconds so a font-load hang doesn't break export
   // entirely.
   function _runHtml2Pdf() {
-    html2pdf().set({
+    // Use the chained .toPdf() API (instead of .save()) so we can
+    // inspect the canvas after html2canvas runs. If it produced
+    // empty/zero-pixel output, surface a clear error rather than
+    // saving a silently-blank PDF — the most confusing failure mode
+    // we've hit twice now.
+    var worker = html2pdf().set({
       margin: [0.4, 0.4, 0.4, 0.4],
       filename: getFilenameSlug('.pdf'),
       image: { type: 'jpeg', quality: 0.95 },
@@ -2814,19 +2841,44 @@ function exportPdf(pdfOpts) {
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
-        // Force the canvas to use the wrap's natural width — without
-        // this, off-screen/absolute elements can be measured at viewport
-        // width which mismatches the inline 7.5in size we set.
+        // Pin the measurement width to the wrap's natural width.
+        // Without this, html2canvas defaults to viewport width which
+        // mismatches the inline 7.5in size. Read from wrap (not
+        // clipper, which is 0×0) so we get real dimensions.
         windowWidth: wrap.scrollWidth || 720,
       },
       jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
       pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' },
-    }).from(wrap).save().then(function() {
-      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    }).from(wrap);
+
+    worker.toCanvas().then(function() {
+      // After toCanvas() resolves, the worker has a `canvas` field
+      // we can inspect. Empty canvas = 0 width or 0 height; effectively
+      // empty = all-white (rare but possible if styles failed to
+      // apply). We only check dimensions here; an all-white canvas
+      // would still produce a "blank" PDF but that's a different
+      // class of bug and we don't want to slow every export with a
+      // pixel scan.
+      var canvas = worker.prop && worker.prop.canvas;
+      if (!canvas || !canvas.width || !canvas.height) {
+        if (clipper.parentNode) clipper.parentNode.removeChild(clipper);
+        alert(
+          'PDF generation produced an empty canvas (' +
+          (canvas ? canvas.width + 'x' + canvas.height : 'no canvas') + '). ' +
+          'This usually means a CSS or font issue with the rendered HTML. ' +
+          'Open the browser console to see html2canvas warnings, or use ' +
+          'the Print button and choose "Save as PDF" instead.'
+        );
+        return;
+      }
+      // Canvas looks valid — proceed to PDF stage.
+      return worker.toPdf().save().then(function() {
+        if (clipper.parentNode) clipper.parentNode.removeChild(clipper);
+      });
     }).catch(function(err) {
-      console.error(err);
-      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
-      alert('PDF generation failed: ' + err.message);
+      console.error('PDF generation failed:', err);
+      if (clipper.parentNode) clipper.parentNode.removeChild(clipper);
+      alert('PDF generation failed: ' + (err && err.message ? err.message : err));
     });
   }
 
