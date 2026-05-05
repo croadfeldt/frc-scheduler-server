@@ -187,6 +187,16 @@
     background: var(--break-bg); color: var(--break-text); font-style: italic;
     font-weight: 500; padding: 0.6rem 1rem; text-align: center;
   }
+  /* Informational blocks from the day-plan PDF — ceremonies, playoffs,
+     awards. Same row shape as breaks but with kind-specific tinting so
+     they read as event milestones rather than scheduling gaps. */
+  tr.info-block-row td {
+    font-style: normal;
+    /* Slight color shifts per kind, layered over break-bg */
+  }
+  tr.info-block-row[data-kind="playoff"]  td { background: rgba(229, 115, 115, 0.18); color: #b54040; }
+  tr.info-block-row[data-kind="ceremony"] td { background: rgba(155, 109, 255, 0.15); color: #6b3fc7; }
+  tr.info-block-row[data-kind="practice"] td { background: rgba(93, 175, 120, 0.15); color: #2c7a4a; }
   /* Day divider */
   tr.day-divider td {
     background: var(--primary); color: #fff; font-weight: 700;
@@ -1207,6 +1217,28 @@ function computeMatchTimes() {
     });
   }
 
+  // ── Informational timeline blocks (ceremony, playoff, awards) ──────────
+  // These come from the day-plan PDF importer. They aren't part of the
+  // schedule's match list — they're just labeled time ranges that should
+  // appear on the timeline so the /view page reflects the full event.
+  // Inserted as `info-block` entries; the renderer treats them similarly
+  // to break rows but with kind-specific styling/labels.
+  const timelineBlocks = (cfg.timeline_blocks || []).filter(b => b && b.start);
+  if (timelineBlocks.length) {
+    timelineBlocks.forEach(b => {
+      const startMin = timeStrToMin(b.start);
+      const endMin   = b.end ? timeStrToMin(b.end) : null;
+      computed.push({
+        type:    'info-block',
+        kind:    b.kind || 'break',
+        name:    b.label || (b.kind || 'Event'),
+        details: b.details || '',
+        start:   startMin,
+        end:     endMin,
+      });
+    });
+  }
+
   STATE.computed = computed;
 
   // Anchor live mode times to today (or to a passed-in date) so we know
@@ -1296,6 +1328,29 @@ function rerender() {
     } else if (entry.type === 'break') {
       html += '<tr class="break-row"><td colspan="8">⏸ ' + escapeHtml(entry.name) +
               ' · ' + minToTime12(entry.start) + ' – ' + minToTime12(entry.end) + '</td></tr>';
+    } else if (entry.type === 'info-block') {
+      // Informational block from the day-plan PDF (ceremony, playoff, awards).
+      // Rendered like a break row but with a kind-specific icon and label.
+      // Time range is "start – end" if both present, otherwise "start →" for
+      // open-ended blocks like "Playoffs Begin".
+      const icons = {
+        ceremony: '🎤',
+        playoff:  '🏆',
+        practice: '🛠️',
+        break:    '⏸',
+      };
+      const icon = icons[entry.kind] || '📌';
+      const timeStr = entry.end
+        ? (minToTime12(entry.start) + ' – ' + minToTime12(entry.end))
+        : (minToTime12(entry.start) + ' →');
+      const detailStr = entry.details
+        ? ' <span style="color:var(--text-muted);font-size:0.85em;">' +
+          escapeHtml(entry.details) + '</span>'
+        : '';
+      html += '<tr class="break-row info-block-row" data-kind="' +
+              escapeAttr(entry.kind) + '"><td colspan="8">' +
+              icon + ' <strong>' + escapeHtml(entry.name) + '</strong> · ' +
+              timeStr + detailStr + '</td></tr>';
     } else {
       // Live data only applies to qualification matches — TBA/Nexus don't track practice
       const live  = entry.isPractice ? null : STATE.liveByMatch[entry.matchNum];

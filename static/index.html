@@ -1236,10 +1236,10 @@
       <div id="pdfImportStage3" style="display:none;flex:1;overflow-y:auto;">
         <div id="pdfImportSummary" style="margin-bottom:0.75rem;"></div>
         <div id="pdfImportValidation" style="margin-bottom:0.75rem;"></div>
-        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem;">
+        <div id="pdfImportEditHint" style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem;">
           Review and edit (click any cell to change). Surrogate flags are toggled by clicking the team's <strong>S</strong> indicator.
         </div>
-        <div style="overflow-x:auto;">
+        <div id="pdfImportTableContainer" style="overflow-x:auto;">
           <table id="pdfImportTable" class="pdf-import-table"></table>
         </div>
       </div>
@@ -1801,6 +1801,30 @@ function renderPdfImportPreview(d) {
   document.getElementById('pdfImportStage3').style.display = '';
   document.getElementById('pdfImportStage3Footer').style.display = 'flex';
 
+  // Branch by what the backend extracted. Match-list PDFs go through the
+  // existing detailed preview with editable per-match cells. Day-plan PDFs
+  // (event-day programs, MSHSL itinerary) get a simpler preview with a
+  // single Apply-to-form button.
+  if (d.kind === 'dayplan') {
+    renderDayplanPreview(d);
+    return;
+  }
+
+  // Match-list flow: ensure the table + edit hint are visible (might have
+  // been hidden by a previous dayplan import in the same session)
+  const _tc = document.getElementById('pdfImportTableContainer');
+  if (_tc) _tc.style.display = '';
+  const _eh = document.getElementById('pdfImportEditHint');
+  if (_eh) _eh.style.display = '';
+  // Restore default match-list footer (Cancel + Commit)
+  const _fb = document.getElementById('pdfImportStage3Footer');
+  if (_fb) {
+    _fb.innerHTML =
+      '<button class="btn-sm" onclick="closePdfImportModal()">Cancel</button>' +
+      '<button class="btn-sm btn-accent" id="pdfImportConfirmBtn" onclick="confirmPdfImport()">' +
+      '&#10003; Import Schedule</button>';
+  }
+
   // Summary line
   const stats = (d.validation && d.validation.stats) || {};
   let summaryHtml = '<div style="font-size:0.78rem;line-height:1.5;">';
@@ -1878,6 +1902,255 @@ function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
                   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+// ── Day-plan preview (event-program PDFs) ─────────────────────────────────
+// Day-plan PDFs (MSHSL itinerary, regional state event programs) describe
+// when each phase of an event runs — practice window, qual rounds, lunch,
+// alliance selection, playoffs. We extract these as a list of typed blocks,
+// preview them, and on Apply we populate the day-config form fields.
+//
+// Block kinds mapped to today's schema:
+//   practice            → practiceDay form fields
+//   qual + lunch/break  → days[0] start/end + breaks
+//   ceremony, playoff   → timeline_blocks (informational; rendered on /view
+//                         as labeled time ranges; no impact on scheduling
+//                         except: a playoff block auto-caps days[0].end)
+
+function _formatTimeRange(startStr, endStr) {
+  // "08:30" "12:30" → "8:30 AM – 12:30 PM"
+  const fmt = function(hhmm) {
+    if (!hhmm) return '';
+    const parts = hhmm.split(':');
+    let h = parseInt(parts[0], 10);
+    const m = parts[1] || '00';
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12; if (h === 0) h = 12;
+    return h + ':' + m + ' ' + ampm;
+  };
+  if (startStr && endStr) return fmt(startStr) + ' – ' + fmt(endStr);
+  if (startStr) return fmt(startStr);
+  return '';
+}
+
+function _kindBadge(kind) {
+  // Color-code by kind so users can scan visually
+  const colors = {
+    practice: '#5daf78',  qual:    '#3a7bd5',  lunch:    '#c8992a',
+    break:    '#888',     ceremony:'#9b6dff',  playoff:  '#e57373',
+  };
+  const labels = {
+    practice: 'Practice', qual: 'Qual', lunch: 'Lunch',
+    break: 'Break', ceremony: 'Ceremony', playoff: 'Playoff',
+  };
+  const color = colors[kind] || '#888';
+  const label = labels[kind] || kind;
+  return '<span style="background:' + color + ';color:white;font-size:0.62rem;' +
+         'padding:2px 6px;border-radius:3px;font-weight:600;text-transform:uppercase;' +
+         'letter-spacing:0.4px;">' + label + '</span>';
+}
+
+function renderDayplanPreview(d) {
+  const blocks = d.blocks || [];
+  const cfg = d.day_config || {};
+
+  // Group blocks by day for display. The LLM emits day_index so we
+  // preserve that — Friday + Saturday show separately.
+  const byDay = {};
+  blocks.forEach(function(b) {
+    const di = (typeof b.day_index === 'number') ? b.day_index : 0;
+    if (!byDay[di]) byDay[di] = [];
+    byDay[di].push(b);
+  });
+  const dayIndices = Object.keys(byDay).map(function(s) { return parseInt(s, 10); }).sort(function(a, b) { return a - b; });
+  const eventDates = d.event_dates || {};
+
+  // Day labels: try to match the dates from the PDF if extracted
+  function dayLabel(di) {
+    if (di === 0 && eventDates.start) return 'Day 1 — ' + eventDates.start;
+    if (di === 1 && eventDates.end)   return 'Day 2 — ' + eventDates.end;
+    return 'Day ' + (di + 1);
+  }
+
+  let html = '';
+
+  // Header summary
+  html += '<div style="font-size:0.78rem;line-height:1.5;margin-bottom:0.8rem;">';
+  html += '<strong>Format:</strong> ' + escapeHtml(d.format_detected || 'Event-day program') + '<br>';
+  html += '<strong>Source:</strong> ' + escapeHtml(d.file_name || '(unnamed)') +
+          ' · ' + d.page_count + ' page' + (d.page_count !== 1 ? 's' : '') +
+          ' · ' + (d._cache === 'hit' ? 'cached' : 'fresh parse') + '<br>';
+  if (d.confidence) {
+    const confColor = d.confidence === 'high' ? 'var(--accent3, #2ea043)' :
+                      d.confidence === 'medium' ? 'var(--amber, #c8992a)' : 'var(--text-muted)';
+    html += '<strong>Confidence:</strong> <span style="color:' + confColor + ';">' +
+            escapeHtml(d.confidence) + '</span>';
+  }
+  html += '</div>';
+
+  // Notice about what gets applied
+  html += '<div style="background:rgba(58,123,213,0.1);border-left:3px solid var(--accent2, #3a7bd5);' +
+          'padding:0.5rem 0.75rem;margin-bottom:1rem;font-size:0.72rem;line-height:1.4;">';
+  html += '<strong>Practice and qualification times</strong> will populate the form. ' +
+          '<strong>Ceremonies and playoffs</strong> are informational — they\'ll show ' +
+          'on the schedule view but don\'t affect scheduling (except a playoff block ' +
+          'auto-caps the qual day end). Re-import or edit the form if anything looks off.';
+  html += '</div>';
+
+  // Blocks per day
+  dayIndices.forEach(function(di) {
+    html += '<div style="margin-bottom:0.8rem;">';
+    html += '<div style="font-weight:600;font-size:0.78rem;color:var(--text-muted);' +
+            'border-bottom:1px solid var(--border, #333);padding-bottom:0.2rem;margin-bottom:0.4rem;">' +
+            escapeHtml(dayLabel(di)) + '</div>';
+    html += '<table style="width:100%;font-size:0.75rem;border-collapse:collapse;">';
+    byDay[di].forEach(function(b) {
+      const isInfo = (b.kind === 'ceremony' || b.kind === 'playoff');
+      const rowOpacity = isInfo ? '0.7' : '1';
+      html += '<tr style="opacity:' + rowOpacity + ';">';
+      html += '<td style="padding:3px 6px;width:90px;">' + _kindBadge(b.kind || 'break') + '</td>';
+      html += '<td style="padding:3px 6px;font-family:monospace;color:var(--text-muted);' +
+              'white-space:nowrap;">' +
+              escapeHtml(_formatTimeRange(b.start, b.end) || '(no time)') + '</td>';
+      html += '<td style="padding:3px 6px;">' + escapeHtml(b.label || '');
+      if (b.details) {
+        html += ' <span style="color:var(--text-muted);font-size:0.7rem;">— ' +
+                escapeHtml(b.details) + '</span>';
+      }
+      if (isInfo) {
+        html += ' <span style="font-size:0.65rem;color:var(--text-muted);font-style:italic;">' +
+                '(informational)</span>';
+      }
+      html += '</td></tr>';
+    });
+    html += '</table>';
+    html += '</div>';
+  });
+
+  if (d.notes && d.notes.trim()) {
+    html += '<div style="font-size:0.7rem;color:var(--text-muted);font-style:italic;' +
+            'padding:0.4rem 0;border-top:1px solid var(--border, #333);">';
+    html += 'LLM notes: ' + escapeHtml(d.notes);
+    html += '</div>';
+  }
+
+  document.getElementById('pdfImportSummary').innerHTML = html;
+  // Hide the matches table + edit hint — not relevant for dayplan
+  const tableContainer = document.getElementById('pdfImportTableContainer');
+  if (tableContainer) tableContainer.style.display = 'none';
+  const editHint = document.getElementById('pdfImportEditHint');
+  if (editHint) editHint.style.display = 'none';
+  // Clear any leftover validation from a previous match-list import
+  const validationDiv = document.getElementById('pdfImportValidation');
+  if (validationDiv) validationDiv.innerHTML = '';
+
+  // Replace footer buttons. Match-list flow has Edit/Commit; dayplan has
+  // a single Apply button.
+  const footer = document.getElementById('pdfImportStage3Footer');
+  if (footer) {
+    footer.innerHTML =
+      '<button class="btn-sm" onclick="closePdfImportModal()">Cancel</button>' +
+      '<button class="btn-sm btn-accent" onclick="applyDayplanToForm()" ' +
+      'style="margin-left:auto;">&#10003; Apply to form</button>';
+  }
+}
+
+function applyDayplanToForm() {
+  if (!_pdfImportState || _pdfImportState.kind !== 'dayplan') return;
+  const cfg = _pdfImportState.day_config;
+  if (!cfg) {
+    showApiStatus('Day-plan import has no day_config payload — cannot apply.');
+    return;
+  }
+
+  // Push values into the form fields. This mirrors what loadDayConfigIntoForm()
+  // does for stored schedules, but we adapt to the imported shape.
+  try {
+    // numDays
+    const elND = document.getElementById('numDays');
+    if (elND && cfg.numDays) {
+      elND.value = cfg.numDays;
+      // Rebuild day rows to match numDays so subsequent population finds them
+      if (typeof syncDayRowsToNumDays === 'function') syncDayRowsToNumDays();
+    }
+
+    // Default cycle time / break buffer (only set if the form value is the
+    // default — don't clobber user-set values for unrelated fields)
+    if (cfg.cycleTime) {
+      const ct = document.getElementById('cycleTime');
+      if (ct) ct.value = cfg.cycleTime;
+    }
+    if (cfg.breakBuffer) {
+      const bb = document.getElementById('breakBuffer');
+      if (bb) bb.value = cfg.breakBuffer;
+    }
+
+    // Practice day
+    const pde = document.getElementById('practiceDayEnabled');
+    if (cfg.practiceDay && cfg.practiceDay.enabled) {
+      if (pde && !pde.checked) {
+        pde.checked = true;
+        if (typeof togglePracticeDay === 'function') togglePracticeDay();
+      }
+      const set = function(id, val) {
+        const el = document.getElementById(id);
+        if (el && val !== null && val !== undefined && val !== '') el.value = val;
+      };
+      set('practiceStart',      cfg.practiceDay.start);
+      set('practiceEnd',        cfg.practiceDay.end);
+      set('practiceCycleTime',  cfg.practiceDay.ct);
+      set('practiceGuaranteed', cfg.practiceDay.guaranteed);
+      set('practiceFiller',     cfg.practiceDay.filler);
+    } else if (pde && pde.checked) {
+      // PDF says no practice → uncheck
+      pde.checked = false;
+      if (typeof togglePracticeDay === 'function') togglePracticeDay();
+    }
+
+    // Days[]: populate the existing per-day rows
+    const dayRows = document.querySelectorAll('.day-row');
+    if (cfg.days && cfg.days.length > 0) {
+      cfg.days.forEach(function(day, idx) {
+        const row = dayRows[idx];
+        if (!row) return;
+        const startEl = row.querySelector('.day-start');
+        const endEl   = row.querySelector('.day-end');
+        if (startEl && day.start) startEl.value = day.start;
+        if (endEl   && day.end)   endEl.value   = day.end;
+
+        // Clear existing breaks then add the imported ones via the same
+        // helpers the user uses, so any DOM wiring (event listeners, etc.)
+        // stays consistent.
+        const breakRows = row.querySelectorAll('.break-row');
+        breakRows.forEach(function(br) {
+          const removeBtn = br.querySelector('.btn-remove-break');
+          if (removeBtn) removeBtn.click();
+        });
+        const addBtn = row.querySelector('.btn-add-break-day');
+        if (addBtn && typeof addBreak === 'function') {
+          (day.breaks || []).forEach(function(b) {
+            addBreak(addBtn, b.start || '', b.end || '', b.name || 'Break');
+          });
+        }
+      });
+    }
+
+    // Stash the timeline_blocks (ceremony, playoff) on a window-level holder
+    // so collectDayConfig() picks them up next time the schedule is generated
+    // and they get persisted on the AbstractSchedule. /view reads them from
+    // there.
+    window._frcImportedTimelineBlocks = cfg.timeline_blocks || [];
+
+    closePdfImportModal();
+    showApiStatus('Day plan applied to form. Generate the schedule to see it on the timeline.');
+
+    // Trigger MPT recompute / autoMaxCycles since the day windows changed
+    if (typeof onCycleTimeChanged === 'function') onCycleTimeChanged();
+  } catch (e) {
+    console.error('applyDayplanToForm failed:', e);
+    showApiStatus('Apply failed: ' + e.message);
+  }
+}
+
 
 function renderPdfImportTable(matches) {
   const tbl = document.getElementById('pdfImportTable');
@@ -2839,6 +3112,29 @@ setTimeout(async function() {
   if (el) el.addEventListener('input', onScheduleParamsChanged);
 });
 
+// Day-row and practice-day inputs also need to trigger MPT/agenda recompute,
+// because changing window times changes how many qual slots fit. Without
+// this, importing a PDF day plan (or hand-editing day times) leaves the
+// stale matchesPerTeam value in the form and the regeneration uses it.
+//
+// Use event delegation on document so dynamically-added day rows pick up
+// the listener too (the days UI rebuilds when numDays changes).
+document.addEventListener('input', function(ev) {
+  var t = ev.target;
+  if (!t || !t.classList) return;
+  if (t.classList.contains('day-start')      ||
+      t.classList.contains('day-end')        ||
+      t.classList.contains('break-start')    ||
+      t.classList.contains('break-end')      ||
+      t.id === 'practiceStart'                ||
+      t.id === 'practiceEnd'                  ||
+      t.id === 'practiceCycleTime'            ||
+      t.id === 'practiceGuaranteed'           ||
+      t.id === 'practiceFiller') {
+    if (typeof onCycleTimeChanged === 'function') onCycleTimeChanged();
+  }
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // AUTH STATE
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3291,6 +3587,10 @@ function applyDayConfigToUI(dc) {
   if (!dc) return;
   if (dc.cycleTime)   document.getElementById('cycleTime').value   = dc.cycleTime;
   if (dc.breakBuffer != null) document.getElementById('breakBuffer').value = dc.breakBuffer;
+  // Restore informational timeline blocks (ceremonies, playoffs) imported
+  // from a day-plan PDF. These don't have form fields — they live on a
+  // window-level holder that collectDayConfig() reads back.
+  window._frcImportedTimelineBlocks = dc.timeline_blocks || [];
   // Restore auto flags if stored (named booleans; undefined = leave as current default)
   var dcAP = document.getElementById('autoPopulate');
   var dcAM = document.getElementById('autoMaxCycles');
@@ -7526,6 +7826,11 @@ function collectDayConfig() {
         }).filter(function(b) { return b.start && b.end; }),
       };
     }),
+    // Informational blocks captured by the PDF importer — ceremonies and
+    // playoffs. The scheduler ignores these; /view renders them as labeled
+    // time ranges so the timeline reflects the full event. Stored per-event
+    // on day_config so they round-trip with the schedule.
+    timeline_blocks: window._frcImportedTimelineBlocks || [],
   };
 }
 

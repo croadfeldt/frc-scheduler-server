@@ -39,6 +39,7 @@ from app import statbotics as statbotics_client
 from app import tba as tba_client
 from app import frc_events as frc_client
 from app import pdf_extract
+from app import pdf_dayplan
 from app import pdf_validate
 from app import llm_client
 from app.auth import (
@@ -1797,6 +1798,70 @@ async def import_pdf(
     strategy = extracted["strategy"]
     log.info("PDF extraction succeeded via strategy=%s", strategy)
 
+    # ── Auto-detect: match list vs. day plan ─────────────────────────────────
+    # Day-plan PDFs (event-day programs, MSHSL itinerary, etc.) are prose
+    # itineraries with no team-number table. We route these through the
+    # day-plan extractor instead of the match-list extractor.
+    #
+    # Vision-strategy results don't get this branch — they always produce a
+    # match-list-shaped JSON because that's what the vision system prompt
+    # asks for. (Day-plan PDFs are text-extractable in practice; OCR or
+    # native always finds them. If a future vision-only day-plan emerges,
+    # we'd extend this dispatch.)
+    pdf_text = pdf_extract.format_for_llm(extracted) if strategy != "vision" else ""
+
+    is_dayplan = strategy != "vision" and pdf_dayplan.looks_like_dayplan(pdf_text)
+    if is_dayplan:
+        log.info("PDF detected as day plan; using dayplan extractor")
+        try:
+            dayplan = await pdf_dayplan.extract_dayplan(pdf_text)
+        except RuntimeError as e:
+            raise HTTPException(503, str(e))
+        except ValueError as e:
+            raise HTTPException(502, f"LLM returned malformed day-plan: {e}")
+        if not dayplan:
+            raise HTTPException(503, "LLM extraction not configured")
+
+        # Convert to today's day_config schema for direct form-field apply
+        legacy_cfg = pdf_dayplan.to_legacy_day_config(dayplan)
+
+        # Save to cache. Reuse the PdfImport table — `kind` is encoded in
+        # the method field ("llm:dayplan:<strategy>") so the commit endpoint
+        # can dispatch correctly.
+        async with AsyncSessionLocal() as db:
+            pdf_import = PdfImport(
+                pdf_hash=pdf_hash,
+                file_name=file.filename,
+                byte_size=len(content),
+                page_count=extracted["page_count"],
+                parsed={"dayplan": dayplan, "day_config": legacy_cfg},
+                validation={"dayplan_blocks": len(dayplan.get("blocks", []))},
+                format_detected=dayplan.get("format_detected"),
+                method=f"llm:dayplan:{strategy}",
+            )
+            db.add(pdf_import)
+            await db.commit()
+            await db.refresh(pdf_import)
+
+        return {
+            "kind":            "dayplan",
+            "pdf_import_id":   pdf_import.id,
+            "pdf_hash":        pdf_hash,
+            "file_name":       file.filename,
+            "page_count":      extracted["page_count"],
+            "method":          f"llm:dayplan:{strategy}",
+            "strategy":        strategy,
+            "tried":           extracted.get("tried", []),
+            "format_detected": dayplan.get("format_detected"),
+            "confidence":      dayplan.get("confidence"),
+            "event_dates":     dayplan.get("event_dates"),
+            "blocks":          dayplan.get("blocks", []),
+            "day_config":      legacy_cfg,
+            "notes":           dayplan.get("notes", ""),
+            "_cache":          "miss",
+        }
+
+    # ── Match-list flow (existing behaviour) ─────────────────────────────────
     # Vision strategy returns already-parsed JSON. Skip the text-LLM step.
     if strategy == "vision":
         parsed = extracted["parsed"]
@@ -1811,8 +1876,6 @@ async def import_pdf(
                 f"(max ~16000). Try a more focused document or split into pages."
             )
 
-        pdf_text = pdf_extract.format_for_llm(extracted)
-
         try:
             parsed = await llm_client.parse_schedule(pdf_text)
         except RuntimeError as e:
@@ -1826,8 +1889,14 @@ async def import_pdf(
 
     matches = parsed.get("matches") or []
     if not matches:
-        raise HTTPException(422, "LLM did not extract any matches from the PDF. "
-                                  "Check that the PDF contains a qualification schedule.")
+        raise HTTPException(
+            422,
+            "LLM did not extract any matches from the PDF, and the document doesn't "
+            "look like an event-day program either. If this is a match schedule, the "
+            "format may be too unusual for the parser. If this is an event itinerary, "
+            "make sure it mentions phases like 'Qualification Rounds' or 'Practice "
+            "Matches' so the system can recognize it."
+        )
 
     # Pull roster for cross-check if event provided
     roster = None
@@ -1858,6 +1927,7 @@ async def import_pdf(
         await db.refresh(pdf_import)
 
     return {
+        "kind":            "matches",
         "pdf_import_id":   pdf_import.id,
         "pdf_hash":        pdf_hash,
         "file_name":       file.filename,
