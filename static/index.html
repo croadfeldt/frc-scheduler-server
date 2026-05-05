@@ -1211,47 +1211,177 @@
     </div>
   </div>
 
-  <!-- Print options modal -->
-  <div class="modal-overlay" id="modalPrint">
-    <div class="modal" style="width:min(400px,95vw);">
-      <button class="modal-close" onclick="closeModal('modalPrint')">&#x2715;</button>
-      <div class="modal-title">&#128438; Print Schedule</div>
-      <div class="modal-section">
-        <div class="modal-section-label">Include in printout</div>
-        <div style="display:flex;flex-direction:column;gap:0.5rem;margin-top:0.25rem;">
-          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptCycleTimes" checked> Cycle times in day header
+  <!-- Export modal — unified entry point for all output formats.
+       The left column lists formats; the right column shows the
+       active format's options. The bottom action button label
+       updates to reflect the chosen format. Format-specific option
+       panels are siblings and toggled via display:none — keeps each
+       set of checkboxes/IDs simple and discoverable in the DOM.
+
+       Legacy IDs (printOptCycleTimes, printOptPageBreak, etc.) are
+       preserved inside the Print/PDF panel so printSchedule() and
+       downloadSchedulePDF() continue to read from them without
+       changes. -->
+  <div class="modal-overlay" id="modalExport">
+    <div class="modal" style="width:min(720px,95vw);max-height:90vh;overflow:auto;">
+      <button class="modal-close" onclick="closeModal('modalExport')">&#x2715;</button>
+      <div class="modal-title">&#11015; Export schedule</div>
+      <div style="display:grid;grid-template-columns:180px 1fr;gap:1rem;margin-top:0.5rem;">
+        <!-- ── Left column: format selector ─────────────────────── -->
+        <div style="display:flex;flex-direction:column;gap:0.25rem;border-right:1px solid var(--border);padding-right:0.75rem;">
+          <div class="modal-section-label" style="margin-bottom:0.4rem;">Format</div>
+          <label class="export-format-radio" style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;padding:0.4rem 0.5rem;border-radius:4px;cursor:pointer;">
+            <input type="radio" name="exportFormat" value="print_pdf" checked onchange="onExportFormatChange()">
+            <span>Print / PDF</span>
           </label>
-          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptCycleChanges" checked> Cycle time changes
+          <label class="export-format-radio" style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;padding:0.4rem 0.5rem;border-radius:4px;cursor:pointer;">
+            <input type="radio" name="exportFormat" value="xlsx" onchange="onExportFormatChange()">
+            <span>Excel (XLSX)</span>
           </label>
-          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptBreaks" checked> Breaks
+          <label class="export-format-radio" style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;padding:0.4rem 0.5rem;border-radius:4px;cursor:pointer;">
+            <input type="radio" name="exportFormat" value="csv" onchange="onExportFormatChange()">
+            <span>CSV</span>
           </label>
-          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptDayBreaks" checked> Day break markers
+          <label class="export-format-radio" style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;padding:0.4rem 0.5rem;border-radius:4px;cursor:pointer;">
+            <input type="radio" name="exportFormat" value="json" onchange="onExportFormatChange()">
+            <span>JSON</span>
           </label>
-          <label id="printOptTeamNumsLabel" style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptTeamNums" checked> Team numbers (requires team assignment)
+          <label class="export-format-radio" style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;padding:0.4rem 0.5rem;border-radius:4px;cursor:pointer;"
+                 title="Tab-delimited file for FIRST FMS Match Maker import. Qualification matches only.">
+            <input type="radio" name="exportFormat" value="fms" onchange="onExportFormatChange()">
+            <span>FMS Match Maker</span>
           </label>
-          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptRoundDividers"> Round dividers
-          </label>
-          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-            <input type="checkbox" id="printOptPageBreak" checked> Page break between days
-          </label>
-          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;"
-                 title="Force a page break after the practice match table so practice and qualification matches print on separate sheets — useful when handing the practice list to pit crew while the qual list goes to the field.">
-            <input type="checkbox" id="printOptPageBreakAfterPractice" checked> Page break after practice matches
+          <label class="export-format-radio" style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;padding:0.4rem 0.5rem;border-radius:4px;cursor:pointer;"
+                 title="Printable setup sheet for FMS Build Schedule with all timing settings, breaks, cycle changes, and a QR code.">
+            <input type="radio" name="exportFormat" value="fms_setup" onchange="onExportFormatChange()">
+            <span>FMS Setup Sheet</span>
           </label>
         </div>
+
+        <!-- ── Right column: format-specific options ────────────── -->
+        <div>
+          <!-- Print/PDF panel (default) — contains the legacy
+               printOpt* checkboxes that printSchedule() reads. -->
+          <div class="export-panel" id="exportPanel-print_pdf">
+            <div class="modal-section-label">Page breaks</div>
+            <div style="display:flex;flex-direction:column;gap:0.45rem;margin-top:0.25rem;">
+              <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+                <input type="checkbox" id="printOptPageBreakAfterPractice" checked>
+                Page break after practice matches
+              </label>
+              <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+                <input type="checkbox" id="printOptPageBreak" checked>
+                Page break between days
+              </label>
+            </div>
+            <div class="modal-section-label" style="margin-top:0.85rem;">Include in printout</div>
+            <div style="display:flex;flex-direction:column;gap:0.45rem;margin-top:0.25rem;">
+              <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+                <input type="checkbox" id="printOptCycleTimes" checked> Cycle times in day header
+              </label>
+              <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+                <input type="checkbox" id="printOptCycleChanges" checked> Cycle time changes
+              </label>
+              <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+                <input type="checkbox" id="printOptBreaks" checked> Breaks
+              </label>
+              <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+                <input type="checkbox" id="printOptDayBreaks" checked> Day break markers
+              </label>
+              <label id="printOptTeamNumsLabel" style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+                <input type="checkbox" id="printOptTeamNums" checked> Team numbers (requires team assignment)
+              </label>
+              <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+                <input type="checkbox" id="printOptRoundDividers"> Round dividers
+              </label>
+            </div>
+          </div>
+
+          <!-- XLSX panel — scope dropdown -->
+          <div class="export-panel" id="exportPanel-xlsx" style="display:none;">
+            <div class="modal-section-label">Match scope</div>
+            <div style="margin-top:0.5rem;">
+              <select id="xlsxScope" class="btn-sm" style="padding:0.35rem 0.5rem;font-size:0.88rem;">
+                <option value="both" selected>Both — practice and qualification on separate sheets</option>
+                <option value="qual">Qualification only</option>
+                <option value="practice">Practice only</option>
+              </select>
+            </div>
+            <div style="margin-top:0.85rem;font-size:0.78rem;color:var(--text-muted);line-height:1.45;">
+              Spreadsheet uses the canonical FMS layout. The exported
+              file can be re-imported via "Restore from file" to
+              recover the schedule along with derived parameters
+              (team count, MPT, cycle time, etc.).
+            </div>
+          </div>
+
+          <!-- CSV panel — informational, no options -->
+          <div class="export-panel" id="exportPanel-csv" style="display:none;">
+            <div class="modal-section-label">CSV export</div>
+            <div style="margin-top:0.5rem;font-size:0.85rem;line-height:1.45;">
+              Comma-separated, one row per match, with columns
+              <code>Type, Match, Day, Time, Red 1-3, Blue 1-3, Surrogates</code>.
+              Practice and qualification matches are interleaved with
+              the Type column distinguishing them. Compatible with
+              spreadsheet apps and the "Restore from file" import.
+            </div>
+          </div>
+
+          <!-- JSON panel — informational -->
+          <div class="export-panel" id="exportPanel-json" style="display:none;">
+            <div class="modal-section-label">JSON export</div>
+            <div style="margin-top:0.5rem;font-size:0.85rem;line-height:1.45;">
+              Full schedule with parameters, day configuration, all
+              matches, breaks, cycle changes, and seeds. The most
+              complete round-trip format — re-importing a JSON file
+              restores the schedule exactly.
+            </div>
+          </div>
+
+          <!-- FMS panel — informational -->
+          <div class="export-panel" id="exportPanel-fms" style="display:none;">
+            <div class="modal-section-label">FMS Match Maker</div>
+            <div style="margin-top:0.5rem;font-size:0.85rem;line-height:1.45;">
+              Tab-delimited file matching the FIRST FMS Match Maker
+              import format. <strong>Qualification matches only</strong> —
+              practice matches are not included. Match times must be
+              re-entered in FMS Build Schedule after import.
+            </div>
+          </div>
+
+          <!-- FMS Setup panel — informational -->
+          <div class="export-panel" id="exportPanel-fms_setup" style="display:none;">
+            <div class="modal-section-label">FMS Setup Sheet</div>
+            <div style="margin-top:0.5rem;font-size:0.85rem;line-height:1.45;">
+              Printable reference sheet for setting up the schedule
+              in FMS Build Schedule. Includes all timing parameters,
+              breaks, cycle changes, and a QR code linking back to
+              this schedule. Opens in a new window for printing or
+              saving as PDF.
+            </div>
+          </div>
+        </div>
       </div>
-      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
-        <button class="btn-sm btn-accent" onclick="printSchedule()" style="flex:1;">&#128438; Print</button>
-        <button class="btn-sm" onclick="closeModal('modalPrint')">Cancel</button>
+
+      <!-- ── Bottom action row ─────────────────────────────────── -->
+      <div style="display:flex;gap:0.5rem;margin-top:1rem;justify-content:flex-end;align-items:center;">
+        <button class="btn-sm" onclick="closeModal('modalExport')">Cancel</button>
+        <!-- For Print/PDF format we show TWO actions: Print and Save
+             as PDF. For all other formats, one action: Download/Open.
+             onExportFormatChange() updates which is visible. -->
+        <button class="btn-sm btn-accent" id="exportActionPdf" onclick="runExportAction('pdf')" style="display:none;">&#11015; Save as PDF</button>
+        <button class="btn-sm btn-accent" id="exportActionPrint" onclick="runExportAction('print')" style="display:none;">&#128438; Print</button>
+        <button class="btn-sm btn-accent" id="exportActionDownload" onclick="runExportAction('download')" style="display:none;">&#11015; Download</button>
+        <button class="btn-sm btn-accent" id="exportActionOpen" onclick="runExportAction('open')" style="display:none;">&#128196; Open setup sheet</button>
       </div>
     </div>
   </div>
+
+  <!-- Legacy modalPrint — retained as an empty stub because some
+       outdated paths may still call openModal('modalPrint'). The
+       Export modal supersedes it; clicking openPrintDialog() now
+       routes to openExportModal() with Print/PDF preselected. -->
+  <div class="modal-overlay" id="modalPrint" style="display:none;"></div>
 
   <!-- Saved schedules modal -->
   <div class="modal-overlay" id="modalSchedules">
@@ -1564,24 +1694,13 @@
       <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;border-top:none;">
         <span>Schedule Output</span>
         <div id="downloadBar" style="display:none;gap:0.4rem;display:none;align-items:center;">
-          <button class="btn-export" id="btnDownloadCSV" onclick="downloadCSV()" title="Download schedule as CSV">&#11015; CSV</button>
-          <button class="btn-export" id="btnDownloadJSON" onclick="downloadJSON()" title="Download schedule as JSON">&#11015; JSON</button>
-          <span style="display:inline-flex;align-items:stretch;gap:0;">
-            <button class="btn-export" id="btnDownloadXLSX"
-                    style="border-top-right-radius:0;border-bottom-right-radius:0;border-right:0;"
-                    onclick="downloadXLSX()" title="Download schedule as Excel spreadsheet (canonical FMS layout)">&#11015; XLSX</button>
-            <select id="xlsxScope" class="btn-export"
-                    style="border-top-left-radius:0;border-bottom-left-radius:0;cursor:pointer;padding:0 0.4rem;"
-                    title="Which matches to include in the spreadsheet">
-              <option value="both" selected>Both</option>
-              <option value="qual">Qual only</option>
-              <option value="practice">Practice only</option>
-            </select>
-          </span>
-          <button class="btn-export" id="btnDownloadPDF" onclick="downloadSchedulePDF()" title="Download schedule as PDF (uses your current Print options)">&#11015; PDF</button>
-          <button class="btn-export" id="btnDownloadFMS" onclick="downloadFMS()" title="Download schedule for FIRST FMS Match Maker import (tab-delimited, qualification matches only). Match times must be re-entered in FMS Build Schedule.">&#11015; FMS</button>
-          <button class="btn-export" id="btnFMSSetup" onclick="openFMSSetupSheet()" title="Open a printable FMS Build Schedule setup sheet with all timing settings, breaks, cycle changes, and a QR code linking back to this schedule">&#128196; FMS Setup</button>
-          <button class="btn-export" id="btnPrint" onclick="openPrintDialog()" title="Print schedule">&#128438; Print</button>
+          <!-- Single Export button — opens the Export modal where the
+               user picks format and per-format options. Replaces the
+               previous toolbar of CSV/JSON/XLSX/PDF/FMS/Setup/Print
+               buttons. The id is preserved as #btnExport so the
+               existing JS toggle that shows/hides the export bar
+               (renderScheduleAfterRun, etc.) continues to work. -->
+          <button class="btn-export" id="btnExport" onclick="openExportModal()" title="Export — print, save as PDF, or download as XLSX/CSV/JSON/FMS">&#11015; Export&hellip;</button>
         </div>
       </div>
       <div class="stats-bar">
@@ -10387,9 +10506,32 @@ function openFMSSetupSheet() {
 
 
 
-function openPrintDialog() {
-  if (!window._frcScheduled) { showApiStatus('No schedule to print', true); return; }
-  // Grey out team numbers checkbox if no assignment done
+// ─────────────────────────────────────────────────────────────────────
+// Export modal — unified entry point for all output formats.
+//
+// Replaces the previous toolbar of CSV/JSON/XLSX/PDF/FMS/Setup/Print
+// buttons with a single "Export…" button that opens this modal. The
+// modal lets the user pick a format on the left, configure
+// format-specific options on the right, and dispatch via the action
+// button at the bottom.
+//
+// Print and PDF share the same options panel because they produce
+// the same content — they only differ in destination. The action row
+// shows two buttons (Print, Save as PDF) when that format is
+// selected; one button (Download or Open) for everything else.
+//
+// Existing exporters (downloadCSV, downloadJSON, downloadXLSX,
+// downloadFMS, openFMSSetupSheet, printSchedule) are reused without
+// modification — runExportAction() just dispatches to the right one.
+// ─────────────────────────────────────────────────────────────────────
+
+function openExportModal() {
+  if (!window._frcScheduled) {
+    showApiStatus('No schedule to export', true);
+    return;
+  }
+  // Grey out team numbers checkbox if no assignment done — the
+  // Print/PDF panel uses it. Same logic as the old openPrintDialog.
   var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
   var teamNumsCb = document.getElementById('printOptTeamNums');
   if (teamNumsCb) {
@@ -10399,27 +10541,93 @@ function openPrintDialog() {
     if (lbl) lbl.style.opacity = hasAssignment ? '' : '0.45';
     if (lbl) lbl.title = hasAssignment ? '' : 'Assign teams to enable team numbers';
   }
-  // Reset PDF mode flag — set by downloadSchedulePDF before opening the modal
-  window._frcPrintAsPdf = false;
-  openModal('modalPrint');
+  // Default selection: Print/PDF (the most common output for new users).
+  var print_pdf_radio = document.querySelector('input[name="exportFormat"][value="print_pdf"]');
+  if (print_pdf_radio) print_pdf_radio.checked = true;
+  onExportFormatChange();
+  openModal('modalExport');
 }
 
-// Open the same Print options modal but route the result through html2pdf
-// for a real .pdf download instead of window.print(). Reuses printSchedule()
-// so all the print options (team nums, cycle changes, page breaks, etc.) apply.
-function downloadSchedulePDF() {
-  if (!window._frcScheduled) { showApiStatus('No schedule to download', true); return; }
-  var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
-  var teamNumsCb = document.getElementById('printOptTeamNums');
-  if (teamNumsCb) {
-    teamNumsCb.disabled = !hasAssignment;
-    if (!hasAssignment) teamNumsCb.checked = false;
-    var lbl = document.getElementById('printOptTeamNumsLabel');
-    if (lbl) lbl.style.opacity = hasAssignment ? '' : '0.45';
-    if (lbl) lbl.title = hasAssignment ? '' : 'Assign teams to enable team numbers';
+function onExportFormatChange() {
+  // Show the panel that matches the selected format; hide all others.
+  // Action buttons swap to match what makes sense for the format.
+  var selected = document.querySelector('input[name="exportFormat"]:checked');
+  var fmt = selected ? selected.value : 'print_pdf';
+
+  // Toggle option panels.
+  var panels = document.querySelectorAll('.export-panel');
+  panels.forEach(function(panel) {
+    panel.style.display = (panel.id === 'exportPanel-' + fmt) ? '' : 'none';
+  });
+
+  // Toggle action buttons.
+  var btnPrint    = document.getElementById('exportActionPrint');
+  var btnPdf      = document.getElementById('exportActionPdf');
+  var btnDownload = document.getElementById('exportActionDownload');
+  var btnOpen     = document.getElementById('exportActionOpen');
+  [btnPrint, btnPdf, btnDownload, btnOpen].forEach(function(b) {
+    if (b) b.style.display = 'none';
+  });
+  if (fmt === 'print_pdf') {
+    if (btnPrint) btnPrint.style.display = '';
+    if (btnPdf)   btnPdf.style.display   = '';
+  } else if (fmt === 'fms_setup') {
+    if (btnOpen) btnOpen.style.display = '';
+  } else {
+    if (btnDownload) btnDownload.style.display = '';
   }
-  window._frcPrintAsPdf = true;  // printSchedule() reads this flag
-  openModal('modalPrint');
+
+  // Highlight the selected radio's row visually.
+  var rows = document.querySelectorAll('.export-format-radio');
+  rows.forEach(function(row) {
+    var inp = row.querySelector('input[type="radio"]');
+    if (inp && inp.checked) {
+      row.style.background = 'var(--bg-alt, #f6f8fa)';
+      row.style.color      = 'var(--text-strong, inherit)';
+    } else {
+      row.style.background = '';
+      row.style.color      = '';
+    }
+  });
+}
+
+function runExportAction(action) {
+  // action: 'print' | 'pdf' | 'download' | 'open'
+  // Dispatches to the appropriate existing exporter based on the
+  // currently-selected format and action.
+  var selected = document.querySelector('input[name="exportFormat"]:checked');
+  var fmt = selected ? selected.value : 'print_pdf';
+
+  closeModal('modalExport');
+
+  // Small async gap so the modal close animation doesn't fight with
+  // popup-window opening (some browsers throttle popup creation
+  // when triggered too close to a click in a still-animating UI).
+  setTimeout(function() {
+    if (fmt === 'print_pdf') {
+      if (action === 'pdf') {
+        window._frcPrintAsPdf = true;
+      } else {
+        window._frcPrintAsPdf = false;
+      }
+      printSchedule();
+      return;
+    }
+    if (fmt === 'xlsx')      { downloadXLSX();      return; }
+    if (fmt === 'csv')       { downloadCSV();       return; }
+    if (fmt === 'json')      { downloadJSON();      return; }
+    if (fmt === 'fms')       { downloadFMS();       return; }
+    if (fmt === 'fms_setup') { openFMSSetupSheet(); return; }
+  }, 50);
+}
+
+// Legacy entry points — kept so any code still calling these works.
+// Both route to the unified Export modal with appropriate preselection.
+function openPrintDialog()      { openExportModal(); }
+function downloadSchedulePDF() {
+  // Open modal pre-set to PDF action affordance — easiest is to
+  // select Print/PDF format and let the user click "Save as PDF".
+  openExportModal();
 }
 
 function printSchedule() {
@@ -10480,7 +10688,14 @@ function printSchedule() {
   html += 'body{font-family:Arial,sans-serif;font-size:10pt;margin:1cm;color:#000;}';
   html += 'h1{font-size:14pt;margin:0 0 2px 0;}';
   html += '.meta{font-size:8pt;color:#555;margin-bottom:12px;}';
-  html += '.day-title{font-size:11pt;font-weight:bold;margin:14px 0 4px 0;border-bottom:2px solid #000;padding-bottom:2px;}' + (opts.pageBreak ? '.day-title.page-break{page-break-before:always;margin-top:0;}' : '');
+  // Always emit the .page-break rule. Both opts.pageBreak (between
+  // days) and opts.pageBreakAfterPractice apply this same class to
+  // .day-title elements; emitting the rule conditionally on
+  // opts.pageBreak made the after-practice toggle silently no-op
+  // when the user unchecked between-days. Modern + legacy variants
+  // both included for browser coverage.
+  html += '.day-title{font-size:11pt;font-weight:bold;margin:14px 0 4px 0;border-bottom:2px solid #000;padding-bottom:2px;}';
+  html += '.day-title.page-break{page-break-before:always;break-before:page;margin-top:0;}';
   html += 'table{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:9pt;}';
   html += 'th{background:#222;color:#fff;padding:3px 6px;text-align:left;font-size:8pt;}';
   html += 'td{padding:2px 6px;border-bottom:1px solid #ddd;}';
@@ -10491,7 +10706,12 @@ function printSchedule() {
   html += '.break-row td{color:#b7770d;font-style:italic;background:#fef9e7;font-size:8pt;}';
   html += '.cc-row td{color:#555;font-style:italic;background:#f0f4ff;font-size:8pt;}';
   html += '.round-row td{color:#555;font-size:7.5pt;background:#f0f0f0;text-align:center;letter-spacing:0.05em;text-transform:uppercase;}';
-  html += '@media print{@page{margin:1cm;size:portrait;}body{margin:0;}.day-title{page-break-before:auto;}}';
+  // @media print: just margins/size, NO override of page-break-before.
+  // Previous version reset .day-title page-break-before to auto here,
+  // which silently negated the .page-break class because of source-
+  // order specificity. The .day-title.page-break selector is more
+  // specific, so it now wins regardless.
+  html += '@media print{@page{margin:1cm;size:portrait;}body{margin:0;}}';
   html += '</style></head><body>';
   // Wrap printable content so PDF mode can target it directly
   // (avoids html2canvas trying to render the injected <script> tags

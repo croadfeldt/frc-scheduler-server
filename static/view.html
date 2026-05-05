@@ -695,32 +695,12 @@
       </table>
     </div>
 
-    <!-- Toolbar -->
+    <!-- Toolbar — single Export button opens unified modal -->
     <div class="toolbar no-print">
       <span class="group-label">Export</span>
-      <button class="btn btn-secondary" onclick="openPrintOptionsModal('pdf')" title="Download printable PDF">📄 PDF</button>
-      <!-- XLSX is a button + scope dropdown. The dropdown picks which
-           subset of matches goes into the file; "Both" produces a
-           workbook with separate Practice and Qualification sheets,
-           the other options produce a single-sheet file. -->
-      <span class="xlsx-group" style="display:inline-flex;align-items:stretch;gap:0;">
-        <button class="btn btn-secondary"
-                style="border-top-right-radius:0;border-bottom-right-radius:0;border-right:0;"
-                onclick="exportXlsx()" title="Download Excel spreadsheet">📊 XLSX</button>
-        <select id="xlsxScope" class="btn btn-secondary"
-                title="Which matches to include in the spreadsheet"
-                style="border-top-left-radius:0;border-bottom-left-radius:0;padding-right:0.5rem;cursor:pointer;">
-          <option value="both" selected>Both</option>
-          <option value="qual">Qualification only</option>
-          <option value="practice">Practice only</option>
-        </select>
-      </span>
-      <button class="btn btn-secondary" onclick="exportCsv()" title="Download CSV">📑 CSV</button>
-      <button class="btn btn-secondary" onclick="exportJson()" title="Download raw JSON">{} JSON</button>
-      <button class="btn btn-secondary" onclick="exportFms()" title="Download FMS Match Maker import file">⬇ FMS</button>
+      <button class="btn btn-secondary" onclick="openExportModal()" title="Print, save as PDF, or download as XLSX/CSV/JSON/FMS">⬇ Export…</button>
       <span style="flex:1"></span>
       <span class="group-label">Share</span>
-      <button class="btn btn-secondary" onclick="openPrintOptionsModal('print')" title="Print options">🖨 Print</button>
       <button class="btn btn-secondary" onclick="openShareModal()" title="Show QR code">📱 QR</button>
     </div>
 
@@ -772,34 +752,124 @@
   </div>
 </div>
 
-<!-- Print options modal — shared by Print button and PDF export.
-     Lightweight subset of the editor's options: just what makes sense
-     when reading a finished schedule (page-break controls). Other
-     editor-only options (cycle times, round dividers etc.) aren't
-     present in the view's data shape so we don't surface them. -->
-<div class="modal-overlay" id="printOptionsModal" onclick="if(event.target===this)closePrintOptionsModal()">
-  <div class="modal-card">
-    <h2>Print &amp; PDF options</h2>
-    <p style="margin:0 0 1rem 0; color:var(--text-muted); font-size:13px;">
-      Settings here apply to both Print (browser dialog) and PDF download.
-    </p>
-    <div style="display:flex;flex-direction:column;gap:0.6rem;">
-      <label style="display:flex;align-items:center;gap:0.5rem;font-size:14px;cursor:pointer;">
-        <input type="checkbox" id="vPrintOptPageBreakAfterPractice" checked>
-        Page break after practice matches
-      </label>
-      <label style="display:flex;align-items:center;gap:0.5rem;font-size:14px;cursor:pointer;">
-        <input type="checkbox" id="vPrintOptPageBreakBetweenDays" checked>
-        Page break between days
-      </label>
+<!-- Export modal — unified entry point for all output formats.
+     Mirrors the editor's modalExport but without FMS Setup (which
+     is editor-specific). Format-specific option panels are siblings
+     toggled by display:none. Bottom action buttons swap based on
+     selected format. -->
+<div class="modal-overlay" id="exportModal" onclick="if(event.target===this)closeModal('exportModal')">
+  <div class="modal-card" style="max-width:720px;width:95vw;">
+    <h2 style="margin:0 0 0.75rem 0;">⬇ Export schedule</h2>
+    <div style="display:grid;grid-template-columns:160px 1fr;gap:1rem;">
+      <!-- ── Left: format selector ────────────────────────────── -->
+      <div style="display:flex;flex-direction:column;gap:0.25rem;border-right:1px solid var(--border, #ccc);padding-right:0.75rem;">
+        <div style="font-weight:600;font-size:0.85rem;color:var(--text-muted, #555);margin-bottom:0.4rem;">Format</div>
+        <label class="export-format-radio">
+          <input type="radio" name="exportFormat" value="print_pdf" checked onchange="onExportFormatChange()">
+          <span>Print / PDF</span>
+        </label>
+        <label class="export-format-radio">
+          <input type="radio" name="exportFormat" value="xlsx" onchange="onExportFormatChange()">
+          <span>Excel (XLSX)</span>
+        </label>
+        <label class="export-format-radio">
+          <input type="radio" name="exportFormat" value="csv" onchange="onExportFormatChange()">
+          <span>CSV</span>
+        </label>
+        <label class="export-format-radio">
+          <input type="radio" name="exportFormat" value="json" onchange="onExportFormatChange()">
+          <span>JSON</span>
+        </label>
+        <label class="export-format-radio"
+               title="Tab-delimited file for FIRST FMS Match Maker import. Qualification matches only.">
+          <input type="radio" name="exportFormat" value="fms" onchange="onExportFormatChange()">
+          <span>FMS Match Maker</span>
+        </label>
+      </div>
+
+      <!-- ── Right: format-specific options ───────────────────── -->
+      <div>
+        <!-- Print/PDF panel (default) — view has fewer toggles than
+             the editor since cycle-times/round-dividers etc. aren't
+             part of the view's data shape. -->
+        <div class="export-panel" id="exportPanel-print_pdf">
+          <div style="font-weight:600;font-size:0.85rem;color:var(--text-muted, #555);margin-bottom:0.5rem;">Page breaks</div>
+          <div style="display:flex;flex-direction:column;gap:0.5rem;">
+            <label style="display:flex;align-items:center;gap:0.5rem;font-size:14px;cursor:pointer;">
+              <input type="checkbox" id="vPrintOptPageBreakAfterPractice" checked>
+              Page break after practice matches
+            </label>
+            <label style="display:flex;align-items:center;gap:0.5rem;font-size:14px;cursor:pointer;">
+              <input type="checkbox" id="vPrintOptPageBreakBetweenDays" checked>
+              Page break between days
+            </label>
+          </div>
+          <div style="margin-top:0.75rem;font-size:0.8rem;color:var(--text-muted, #555);line-height:1.45;">
+            Print and PDF produce the same content; only the destination differs.
+          </div>
+        </div>
+
+        <!-- XLSX panel -->
+        <div class="export-panel" id="exportPanel-xlsx" style="display:none;">
+          <div style="font-weight:600;font-size:0.85rem;color:var(--text-muted, #555);margin-bottom:0.5rem;">Match scope</div>
+          <select id="xlsxScope" class="btn btn-secondary" style="padding:0.4rem 0.5rem;font-size:14px;">
+            <option value="both" selected>Both — practice and qualification on separate sheets</option>
+            <option value="qual">Qualification only</option>
+            <option value="practice">Practice only</option>
+          </select>
+          <div style="margin-top:0.75rem;font-size:0.8rem;color:var(--text-muted, #555);line-height:1.45;">
+            Spreadsheet uses the canonical FMS layout. Re-importable
+            via "Restore from file" in the editor.
+          </div>
+        </div>
+
+        <!-- CSV panel -->
+        <div class="export-panel" id="exportPanel-csv" style="display:none;">
+          <div style="font-size:14px;line-height:1.45;">
+            Comma-separated, one row per match, with columns
+            <code>Time, Match, Blue 1-3, Red 1-3, Surrogates</code>.
+          </div>
+        </div>
+
+        <!-- JSON panel -->
+        <div class="export-panel" id="exportPanel-json" style="display:none;">
+          <div style="font-size:14px;line-height:1.45;">
+            Raw schedule data including event metadata, all matches,
+            and surrogate flags. Useful for programmatic processing.
+          </div>
+        </div>
+
+        <!-- FMS panel -->
+        <div class="export-panel" id="exportPanel-fms" style="display:none;">
+          <div style="font-size:14px;line-height:1.45;">
+            Tab-delimited file matching FIRST FMS Match Maker's
+            import format. <strong>Qualification matches only.</strong>
+            Match times must be re-entered in FMS Build Schedule
+            after import.
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="modal-actions" style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem;">
-      <button class="btn btn-secondary" onclick="closePrintOptionsModal()">Cancel</button>
-      <button class="btn btn-secondary" onclick="runPrintAfterOptions(false)">PDF</button>
-      <button class="btn" onclick="runPrintAfterOptions(true)">Print</button>
+
+    <!-- ── Action row ─────────────────────────────────────────── -->
+    <div class="modal-actions" style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem;align-items:center;">
+      <button class="btn btn-secondary" onclick="closeModal('exportModal')">Cancel</button>
+      <button class="btn btn-secondary" id="exportActionPdf" onclick="runExportAction('pdf')" style="display:none;">⬇ Save as PDF</button>
+      <button class="btn" id="exportActionPrint" onclick="runExportAction('print')" style="display:none;">🖨 Print</button>
+      <button class="btn" id="exportActionDownload" onclick="runExportAction('download')" style="display:none;">⬇ Download</button>
     </div>
   </div>
 </div>
+
+<style>
+.export-format-radio {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.92rem; padding: 0.4rem 0.5rem; border-radius: 4px;
+  cursor: pointer;
+}
+.export-format-radio:hover { background: var(--bg-alt, #f6f8fa); }
+.export-format-radio input[type="radio"] { margin: 0; }
+</style>
 
 <!-- External libraries (loaded lazily — failures degrade gracefully) -->
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
@@ -2432,73 +2502,129 @@ function exportXlsx() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Print + PDF options modal
+// Export modal — unified entry point for all output formats.
 //
-// Shared by the Print button (browser print dialog) and PDF button
-// (html2pdf). The modal collects two toggles — page break after
-// practice, page break between days — and dispatches to the right
-// path. Page breaks are applied by tagging rows in the live DOM
-// with marker classes; @media print CSS turns those into actual
-// `page-break-before: always`.
+// Replaces the previous PDF/XLSX/CSV/JSON/FMS toolbar buttons with a
+// single Export button that opens this modal. Format selector on the
+// left, format-specific options on the right, action button(s) at
+// the bottom. Print and PDF share a panel because they produce the
+// same content; only the destination differs.
 //
-// State variable holds the user's intent ("print" or "pdf") so the
-// confirm buttons in the modal know which action to fire.
+// Existing exporters (exportPdf, exportXlsx, exportCsv, exportJson,
+// exportFms) are reused without modification — runExportAction()
+// dispatches to whichever matches the selected format. The print
+// path tags live-DOM rows with marker classes; the PDF path passes
+// options into exportPdf() which builds a detached DOM and injects
+// inline page-break styles.
 // ─────────────────────────────────────────────────────────────────────
 
-var _printOptionsAction = 'print';
-
-function openPrintOptionsModal(action) {
-  // action is 'print' or 'pdf'. The modal stays the same; only the
-  // confirm dispatch differs. We don't disable the alternate button —
-  // the user might pick Print but realise they want PDF instead.
-  _printOptionsAction = (action === 'pdf') ? 'pdf' : 'print';
-  var modal = document.getElementById('printOptionsModal');
+function openExportModal() {
+  // Reset to default selection (Print/PDF) every open so the modal
+  // doesn't open in some lingering state from a previous interaction.
+  var defaultRadio = document.querySelector('input[name="exportFormat"][value="print_pdf"]');
+  if (defaultRadio) defaultRadio.checked = true;
+  onExportFormatChange();
+  var modal = document.getElementById('exportModal');
   if (modal) modal.classList.add('open');
 }
 
-function closePrintOptionsModal() {
-  var modal = document.getElementById('printOptionsModal');
+// Tiny helper — view.html uses classList.add/remove('open') directly
+// for other modals, so this just wraps that pattern by id. Mirrors
+// the editor's closeModal() helper signature so onclick="closeModal('id')"
+// markup works the same way on both pages.
+function closeModal(id) {
+  var modal = document.getElementById(id);
   if (modal) modal.classList.remove('open');
 }
 
-function runPrintAfterOptions(useBrowserPrint) {
-  // useBrowserPrint=true → window.print(); false → exportPdf()
-  // The two paths take different tracks:
-  //   - Print: tag rows in the LIVE DOM with marker classes; the
-  //     @media print CSS turns those into actual page breaks. Then
-  //     remove the markers after the dialog closes.
-  //   - PDF: pass options to exportPdf() which rebuilds a detached
-  //     DOM and injects inline page-break-before style on the right
-  //     rows. Markers on the live DOM aren't useful here because the
-  //     PDF builder doesn't read them.
-  var optBreakAfterPractice = document.getElementById('vPrintOptPageBreakAfterPractice').checked;
-  var optBreakBetweenDays   = document.getElementById('vPrintOptPageBreakBetweenDays').checked;
+function onExportFormatChange() {
+  var selected = document.querySelector('input[name="exportFormat"]:checked');
+  var fmt = selected ? selected.value : 'print_pdf';
 
-  closePrintOptionsModal();
+  // Toggle option panels.
+  document.querySelectorAll('.export-panel').forEach(function(panel) {
+    panel.style.display = (panel.id === 'exportPanel-' + fmt) ? '' : 'none';
+  });
 
-  if (useBrowserPrint) {
-    var token = _applyPrintMarkers({
-      breakAfterPractice: optBreakAfterPractice,
-      breakBetweenDays:   optBreakBetweenDays,
-    });
-    var cleanup = function() {
-      _removePrintMarkers(token);
-      window.removeEventListener('afterprint', cleanup);
-    };
-    window.addEventListener('afterprint', cleanup);
-    window.print();
+  // Toggle action buttons.
+  var btnPrint    = document.getElementById('exportActionPrint');
+  var btnPdf      = document.getElementById('exportActionPdf');
+  var btnDownload = document.getElementById('exportActionDownload');
+  [btnPrint, btnPdf, btnDownload].forEach(function(b) {
+    if (b) b.style.display = 'none';
+  });
+  if (fmt === 'print_pdf') {
+    if (btnPrint) btnPrint.style.display = '';
+    if (btnPdf)   btnPdf.style.display   = '';
   } else {
-    exportPdf({
-      breakAfterPractice: optBreakAfterPractice,
-      breakBetweenDays:   optBreakBetweenDays,
-    });
+    if (btnDownload) btnDownload.style.display = '';
   }
+}
+
+function runExportAction(action) {
+  // action: 'print' | 'pdf' | 'download'
+  var selected = document.querySelector('input[name="exportFormat"]:checked');
+  var fmt = selected ? selected.value : 'print_pdf';
+
+  // Read print/PDF options up front because we need them for both
+  // dispatch paths and the modal close happens before those run.
+  var optBreakAfterPractice = false, optBreakBetweenDays = false;
+  if (fmt === 'print_pdf') {
+    var cb1 = document.getElementById('vPrintOptPageBreakAfterPractice');
+    var cb2 = document.getElementById('vPrintOptPageBreakBetweenDays');
+    optBreakAfterPractice = cb1 ? cb1.checked : true;
+    optBreakBetweenDays   = cb2 ? cb2.checked : true;
+  }
+
+  // Close the modal up front. Most actions open a popup or trigger
+  // a download; both work better with the modal already gone.
+  var modal = document.getElementById('exportModal');
+  if (modal) modal.classList.remove('open');
+
+  // Small async gap so the modal close animation (if any) settles
+  // before we trigger heavy-DOM operations.
+  setTimeout(function() {
+    if (fmt === 'print_pdf') {
+      if (action === 'print') {
+        // Tag live DOM with page-break markers; window.print() picks
+        // them up via @media print CSS; cleanup on afterprint.
+        var token = _applyPrintMarkers({
+          breakAfterPractice: optBreakAfterPractice,
+          breakBetweenDays:   optBreakBetweenDays,
+        });
+        var cleanup = function() {
+          _removePrintMarkers(token);
+          window.removeEventListener('afterprint', cleanup);
+        };
+        window.addEventListener('afterprint', cleanup);
+        window.print();
+      } else {
+        // PDF path: pass opts to exportPdf which injects inline
+        // page-break styles in the rebuilt detached DOM.
+        exportPdf({
+          breakAfterPractice: optBreakAfterPractice,
+          breakBetweenDays:   optBreakBetweenDays,
+        });
+      }
+      return;
+    }
+    if (fmt === 'xlsx')  { exportXlsx(); return; }
+    if (fmt === 'csv')   { exportCsv();  return; }
+    if (fmt === 'json')  { exportJson(); return; }
+    if (fmt === 'fms')   { exportFms();  return; }
+  }, 50);
 }
 
 function _applyPrintMarkers(opts) {
   // Walk the matches table once, tagging rows where page breaks
   // should occur. Returns the list of (element, className) pairs we
   // added so cleanup can undo them precisely.
+  //
+  // BUGFIX: previous version checked tr.querySelector('td').textContent
+  // for "P"/"Q" — but the first <td> is the time cell (col-time), not
+  // the match number. So `seenPractice` never flipped, no markers
+  // were ever added, and the page-break-after-practice toggle was a
+  // silent no-op. Fixed by reading the .col-match cell explicitly.
   var added = [];
   var tbody = document.getElementById('matchesTbody');
   if (!tbody) return added;
@@ -2510,11 +2636,6 @@ function _applyPrintMarkers(opts) {
 
   rows.forEach(function(tr) {
     if (tr.classList.contains('day-divider')) {
-      // Day-divider rows carry the day label in their text — we use
-      // a change in label to detect day boundaries. Tag the divider
-      // itself so the page break sits on the divider, not the next
-      // match (cleaner visual: divider becomes the top of the new
-      // page).
       var label = tr.textContent.trim();
       if (opts.breakBetweenDays && lastDayLabel !== null && label !== lastDayLabel) {
         tr.classList.add('print-pb-before');
@@ -2525,12 +2646,12 @@ function _applyPrintMarkers(opts) {
     }
     if (!tr.classList.contains('match-row')) return;
 
-    // Detect practice→qual transition by looking at the match-number
-    // cell. Practice rows show "P<n>"; qual rows show "Q<n>". We
-    // already track isPractice in the data, but the rendered DOM
-    // doesn't carry it — easier to read the cell text.
-    var firstTd = tr.querySelector('td');
-    var label = firstTd ? firstTd.textContent.trim() : '';
+    // Read the match-number cell directly by class. Practice rows
+    // show "P<n>" in this cell; qual rows show "Q<n>". Falling back
+    // to the second TD covers any cases where col-match isn't on
+    // the cell (defensive).
+    var matchCell = tr.querySelector('.col-match') || tr.cells[1];
+    var label = matchCell ? matchCell.textContent.trim() : '';
     var isPractice = label.charAt(0) === 'P';
 
     if (isPractice) {
