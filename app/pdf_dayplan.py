@@ -145,6 +145,11 @@ async def extract_dayplan(text: str) -> dict[str, Any] | None:
 
     Uses the consolidated llm_client._post() so timeout, error handling,
     and JSON-tolerant parsing are unified across all LLM call sites.
+
+    Passes DAYPLAN_SCHEMA via guided_json so vLLM enforces output shape
+    at decode time. Without this, smaller models (7B class) tend to
+    drift mid-output, repeat themselves, or trail off — producing JSON
+    that's syntactically broken and unrecoverable downstream.
     """
     from app import llm_client
     if not llm_client.is_configured():
@@ -155,10 +160,13 @@ async def extract_dayplan(text: str) -> dict[str, Any] | None:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": _build_user_prompt(text)},
         ],
-        # Day plans are short — a few hundred tokens of structured output.
-        # Smaller cap than match-list extraction since there's no per-match
-        # repetition.
-        max_tokens=4000,
+        # Day plans typically contain 5-10 blocks. Output is small —
+        # 1500 tokens is plenty. Going much higher (the previous 4000)
+        # gives small models room to drift after they've finished the
+        # actual answer; small models are more disciplined when the
+        # cap is closer to the expected output size.
+        max_tokens=1500,
+        json_schema=llm_client.DAYPLAN_SCHEMA,
     )
 
 

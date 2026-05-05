@@ -152,8 +152,22 @@ def _parse_json_response(text: str) -> dict[str, Any]:
     """Tolerantly parse JSON out of an LLM response.
 
     Handles markdown code fences, leading prose, and trailing junk. Raises
-    ValueError if no parseable JSON object can be found.
+    ValueError with diagnostic context if no parseable JSON can be found.
+
+    On failure, the raised error includes a window around the parse error
+    location (~150 chars before/after) so the user/operator can see what
+    actually broke. The full response is also logged at WARNING level so
+    pod logs have the complete payload for after-the-fact inspection.
+
+    Common breakage modes from small structured-output models:
+      - Trailing repetition: model gets stuck and re-emits the same array
+        item until it hits max_tokens, leaving the JSON unclosed
+      - Mid-stream drift: model switches to prose ("Here's another match…")
+        partway through
+      - Extra commas: trailing comma after the last array element
+      - Smart quotes: typographic quotes instead of ASCII quotes
     """
+    raw = text  # keep for diagnostics
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*\n", "", text)
@@ -161,22 +175,170 @@ def _parse_json_response(text: str) -> dict[str, Any]:
     start = text.find("{")
     end   = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
-        raise ValueError("No JSON object found in LLM response")
+        log.warning(
+            "LLM response had no JSON object. Full response (%d chars):\n%s",
+            len(raw), raw[:4000],
+        )
+        raise ValueError(
+            "No JSON object found in LLM response. "
+            f"First 200 chars: {raw[:200]!r}"
+        )
     candidate = text[start:end + 1]
+
+    # First attempt: parse as-is
     try:
         return json.loads(candidate)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON from LLM: {e}")
+        first_err = e
+
+    # Second attempt: strip trailing commas before } or ]. Some models add
+    # them despite the "valid JSON" instruction.
+    repaired = re.sub(r",(\s*[}\]])", r"\1", candidate)
+    if repaired != candidate:
+        try:
+            log.info("First JSON parse failed; retrying with trailing commas stripped")
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+
+    # Third attempt: replace smart quotes with ASCII quotes
+    smart_fixed = (
+        candidate
+        .replace("\u201c", '"').replace("\u201d", '"')
+        .replace("\u2018", "'").replace("\u2019", "'")
+    )
+    if smart_fixed != candidate:
+        try:
+            log.info("First JSON parse failed; retrying with smart quotes normalized")
+            return json.loads(smart_fixed)
+        except json.JSONDecodeError:
+            pass
+
+    # All repairs failed. Surface a useful error: show where the parser
+    # gave up + a window of surrounding content.
+    pos = first_err.pos if hasattr(first_err, "pos") else 0
+    window_start = max(0, pos - 150)
+    window_end   = min(len(candidate), pos + 150)
+    snippet = candidate[window_start:window_end]
+    # Mark the failure point with a caret line so it's obvious where parsing
+    # went wrong even after the message gets quoted in HTTP responses.
+    relative_pos = pos - window_start
+    caret_line = " " * relative_pos + "^"
+
+    log.warning(
+        "LLM JSON parse failed at position %d. Full response (%d chars):\n%s",
+        pos, len(raw), raw[:4000],
+    )
+
+    raise ValueError(
+        f"Invalid JSON from LLM: {first_err.msg} at char {pos}. "
+        f"Context: ...{snippet!r}... "
+        f"(error around: {snippet[max(0, relative_pos - 30):relative_pos + 30]!r})"
+    )
+
+
+# ── JSON schemas (for vLLM guided_json structured output) ────────────────────
+# These describe the *shape* the model is asked to produce. When passed to
+# vLLM via guided_json, the decoder enforces the structure at sampling time —
+# the model literally cannot emit invalid JSON or wrong-typed fields. This
+# is critical for small models (7B class) which otherwise drift, repeat,
+# or trail off on multi-field structured tasks.
+#
+# Schema philosophy:
+#   - Keep schemas as PERMISSIVE as possible while still catching the shape
+#     errors that break downstream code. Over-strict schemas (regex-validated
+#     time strings, enums for every label) make decoding harder and slower
+#     and can cause vLLM to refuse to terminate.
+#   - Use `additionalProperties: true` so the model can include fields we
+#     didn't anticipate without crashing the decoder.
+#   - Don't enumerate `required` for nice-to-have fields; the adapter
+#     handles missing keys gracefully.
+
+MATCH_LIST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "format_detected": {"type": "string"},
+        "confidence":      {"type": "string"},
+        "matches": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "match_num":      {"type": "integer"},
+                    "time":           {"type": ["string", "null"]},
+                    "red":            {"type": "array", "items": {"type": "integer"}},
+                    "blue":           {"type": "array", "items": {"type": "integer"}},
+                    "red_surrogate":  {"type": "array", "items": {"type": "boolean"}},
+                    "blue_surrogate": {"type": "array", "items": {"type": "boolean"}},
+                },
+                "required": ["match_num", "red", "blue"],
+                "additionalProperties": True,
+            },
+        },
+        "notes": {"type": "string"},
+    },
+    "required": ["matches"],
+    "additionalProperties": True,
+}
+
+DAYPLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "format_detected": {"type": "string"},
+        "confidence":      {"type": "string"},
+        "event_dates": {
+            "type": "object",
+            "properties": {
+                "start": {"type": ["string", "null"]},
+                "end":   {"type": ["string", "null"]},
+            },
+            "additionalProperties": True,
+        },
+        "blocks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kind":      {"type": "string"},
+                    "day_index": {"type": "integer"},
+                    "start":     {"type": ["string", "null"]},
+                    "end":       {"type": ["string", "null"]},
+                    "label":     {"type": "string"},
+                    "details":   {"type": "string"},
+                },
+                "required": ["kind", "day_index"],
+                "additionalProperties": True,
+            },
+        },
+        "raw_phases": {
+            "type": "array",
+            "items": {"type": "object", "additionalProperties": True},
+        },
+        "notes": {"type": "string"},
+    },
+    "required": ["blocks"],
+    "additionalProperties": True,
+}
 
 
 # ── Core call ────────────────────────────────────────────────────────────────
 
 async def _post(messages: list[dict[str, Any]], *,
-                max_tokens: int = 8000) -> dict[str, Any]:
+                max_tokens: int = 8000,
+                json_schema: dict[str, Any] | None = None) -> dict[str, Any]:
     """Send a chat-completion request and return the parsed JSON content.
 
     All structured-extraction call sites go through this. Centralizes the
     timeout, error-handling, and JSON-tolerant parsing.
+
+    json_schema (optional): when provided, constrains the model to produce
+    output that conforms to the schema. This is vLLM's `guided_json`
+    feature — at decode time vLLM masks tokens that would violate the
+    schema, so the response is GUARANTEED to be syntactically valid JSON
+    matching the structure (assuming sufficient max_tokens). Other OpenAI-
+    compatible backends ignore the field harmlessly. This is the right
+    tool for small-model structured-output drift; without it, models
+    sometimes trail off, repeat themselves, or generate prose mid-output.
     """
     if not is_configured():
         raise RuntimeError("LLM not configured (set LLM_ENDPOINT and LLM_MODEL)")
@@ -185,16 +347,28 @@ async def _post(messages: list[dict[str, Any]], *,
     if LLM_API_KEY:
         headers["Authorization"] = f"Bearer {LLM_API_KEY}"
 
-    body = {
+    body: dict[str, Any] = {
         "model":       LLM_MODEL,
         "messages":    messages,
         "max_tokens":  max_tokens,
         "temperature": 0,
         "top_p":       1.0,
     }
+    if json_schema is not None:
+        # vLLM's structured-output spec. The "guided_json" key takes a
+        # JSON Schema and the decoder enforces it. Documented at:
+        # https://docs.vllm.ai/en/latest/features/structured_outputs.html
+        body["guided_json"] = json_schema
+        # Belt-and-suspenders: also set the OpenAI-standard response_format,
+        # which more recent vLLM versions and other servers honor. If both
+        # are present, vLLM uses guided_json.
+        body["response_format"] = {"type": "json_object"}
 
     url = f"{LLM_ENDPOINT}/chat/completions"
-    log.info("Calling LLM at %s (model=%s, max_tokens=%d)", url, LLM_MODEL, max_tokens)
+    log.info(
+        "Calling LLM at %s (model=%s, max_tokens=%d, guided=%s)",
+        url, LLM_MODEL, max_tokens, "yes" if json_schema else "no",
+    )
 
     async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
         try:
@@ -244,6 +418,7 @@ async def parse_schedule(pdf_text: str) -> dict[str, Any] | None:
         ],
         # Match-list output for a 92-match schedule is roughly 8K tokens of JSON
         max_tokens=16000,
+        json_schema=MATCH_LIST_SCHEMA,
     )
 
 
@@ -293,6 +468,7 @@ async def parse_schedule_from_images(images: list) -> dict[str, Any] | None:
             {"role": "user",   "content": user_content},
         ],
         max_tokens=16000,
+        json_schema=MATCH_LIST_SCHEMA,
     )
 
 
