@@ -277,13 +277,17 @@ MATCH_LIST_SCHEMA = {
                     "blue_surrogate": {"type": "array", "items": {"type": "boolean"}},
                 },
                 "required": ["match_num", "red", "blue"],
-                "additionalProperties": True,
+                # NOTE: do NOT set additionalProperties: True. xgrammar
+                # (vLLM's structured-output backend) crashes during
+                # grammar compilation on some additionalProperties
+                # constructs with an opaque 500. By default JSON Schema
+                # allows extras when not specified, so omitting the key
+                # gives us the same flexibility without tripping the bug.
             },
         },
         "notes": {"type": "string"},
     },
     "required": ["matches"],
-    "additionalProperties": True,
 }
 
 DAYPLAN_SCHEMA = {
@@ -301,7 +305,6 @@ DAYPLAN_SCHEMA = {
                 "start": {"type": "string"},
                 "end":   {"type": "string"},
             },
-            "additionalProperties": True,
         },
         "blocks": {
             "type": "array",
@@ -319,17 +322,15 @@ DAYPLAN_SCHEMA = {
                     "details":   {"type": "string"},
                 },
                 "required": ["kind", "day_index"],
-                "additionalProperties": True,
             },
         },
         "raw_phases": {
             "type": "array",
-            "items": {"type": "object", "additionalProperties": True},
+            "items": {"type": "object"},
         },
         "notes": {"type": "string"},
     },
     "required": ["blocks"],
-    "additionalProperties": True,
 }
 
 
