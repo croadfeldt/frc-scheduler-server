@@ -114,7 +114,7 @@ Rules:
 
 2. Multi-segment qual days: if quals run morning AND afternoon with lunch between, emit THREE blocks: one qual block for the morning window, one lunch block, one qual block for the afternoon window. Keep them in chronological order.
 
-3. Times: convert all to 24-hour HH:MM. "8:30 AM" → "08:30". "1:30 PM" → "13:30". If a phase has only a start time and no end ("4:00 PM Playoffs Begin"), set end to null.
+3. Times: convert all to 24-hour HH:MM. "8:30 AM" → "08:30". "1:30 PM" → "13:30". If a phase has only a start time and no end ("4:00 PM Playoffs Begin"), set end to "" (empty string).
 
 4. day_index counts ALL days teams attend (Friday + Saturday = days 0 and 1), not just match days. If the document only covers one day, that day is day_index 0.
 
@@ -122,7 +122,9 @@ Rules:
 
 6. The `details` field captures what makes a block specific: "6 matches, 10-minute cycles", "Concession stand open", "Dunwoody award judging on-site". Empty string if no details.
 
-7. Output JSON ONLY. No prose before or after. No markdown fences."""
+7. EACH PHASE APPEARS EXACTLY ONCE. A typical day plan has 4-8 blocks total (e.g. practice, qual-morning, lunch, qual-afternoon, ceremony, playoff). NEVER emit duplicate blocks. NEVER emit the same qualification round multiple times. If you find yourself about to write a block identical to one you already wrote, stop and close the array instead.
+
+8. Output JSON ONLY. No prose before or after. No markdown fences."""
 
 
 def _build_user_prompt(text: str) -> str:
@@ -207,6 +209,31 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
     blocks = extracted.get("blocks") or []
     if not isinstance(blocks, list):
         blocks = []
+
+    # Deduplicate blocks. Defense-in-depth against the model emitting
+    # duplicate blocks (a known small-model failure mode under guided
+    # decoding on tabular inputs — the model locks into a repetition
+    # loop and fills the response with copies of the same block). The
+    # sampler config and prompt already discourage this, but if it
+    # slips through, at least we don't show the user 30 identical
+    # qual rows. Two blocks are "duplicate" iff they share kind,
+    # day_index, start, end. Label and details may differ harmlessly.
+    seen_keys: set[tuple] = set()
+    deduped: list[dict] = []
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        key = (
+            (b.get("kind") or "").lower().strip(),
+            b.get("day_index"),
+            (b.get("start") or "").strip(),
+            (b.get("end") or "").strip(),
+        )
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped.append(b)
+    blocks = deduped
 
     # Group by day_index for the qual aggregation pass
     by_day: dict[int, list[dict]] = {}

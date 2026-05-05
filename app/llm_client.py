@@ -20,9 +20,15 @@ for both text-only prompts (day-plan extraction, schedule parsing from
 extracted text) AND image prompts (vision strategy when text extraction
 fails). One endpoint, one health check, one config block.
 
-Determinism: all callers use temperature=0, top_p=1.0. Response is
-required to be strict JSON; we parse with tolerance for common minor
-format issues (markdown code fences, leading prose).
+Sampling: temperature=0.1, top_p=0.9, repetition_penalty=1.1. We used to
+run pure greedy (temperature=0) but it interacted badly with grammar-
+constrained decoding on small models: the constrained sampler would
+lock into repetition loops on tabular PDF inputs and emit the same
+valid-but-redundant block until hitting max_tokens. Low-temp sampling
+plus a mild repetition penalty fixes this while keeping output ~stable
+across runs. Response is required to be strict JSON; we parse with
+tolerance for common minor format issues (markdown code fences,
+leading prose).
 """
 from __future__ import annotations
 
@@ -383,8 +389,22 @@ async def _post(messages: list[dict[str, Any]], *,
         "model":       LLM_MODEL,
         "messages":    messages,
         "max_tokens":  max_tokens,
-        "temperature": 0,
-        "top_p":       1.0,
+        # Low temperature instead of pure greedy (temperature=0).
+        # Pure greedy + grammar-constrained decoding causes small models
+        # to lock into repetition loops on tabular inputs: when the same
+        # string is the highest-probability completion under the grammar
+        # at multiple positions, the model emits it over and over until
+        # max_tokens is hit. Adding a small amount of randomness lets
+        # the sampler escape these loops while keeping output ~stable
+        # across runs.
+        "temperature": 0.1,
+        "top_p":       0.9,
+        # Penalize recently-emitted tokens. With grammar-constrained
+        # decoding, this is the most reliable knob for preventing the
+        # model from endlessly repeating valid-but-redundant array
+        # elements. 1.0 = no penalty; 1.1 is the conventional starting
+        # value and has minimal side effects on quality.
+        "repetition_penalty": 1.1,
     }
     if json_schema is not None:
         # vLLM's structured-output spec. The "guided_json" key takes a
