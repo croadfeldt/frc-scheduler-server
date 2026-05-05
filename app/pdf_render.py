@@ -466,7 +466,12 @@ def _build_full_html(
         raise ValueError(f"Scope '{scope}' filtered out all days")
 
     # Build branding header.
-    primary_color = branding.get("primary_color", "#0969da")
+    # Branding values: use `or` rather than dict.get(default=)
+    # because the frontend sends null for missing keys (which the
+    # default-arg form does NOT replace — get() only uses the default
+    # when the key is absent, not when its value is None). Same
+    # pattern is already in use for title/subtitle/logo_text below.
+    primary_color = branding.get("primary_color") or "#0969da"
     title_text    = branding.get("title") or schedule.get("event_name") or "FRC Match Schedule"
     subtitle      = branding.get("subtitle") or _build_subtitle(schedule)
     logo_text     = branding.get("logo_text") or (

@@ -1338,14 +1338,28 @@
             </div>
           </div>
 
-          <!-- FMS panel — informational -->
+          <!-- FMS panel — two separate downloads (qual + practice).
+               FMS Match Maker imports practice and qualification as
+               distinct round numbering schemes inside Build Schedule,
+               so they need to be separate files. The bottom Download
+               button is hidden when this panel is active because
+               choosing one of these two buttons IS the action. -->
           <div class="export-panel" id="exportPanel-fms" style="display:none;">
             <div class="modal-section-label">FMS Match Maker</div>
             <div style="margin-top:0.5rem;font-size:0.85rem;line-height:1.45;">
-              Tab-delimited file matching the FIRST FMS Match Maker
-              import format. <strong>Qualification matches only</strong> —
-              practice matches are not included. Match times must be
-              re-entered in FMS Build Schedule after import.
+              Tab-delimited files matching the FIRST FMS Match Maker
+              import format. Practice and qualification are downloaded
+              as separate files because FMS imports them as distinct
+              round numbering schemes. Match times must be re-entered
+              in FMS Build Schedule after import.
+            </div>
+            <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap;">
+              <button class="btn-sm btn-accent" onclick="closeModal('modalExport'); downloadFMS('qual');">
+                &#11015; Qualification
+              </button>
+              <button class="btn-sm" onclick="closeModal('modalExport'); downloadFMS('practice');">
+                &#11015; Practice
+              </button>
             </div>
           </div>
 
@@ -1711,6 +1725,12 @@
         <div class="stat stat-clickable" id="statB2BContainer" onclick="toggleStatFilter('b2b')" title="A back-to-back is when a team plays two matches in a row with no break. Lower is better. Click to filter."><div class="stat-value" id="statB2B" style="color:var(--text-muted)">&#8212;</div><div class="stat-label">Back-to-Backs &#9660;</div></div>
         <div class="stat stat-clickable" id="statSurrogatesContainer" onclick="toggleStatFilter('surrogate')" title="A surrogate plays an extra match to fill a structural gap in the schedule. Click to filter surrogate matches."><div class="stat-value" id="statSurrogates" style="color:var(--text-muted)">&#8212;</div><div class="stat-label">Surrogate Plays &#9660;</div><div id="statSurrogatesMin" style="font-size:0.65rem;font-weight:700;font-family:'Barlow Condensed',sans-serif;letter-spacing:0.04em;margin-top:0.2rem;" title=""></div></div>
       </div>
+      <!-- Diversity Report — shows partner/opponent repeat distribution, station
+           balance, surrogate placement, and worst-case callouts. Populated after
+           Stage 1 generation completes. Hidden by default.
+           Positioned ABOVE the schedule (right below the stats bar) so all
+           the schedule-quality numbers sit together as one unit. -->
+      <div id="diversityReportCard" class="diversity-report" style="display:none;"></div>
       <div class="filter-bar" id="filterBar" style="display:none">
         <span class="filter-bar-label">Filters:</span>
         <span class="filter-empty" id="filterEmpty">None active &mdash; click column headers or team numbers to filter</span>
@@ -1723,10 +1743,6 @@
           <p>Load an event or enter your team count,<br>then click <strong>Generate Schedule</strong></p>
         </div>
       </div>
-      <!-- Diversity Report — shows partner/opponent repeat distribution, station
-           balance, surrogate placement, and worst-case callouts. Populated after
-           Stage 1 generation completes. Hidden by default. -->
-      <div id="diversityReportCard" class="diversity-report" style="display:none;"></div>
     </div>
   </div>
 
@@ -4455,16 +4471,37 @@ async function autoRunFromUrl() {
 
   // If we have a server-side ID, load directly from DB (faster, exact match)
   if (params.aid) {
-    // aid = assigned schedule ID — load full assignment + underlying abstract
+    // aid = assigned schedule ID — load full assignment + underlying abstract.
+    //
+    // The user's schedule and team assignments should both restore on refresh.
+    // History: there were intermittent reports of the schedule rendering but
+    // team numbers showing as dashes/empty — symptom of _frcAbstractMode
+    // being left true during the load. We now explicitly clear that flag
+    // BEFORE the load and emit console traces so the failure mode (if it
+    // recurs) is debuggable.
+    console.log('[autoRunFromUrl] aid path: loading assigned schedule', params.aid);
+    window._frcAbstractMode  = false;
+    window._frcShowFakeTeams = false;
     try {
       const adResp  = await apiFetch('/api/assigned-schedules/' + params.aid);
       const absResp = await apiFetch('/api/abstract-schedules/' + adResp.abstract_schedule_id);
+      console.log('[autoRunFromUrl] adResp matches:', (adResp.matches || []).length,
+                  'slot_map keys:', adResp.slot_map ? Object.keys(adResp.slot_map).length : 0);
       _currentAbstractScheduleId = absResp.id;
       _currentAssignedScheduleId = adResp.id;
       _currentSeed       = absResp.seed || null;
       _currentAssignSeed = adResp.assign_seed || null;
       _currentSlotMap    = adResp.slot_map || null;
       _abstractParams    = { numTeams: absResp.num_teams, matchesPerTeam: absResp.matches_per_team, cooldown: absResp.cooldown };
+      // Sync form fields to the abstract's parameters so any later
+      // generateSchedule() call (e.g. from a stray param-change handler)
+      // doesn't see stale form values that disagree with the loaded
+      // schedule. URL params should already match these, but it's a
+      // belt-and-suspenders sync.
+      var ntInp  = document.getElementById('numTeams');
+      var mptInp = document.getElementById('matchesPerTeam');
+      if (ntInp  && absResp.num_teams)        ntInp.value  = absResp.num_teams;
+      if (mptInp && absResp.matches_per_team) mptInp.value = absResp.matches_per_team;
       updateSeedDisplay(_currentSeed, _currentAssignSeed);
       updateUrlFromState();
       // Restore event UI state (code input + status label + event select)
@@ -4495,10 +4532,26 @@ async function autoRunFromUrl() {
       }
       const dayConfig = adResp.day_config || collectDayConfig();
       await loadAssignedSchedule(adResp.id, dayConfig);
+      // Defensive: ensure abstract-mode is OFF after load completes.
+      // loadAssignedSchedule already sets it false, but a stray async
+      // handler might have flipped it during the await above.
+      window._frcAbstractMode  = false;
+      window._frcShowFakeTeams = false;
+      // Force a re-render so the team numbers paint with the correct
+      // mode flags. If finishGeneration already rendered (it should
+      // have), this is a no-op visually; if something raced, this
+      // recovers.
+      if (window._frcScheduled && typeof renderSchedule === 'function') {
+        console.log('[autoRunFromUrl] forcing re-render with',
+                    window._frcScheduled.length, 'days,',
+                    'abstractMode=', window._frcAbstractMode);
+        renderSchedule();
+      }
       showStage2Panel(_abstractParams.numTeams);
       document.getElementById('btnCommit').style.display = 'block';
       showApiStatus('\u2713 Assignment #' + params.aid + ' loaded from server');
     } catch(e) {
+      console.error('[autoRunFromUrl] aid path failed:', e);
       showApiStatus('Could not load assignment #' + params.aid + ': ' + e.message, true);
       if (params.seed) { _urlAutoTeams = params.teams; await generateScheduleWithSeed(params.seed); }
     }
@@ -4555,7 +4608,10 @@ async function autoRunFromUrl() {
         if (typeof renderWeightsPanel === 'function' && SCHEDULER_DEFAULTS) renderWeightsPanel();
       }
       showStage2Panel(_abstractParams.numTeams);
-      await checkForSavedAssignment(absResp.id);
+      // On URL-driven page load, auto-restore the most recent saved
+      // assignment instead of showing a "click to load" banner.
+      // The user expects refresh to bring their state back.
+      await checkForSavedAssignment(absResp.id, { autoLoad: true });
       showApiStatus('\u2713 Schedule #' + params.sid + ' loaded from server');
     } catch(e) {
       showApiStatus('Could not load schedule #' + params.sid + ': ' + e.message, true);
@@ -8601,19 +8657,54 @@ function displayAbstractSchedule(sched, dayConfig) {
 }
 
 // Check if a saved assignment exists for this abstract schedule + event
-async function checkForSavedAssignment(abstractScheduleId) {
+async function checkForSavedAssignment(abstractScheduleId, options) {
+  // options: { autoLoad: bool } — when true, automatically load the
+  // most recent saved assignment instead of just showing the banner.
+  // This is the right behavior on URL-driven page load: the user
+  // expects refresh to restore their state, not to show a "click
+  // to load" banner. The banner approach is still used in
+  // contexts where multiple assignments may exist and the user
+  // should choose explicitly (e.g. event-switch).
+  options = options || {};
   if (!_currentEventId) return;
   try {
     const schedules = await apiFetch('/api/events/' + _currentEventId + '/assigned-schedules');
+    // Pick the most recent assignment for this abstract. If multiple,
+    // /api/events/{id}/assigned-schedules already orders by created_at desc.
     const match = schedules.find(function(s) { return s.abstract_schedule_id === abstractScheduleId; });
-    if (match) {
-      const banner = document.getElementById('loadFromDbBanner');
-      document.getElementById('loadFromDbInfo').textContent =
-        match.name + ' — saved ' + new Date(match.created_at).toLocaleString();
-      banner.dataset.scheduleId = match.id;
-      banner.style.display = 'block';
+    if (!match) return;
+    if (options.autoLoad) {
+      // Auto-restore the saved assignment. Bypass the banner UI —
+      // user is refreshing the page and expects the previous state.
+      console.log('[checkForSavedAssignment] auto-loading assignment', match.id);
+      window._frcAbstractMode  = false;
+      window._frcShowFakeTeams = false;
+      _currentAssignedScheduleId = match.id;
+      try {
+        await loadAssignedSchedule(match.id, collectDayConfig());
+        // Update URL so subsequent refreshes hit the aid path directly
+        // (faster — no extra round-trip to find the assignment).
+        updateUrlFromState();
+        // Defensive re-render to guarantee team numbers paint.
+        if (window._frcScheduled && typeof renderSchedule === 'function') {
+          renderSchedule();
+        }
+      } catch (e) {
+        console.warn('[checkForSavedAssignment] auto-load failed, falling back to banner:', e);
+        _showSavedAssignmentBanner(match);
+      }
+    } else {
+      _showSavedAssignmentBanner(match);
     }
   } catch(e) { /* no saved schedule is fine */ }
+}
+
+function _showSavedAssignmentBanner(match) {
+  const banner = document.getElementById('loadFromDbBanner');
+  document.getElementById('loadFromDbInfo').textContent =
+    match.name + ' — saved ' + new Date(match.created_at).toLocaleString();
+  banner.dataset.scheduleId = match.id;
+  banner.style.display = 'block';
 }
 
 async function loadSavedAssignment() {
@@ -10129,7 +10220,17 @@ async function downloadXLSX() {
 //     step. Re-enter day start, breaks, and cycle time changes in FMS first,
 //     then import this file on the Match Maker step.
 //   - Requires assigned (real) team numbers. Slot indices won't import.
-function downloadFMS() {
+function downloadFMS(scope) {
+  // scope: 'qual' (default) or 'practice'
+  // Each is its own file because FMS Match Maker imports practice
+  // and qualification matches as separate operations — they're
+  // distinct round numbering schemes inside FMS Build Schedule.
+  scope = scope || 'qual';
+  if (scope !== 'qual' && scope !== 'practice') {
+    showApiStatus('Invalid FMS scope: ' + scope, true);
+    return;
+  }
+
   var scheduled = window._frcScheduled;
   if (!scheduled || !scheduled.length) {
     showApiStatus('No schedule to download', true);
@@ -10144,10 +10245,15 @@ function downloadFMS() {
     return;
   }
 
+  // FMS export is intentionally NOT subject to view-level filters.
+  // The file goes into FMS Build Schedule as the canonical match
+  // list; partial schedules would corrupt FMS's match numbering.
+
   var lines = [];
   var matchNum = 0;
+  var wantPractice = (scope === 'practice');
   scheduled.forEach(function(day) {
-    if (day.isPracticeDay) return; // FMS imports practice and qual separately
+    if (!!day.isPracticeDay !== wantPractice) return;  // skip the wrong scope
     day.entries.forEach(function(e) {
       if (e.type !== 'match') return;
       matchNum++;
@@ -10171,7 +10277,12 @@ function downloadFMS() {
   });
 
   if (lines.length === 0) {
-    showApiStatus('No qualification matches to export', true);
+    showApiStatus(
+      scope === 'practice'
+        ? 'No practice matches in this schedule'
+        : 'No qualification matches in this schedule',
+      true
+    );
     return;
   }
 
@@ -10182,14 +10293,20 @@ function downloadFMS() {
   var url  = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url;
-  // FMS file: standardized name FMS expects, but include year/code prefix
-  a.download = getScheduleFilenameSlug('') + '_fms.txt';
+  // Filename suffix distinguishes the two output files. FMS doesn't
+  // care about the filename; it's purely user-facing for organization.
+  var suffix = scope === 'practice' ? '_fms_practice.txt' : '_fms_quals.txt';
+  a.download = getScheduleFilenameSlug('') + suffix;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   // Defer revoke so the download has time to start
   setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
-  showApiStatus('✓ Exported ' + lines.length + ' qualification matches for FMS Match Maker import');
+  showApiStatus(
+    '✓ Exported ' + lines.length + ' ' +
+    (scope === 'practice' ? 'practice' : 'qualification') +
+    ' matches for FMS Match Maker import'
+  );
 }
 
 
@@ -10573,6 +10690,9 @@ function onExportFormatChange() {
     if (btnPdf)   btnPdf.style.display   = '';
   } else if (fmt === 'fms_setup') {
     if (btnOpen) btnOpen.style.display = '';
+  } else if (fmt === 'fms') {
+    // FMS panel has its own inline Qualification/Practice buttons —
+    // bottom action button stays hidden.
   } else {
     if (btnDownload) btnDownload.style.display = '';
   }
@@ -10886,7 +11006,9 @@ function runExportAction(action) {
     if (fmt === 'xlsx')      { downloadXLSX();      return; }
     if (fmt === 'csv')       { downloadCSV();       return; }
     if (fmt === 'json')      { downloadJSON();      return; }
-    if (fmt === 'fms')       { downloadFMS();       return; }
+    // 'fms' is handled by inline buttons in the FMS panel itself
+    // (one for Qualification, one for Practice). No bottom-action
+    // dispatch path for it.
     if (fmt === 'fms_setup') { openFMSSetupSheet(); return; }
   }, 50);
 }

@@ -834,13 +834,20 @@
           </div>
         </div>
 
-        <!-- FMS panel -->
+        <!-- FMS panel — two separate downloads. FMS Match Maker
+             imports practice and qualification as distinct round
+             numbering schemes, so they need separate files.
+             Inline buttons replace the bottom Download button. -->
         <div class="export-panel" id="exportPanel-fms" style="display:none;">
           <div style="font-size:14px;line-height:1.45;">
-            Tab-delimited file matching FIRST FMS Match Maker's
-            import format. <strong>Qualification matches only.</strong>
-            Match times must be re-entered in FMS Build Schedule
-            after import.
+            Tab-delimited files matching FIRST FMS Match Maker's
+            import format. Practice and qualification download as
+            separate files; match times must be re-entered in FMS
+            Build Schedule after import.
+          </div>
+          <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap;">
+            <button class="btn" onclick="closeModal('exportModal'); exportFms('qual');">⬇ Qualification</button>
+            <button class="btn btn-secondary" onclick="closeModal('exportModal'); exportFms('practice');">⬇ Practice</button>
           </div>
         </div>
       </div>
@@ -2344,11 +2351,26 @@ function exportJson() {
   triggerDownload(blob, getFilenameSlug('.json'));
 }
 
-function exportFms() {
+function exportFms(scope) {
+  // scope: 'qual' (default) or 'practice'
+  // FMS export is intentionally NOT subject to the view's onlyMine
+  // filter — the file is the canonical match list for FMS Build
+  // Schedule, and a partial list would corrupt FMS's match numbering.
+  // Read directly from STATE.computed instead of getCurrentRows().
+  scope = scope || 'qual';
+  if (scope !== 'qual' && scope !== 'practice') {
+    alert('Invalid FMS scope: ' + scope);
+    return;
+  }
+  const wantPractice = (scope === 'practice');
+  const computed = STATE.computed || [];
+
   // Per FMS Manual: tab-delimited, 13 fields, TRUE/FALSE for surrogate
   const lines = [];
   let n = 0;
-  getCurrentRows().forEach(e => {
+  computed.forEach(e => {
+    if (e.type !== 'match') return;
+    if (!!e.isPractice !== wantPractice) return;
     n++;
     const sur = (arr, i) => (arr && arr[i]) ? 'TRUE' : 'FALSE';
     lines.push([
@@ -2361,8 +2383,15 @@ function exportFms() {
       e.blue[2], sur(e.blueSur, 2),
     ].join('\t'));
   });
+  if (lines.length === 0) {
+    alert('No ' + (wantPractice ? 'practice' : 'qualification') +
+          ' matches in this schedule');
+    return;
+  }
   const blob = new Blob([lines.join('\r\n') + '\r\n'], {type:'text/plain'});
-  triggerDownload(blob, getFilenameSlug('') + '_fms.txt');
+  // Filename suffix distinguishes the two output files.
+  const suffix = wantPractice ? '_fms_practice.txt' : '_fms_quals.txt';
+  triggerDownload(blob, getFilenameSlug('') + suffix);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -2567,6 +2596,9 @@ function onExportFormatChange() {
   if (fmt === 'print_pdf') {
     if (btnPrint) btnPrint.style.display = '';
     if (btnPdf)   btnPdf.style.display   = '';
+  } else if (fmt === 'fms') {
+    // FMS panel has its own inline Qualification/Practice buttons.
+    // Bottom Download button stays hidden.
   } else {
     if (btnDownload) btnDownload.style.display = '';
   }
@@ -2843,7 +2875,8 @@ function runExportAction(action) {
     if (fmt === 'xlsx')  { exportXlsx(); return; }
     if (fmt === 'csv')   { exportCsv();  return; }
     if (fmt === 'json')  { exportJson(); return; }
-    if (fmt === 'fms')   { exportFms();  return; }
+    // 'fms' is handled by the FMS panel's inline Qualification /
+    // Practice buttons. No bottom-action dispatch.
   }, 50);
 }
 
