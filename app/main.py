@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -1942,6 +1943,14 @@ async def import_pdf(
         # Save to cache. Reuse the PdfImport table — `kind` is encoded in
         # the method field ("llm:dayplan:<strategy>") so the commit endpoint
         # can dispatch correctly.
+        #
+        # Race / retry safety: if a previous request for the same PDF
+        # already wrote a row (and we're getting here because nocache=1
+        # was passed, or the cache check missed due to a concurrent
+        # request), the INSERT fails on the unique constraint over
+        # pdf_hash. Catch that specific case and fetch the existing
+        # row instead — the caller still gets a valid pdf_import_id
+        # they can commit, and the import isn't lost.
         try:
             async with AsyncSessionLocal() as db:
                 pdf_import = PdfImport(
@@ -1955,8 +1964,35 @@ async def import_pdf(
                     method=f"llm:dayplan:{strategy}",
                 )
                 db.add(pdf_import)
-                await db.commit()
-                await db.refresh(pdf_import)
+                try:
+                    await db.commit()
+                    await db.refresh(pdf_import)
+                except IntegrityError as ie:
+                    # Row already exists — fetch it and use that. We
+                    # OVERWRITE the parsed payload because this run is
+                    # newer / fresher, especially when triggered by
+                    # ?nocache=1 (the user explicitly asked for
+                    # re-extraction). Without overwriting, the user's
+                    # nocache request would silently keep returning
+                    # the old cached data.
+                    await db.rollback()
+                    log.info(
+                        "PDF row already existed for hash=%s; updating in-place",
+                        pdf_hash[:8],
+                    )
+                    existing = await db.execute(
+                        select(PdfImport).where(PdfImport.pdf_hash == pdf_hash)
+                    )
+                    pdf_import = existing.scalar_one()
+                    pdf_import.file_name       = file.filename
+                    pdf_import.byte_size       = len(content)
+                    pdf_import.page_count      = extracted["page_count"]
+                    pdf_import.parsed          = {"dayplan": dayplan, "day_config": legacy_cfg}
+                    pdf_import.validation      = {"dayplan_blocks": len(dayplan.get("blocks", []))}
+                    pdf_import.format_detected = dayplan.get("format_detected")
+                    pdf_import.method          = f"llm:dayplan:{strategy}"
+                    await db.commit()
+                    await db.refresh(pdf_import)
         except Exception as e:
             log.exception("Day-plan cache write failed")
             raise HTTPException(
@@ -2032,7 +2068,9 @@ async def import_pdf(
     validation = pdf_validate.validate_schedule(matches, roster)
 
     # Save to cache regardless of validation pass — user may want to edit
-    # bad parses rather than re-call the LLM
+    # bad parses rather than re-call the LLM. Same race / retry safety
+    # as the day-plan path: handle UniqueViolation by updating the
+    # existing row.
     async with AsyncSessionLocal() as db:
         pdf_import = PdfImport(
             pdf_hash=pdf_hash,
@@ -2045,8 +2083,28 @@ async def import_pdf(
             method=f"llm:{strategy}",
         )
         db.add(pdf_import)
-        await db.commit()
-        await db.refresh(pdf_import)
+        try:
+            await db.commit()
+            await db.refresh(pdf_import)
+        except IntegrityError:
+            await db.rollback()
+            log.info(
+                "PDF row already existed for hash=%s; updating in-place",
+                pdf_hash[:8],
+            )
+            existing = await db.execute(
+                select(PdfImport).where(PdfImport.pdf_hash == pdf_hash)
+            )
+            pdf_import = existing.scalar_one()
+            pdf_import.file_name       = file.filename
+            pdf_import.byte_size       = len(content)
+            pdf_import.page_count      = extracted["page_count"]
+            pdf_import.parsed          = parsed
+            pdf_import.validation      = validation
+            pdf_import.format_detected = parsed.get("format_detected")
+            pdf_import.method          = f"llm:{strategy}"
+            await db.commit()
+            await db.refresh(pdf_import)
 
     return {
         "kind":            "matches",
