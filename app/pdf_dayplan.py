@@ -122,7 +122,7 @@ Rules:
 
 6. The `details` field captures what makes a block specific: "6 matches, 10-minute cycles", "Concession stand open", "Dunwoody award judging on-site". Empty string if no details.
 
-7. EACH PHASE APPEARS EXACTLY ONCE. A typical day plan has 4-8 blocks total (e.g. practice, qual-morning, lunch, qual-afternoon, ceremony, playoff). NEVER emit duplicate blocks. NEVER emit the same qualification round multiple times. If you find yourself about to write a block identical to one you already wrote, stop and close the array instead.
+7. EACH PHASE APPEARS EXACTLY ONCE. A typical day plan has 4-8 blocks total — practice, qual-morning, lunch, qual-afternoon, ceremony, playoff. The `blocks` array MUST contain AT MOST 12 entries. NEVER emit duplicate blocks. NEVER emit the same qualification round multiple times. NEVER pad the array with redundant entries. After your final distinct block, immediately emit `]` and continue with the rest of the JSON.
 
 8. Output JSON ONLY. No prose before or after. No markdown fences."""
 
@@ -162,12 +162,14 @@ async def extract_dayplan(text: str) -> dict[str, Any] | None:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": _build_user_prompt(text)},
         ],
-        # Day plans typically contain 5-10 blocks. Output is small, but
-        # the `details` field can carry verbose descriptors and we've
-        # seen the model hit the cap mid-output (parse error around
-        # char ~4285 maps to ~1100-1300 tokens). Give meaningful
-        # headroom so the model can finish and close the structure.
-        max_tokens=4000,
+        # Day plans are small. A typical extracted output is 4-8 blocks
+        # plus a few top-level fields = roughly 200-600 tokens. Generous
+        # budget at 1500. We used to set this at 4000 for safety, but
+        # that gave repetition loops too much room: a stuck model
+        # could emit ~250 minimal blocks before truncation. At 1500
+        # the same loop produces ~80 blocks, which the dedup pass +
+        # truncation recovery handle cleanly.
+        max_tokens=1500,
         json_schema=llm_client.DAYPLAN_SCHEMA,
     )
 

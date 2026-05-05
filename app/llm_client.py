@@ -182,6 +182,160 @@ PDF CONTENT:
 Output the JSON object now."""
 
 
+def _truncate_to_last_complete_block(text: str) -> str | None:
+    """Stateful truncation recovery for `blocks`-shaped responses.
+
+    More robust than the count-based recovery in `_try_truncation_recovery`
+    because it handles string literals (with escape sequences) correctly —
+    a `{`, `}`, `[`, or `]` inside a label or details field doesn't throw
+    off the recovery.
+
+    Algorithm:
+      1. Find the `"blocks": [` marker.
+      2. Walk forward, tracking nesting depth + whether we're inside a
+         JSON string (which can contain arbitrary characters including
+         braces/brackets, modulo escaping).
+      3. Remember the position of every `}` we see at depth 0 within
+         the array — these are the boundaries of complete top-level
+         array elements.
+      4. If we hit `]` at depth 0, the array is already closed in the
+         response — no truncation past this point matters; return None
+         and let the count-based path try.
+      5. Otherwise, truncate at the last remembered `}` position and
+         append `]}` to close the array and outer object.
+
+    Returns the repaired string, or None if the response doesn't have
+    a recognisable `blocks` array.
+    """
+    blocks_marker = '"blocks"'
+    blocks_idx = text.find(blocks_marker)
+    if blocks_idx < 0:
+        return None
+
+    # Find the [ that opens the array (skipping the colon and any whitespace)
+    arr_open = text.find('[', blocks_idx + len(blocks_marker))
+    if arr_open < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    last_complete_end = -1  # position of the last `}` at depth 0 inside the array
+
+    i = arr_open + 1
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if escape:
+            escape = False
+        elif in_string:
+            if c == '\\':
+                escape = True
+            elif c == '"':
+                in_string = False
+        else:
+            if c == '"':
+                in_string = True
+            elif c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    last_complete_end = i
+            elif c == '[' and depth == 0:
+                # A nested array inside an element? unusual but possible
+                # for raw_phases-shaped data. Treat as part of the element.
+                pass
+            elif c == ']' and depth == 0:
+                # Array already closes here. The original parse error must
+                # have been somewhere else (after the array closed).
+                # Let the count-based recovery handle that case.
+                return None
+        i += 1
+
+    if last_complete_end < 0:
+        # No complete blocks at all — empty array or only partial first
+        # block. Best we can do is close to an empty array.
+        return text[:arr_open + 1] + "]}"
+
+    # Truncate after the last complete `}` at depth 0, then close the
+    # array and the outer object.
+    return text[:last_complete_end + 1] + "]}"
+
+
+def _try_truncation_recovery(text: str) -> str | None:
+    """Attempt to salvage a truncated JSON document by closing open
+    structures.
+
+    When small models get stuck in a repetition loop and fill the
+    max_tokens budget with minimal valid array elements, the response
+    ends mid-token (no closing `]`, no closing `}`). The valid prefix
+    is still useful — it contains all the real blocks the model
+    emitted before the loop started.
+
+    Returns a candidate string that *might* parse, or None if recovery
+    isn't possible. The caller is responsible for verifying with
+    json.loads.
+
+    Approach:
+      1. Trim trailing whitespace and commas.
+      2. If the last char isn't `}` or `]`, we're mid-token (e.g. an
+         unclosed string or partial new block). Roll back to the last
+         complete `}`.
+      3. Trim trailing whitespace/commas again after the rollback.
+      4. Count open vs. close braces/brackets and append the closing
+         characters needed (square brackets first since arrays are
+         typically nested inside the root object).
+
+    Limitations:
+      - Brace counting includes characters inside string literals. For
+        our schemas, string values don't typically contain `{`, `}`,
+        `[`, `]`, so this is fine in practice. A pathological label
+        or details field with embedded braces could throw off the
+        count, but that's rare for day-plan PDFs.
+      - Only handles object/array close. If the truncation is at a
+        weirder boundary (e.g. mid-key) we may produce nonsense that
+        json.loads rejects — that's why the caller wraps in try/except.
+    """
+    if not text:
+        return None
+
+    text = text.rstrip()
+    while text and text[-1] in ", \n\t":
+        text = text[:-1]
+
+    # If the last character isn't a closing brace/bracket, we're
+    # mid-token (likely a partial new block). Roll back to the last
+    # complete `}` so we end on a coherent boundary.
+    if text and text[-1] not in "}]":
+        last_brace = text.rfind("}")
+        if last_brace == -1:
+            return None  # No complete object anywhere — give up
+        text = text[:last_brace + 1]
+
+    # Trim trailing comma/whitespace once more in case the rollback
+    # exposed a `,` we'd written between blocks.
+    while text and text[-1] in ", \n\t":
+        text = text[:-1]
+
+    # Count remaining open structures
+    open_curly  = text.count("{") - text.count("}")
+    open_square = text.count("[") - text.count("]")
+
+    if open_curly < 0 or open_square < 0:
+        # More closes than opens — the text is malformed in a way we
+        # can't fix by just appending closes.
+        return None
+    if open_curly == 0 and open_square == 0:
+        # Already balanced; no need to add anything. The original
+        # parse failure must have been somewhere else; we can't help.
+        return None
+
+    # Close arrays first (they're nested inside the root object).
+    closing = ("]" * open_square) + ("}" * open_curly)
+    return text + closing
+
+
 def _parse_json_response(text: str) -> dict[str, Any]:
     """Tolerantly parse JSON out of an LLM response.
 
@@ -247,6 +401,49 @@ def _parse_json_response(text: str) -> dict[str, Any]:
             return json.loads(smart_fixed)
         except json.JSONDecodeError:
             pass
+
+    # Fourth attempt: truncation recovery. When the model gets stuck in
+    # a repetition loop and fills max_tokens with minimal valid blocks,
+    # the response is cut off mid-token, leaving JSON structures
+    # unclosed. We try to salvage the valid prefix by trimming back
+    # to the last complete `}` and adding closing brackets.
+    #
+    # This is the LAST line of defense; without it, a model
+    # repetition loop = total import failure even though we have all
+    # the valid blocks we need before the loop started.
+    #
+    # We try TWO recovery strategies in order:
+    #   (a) Stateful — finds the last complete top-level `}` inside
+    #       the blocks array, properly skipping over string literals.
+    #       More robust against unusual content in label/details fields.
+    #   (b) Count-based — naive bracket counting. Faster and works in
+    #       most cases but can mis-count if strings contain braces.
+    for recovery_name, recovery_fn in (
+        ("stateful",  _truncate_to_last_complete_block),
+        ("count-based", _try_truncation_recovery),
+    ):
+        recovered = recovery_fn(candidate)
+        if not recovered:
+            continue
+        try:
+            log.info(
+                "First JSON parse failed; attempting %s truncation recovery "
+                "(original %d chars -> recovered %d chars)",
+                recovery_name, len(candidate), len(recovered),
+            )
+            result = json.loads(recovered)
+            log.info(
+                "Truncation recovery (%s) succeeded; salvaged %d top-level "
+                "keys (blocks: %d). Dedup pass will collapse repetition.",
+                recovery_name, len(result),
+                len(result.get("blocks", [])) if isinstance(result, dict) else 0,
+            )
+            return result
+        except json.JSONDecodeError as e:
+            log.warning(
+                "Truncation recovery (%s) produced unparseable JSON: %s",
+                recovery_name, e,
+            )
 
     # All repairs failed. Surface a useful error: show where the parser
     # gave up + a window of surrounding content. We deliberately show
@@ -396,7 +593,7 @@ DAYPLAN_SCHEMA = {
                     "label":   {"type": "string"},
                     "details": {"type": "string"},
                 },
-                "required": ["kind", "day_index"],
+                "required": ["kind", "day_index", "start", "end", "label"],
             },
         },
         "raw_phases": {
