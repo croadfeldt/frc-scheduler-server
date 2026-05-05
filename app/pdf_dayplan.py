@@ -160,12 +160,12 @@ async def extract_dayplan(text: str) -> dict[str, Any] | None:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": _build_user_prompt(text)},
         ],
-        # Day plans typically contain 5-10 blocks. Output is small —
-        # 1500 tokens is plenty. Going much higher (the previous 4000)
-        # gives small models room to drift after they've finished the
-        # actual answer; small models are more disciplined when the
-        # cap is closer to the expected output size.
-        max_tokens=1500,
+        # Day plans typically contain 5-10 blocks. Output is small, but
+        # the `details` field can carry verbose descriptors and we've
+        # seen the model hit the cap mid-output (parse error around
+        # char ~4285 maps to ~1100-1300 tokens). Give meaningful
+        # headroom so the model can finish and close the structure.
+        max_tokens=4000,
         json_schema=llm_client.DAYPLAN_SCHEMA,
     )
 

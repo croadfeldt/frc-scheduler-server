@@ -215,26 +215,45 @@ def _parse_json_response(text: str) -> dict[str, Any]:
             pass
 
     # All repairs failed. Surface a useful error: show where the parser
-    # gave up + a window of surrounding content.
+    # gave up + a window of surrounding content. We deliberately show
+    # MORE of what comes AFTER the failure than before, because the
+    # before-context is usually correct JSON; the bug is what comes
+    # next. Common cases: missing comma, extra `{`, prose drift,
+    # truncation (response just stops mid-string).
     pos = first_err.pos if hasattr(first_err, "pos") else 0
-    window_start = max(0, pos - 150)
-    window_end   = min(len(candidate), pos + 150)
-    snippet = candidate[window_start:window_end]
-    # Mark the failure point with a caret line so it's obvious where parsing
-    # went wrong even after the message gets quoted in HTTP responses.
-    relative_pos = pos - window_start
-    caret_line = " " * relative_pos + "^"
+    window_start = max(0, pos - 80)
+    window_end   = min(len(candidate), pos + 220)
+    before = candidate[window_start:pos]
+    at_and_after = candidate[pos:window_end]
+
+    # Detect truncation: did the response stop without a closing }?
+    # If candidate doesn't end with } at the top level, we got cut off.
+    # This happens when max_tokens is hit mid-output OR when the model
+    # emits an EOS that the grammar doesn't allow but vLLM honors anyway.
+    truncation_likely = (
+        not candidate.rstrip().endswith("}")
+        or pos >= len(candidate) - 5  # error within last 5 chars
+    )
 
     log.warning(
-        "LLM JSON parse failed at position %d. Full response (%d chars):\n%s",
-        pos, len(raw), raw[:4000],
+        "LLM JSON parse failed at position %d/%d. Full response:\n%s",
+        pos, len(candidate), raw,
     )
 
-    raise ValueError(
+    diagnostic = (
         f"Invalid JSON from LLM: {first_err.msg} at char {pos}. "
-        f"Context: ...{snippet!r}... "
-        f"(error around: {snippet[max(0, relative_pos - 30):relative_pos + 30]!r})"
+        f"Before: ...{before!r} "
+        f"At/after: {at_and_after!r}..."
     )
+    if truncation_likely:
+        diagnostic += (
+            " [Looks like the response was TRUNCATED — the model stopped "
+            "mid-output. Check vLLM logs and consider raising max_tokens "
+            "or simplifying the input.]"
+        )
+    diagnostic += f" Total response length: {len(raw)} chars."
+
+    raise ValueError(diagnostic)
 
 
 # ── JSON schemas (for vLLM guided_json structured output) ────────────────────
