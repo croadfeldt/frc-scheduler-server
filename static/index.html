@@ -240,8 +240,64 @@
     text-transform: uppercase; font-weight: 700;
   }
   .diversity-report .dr-headline {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    /* Fixed 6 columns ensures all tiles are equal width and always
+       fit on one row, no matter how short or long their labels are.
+       Wraps to 3 columns on phones so things still read at narrow
+       widths. The Schedule Quality card has exactly 6 tiles right
+       now (4 server-data + B2B + Surrogates); if a 7th is ever
+       added, bump this to repeat(7, 1fr) at the same time. */
+    display: grid; grid-template-columns: repeat(6, 1fr);
     gap: 0.5rem; margin-bottom: 0.85rem;
+  }
+  /* Single stacked bar — replaces the multi-row histogram. Each
+     segment's width is the bucket count; segment color encodes the
+     bucket meaning (zero / at-floor / over-floor / way-over). The
+     numbers sit inside the segment with white text + shadow for
+     contrast. Mirrors the agenda-timeline-fill style. */
+  .diversity-report .dr-stacked-row {
+    display: grid; grid-template-columns: 130px 1fr;
+    gap: 0.6rem; align-items: center;
+    padding: 0.35rem 0;
+  }
+  .diversity-report .dr-stacked-row + .dr-stacked-row {
+    border-top: 1px solid var(--border);
+  }
+  .diversity-report .dr-stacked-label {
+    font-size: 0.72rem; color: var(--text-muted);
+  }
+  .diversity-report .dr-stacked-bar {
+    height: 24px; display: flex; border-radius: 3px; overflow: hidden;
+    background: var(--bg); border: 1px solid var(--border);
+  }
+  .diversity-report .dr-stacked-seg {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.65rem; color: #fff; font-weight: 600;
+    min-width: 0;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.5);
+    white-space: nowrap;
+  }
+  .diversity-report .dr-stacked-seg.zero  { background: #5b6068; }
+  .diversity-report .dr-stacked-seg.floor { background: var(--accent, #4a8eed); }
+  .diversity-report .dr-stacked-seg.over  {
+    background: var(--amber);
+    color: #2a1f08; text-shadow: none;
+  }
+  .diversity-report .dr-stacked-seg.way   { background: var(--danger); }
+  /* Single shared legend explaining segment colors for both
+     partner and opponent stacked bars. */
+  .diversity-report .dr-legend {
+    display: flex; flex-wrap: wrap;
+    gap: 0.5rem 1.1rem;
+    padding: 0.5rem 0 0.2rem;
+    margin-top: 0.6rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.7rem; color: var(--text-muted);
+  }
+  .diversity-report .dr-legend-item {
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+  .diversity-report .dr-legend-swatch {
+    width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0;
   }
   .diversity-report .dr-stat {
     background: var(--bg);
@@ -263,25 +319,6 @@
   .diversity-report .dr-section {
     margin-top: 0.85rem; padding-top: 0.6rem;
     border-top: 1px solid var(--border);
-  }
-  /* Histogram bars — one bar per repeat-count bucket */
-  .diversity-report .dr-histogram {
-    display: grid; grid-template-columns: 60px 1fr 60px; gap: 0.4rem;
-    margin: 0.2rem 0; align-items: center; font-size: 0.7rem;
-  }
-  .diversity-report .dr-histogram-label {
-    font-variant-numeric: tabular-nums; color: var(--text-muted);
-    text-align: right;
-  }
-  .diversity-report .dr-histogram-bar {
-    height: 14px; background: var(--accent); border-radius: 2px;
-    min-width: 2px;
-  }
-  .diversity-report .dr-histogram-bar.zero { background: var(--text-muted); opacity: 0.3; }
-  .diversity-report .dr-histogram-bar.over-floor { background: var(--amber); }
-  .diversity-report .dr-histogram-bar.way-over    { background: var(--danger); }
-  .diversity-report .dr-histogram-count {
-    font-variant-numeric: tabular-nums; color: var(--text);
   }
   .diversity-report .dr-issues {
     background: rgba(200,153,42,0.10);
@@ -478,7 +515,15 @@
   tr.b2b-match td:first-child { border-left: 2px solid rgba(111,168,232,0.4); }
   .stat-clickable { cursor: pointer; transition: opacity 0.15s; }
   .stat-clickable:hover { opacity: 0.75; }
-  .stat-clickable.stat-active .stat-value { text-decoration: underline dotted; text-underline-offset: 3px; }
+  /* Active-filter visual feedback — underline the tile's value when
+     its corresponding filter is on. The new tile structure uses
+     .dr-stat-value (inside Schedule Quality card), so the selector
+     covers both that and the legacy .stat-value markup just in
+     case any other code still emits it. */
+  .stat-clickable.stat-active .dr-stat-value,
+  .stat-clickable.stat-active .stat-value {
+    text-decoration: underline dotted; text-underline-offset: 3px;
+  }
   .filter-chip.b2b-filter { background: rgba(111,168,232,0.12); border-color: rgba(111,168,232,0.55); color: var(--blue-team); }
   .filter-chip.b2b-filter:hover { background: rgba(111,168,232,0.22); }
   .filter-chip.surrogate-filter { background: rgba(200,153,42,0.12); border-color: rgba(200,153,42,0.55); color: var(--amber); }
@@ -716,9 +761,39 @@
   /* ── Mobile ── */
   /* ── Agenda Fit panel ── */
   .agenda-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 1.5rem; }
-  .agenda-fit-grid { display: grid; grid-template-columns: repeat(6, 1fr); border-bottom: 1px solid var(--border); }
-  .agenda-fit-grid .stat { border-right: 1px solid var(--border); border-radius: 0; }
-  .agenda-fit-grid .stat:last-child { border-right: none; }
+  /* Agenda fit stats use the same tile style as the Schedule
+     Quality card — left-accent border, label/value/detail layout.
+     The grid has 6 fixed columns so all 6 tiles fit on one row at
+     panel width; wraps to 3 cols on phones. */
+  .agenda-fit-grid {
+    display: grid; grid-template-columns: repeat(6, 1fr);
+    gap: 0.5rem;
+    padding: 0.6rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+  }
+  /* Tiles inside the agenda fit panel — same shape as .dr-stat. We
+     can't reuse .dr-stat directly because it's scoped under
+     .diversity-report; this is the same visual treatment with the
+     selectors duplicated for the agenda panel. */
+  .agenda-fit-grid .agenda-tile {
+    background: var(--bg);
+    padding: 0.45rem 0.6rem;
+    border-radius: 4px;
+    border-left: 3px solid var(--accent);
+    min-width: 0;
+  }
+  .agenda-fit-grid .agenda-tile-label {
+    font-size: 0.65rem; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    line-height: 1.3;
+  }
+  .agenda-fit-grid .agenda-tile-value {
+    font-size: 1.1rem; font-weight: 700; color: var(--text);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1; margin-top: 0.15rem;
+  }
+  .agenda-fit-grid .agenda-tile.tight  { border-left-color: var(--amber); }
+  .agenda-fit-grid .agenda-tile.over   { border-left-color: var(--danger); }
   .agenda-block-list { display: flex; flex-direction: column; gap: 0; }
   .agenda-block-row { padding: 0.6rem 1.25rem; border-bottom: 1px solid var(--border); font-size: 0.8rem; display: flex; flex-direction: column; gap: 0.35rem; }
   .agenda-block-row:last-child { border-bottom: none; }
@@ -731,6 +806,8 @@
   @media (max-width: 640px) {
     .agenda-fit-grid { grid-template-columns: repeat(3, 1fr); }
     .agenda-block-row { padding: 0.5rem 0.75rem; }
+    .diversity-report .dr-headline { grid-template-columns: repeat(3, 1fr); }
+    .diversity-report .dr-stacked-row { grid-template-columns: 1fr; gap: 0.2rem; }
   }
   /* ── Mobile ── */
   @media (max-width: 640px) {
@@ -3175,28 +3252,55 @@ function renderDiversityCard(card, serverData) {
     '</div>'
   );
 
-  // ── Server-data-only sections: histograms + issues ───────────────
+  // ── Server-data-only sections: stacked bars + issues ─────────────
+  // The two histograms (partner / opponent repeats) collapse to a
+  // single stacked bar each. Each segment's width is the bucket
+  // count; segment color encodes meaning (zero / at-floor /
+  // over-floor / way-over), matching the legend below. The agenda-
+  // fit timeline-fill style was the inspiration — same approach,
+  // applied to schedule quality data.
   var sectionsHtml = '';
   if (d) {
-    function maxVal(hist) { return Math.max(0, ...Object.values(hist || {})); }
-    function histRows(hist, floor, total) {
-      var max = maxVal(hist);
+    function bucketClass(c, floor) {
+      if (c === 0) return 'zero';
+      if (c > floor + 1) return 'way';
+      if (c > floor) return 'over';
+      return 'floor';
+    }
+    function shortLabel(c) {
+      if (c === 0) return '0\u00d7';
+      return c + '\u00d7';
+    }
+    function stackedBar(hist, floor) {
+      // Total = sum of bucket counts (number of pairs in the
+      // schedule). Each segment width = bucket / total * 100%.
+      // Order by repeat-count ascending (0, 1, 2, 3...) so colors
+      // progress from neutral → at-floor → warnings.
       var counts = Object.keys(hist).map(Number).sort(function(a, b) { return a - b; });
-      return counts.map(function(c) {
-        var n = hist[c];
-        var pct = max > 0 ? Math.round((n / max) * 100) : 0;
-        var cls = 'dr-histogram-bar';
-        if (c === 0) cls += ' zero';
-        else if (c > floor + 1) cls += ' way-over';
-        else if (c > floor) cls += ' over-floor';
-        var lbl = c === 0 ? '0 (never met)' : (c + ' time' + (c > 1 ? 's' : ''));
-        var sharePct = total > 0 ? Math.round((n / total) * 100) : 0;
-        return '<div class="dr-histogram">' +
-               '  <span class="dr-histogram-label">' + lbl + '</span>' +
-               '  <div><div class="' + cls + '" style="width:' + pct + '%"></div></div>' +
-               '  <span class="dr-histogram-count">' + n + ' (' + sharePct + '%)</span>' +
-               '</div>';
-      }).join('');
+      var total = counts.reduce(function(s, c) { return s + hist[c]; }, 0);
+      if (total === 0) return '<div class="dr-stacked-bar"></div>';
+      return '<div class="dr-stacked-bar">' +
+             counts.map(function(c) {
+               var n = hist[c];
+               var pct = (n / total * 100);
+               // Skip empty buckets (would render as zero-width
+               // segments, no visual contribution).
+               if (n === 0) return '';
+               var cls = 'dr-stacked-seg ' + bucketClass(c, floor);
+               // Tooltip shows the full bucket label + count + share.
+               var tooltip = (c === 0 ? '0 times (never met)' : c + ' time' + (c > 1 ? 's' : ''))
+                           + ' \u2014 ' + n + ' pair' + (n !== 1 ? 's' : '')
+                           + ' (' + Math.round(n / total * 100) + '%)';
+               // Show bucket count inside the segment when wide
+               // enough; very narrow segments fall back to the
+               // tooltip only.
+               var inner = pct >= 6 ? n : '';
+               // Add the bucket label (0×, 1×, 2×) when there's enough
+               // room; segment count alone is enough on narrow ones.
+               if (pct >= 14) inner = shortLabel(c) + '\u202f\u00b7\u202f' + n;
+               return '<div class="' + cls + '" style="width:' + pct.toFixed(2) + '%;" title="' + tooltip + '">' + inner + '</div>';
+             }).join('') +
+             '</div>';
     }
     var issues = [];
     if (d.partner.worst_pairs && d.partner.worst_pairs.length) {
@@ -3219,18 +3323,28 @@ function renderDiversityCard(card, serverData) {
       ? '<div class="dr-issues"><strong>\u26A0 Notable:</strong><ul>' +
         issues.map(function(i) { return '<li>' + i + '</li>'; }).join('') + '</ul></div>'
       : '<div class="dr-issues clean"><strong>\u2705 Clean:</strong> all distributions at or near theoretical floor.</div>';
-    var totalPartnerSlots  = 2 * d.matches_per_team;
-    var totalOpponentSlots = 3 * d.matches_per_team;
+    // Shared legend — one block explaining the colors used in BOTH
+    // partner and opponent stacked bars. Same key, same colors,
+    // less visual noise than two separate explanations.
+    var legendHtml =
+      '<div class="dr-legend">' +
+      '  <span class="dr-legend-item"><span class="dr-legend-swatch" style="background:#5b6068;"></span>Never met</span>' +
+      '  <span class="dr-legend-item"><span class="dr-legend-swatch" style="background:var(--accent, #4a8eed);"></span>At theoretical floor</span>' +
+      '  <span class="dr-legend-item"><span class="dr-legend-swatch" style="background:var(--amber);"></span>One above floor</span>' +
+      '  <span class="dr-legend-item"><span class="dr-legend-swatch" style="background:var(--danger);"></span>Two+ above floor</span>' +
+      '</div>';
     sectionsHtml =
       '<div class="dr-section">' +
-      '  <h3 style="margin-bottom:0.4rem;">Partner pair distribution</h3>' +
-      '  <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.3rem;">Each team plays alongside ' + totalPartnerSlots + ' partner-slots across the schedule.</div>' +
-      histRows(d.partner.histogram, d.partner.floor, d.total_pairs) +
-      '</div>' +
-      '<div class="dr-section">' +
-      '  <h3 style="margin-bottom:0.4rem;">Opponent pair distribution</h3>' +
-      '  <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.3rem;">Each team faces ' + totalOpponentSlots + ' opponent-slots across the schedule.</div>' +
-      histRows(d.opponent.histogram, d.opponent.floor, d.total_pairs) +
+      '  <h3 style="margin-bottom:0.4rem;">Pair repeat distribution</h3>' +
+      '  <div class="dr-stacked-row">' +
+      '    <span class="dr-stacked-label">Partner repeats</span>' +
+           stackedBar(d.partner.histogram, d.partner.floor) +
+      '  </div>' +
+      '  <div class="dr-stacked-row">' +
+      '    <span class="dr-stacked-label">Opponent repeats</span>' +
+           stackedBar(d.opponent.histogram, d.opponent.floor) +
+      '  </div>' +
+           legendHtml +
       '</div>' +
       issuesHtml;
   }
@@ -5769,10 +5883,17 @@ function updateAgendaFit() {
       (fitClass==='agenda-fit-ok'?'accent3':fitClass==='agenda-fit-tight'?'amber':'danger') + ');';
   }
 
-  // Stats
+  // Stats — tile style matching the Schedule Quality card.
+  // Class accents the left border based on fit (tight/over).
   function agendaStat(val, label, cls) {
-    return '<div class="stat" style="border-radius:0;"><div class="stat-value ' + (cls||'') + '" style="font-size:1.3rem;">' +
-      val + '</div><div class="stat-label">' + label + '</div></div>';
+    var tileCls = 'agenda-tile';
+    if (cls === 'agenda-fit-tight')      tileCls += ' tight';
+    else if (cls === 'agenda-fit-over')  tileCls += ' over';
+    var valCls = cls ? cls : '';
+    return '<div class="' + tileCls + '">' +
+           '<div class="agenda-tile-label">' + label + '</div>' +
+           '<div class="agenda-tile-value ' + valCls + '">' + val + '</div>' +
+           '</div>';
   }
   var statsEl = document.getElementById('agendaFitStats');
   if (statsEl) {
