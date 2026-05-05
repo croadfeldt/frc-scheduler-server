@@ -150,6 +150,31 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
+# Catch-all for unhandled exceptions. Without this, FastAPI returns a
+# generic "Internal Server Error" with no JSON body and the user has
+# nowhere to look but pod logs (which they may not have access to). With
+# it, the user sees the actual exception type+message in the browser
+# AND we still log the full traceback to pod stdout. Don't put sensitive
+# data in exception messages — they're now externally visible. (We rely
+# on Python's standard practice of not putting secrets in exception
+# strings, which holds across our codebase.)
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # FastAPI already handles HTTPException — this only fires for things
+    # that escaped all other handlers. Log full traceback to pod stdout.
+    log.exception(
+        "Unhandled exception in %s %s",
+        request.method, request.url.path,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"{type(exc).__name__}: {str(exc)[:500]}",
+            "path":   str(request.url.path),
+        },
+    )
+
+
 @app.on_event("startup")
 async def startup():
     import time
@@ -1726,13 +1751,15 @@ class PdfImportCommitRequest(BaseModel):
 async def import_pdf(
     file: UploadFile = File(...),
     event_id: int | None = Query(None),
+    nocache: bool = Query(False, description="Bypass content-hash cache; force re-extraction"),
     current_user: dict | None = Depends(get_current_user),
 ):
     """Parse a schedule PDF using the configured LLM. Returns a preview
     that the user confirms (or edits) before committing via /commit.
 
     The result is cached by content hash, so re-uploading the same file
-    is free.
+    is free. Pass `?nocache=1` to bypass and force re-extraction (useful
+    when a previous import wrote bad data to the cache).
 
     Cross-checks against the event roster when event_id is provided —
     catches OCR errors that produce team numbers not in the roster.
@@ -1753,35 +1780,93 @@ async def import_pdf(
 
     pdf_hash = pdf_extract.hash_pdf(content)
 
-    # Check cache first — same PDF, no LLM call needed
-    async with AsyncSessionLocal() as db:
-        existing = await db.execute(
-            select(PdfImport).where(PdfImport.pdf_hash == pdf_hash)
-        )
-        cached = existing.scalar_one_or_none()
-        if cached:
-            log.info("PDF cache hit: %s (%s)", pdf_hash[:8], file.filename)
-            # Re-run validation in case the validator has improved since
-            # the cache entry was written, OR roster has changed
-            roster = None
-            if event_id:
-                roster_result = await db.execute(
-                    select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+    # Trace marker: if you don't see this in pod logs after a request,
+    # the new code isn't actually deployed (image cache, replica didn't
+    # roll, etc.). Includes a build/version stamp so we can tell which
+    # revision is handling the request.
+    log.info(
+        "import_pdf request: file=%s size=%d hash=%s nocache=%s event_id=%s",
+        file.filename, len(content), pdf_hash[:8], nocache, event_id,
+    )
+
+    # Check cache first — same PDF, no LLM call needed. Skip when nocache=1.
+    if not nocache:
+        async with AsyncSessionLocal() as db:
+            existing = await db.execute(
+                select(PdfImport).where(PdfImport.pdf_hash == pdf_hash)
+            )
+            cached = existing.scalar_one_or_none()
+            if cached:
+                # Defensive: SQLAlchemy *should* deserialize JSONB to a
+                # dict, but if a row was written with a partial / null
+                # parsed payload we don't want a generic 500.
+                cached_parsed = cached.parsed if isinstance(cached.parsed, dict) else {}
+                method = cached.method or ""
+
+                # Day-plan cache entries have method "llm:dayplan:<strategy>"
+                # and parsed = {"dayplan": {...}, "day_config": {...}}.
+                # Match-list entries have method without the "dayplan:" infix
+                # and parsed = {"matches": [...]}. Return the right shape
+                # for each kind so the frontend can render it.
+                is_cached_dayplan = method.startswith("llm:dayplan:") or "dayplan" in cached_parsed
+
+                log.info(
+                    "PDF cache hit: %s (%s) kind=%s",
+                    pdf_hash[:8], file.filename, "dayplan" if is_cached_dayplan else "matches",
                 )
-                roster = [r[0] for r in roster_result.all()] or None
-            validation = pdf_validate.validate_schedule(cached.parsed.get("matches", []), roster)
-            return {
-                "pdf_import_id":   cached.id,
-                "pdf_hash":        pdf_hash,
-                "file_name":       cached.file_name,
-                "page_count":      cached.page_count,
-                "method":          cached.method,
-                "format_detected": cached.format_detected,
-                "matches":         cached.parsed.get("matches", []),
-                "validation":      validation,
-                "notes":           cached.parsed.get("notes", ""),
-                "_cache":          "hit",
-            }
+
+                if is_cached_dayplan:
+                    dayplan = cached_parsed.get("dayplan") or {}
+                    legacy_cfg = cached_parsed.get("day_config") or {}
+                    return {
+                        "kind":            "dayplan",
+                        "pdf_import_id":   cached.id,
+                        "pdf_hash":        pdf_hash,
+                        "file_name":       cached.file_name,
+                        "page_count":      cached.page_count,
+                        "method":          method,
+                        "format_detected": cached.format_detected,
+                        "confidence":      dayplan.get("confidence") if isinstance(dayplan, dict) else None,
+                        "event_dates":     dayplan.get("event_dates") if isinstance(dayplan, dict) else None,
+                        "blocks":          dayplan.get("blocks", []) if isinstance(dayplan, dict) else [],
+                        "day_config":      legacy_cfg,
+                        "notes":           dayplan.get("notes", "") if isinstance(dayplan, dict) else "",
+                        "_cache":          "hit",
+                    }
+
+                # Match-list cache entry — original behaviour
+                roster = None
+                if event_id:
+                    roster_result = await db.execute(
+                        select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+                    )
+                    roster = [r[0] for r in roster_result.all()] or None
+                try:
+                    validation = pdf_validate.validate_schedule(
+                        cached_parsed.get("matches", []), roster,
+                    )
+                except Exception as e:
+                    log.exception("Cache hit validation failed for hash=%s", pdf_hash[:8])
+                    raise HTTPException(
+                        500,
+                        f"Cache hit validation error: {type(e).__name__}: {e}. "
+                        f"Try ?nocache=1 to force re-extraction."
+                    )
+                return {
+                    "kind":            "matches",
+                    "pdf_import_id":   cached.id,
+                    "pdf_hash":        pdf_hash,
+                    "file_name":       cached.file_name,
+                    "page_count":      cached.page_count,
+                    "method":          method,
+                    "format_detected": cached.format_detected,
+                    "matches":         cached_parsed.get("matches", []),
+                    "validation":      validation,
+                    "notes":           cached_parsed.get("notes", ""),
+                    "_cache":          "hit",
+                }
+    else:
+        log.info("PDF cache bypassed via ?nocache=1 for hash=%s", pdf_hash[:8])
 
     # Not cached — extract using the strategy router. This tries native
     # text extraction first (works for most FIRST PDFs), falls through to

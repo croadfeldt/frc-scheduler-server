@@ -1221,6 +1221,10 @@
         <button class="btn btn-accent" onclick="document.getElementById('pdfImportFile').click()">
           Choose PDF&hellip;
         </button>
+        <label style="display:block;margin-top:0.7rem;font-size:0.72rem;color:var(--text-muted);cursor:pointer;">
+          <input type="checkbox" id="pdfImportBypassCache" style="vertical-align:middle;margin-right:0.3rem;">
+          <span style="vertical-align:middle;">Bypass cache (re-extract even if this PDF was uploaded before)</span>
+        </label>
       </div>
 
       <!-- Stage 2: loading -->
@@ -1776,12 +1780,26 @@ async function onPdfImportFileChosen(event) {
   try {
     const headers = {};
     const tok = getToken(); if (tok) headers['Authorization'] = 'Bearer ' + tok;
-    const url = API + '/api/schedules/import-pdf?event_id=' + encodeURIComponent(_currentEventId);
+    // Bypass-cache toggle: useful when a previous failed import wrote
+    // bad data to the cache (so re-uploading the same file just keeps
+    // returning the bad cached result).
+    const nocacheChk = document.getElementById('pdfImportBypassCache');
+    const nocache = nocacheChk && nocacheChk.checked ? '&nocache=1' : '';
+    const url = API + '/api/schedules/import-pdf?event_id=' +
+      encodeURIComponent(_currentEventId) + nocache;
     const r = await fetch(url, { method: 'POST', body: formData, headers });
     clearTimeout(slowHint);
     if (!r.ok) {
       const errText = await r.text();
-      throw new Error(errText || ('HTTP ' + r.status));
+      // Try to extract `detail` from a JSON error body — that's our
+      // standard error shape. Falls back to raw text for non-JSON
+      // responses (Starlette default 500 page, network errors, etc).
+      let msg = errText || ('HTTP ' + r.status);
+      try {
+        const j = JSON.parse(errText);
+        if (j && j.detail) msg = (typeof j.detail === 'string') ? j.detail : JSON.stringify(j.detail);
+      } catch (_) { /* not JSON, use raw */ }
+      throw new Error(msg);
     }
     const d = await r.json();
     _pdfImportState = d;
