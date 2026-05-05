@@ -88,7 +88,7 @@ Output schema (REQUIRED — your entire reply must be valid JSON matching this s
   "matches": [
     {
       "match_num":      <int, 1-indexed>,
-      "time":           "<HH:MM in 24-hour format, or null if not present>",
+      "time":           "<HH:MM in 24-hour format, or empty string if not present>",
       "red":            [<red-1 team #>, <red-2 team #>, <red-3 team #>],
       "blue":           [<blue-1 team #>, <blue-2 team #>, <blue-3 team #>],
       "red_surrogate":  [<bool>, <bool>, <bool>],
@@ -120,7 +120,7 @@ Output schema (REQUIRED — your entire reply must be valid JSON matching this s
   "matches": [
     {
       "match_num":      <int, 1-indexed>,
-      "time":           "<HH:MM in 24-hour format, or null if not present>",
+      "time":           "<HH:MM in 24-hour format, or empty string if not present>",
       "red":            [<red-1 team #>, <red-2 team #>, <red-3 team #>],
       "blue":           [<blue-1 team #>, <blue-2 team #>, <blue-3 team #>],
       "red_surrogate":  [<bool>, <bool>, <bool>],
@@ -265,7 +265,12 @@ MATCH_LIST_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "match_num":      {"type": "integer"},
-                    "time":           {"type": ["string", "null"]},
+                    # Time may be missing in some PDFs. Schema allows empty
+                    # string; downstream adapter treats "" as "no time".
+                    # NOTE: vLLM's structured-output parser doesn't accept
+                    # array-typed type fields like ["string", "null"], so
+                    # we use plain "string" with empty-string-as-absent.
+                    "time":           {"type": "string"},
                     "red":            {"type": "array", "items": {"type": "integer"}},
                     "blue":           {"type": "array", "items": {"type": "integer"}},
                     "red_surrogate":  {"type": "array", "items": {"type": "boolean"}},
@@ -289,8 +294,12 @@ DAYPLAN_SCHEMA = {
         "event_dates": {
             "type": "object",
             "properties": {
-                "start": {"type": ["string", "null"]},
-                "end":   {"type": ["string", "null"]},
+                # YYYY-MM-DD or empty if no date in the PDF. vLLM's schema
+                # parser doesn't handle ["string", "null"] union types
+                # (raises "type mismatch! call is<type>() before get<type>()"
+                # because it expects "type" to be a string scalar).
+                "start": {"type": "string"},
+                "end":   {"type": "string"},
             },
             "additionalProperties": True,
         },
@@ -301,8 +310,11 @@ DAYPLAN_SCHEMA = {
                 "properties": {
                     "kind":      {"type": "string"},
                     "day_index": {"type": "integer"},
-                    "start":     {"type": ["string", "null"]},
-                    "end":       {"type": ["string", "null"]},
+                    # HH:MM 24-hour format, or empty string when the PDF
+                    # gives only a start time (e.g. "Playoffs Begin 4:00 PM"
+                    # has no end). Adapter handles "" the same as missing.
+                    "start":     {"type": "string"},
+                    "end":       {"type": "string"},
                     "label":     {"type": "string"},
                     "details":   {"type": "string"},
                 },

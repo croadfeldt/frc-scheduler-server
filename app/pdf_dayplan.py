@@ -83,15 +83,15 @@ You will be given the contents of an event-day program/itinerary PDF for a robot
   "format_detected": "<brief description, e.g. 'MSHSL state tournament 2-day program'>",
   "confidence": "<high|medium|low>",
   "event_dates": {
-    "start": "<YYYY-MM-DD or null if no date>",
-    "end":   "<YYYY-MM-DD or null>"
+    "start": "<YYYY-MM-DD, or empty string if no date>",
+    "end":   "<YYYY-MM-DD, or empty string>"
   },
   "blocks": [
     {
       "kind":      "<practice|qual|lunch|break|ceremony|playoff>",
       "day_index": <0-indexed event day; 0 = first day teams attend, regardless of whether matches happen that day>,
-      "start":     "<HH:MM in 24-hour format, or null>",
-      "end":       "<HH:MM in 24-hour format, or null if open-ended>",
+      "start":     "<HH:MM in 24-hour format, or empty string>",
+      "end":       "<HH:MM in 24-hour format, or empty string if open-ended>",
       "label":     "<short human label exactly as written in the PDF>",
       "details":   "<free-text descriptors from the PDF: 'cycle time 10 minutes', '6 matches', etc.>"
     }
