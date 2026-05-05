@@ -1083,9 +1083,22 @@
                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
       <span id="eventLoadedMeta"
         style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap;"></span>
-      <a href="#" id="lnkSwitchEvent" onclick="event.preventDefault();switchEvent();"
-         style="font-size:0.72rem;color:var(--accent);text-decoration:none;margin-left:auto;flex-shrink:0;"
-         title="Clear the current event and pick a different starting point.">&laquo; Switch event</a>
+      <!-- Right-side links: Import a PDF (visible only when LLM is up,
+           overlays a custom PDF onto the currently-loaded event) and
+           Switch event (return to empty state). The Import link mirrors
+           the empty-state one for power users — same modal, existing
+           event id. Visibility controlled by checkLlmStatus(). -->
+      <span style="margin-left:auto;display:flex;align-items:center;gap:0.6rem;flex-shrink:0;">
+        <a href="#" id="lnkImportPdfLoaded" onclick="event.preventDefault();openPdfImportModal();"
+           style="display:none;font-size:0.72rem;color:var(--accent);text-decoration:none;"
+           title="EXPERIMENTAL — overlay a custom PDF schedule onto this event. Best when the event roster is already loaded so the importer can validate team numbers.">
+          Import a PDF
+          <span id="lnkImportPdfLoadedBadge" style="font-size:0.55rem;font-weight:600;letter-spacing:0.05em;padding:0.05rem 0.3rem;margin-left:0.15rem;background:#b35a00;color:#fff;border-radius:2px;vertical-align:1px;">BETA</span>
+        </a>
+        <a href="#" id="lnkSwitchEvent" onclick="event.preventDefault();switchEvent();"
+           style="font-size:0.72rem;color:var(--accent);text-decoration:none;"
+           title="Clear the current event and pick a different starting point.">&laquo; Switch event</a>
+      </span>
     </div>
 
     <div class="event-bar-actions" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
@@ -1742,65 +1755,98 @@ async function loadSchedulerDefaults() {
 let LLM_AVAILABLE = false;
 
 async function checkLlmStatus() {
-  // The PDF-import link sits in the empty-state helper text under the
-  // event bar (#eventBarAlternatives). It's hidden by default and we
-  // reveal it here only when an LLM endpoint is reachable. Three
-  // elements move together: the link, the BETA badge next to it, and
-  // the "·" separator between the Quick-schedule link and this one.
-  const link    = document.getElementById('lnkImportPdf');
-  const badgeE  = document.getElementById('lnkPdfBadge');     // BETA pill
-  const sep     = document.getElementById('lnkPdfSep');       // "·" separator
+  // The PDF-import affordance appears in TWO places in the event bar:
+  //
+  //   1. Empty state (#eventBarEmpty) — "Import a PDF" link in the
+  //      "Not on FIRST?" helper text, alongside Quick Schedule
+  //   2. Loaded state (#eventBarLoaded) — secondary link next to
+  //      "Switch event", for overlaying a PDF onto an existing event
+  //
+  // Both are hidden by default; this function reveals them only when
+  // an LLM endpoint is reachable. Same flag drives both so the BETA
+  // path appears or disappears uniformly.
+  const linkE   = document.getElementById('lnkImportPdf');         // empty
+  const badgeE  = document.getElementById('lnkPdfBadge');
+  const sepE    = document.getElementById('lnkPdfSep');
+  const linkL   = document.getElementById('lnkImportPdfLoaded');   // loaded
   const indicator = document.getElementById('llmStatusIndicator');
-  const badge    = document.getElementById('llmStatusBadge');  // LLM-status dot
+  const badge    = document.getElementById('llmStatusBadge');
   const text     = document.getElementById('llmStatusText');
-  if (!link) return;
+  if (!linkE && !linkL) return;
 
-  function hideAll() {
-    link.style.display    = 'none';
-    badgeE.style.display  = 'none';
-    sep.style.display     = 'none';
+  function setHidden() {
+    if (linkE)  linkE.style.display    = 'none';
+    if (badgeE) badgeE.style.display   = 'none';
+    if (sepE)   sepE.style.display     = 'none';
+    if (linkL)  linkL.style.display    = 'none';
     if (indicator) indicator.style.display = 'none';
     LLM_AVAILABLE = false;
   }
 
+  function setVisible(available) {
+    if (linkE)  linkE.style.display    = '';
+    if (badgeE) badgeE.style.display   = '';
+    if (sepE)   sepE.style.display     = '';
+    if (linkL)  linkL.style.display    = '';
+    if (indicator) indicator.style.display = '';
+    LLM_AVAILABLE = available;
+    var disabled = !available;
+    [linkE, linkL].forEach(function(a) {
+      if (!a) return;
+      a.style.pointerEvents = disabled ? 'none' : '';
+      a.style.opacity       = disabled ? '0.5'  : '';
+    });
+    if (badge) badge.style.background = available ? 'var(--accent3, #2ea043)' : 'var(--amber, #c8992a)';
+    if (text)  text.textContent       = available ? 'LLM ready' : 'LLM unreachable';
+  }
+
   try {
     const r = await fetch(API + '/api/llm/status');
-    if (!r.ok)             { hideAll(); return; }
+    if (!r.ok)         { setHidden(); return; }
     const d = await r.json();
-    if (!d.configured)     { hideAll(); return; }
-
-    // LLM is configured — reveal the import link + BETA + status dot.
-    link.style.display   = '';
-    badgeE.style.display = '';
-    sep.style.display    = '';
-    if (indicator) indicator.style.display = '';
-    LLM_AVAILABLE = !!d.available;
-    if (d.available) {
-      if (badge) badge.style.background = 'var(--accent3, #2ea043)';
-      if (text)  text.textContent       = 'LLM ready';
-      link.style.pointerEvents = '';
-      link.style.opacity       = '';
-    } else {
-      if (badge) badge.style.background = 'var(--amber, #c8992a)';
-      if (text)  text.textContent       = 'LLM unreachable';
-      // Visually disable but keep present so the user sees what's
-      // available when the endpoint comes back. Clicks are no-op'd
-      // via pointer-events.
-      link.style.pointerEvents = 'none';
-      link.style.opacity       = '0.5';
-    }
+    if (!d.configured) { setHidden(); return; }
+    setVisible(!!d.available);
   } catch (e) {
-    hideAll();
+    setHidden();
   }
 }
 
 let _pdfImportState = null;   // {pdf_import_id, matches, validation, ...}
 
-function openPdfImportModal() {
+async function openPdfImportModal() {
+  // If no event is loaded, transparently create an ad-hoc one to
+  // attach the import to. The user shouldn't have to "load an event
+  // first" — importing a custom PDF *is* a way to create an event,
+  // not an annotation on top of one. Done before the modal opens so
+  // by the time the user picks a file the event exists and any
+  // roster validation in the importer can run.
+  //
+  // Trade-off: this creates an ad-hoc event even if the user changes
+  // their mind and closes the modal. That's OK because (a) ad-hoc
+  // events are persistent-by-design and have always behaved this
+  // way (Quick Schedule does the same thing), and (b) loading the
+  // ad-hoc event a second time reuses the same row.
   if (!_currentEventId) {
-    showApiStatus('Load an event first — PDF imports need an event to attach to', true);
-    return;
+    try {
+      showApiStatus('⏳ Preparing event for PDF import…');
+      const ev = await apiFetch('/api/events/adhoc');
+      // Clear any stale teams from a previous ad-hoc session — the
+      // PDF will provide its own roster (or we'll add teams later).
+      if (ev.teams && ev.teams.length > 0) {
+        for (var i = 0; i < ev.teams.length; i++) {
+          await apiFetch('/api/events/' + ev.id + '/teams/' + ev.teams[i].number, { method: 'DELETE' })
+            .catch(function() {});
+        }
+        ev.teams = [];
+      }
+      await activateEvent(ev);
+      // activateEvent flips the bar to loaded state — fine.
+    } catch (e) {
+      showApiStatus('Could not prepare event: ' + e.message, true);
+      return;
+    }
   }
+
   // Reset modal to stage 1
   document.getElementById('pdfImportStage1').style.display = '';
   document.getElementById('pdfImportStage2').style.display = 'none';
