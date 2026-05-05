@@ -1240,6 +1240,10 @@
           <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
             <input type="checkbox" id="printOptPageBreak" checked> Page break between days
           </label>
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;"
+                 title="Force a page break after the practice match table so practice and qualification matches print on separate sheets — useful when handing the practice list to pit crew while the qual list goes to the field.">
+            <input type="checkbox" id="printOptPageBreakAfterPractice" checked> Page break after practice matches
+          </label>
         </div>
       </div>
       <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
@@ -1562,7 +1566,18 @@
         <div id="downloadBar" style="display:none;gap:0.4rem;display:none;align-items:center;">
           <button class="btn-export" id="btnDownloadCSV" onclick="downloadCSV()" title="Download schedule as CSV">&#11015; CSV</button>
           <button class="btn-export" id="btnDownloadJSON" onclick="downloadJSON()" title="Download schedule as JSON">&#11015; JSON</button>
-          <button class="btn-export" id="btnDownloadXLSX" onclick="downloadXLSX()" title="Download schedule as Excel spreadsheet (canonical FMS layout)">&#11015; XLSX</button>
+          <span style="display:inline-flex;align-items:stretch;gap:0;">
+            <button class="btn-export" id="btnDownloadXLSX"
+                    style="border-top-right-radius:0;border-bottom-right-radius:0;border-right:0;"
+                    onclick="downloadXLSX()" title="Download schedule as Excel spreadsheet (canonical FMS layout)">&#11015; XLSX</button>
+            <select id="xlsxScope" class="btn-export"
+                    style="border-top-left-radius:0;border-bottom-left-radius:0;cursor:pointer;padding:0 0.4rem;"
+                    title="Which matches to include in the spreadsheet">
+              <option value="both" selected>Both</option>
+              <option value="qual">Qual only</option>
+              <option value="practice">Practice only</option>
+            </select>
+          </span>
           <button class="btn-export" id="btnDownloadPDF" onclick="downloadSchedulePDF()" title="Download schedule as PDF (uses your current Print options)">&#11015; PDF</button>
           <button class="btn-export" id="btnDownloadFMS" onclick="downloadFMS()" title="Download schedule for FIRST FMS Match Maker import (tab-delimited, qualification matches only). Match times must be re-entered in FMS Build Schedule.">&#11015; FMS</button>
           <button class="btn-export" id="btnFMSSetup" onclick="openFMSSetupSheet()" title="Open a printable FMS Build Schedule setup sheet with all timing settings, breaks, cycle changes, and a QR code linking back to this schedule">&#128196; FMS Setup</button>
@@ -9915,20 +9930,38 @@ async function downloadXLSX() {
     });
   });
 
+  // Honor the scope dropdown next to the XLSX button. "both" produces
+  // a workbook with both sheets (current default behavior); "qual"
+  // and "practice" produce single-sheet files. Filenames pick up a
+  // hint suffix when not "both" so multiple downloads don't collide.
+  var scopeEl = document.getElementById('xlsxScope');
+  var scope = (scopeEl && scopeEl.value) || 'both';
+
+  if (scope === 'practice' && practiceMatches.length === 0) {
+    showApiStatus('No practice matches in this schedule. Pick a different scope.', true);
+    return;
+  }
+  if (scope === 'qual' && qualMatches.length === 0) {
+    showApiStatus('No qualification matches in this schedule. Pick a different scope.', true);
+    return;
+  }
+
   var wb = XLSX.utils.book_new();
 
   // Qualification sheet — primary
-  var qualWs = _buildXlsxWorksheet({
-    title:    'Qualification Match Schedule',
-    subtitle: eventLine,
-    mpt:      mpt,
-    matches:  qualMatches,
-    isPractice: false,
-  });
-  XLSX.utils.book_append_sheet(wb, qualWs, 'Qualification');
+  if (scope !== 'practice' && qualMatches.length > 0) {
+    var qualWs = _buildXlsxWorksheet({
+      title:    'Qualification Match Schedule',
+      subtitle: eventLine,
+      mpt:      mpt,
+      matches:  qualMatches,
+      isPractice: false,
+    });
+    XLSX.utils.book_append_sheet(wb, qualWs, 'Qualification');
+  }
 
   // Practice sheet — only if practice was generated
-  if (practiceMatches.length > 0) {
+  if (scope !== 'qual' && practiceMatches.length > 0) {
     var practiceWs = _buildXlsxWorksheet({
       title:    'Practice Match Schedule',
       subtitle: eventLine,
@@ -9939,9 +9972,18 @@ async function downloadXLSX() {
     XLSX.utils.book_append_sheet(wb, practiceWs, 'Practice');
   }
 
-  XLSX.writeFile(wb, getScheduleFilenameSlug('.xlsx'));
-  var msg = '\u2713 Exported XLSX (' + qualMatches.length + ' qual';
-  if (practiceMatches.length) msg += ' + ' + practiceMatches.length + ' practice';
+  var fname = getScheduleFilenameSlug('.xlsx');
+  if (scope === 'qual')     fname = fname.replace(/\.xlsx$/, '-qual.xlsx');
+  if (scope === 'practice') fname = fname.replace(/\.xlsx$/, '-practice.xlsx');
+  XLSX.writeFile(wb, fname);
+
+  // Status message reflects what got exported.
+  var nQual = (scope !== 'practice') ? qualMatches.length     : 0;
+  var nPrac = (scope !== 'qual')     ? practiceMatches.length : 0;
+  var msg = '\u2713 Exported XLSX (';
+  if (nQual && nPrac)      msg += nQual + ' qual + ' + nPrac + ' practice';
+  else if (nQual)          msg += nQual + ' qual';
+  else                     msg += nPrac + ' practice';
   msg += ' matches)';
   showApiStatus(msg);
 }
@@ -10393,6 +10435,14 @@ function printSchedule() {
     teamNums:       document.getElementById('printOptTeamNums').checked,
     roundDividers:  document.getElementById('printOptRoundDividers').checked,
     pageBreak:      document.getElementById('printOptPageBreak').checked,
+    // New: page-break between practice and qualification matches.
+    // Default true (the existing checkbox is `checked` in markup).
+    // Reads as false if the checkbox was unchecked OR if for some
+    // reason the checkbox isn't in the DOM (defensive).
+    pageBreakAfterPractice: !!(
+      document.getElementById('printOptPageBreakAfterPractice') &&
+      document.getElementById('printOptPageBreakAfterPractice').checked
+    ),
   };
 
   var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
@@ -10463,6 +10513,15 @@ function printSchedule() {
     return '<span class="' + cls + '">' + label + sur + '</span>';
   };
 
+  // Track practice→qual transition for the page-break-after-practice
+  // option. We emit the page break on the first non-practice day-title
+  // that appears after at least one practice day. (If there are no
+  // practice days, no break.) This is independent of the
+  // page-break-between-days option, so both can be enabled together
+  // without doubling up.
+  var seenPracticeDay = false;
+  var emittedPracticeBreak = false;
+
   scheduled.forEach(function(day) {
     // Day header
     var dayMatches = day.entries.filter(function(e) { return e.type === 'match'; });
@@ -10479,7 +10538,25 @@ function printSchedule() {
       }
     }
     var isFirstDay = (scheduled.indexOf(day) === 0);
-    html += '<div class="day-title' + (opts.pageBreak && !isFirstDay ? ' page-break' : '') + '">Day ' + day.dayNum + ' &mdash; ' + dayMatches.length + ' matches' + ctInfo + '</div>';
+    // Decide whether THIS day-title gets a page break before it.
+    // Two reasons it might:
+    //   (a) opts.pageBreak (between-days) and not the first day
+    //   (b) opts.pageBreakAfterPractice and this is the first qual
+    //       day after at least one practice day
+    var practiceBreakHere =
+      opts.pageBreakAfterPractice &&
+      seenPracticeDay &&
+      !day.isPracticeDay &&
+      !emittedPracticeBreak;
+    var betweenDayBreak = opts.pageBreak && !isFirstDay;
+    var pageBreakClass = (practiceBreakHere || betweenDayBreak) ? ' page-break' : '';
+
+    var dayLabel = day.isPracticeDay ? 'Practice' : ('Day ' + day.dayNum);
+    html += '<div class="day-title' + pageBreakClass + '">' + dayLabel + ' &mdash; ' + dayMatches.length + ' matches' + ctInfo + '</div>';
+
+    if (practiceBreakHere) emittedPracticeBreak = true;
+    if (day.isPracticeDay)  seenPracticeDay = true;
+
     html += '<table><thead><tr><th>#</th><th>Time</th><th>Red Alliance</th><th>Blue Alliance</th></tr></thead><tbody>';
 
     day.entries.forEach(function(entry) {

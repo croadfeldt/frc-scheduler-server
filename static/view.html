@@ -580,6 +580,17 @@
 
   /* ── Print ───────────────────────────────────────────────────────────── */
   @page { size: letter; margin: 0.5in; }
+  /* Page-break markers — applied dynamically by _applyPrintMarkers when
+     the user opens the Print/PDF options modal. We use both the modern
+     `break-before` and the legacy `page-break-before` because html2pdf's
+     html2canvas reads the legacy property, while modern browsers prefer
+     the new one. The print-pb-before class is also tagged with the
+     non-conditional version so it works during PDF generation (when
+     @media print rules don't apply). */
+  tr.print-pb-before {
+    page-break-before: always;
+    break-before: page;
+  }
   @media print {
     body { background: #fff; }
     .page { padding: 0; max-width: 100%; }
@@ -687,14 +698,29 @@
     <!-- Toolbar -->
     <div class="toolbar no-print">
       <span class="group-label">Export</span>
-      <button class="btn btn-secondary" onclick="exportPdf()" title="Download printable PDF">📄 PDF</button>
-      <button class="btn btn-secondary" onclick="exportXlsx()" title="Download Excel spreadsheet">📊 XLSX</button>
+      <button class="btn btn-secondary" onclick="openPrintOptionsModal('pdf')" title="Download printable PDF">📄 PDF</button>
+      <!-- XLSX is a button + scope dropdown. The dropdown picks which
+           subset of matches goes into the file; "Both" produces a
+           workbook with separate Practice and Qualification sheets,
+           the other options produce a single-sheet file. -->
+      <span class="xlsx-group" style="display:inline-flex;align-items:stretch;gap:0;">
+        <button class="btn btn-secondary"
+                style="border-top-right-radius:0;border-bottom-right-radius:0;border-right:0;"
+                onclick="exportXlsx()" title="Download Excel spreadsheet">📊 XLSX</button>
+        <select id="xlsxScope" class="btn btn-secondary"
+                title="Which matches to include in the spreadsheet"
+                style="border-top-left-radius:0;border-bottom-left-radius:0;padding-right:0.5rem;cursor:pointer;">
+          <option value="both" selected>Both</option>
+          <option value="qual">Qualification only</option>
+          <option value="practice">Practice only</option>
+        </select>
+      </span>
       <button class="btn btn-secondary" onclick="exportCsv()" title="Download CSV">📑 CSV</button>
       <button class="btn btn-secondary" onclick="exportJson()" title="Download raw JSON">{} JSON</button>
       <button class="btn btn-secondary" onclick="exportFms()" title="Download FMS Match Maker import file">⬇ FMS</button>
       <span style="flex:1"></span>
       <span class="group-label">Share</span>
-      <button class="btn btn-secondary" onclick="window.print()" title="Print">🖨 Print</button>
+      <button class="btn btn-secondary" onclick="openPrintOptionsModal('print')" title="Print options">🖨 Print</button>
       <button class="btn btn-secondary" onclick="openShareModal()" title="Show QR code">📱 QR</button>
     </div>
 
@@ -742,6 +768,35 @@
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="copyShareUrl()" id="btnCopyUrl">Copy URL</button>
       <button class="btn" onclick="closeShareModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Print options modal — shared by Print button and PDF export.
+     Lightweight subset of the editor's options: just what makes sense
+     when reading a finished schedule (page-break controls). Other
+     editor-only options (cycle times, round dividers etc.) aren't
+     present in the view's data shape so we don't surface them. -->
+<div class="modal-overlay" id="printOptionsModal" onclick="if(event.target===this)closePrintOptionsModal()">
+  <div class="modal-card">
+    <h2>Print &amp; PDF options</h2>
+    <p style="margin:0 0 1rem 0; color:var(--text-muted); font-size:13px;">
+      Settings here apply to both Print (browser dialog) and PDF download.
+    </p>
+    <div style="display:flex;flex-direction:column;gap:0.6rem;">
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:14px;cursor:pointer;">
+        <input type="checkbox" id="vPrintOptPageBreakAfterPractice" checked>
+        Page break after practice matches
+      </label>
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:14px;cursor:pointer;">
+        <input type="checkbox" id="vPrintOptPageBreakBetweenDays" checked>
+        Page break between days
+      </label>
+    </div>
+    <div class="modal-actions" style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem;">
+      <button class="btn btn-secondary" onclick="closePrintOptionsModal()">Cancel</button>
+      <button class="btn btn-secondary" onclick="runPrintAfterOptions(false)">PDF</button>
+      <button class="btn" onclick="runPrintAfterOptions(true)">Print</button>
     </div>
   </div>
 </div>
@@ -2229,86 +2284,78 @@ function exportFms() {
   triggerDownload(blob, getFilenameSlug('') + '_fms.txt');
 }
 
-function exportXlsx() {
-  if (typeof XLSX === 'undefined') {
-    alert('XLSX library failed to load. Try CSV or PDF instead.');
-    return;
-  }
-  const ev = STATE.schedule.event;
-  const titleLine = ev && ev.name ? ev.name + (ev.year ? ' — ' + ev.year : '') : 'Qualification Match Schedule';
-  const aoa = [
-    ['Qualification Match Schedule'],
+// ─────────────────────────────────────────────────────────────────────
+// XLSX export
+//
+// Three scopes available via the #xlsxScope dropdown:
+//   "both"     → workbook with Practice + Qualification sheets (default)
+//   "qual"     → single Qualification sheet
+//   "practice" → single Practice sheet
+//
+// Each sheet uses the canonical FMS layout (matches static/index.html's
+// _buildXlsxWorksheet) so xlsx_extract.py can round-trip both sheets.
+// ─────────────────────────────────────────────────────────────────────
+
+function _buildViewXlsxSheet(opts) {
+  // opts: { titleLine, mpt, rows: [{startMin, matchNum, blue[], red[]}],
+  //         label: "Qualification" | "Practice" }
+  var titleText = opts.label + ' Match Schedule';
+  var aoa = [
+    [titleText],
     [],
-    [titleLine],
-    ['Matches Per Team', '', STATE.schedule.matches_per_team || ''],
+    [opts.titleLine],
+    ['Matches Per Team', '', opts.mpt || ''],
     ['Time', 'Description', 'Blue 1', 'Blue 2', 'Blue 3', 'Red 1', 'Red 2', 'Red 3'],
   ];
-  const rows = getCurrentRows();
-  rows.forEach(e => {
+  opts.rows.forEach(function(e) {
     aoa.push([
       minToTime12(e.startMin),
-      'Qualification ' + e.matchNum,
+      opts.label + ' ' + e.matchNum,
       e.blue[0], e.blue[1], e.blue[2],
       e.red[0],  e.red[1],  e.red[2],
     ]);
   });
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  // Column widths matching the reference XLSX
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols'] = [
     { wch: 18 }, { wch: 18 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 },
   ];
-  // Merge title cells
   ws['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
     { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } },
   ];
 
-  // ── Styling (xlsx-js-style supports cell-level styles) ────────────────
-  const headerStyle = {
-    font:      { bold: true, sz: 14 },
-    alignment: { horizontal: 'center' },
-  };
-  const subTitleStyle = {
-    font:      { bold: true, sz: 12 },
-    alignment: { horizontal: 'center' },
-  };
-  const colHeaderStyle = {
+  // Cell-level styling (xlsx-js-style supports this).
+  var headerStyle    = { font: { bold: true, sz: 14 }, alignment: { horizontal: 'center' } };
+  var subTitleStyle  = { font: { bold: true, sz: 12 }, alignment: { horizontal: 'center' } };
+  var colHeaderStyle = {
     font:      { bold: true, sz: 10 },
     fill:      { patternType: 'solid', fgColor: { rgb: 'D5DBDF' } },
     alignment: { horizontal: 'center' },
-    border: {
-      bottom: { style: 'medium', color: { rgb: '000000' } },
-    },
+    border:    { bottom: { style: 'medium', color: { rgb: '000000' } } },
   };
-  const cellBase  = { alignment: { horizontal: 'center' } };
-  const cellBlue  = { font: { color: { rgb: '0550AE' } }, alignment: { horizontal: 'center' } };
-  const cellRed   = { font: { color: { rgb: 'A3261A' } }, alignment: { horizontal: 'center' } };
-  const cellShade = { fill: { patternType: 'solid', fgColor: { rgb: 'F2F4F7' } } };
+  var cellBase  = { alignment: { horizontal: 'center' } };
+  var cellBlue  = { font: { color: { rgb: '0550AE' } }, alignment: { horizontal: 'center' } };
+  var cellRed   = { font: { color: { rgb: 'A3261A' } }, alignment: { horizontal: 'center' } };
+  var cellShade = { fill: { patternType: 'solid', fgColor: { rgb: 'F2F4F7' } } };
 
-  // Apply title row, sub-title, "Matches Per Team", header row styles
   if (ws['A1']) ws['A1'].s = headerStyle;
   if (ws['A3']) ws['A3'].s = subTitleStyle;
   if (ws['A4']) ws['A4'].s = { font: { bold: true } };
-  // Column headers (row 5 in 1-indexed = row 4 in 0-indexed)
-  ['A5','B5','C5','D5','E5','F5','G5','H5'].forEach(addr => {
+  ['A5','B5','C5','D5','E5','F5','G5','H5'].forEach(function(addr) {
     if (ws[addr]) ws[addr].s = colHeaderStyle;
   });
 
-  // Zebra stripe data rows: rows 6+ (1-indexed) — even rows get shading
-  // (so the first data row is plain, the second is shaded, etc.)
-  rows.forEach((_, idx) => {
-    const xlRow = 6 + idx;          // 1-indexed worksheet row
-    const isShaded = (idx % 2) === 1;
-    ['A','B','C','D','E','F','G','H'].forEach((col, cIdx) => {
-      const addr = col + xlRow;
+  opts.rows.forEach(function(_, idx) {
+    var xlRow = 6 + idx;
+    var isShaded = (idx % 2) === 1;
+    ['A','B','C','D','E','F','G','H'].forEach(function(col, cIdx) {
+      var addr = col + xlRow;
       if (!ws[addr]) return;
-      // Pick base style by column
-      let s = Object.assign({}, cellBase);
+      var s = Object.assign({}, cellBase);
       if (cIdx >= 2 && cIdx <= 4) s = Object.assign({}, cellBlue);
       else if (cIdx >= 5 && cIdx <= 7) s = Object.assign({}, cellRed);
       if (isShaded) {
         s = Object.assign({}, s, cellShade);
-        // Preserve color while merging fill
         if (cIdx >= 2 && cIdx <= 4) s.font = { color: { rgb: '0550AE' } };
         if (cIdx >= 5 && cIdx <= 7) s.font = { color: { rgb: 'A3261A' } };
       }
@@ -2316,12 +2363,209 @@ function exportXlsx() {
     });
   });
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
-  XLSX.writeFile(wb, getFilenameSlug('.xlsx'));
+  return ws;
 }
 
-function exportPdf() {
+function exportXlsx() {
+  if (typeof XLSX === 'undefined') {
+    alert('XLSX library failed to load. Try CSV or PDF instead.');
+    return;
+  }
+  var scopeEl = document.getElementById('xlsxScope');
+  var scope = (scopeEl && scopeEl.value) || 'both';
+
+  var ev = STATE.schedule.event;
+  var titleLine = ev && ev.name
+    ? ev.name + (ev.year ? ' — ' + ev.year : '')
+    : 'Match Schedule';
+  var mpt = STATE.schedule.matches_per_team || '';
+
+  // Split current rows by isPractice. getCurrentRows() is filtered by
+  // any active team filter — that's deliberate; the spreadsheet should
+  // mirror what the user sees on screen.
+  var allRows = getCurrentRows();
+  var qualRows     = allRows.filter(function(r) { return !r.isPractice; });
+  var practiceRows = allRows.filter(function(r) { return  r.isPractice; });
+
+  // Validate scope matches reality. If the user picks "Practice only"
+  // but no practice matches exist, tell them rather than silently
+  // produce an empty file.
+  if (scope === 'practice' && practiceRows.length === 0) {
+    alert('No practice matches in this schedule. Pick a different scope.');
+    return;
+  }
+  if (scope === 'qual' && qualRows.length === 0) {
+    alert('No qualification matches in this schedule. Pick a different scope.');
+    return;
+  }
+
+  var wb = XLSX.utils.book_new();
+
+  // Qualification sheet (always first when included — it's the primary)
+  if (scope !== 'practice' && qualRows.length > 0) {
+    var qualWs = _buildViewXlsxSheet({
+      titleLine: titleLine,
+      mpt:       mpt,
+      rows:      qualRows,
+      label:     'Qualification',
+    });
+    XLSX.utils.book_append_sheet(wb, qualWs, 'Qualification');
+  }
+
+  // Practice sheet
+  if (scope !== 'qual' && practiceRows.length > 0) {
+    var pracWs = _buildViewXlsxSheet({
+      titleLine: titleLine,
+      mpt:       '',  // MPT applies to qual rounds, not practice
+      rows:      practiceRows,
+      label:     'Practice',
+    });
+    XLSX.utils.book_append_sheet(wb, pracWs, 'Practice');
+  }
+
+  // Filename: include scope hint when not "both" so files don't
+  // collide if the user downloads multiple scopes.
+  var slug = getFilenameSlug('.xlsx');
+  if (scope === 'qual')     slug = slug.replace(/\.xlsx$/, '-qual.xlsx');
+  if (scope === 'practice') slug = slug.replace(/\.xlsx$/, '-practice.xlsx');
+  XLSX.writeFile(wb, slug);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Print + PDF options modal
+//
+// Shared by the Print button (browser print dialog) and PDF button
+// (html2pdf). The modal collects two toggles — page break after
+// practice, page break between days — and dispatches to the right
+// path. Page breaks are applied by tagging rows in the live DOM
+// with marker classes; @media print CSS turns those into actual
+// `page-break-before: always`.
+//
+// State variable holds the user's intent ("print" or "pdf") so the
+// confirm buttons in the modal know which action to fire.
+// ─────────────────────────────────────────────────────────────────────
+
+var _printOptionsAction = 'print';
+
+function openPrintOptionsModal(action) {
+  // action is 'print' or 'pdf'. The modal stays the same; only the
+  // confirm dispatch differs. We don't disable the alternate button —
+  // the user might pick Print but realise they want PDF instead.
+  _printOptionsAction = (action === 'pdf') ? 'pdf' : 'print';
+  var modal = document.getElementById('printOptionsModal');
+  if (modal) modal.classList.add('open');
+}
+
+function closePrintOptionsModal() {
+  var modal = document.getElementById('printOptionsModal');
+  if (modal) modal.classList.remove('open');
+}
+
+function runPrintAfterOptions(useBrowserPrint) {
+  // useBrowserPrint=true → window.print(); false → exportPdf()
+  // The two paths take different tracks:
+  //   - Print: tag rows in the LIVE DOM with marker classes; the
+  //     @media print CSS turns those into actual page breaks. Then
+  //     remove the markers after the dialog closes.
+  //   - PDF: pass options to exportPdf() which rebuilds a detached
+  //     DOM and injects inline page-break-before style on the right
+  //     rows. Markers on the live DOM aren't useful here because the
+  //     PDF builder doesn't read them.
+  var optBreakAfterPractice = document.getElementById('vPrintOptPageBreakAfterPractice').checked;
+  var optBreakBetweenDays   = document.getElementById('vPrintOptPageBreakBetweenDays').checked;
+
+  closePrintOptionsModal();
+
+  if (useBrowserPrint) {
+    var token = _applyPrintMarkers({
+      breakAfterPractice: optBreakAfterPractice,
+      breakBetweenDays:   optBreakBetweenDays,
+    });
+    var cleanup = function() {
+      _removePrintMarkers(token);
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    window.print();
+  } else {
+    exportPdf({
+      breakAfterPractice: optBreakAfterPractice,
+      breakBetweenDays:   optBreakBetweenDays,
+    });
+  }
+}
+
+function _applyPrintMarkers(opts) {
+  // Walk the matches table once, tagging rows where page breaks
+  // should occur. Returns the list of (element, className) pairs we
+  // added so cleanup can undo them precisely.
+  var added = [];
+  var tbody = document.getElementById('matchesTbody');
+  if (!tbody) return added;
+
+  var rows = tbody.querySelectorAll('tr');
+  var seenPractice = false;
+  var seenQual     = false;
+  var lastDayLabel = null;
+
+  rows.forEach(function(tr) {
+    if (tr.classList.contains('day-divider')) {
+      // Day-divider rows carry the day label in their text — we use
+      // a change in label to detect day boundaries. Tag the divider
+      // itself so the page break sits on the divider, not the next
+      // match (cleaner visual: divider becomes the top of the new
+      // page).
+      var label = tr.textContent.trim();
+      if (opts.breakBetweenDays && lastDayLabel !== null && label !== lastDayLabel) {
+        tr.classList.add('print-pb-before');
+        added.push([tr, 'print-pb-before']);
+      }
+      lastDayLabel = label;
+      return;
+    }
+    if (!tr.classList.contains('match-row')) return;
+
+    // Detect practice→qual transition by looking at the match-number
+    // cell. Practice rows show "P<n>"; qual rows show "Q<n>". We
+    // already track isPractice in the data, but the rendered DOM
+    // doesn't carry it — easier to read the cell text.
+    var firstTd = tr.querySelector('td');
+    var label = firstTd ? firstTd.textContent.trim() : '';
+    var isPractice = label.charAt(0) === 'P';
+
+    if (isPractice) {
+      seenPractice = true;
+    } else {
+      // First qual row after any practice rows is the boundary.
+      if (opts.breakAfterPractice && seenPractice && !seenQual) {
+        tr.classList.add('print-pb-before');
+        added.push([tr, 'print-pb-before']);
+      }
+      seenQual = true;
+    }
+  });
+
+  return added;
+}
+
+function _removePrintMarkers(added) {
+  if (!added) return;
+  added.forEach(function(pair) {
+    pair[0].classList.remove(pair[1]);
+  });
+}
+
+function exportPdf(pdfOpts) {
+  // pdfOpts (optional): {
+  //   breakAfterPractice: bool,   // default true
+  //   breakBetweenDays:   bool,   // default true
+  // }
+  // Called both with no args (legacy / direct invocation) and with an
+  // opts object (from the Print/PDF options modal).
+  pdfOpts = pdfOpts || {};
+  var optBreakAfterPractice = (pdfOpts.breakAfterPractice !== false);
+  var optBreakBetweenDays   = (pdfOpts.breakBetweenDays   !== false);
+
   if (typeof html2pdf === 'undefined') {
     alert('PDF library failed to load. Use Print and choose Save as PDF.');
     return;
@@ -2431,6 +2675,12 @@ function exportPdf() {
   var tbody = tbl.querySelector('tbody');
   var zebra = 0;
   var totalMatches = 0, shown = 0;
+  // Page-break tracking. We tag rows that should force a page break
+  // before themselves with inline CSS — html2canvas honours the
+  // legacy `page-break-before` property when rendering.
+  var seenPractice = false;
+  var seenQual     = false;
+  var lastDayLabel = null;
 
   rows.forEach(function(entry) {
     if (entry.type === 'match') totalMatches++;
@@ -2439,6 +2689,26 @@ function exportPdf() {
       if (entry.type === 'break' || entry.type === 'day-divider') return;
     }
     var tr = document.createElement('tr');
+
+    // Decide whether this row should carry a page break BEFORE itself.
+    // Done before innerHTML so we can prepend the style declaration.
+    var pageBreakBefore = false;
+    if (entry.type === 'day-divider') {
+      if (optBreakBetweenDays && lastDayLabel !== null && entry.label !== lastDayLabel) {
+        pageBreakBefore = true;
+      }
+      lastDayLabel = entry.label;
+    } else if (entry.type === 'match') {
+      if (entry.isPractice) {
+        seenPractice = true;
+      } else {
+        if (optBreakAfterPractice && seenPractice && !seenQual) {
+          pageBreakBefore = true;
+        }
+        seenQual = true;
+      }
+    }
+
     if (entry.type === 'day-divider') {
       tr.innerHTML = '<td colspan="8" style="background:' + primaryColor +
         ';color:#fff;padding:5px 10px;font-weight:700;font-size:9pt;text-transform:uppercase;letter-spacing:0.05em;-webkit-print-color-adjust:exact;print-color-adjust:exact;">' +
@@ -2480,6 +2750,17 @@ function exportPdf() {
         teamCell(entry.red[2],  entry.redSur[2],  'red');
       shown++;
     }
+
+    // Page-break injection. Both modern (`break-before:page`) and legacy
+    // (`page-break-before:always`) variants — html2canvas reads the
+    // legacy property; modern browsers honour both. Pre-existing
+    // tr.style.cssText (zebra/match-row styling) is preserved.
+    if (pageBreakBefore) {
+      var existing = tr.style.cssText;
+      tr.style.cssText = (existing ? existing + ';' : '') +
+                         'page-break-before:always;break-before:page;';
+    }
+
     tbody.appendChild(tr);
   });
 
