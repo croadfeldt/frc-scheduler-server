@@ -994,53 +994,100 @@
   <!-- API status indicator -->
   <div id="apiStatus" class="api-status" style="display:none"></div>
 
-  <!-- Event bar -->
+  <!-- Event bar — has two distinct rendered states:
+
+       1. EMPTY (no event loaded) — #eventBarEmpty visible
+          The "Option E" layout: source/year/code + Load button, with
+          alternative paths (Quick schedule, Custom PDF) as helper-text
+          links underneath. The bar reads as a single action ("load a
+          FIRST event") with escape hatches for non-FIRST cases.
+
+       2. LOADED (an event is active) — #eventBarLoaded visible
+          Shows a chip with the event's source ("FIRST event",
+          "Quick schedule", "Custom PDF") + the event name, plus a
+          quiet "Switch event…" link to return to the empty state.
+          The year/code inputs aren't shown — they only made sense
+          for the FIRST path, and showing them after a non-FIRST
+          load was misleading.
+
+       renderEventBarState() (defined below) toggles between these
+       based on _currentEventId. Call it whenever the event changes:
+       activateEvent (load), deleteEvent + reset paths (clear).      -->
   <div class="event-bar">
     <span class="event-bar-label">Event</span>
-    <div style="display:flex;align-items:center;gap:0.4rem;flex:1;min-width:0;flex-wrap:wrap;">
-      <!-- Source selector -->
-      <select id="eventSource" onchange="onEventSourceChange()"
-        style="flex-shrink:0;background:var(--bg);border:1px solid var(--border);color:var(--text-muted);
-               padding:0.35rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.78rem;
-               letter-spacing:0.04em;cursor:pointer;">
-        <option value="tba">TBA</option>
-        <option value="frc">FRC Events</option>
-      </select>
-      <input type="number" id="eventYear" placeholder="Year"
-        style="width:68px;flex-shrink:0;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
-               padding:0.4rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;"
-        onkeydown="if(event.key==='Enter')loadEventByCode()"
-        oninput="onEventYearInput()" min="2000" max="2099">
-      <div style="position:relative;flex:1;min-width:0;">
-        <input type="text" id="eventCodeInput" placeholder="Event code or name…"
-          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
-                 padding:0.4rem 0.7rem;border-radius:4px;font-family:'Barlow',sans-serif;"
+
+    <!-- Empty state ─────────────────────────────────────────────── -->
+    <div id="eventBarEmpty" style="display:flex;flex-direction:column;flex:1;min-width:0;gap:0.35rem;">
+      <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+        <select id="eventSource" onchange="onEventSourceChange()"
+          style="flex-shrink:0;background:var(--bg);border:1px solid var(--border);color:var(--text-muted);
+                 padding:0.35rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;font-size:0.78rem;
+                 letter-spacing:0.04em;cursor:pointer;">
+          <option value="tba">TBA</option>
+          <option value="frc">FRC Events</option>
+        </select>
+        <input type="number" id="eventYear" placeholder="Year"
+          style="width:68px;flex-shrink:0;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
+                 padding:0.4rem 0.5rem;border-radius:4px;font-family:'Barlow',sans-serif;"
           onkeydown="if(event.key==='Enter')loadEventByCode()"
-          oninput="onEventCodeInput()" autocomplete="off" spellcheck="false">
-        <!-- Event dropdown (shared between TBA and FRC Events) -->
-        <div id="tbaDropdown" style="display:none;position:absolute;top:calc(100% + 2px);left:0;right:0;z-index:200;
-             background:var(--surface);border:1px solid var(--accent);border-radius:4px;
-             max-height:240px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.4);">
-          <div id="tbaDropdownList" style="display:flex;flex-direction:column;"></div>
+          oninput="onEventYearInput()" min="2000" max="2099">
+        <div style="position:relative;flex:1;min-width:0;">
+          <input type="text" id="eventCodeInput" placeholder="Event code or name…"
+            style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text-strong);
+                   padding:0.4rem 0.7rem;border-radius:4px;font-family:'Barlow',sans-serif;"
+            onkeydown="if(event.key==='Enter')loadEventByCode()"
+            oninput="onEventCodeInput()" autocomplete="off" spellcheck="false">
+          <div id="tbaDropdown" style="display:none;position:absolute;top:calc(100% + 2px);left:0;right:0;z-index:200;
+               background:var(--surface);border:1px solid var(--accent);border-radius:4px;
+               max-height:240px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.4);">
+            <div id="tbaDropdownList" style="display:flex;flex-direction:column;"></div>
+          </div>
         </div>
+        <button class="btn-sm btn-accent" onclick="loadEventByCode()" id="btnLoadEvent"
+          title="Load an official FIRST event by its code or name.&#10;&#10;• Pulls schedule, teams, and results from The Blue Alliance (TBA) or FRC Events&#10;• Reliable: uses the canonical event data published by FIRST&#10;• Required for events with TBA records (most district / regional / state events)&#10;• Sets the event year and source dropdown above as needed">Load FIRST event</button>
+        <div id="eventCodeStatus" style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;"></div>
       </div>
-      <button class="btn-sm btn-accent" onclick="loadEventByCode()" id="btnLoadEvent"
-        title="Load an official FIRST event by its code or name.&#10;&#10;• Pulls schedule, teams, and results from The Blue Alliance (TBA) or FRC Events&#10;• Reliable: uses the canonical event data published by FIRST&#10;• Required for events with TBA records (most district / regional / state events)&#10;• Sets the event year and source dropdown above as needed">Load FIRST event</button>
-      <div id="eventCodeStatus" style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;"></div>
-      <button class="btn-sm" id="btnAdhoc" onclick="loadAdhocEvent()"
-        title="Start fresh — create an ad-hoc schedule without importing from anywhere.&#10;&#10;Use Load FIRST event for official events, or Import custom PDF for non-FIRST schedules.&#10;&#10;• Creates a persistent event in the database&#10;• Starts with 12 teams — add or remove via the Teams button&#10;• Generates a working schedule immediately&#10;• All schedules are saved and recallable via URL&#10;• Use Assign Teams to map real team numbers onto the schedule"
-        style="white-space:nowrap;">&#9998; Quick Schedule</button>
-      <!-- Import-from-PDF button — for arbitrary / custom schedule PDFs
-           that aren't on TBA or FRC Events. Marked BETA because the
-           LLM extraction is unreliable on tabular content. Hidden until
-           checkLlmStatus() confirms the LLM endpoint is reachable. -->
-      <button class="btn-sm" id="btnImportPdf" onclick="openPdfImportModal()"
-        title="EXPERIMENTAL — for custom or arbitrary schedule PDFs not available on TBA or FRC Events.&#10;&#10;Use Load FIRST event for official events. Use Quick Schedule to start fresh.&#10;&#10;Known limitation: the model often repeats the morning qualification block and misses afternoon/playoff times. Always review the preview carefully before applying, and edit the form afterwards if needed.&#10;&#10;• Best for MSHSL state, off-season events, anything not on TBA&#10;• Uses a self-hosted LLM to parse arbitrary table layouts&#10;• You'll review the parsed result before committing&#10;• Validates against the loaded event's roster"
-        style="display:none;white-space:nowrap;">&#128195; Import custom PDF <span style="font-size:0.55rem;font-weight:600;letter-spacing:0.05em;padding:0.05rem 0.25rem;margin-left:0.15rem;background:#b35a00;color:#fff;border-radius:2px;vertical-align:middle;">BETA</span></button>
-      <span id="llmStatusIndicator" style="display:none;font-size:0.65rem;color:var(--text-muted);white-space:nowrap;">
-        <span id="llmStatusBadge" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-muted);vertical-align:middle;margin-right:0.2rem;"></span><span id="llmStatusText">checking&hellip;</span>
-      </span>
+      <!-- Helper-text alternatives. Lives below the main bar so it
+           reads like an answer to "what if my event isn't on FIRST?"
+           rather than as a competing action. The PDF link is hidden
+           by default (display:none) and revealed by checkLlmStatus()
+           when the LLM endpoint is reachable, same as the old button. -->
+      <div id="eventBarAlternatives" style="font-size:0.72rem;color:var(--text-muted);line-height:1.4;">
+        Not on FIRST?
+        <a href="#" id="lnkAdhoc" onclick="event.preventDefault();loadAdhocEvent();"
+           style="color:var(--accent);text-decoration:none;margin-left:0.25rem;"
+           title="Start fresh — create an ad-hoc schedule with 12 placeholder teams.">Start with 12 teams</a>
+        <span id="lnkPdfSep" style="display:none;margin:0 0.4rem;color:var(--border);">·</span>
+        <a href="#" id="lnkImportPdf" onclick="event.preventDefault();openPdfImportModal();"
+           style="display:none;color:var(--accent);text-decoration:none;"
+           title="EXPERIMENTAL — for custom or arbitrary schedule PDFs not available on TBA or FRC Events.&#10;&#10;Known limitation: the model often repeats the morning qualification block and misses afternoon/playoff times. Always review the preview carefully before applying.">Import a PDF</a>
+        <span id="lnkPdfBadge" style="display:none;font-size:0.55rem;font-weight:600;letter-spacing:0.05em;padding:0.05rem 0.3rem;margin-left:0.2rem;background:#b35a00;color:#fff;border-radius:2px;vertical-align:1px;">BETA</span>
+        <span id="llmStatusIndicator" style="display:none;font-size:0.65rem;color:var(--text-muted);white-space:nowrap;margin-left:0.5rem;">
+          <span id="llmStatusBadge" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-muted);vertical-align:middle;margin-right:0.2rem;"></span><span id="llmStatusText">checking&hellip;</span>
+        </span>
+      </div>
     </div>
+
+    <!-- Loaded state ────────────────────────────────────────────── -->
+    <div id="eventBarLoaded" style="display:none;flex:1;min-width:0;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+      <!-- Source chip — small pill that says where this event came
+           from. Color/label set by renderEventBarState() based on
+           _currentEventInfo. -->
+      <span id="eventSourceChip"
+        style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.2rem 0.55rem;
+               border-radius:3px;font-size:0.65rem;font-weight:600;letter-spacing:0.05em;
+               text-transform:uppercase;background:var(--accent);color:#fff;flex-shrink:0;"></span>
+      <!-- Event name + year -->
+      <span id="eventLoadedName"
+        style="font-size:0.88rem;font-weight:600;color:var(--text-strong);min-width:0;
+               overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+      <span id="eventLoadedMeta"
+        style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap;"></span>
+      <a href="#" id="lnkSwitchEvent" onclick="event.preventDefault();switchEvent();"
+         style="font-size:0.72rem;color:var(--accent);text-decoration:none;margin-left:auto;flex-shrink:0;"
+         title="Clear the current event and pick a different starting point.">&laquo; Switch event</a>
+    </div>
+
     <div class="event-bar-actions" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
       <div style="height:1.5rem;width:1px;background:var(--border);flex-shrink:0;" class="event-bar-divider"></div>
       <select class="event-select" id="eventSelect" onchange="onEventSelectChange()"
@@ -1695,42 +1742,55 @@ async function loadSchedulerDefaults() {
 let LLM_AVAILABLE = false;
 
 async function checkLlmStatus() {
-  const btn       = document.getElementById('btnImportPdf');
+  // The PDF-import link sits in the empty-state helper text under the
+  // event bar (#eventBarAlternatives). It's hidden by default and we
+  // reveal it here only when an LLM endpoint is reachable. Three
+  // elements move together: the link, the BETA badge next to it, and
+  // the "·" separator between the Quick-schedule link and this one.
+  const link    = document.getElementById('lnkImportPdf');
+  const badgeE  = document.getElementById('lnkPdfBadge');     // BETA pill
+  const sep     = document.getElementById('lnkPdfSep');       // "·" separator
   const indicator = document.getElementById('llmStatusIndicator');
-  const badge     = document.getElementById('llmStatusBadge');
-  const text      = document.getElementById('llmStatusText');
-  if (!btn) return;
+  const badge    = document.getElementById('llmStatusBadge');  // LLM-status dot
+  const text     = document.getElementById('llmStatusText');
+  if (!link) return;
+
+  function hideAll() {
+    link.style.display    = 'none';
+    badgeE.style.display  = 'none';
+    sep.style.display     = 'none';
+    if (indicator) indicator.style.display = 'none';
+    LLM_AVAILABLE = false;
+  }
+
   try {
     const r = await fetch(API + '/api/llm/status');
-    if (!r.ok) {
-      btn.style.display       = 'none';
-      indicator.style.display = 'none';
-      LLM_AVAILABLE = false;
-      return;
-    }
+    if (!r.ok)             { hideAll(); return; }
     const d = await r.json();
-    if (!d.configured) {
-      btn.style.display       = 'none';
-      indicator.style.display = 'none';
-      LLM_AVAILABLE = false;
-      return;
-    }
-    btn.style.display       = '';
-    indicator.style.display = '';
+    if (!d.configured)     { hideAll(); return; }
+
+    // LLM is configured — reveal the import link + BETA + status dot.
+    link.style.display   = '';
+    badgeE.style.display = '';
+    sep.style.display    = '';
+    if (indicator) indicator.style.display = '';
     LLM_AVAILABLE = !!d.available;
     if (d.available) {
-      badge.style.background = 'var(--accent3, #2ea043)';
-      text.textContent = 'LLM ready';
-      btn.disabled = false;
+      if (badge) badge.style.background = 'var(--accent3, #2ea043)';
+      if (text)  text.textContent       = 'LLM ready';
+      link.style.pointerEvents = '';
+      link.style.opacity       = '';
     } else {
-      badge.style.background = 'var(--amber, #c8992a)';
-      text.textContent = 'LLM unreachable';
-      btn.disabled = true;
+      if (badge) badge.style.background = 'var(--amber, #c8992a)';
+      if (text)  text.textContent       = 'LLM unreachable';
+      // Visually disable but keep present so the user sees what's
+      // available when the endpoint comes back. Clicks are no-op'd
+      // via pointer-events.
+      link.style.pointerEvents = 'none';
+      link.style.opacity       = '0.5';
     }
   } catch (e) {
-    btn.style.display       = 'none';
-    indicator.style.display = 'none';
-    LLM_AVAILABLE = false;
+    hideAll();
   }
 }
 
@@ -3870,14 +3930,15 @@ async function autoRunFromUrl() {
         document.getElementById('btnManageTeams').disabled    = false;
         document.getElementById('btnSavedSchedules').disabled = false;
         document.getElementById('btnDeleteEvent').disabled    = false;
-        var adhocBtn3 = document.getElementById('btnAdhoc');
-        if (adhocBtn3) adhocBtn3.style.display = 'none';
         try {
           const evResp = await apiFetch('/api/events/' + adResp.event_id);
+          _currentEventInfo = { id: evResp.id, key: evResp.key || '', name: evResp.name || '', year: evResp.year || '' };
           var codeInp = document.getElementById('eventCodeInput');
           if (codeInp) { codeInp.value = evResp.key || ''; codeInp.className = 'valid'; }
           var codeStat = document.getElementById('eventCodeStatus');
           if (codeStat) codeStat.textContent = evResp.name ? evResp.name + ' (' + evResp.year + ')' : '';
+          // Swap the event bar to loaded state with the chip + name.
+          if (typeof renderEventBarState === 'function') renderEventBarState('loaded', evResp);
           // Add to recent events dropdown
           var sel = document.getElementById('eventSelect');
           if (sel && ![...sel.options].some(function(o){ return o.value == evResp.id; })) {
@@ -3919,14 +3980,15 @@ async function autoRunFromUrl() {
         document.getElementById('btnManageTeams').disabled    = false;
         document.getElementById('btnSavedSchedules').disabled = false;
         document.getElementById('btnDeleteEvent').disabled    = false;
-        var adhocBtn4 = document.getElementById('btnAdhoc');
-        if (adhocBtn4) adhocBtn4.style.display = 'none';
         try {
           const evResp2 = await apiFetch('/api/events/' + absResp.event_id);
+          _currentEventInfo = { id: evResp2.id, key: evResp2.key || '', name: evResp2.name || '', year: evResp2.year || '' };
           var codeInp2 = document.getElementById('eventCodeInput');
           if (codeInp2) { codeInp2.value = evResp2.key || ''; codeInp2.className = 'valid'; }
           var codeStat2 = document.getElementById('eventCodeStatus');
           if (codeStat2) codeStat2.textContent = evResp2.name ? evResp2.name + ' (' + evResp2.year + ')' : '';
+          // Swap the event bar to loaded state.
+          if (typeof renderEventBarState === 'function') renderEventBarState('loaded', evResp2);
           var sel2 = document.getElementById('eventSelect');
           if (sel2 && ![...sel2.options].some(function(o){ return o.value == evResp2.id; })) {
             var opt2 = document.createElement('option');
@@ -4102,8 +4164,8 @@ function fullReset() {
   if (eventSel) eventSel.value = '';
   document.getElementById('btnManageTeams').disabled  = true;
   document.getElementById('btnDeleteEvent').disabled  = true;
-  var adhocBtn = document.getElementById('btnAdhoc');
-  if (adhocBtn) adhocBtn.style.display = '';
+  // Swap the event bar back to empty state — input row visible, chip hidden.
+  if (typeof renderEventBarState === 'function') renderEventBarState('empty');
   updateWorkflowSteps(1);  // back to step 1
 
   showApiStatus('Reset complete \u2014 ready to build a new schedule');
@@ -7026,6 +7088,105 @@ document.addEventListener('DOMContentLoaded', function() {
   if (typeof checkLlmStatus === 'function') checkLlmStatus();
 });
 
+// ─────────────────────────────────────────────────────────────────────
+// Event-bar state machine
+//
+// The event bar has two distinct rendered states (#eventBarEmpty and
+// #eventBarLoaded). Toggle between them by calling renderEventBarState
+// whenever the event changes.
+//
+//   renderEventBarState('empty')               — no event loaded
+//   renderEventBarState('loaded', ev)          — show source chip + name
+//
+// Source-of-event is inferred from ev.key:
+//   key === 'adhoc'                  → "QUICK" chip (gray)
+//   key === '' or starts with 'pdf-' → "CUSTOM PDF" chip (amber, BETA)
+//   otherwise                        → "FIRST" chip (accent)
+//
+// We don't (yet) track explicitly whether an event was imported from a
+// PDF — for now anything with a real key counts as FIRST. When PDF
+// imports get a distinct event key prefix, we'll match on that.
+// ─────────────────────────────────────────────────────────────────────
+function renderEventBarState(mode, ev) {
+  var empty  = document.getElementById('eventBarEmpty');
+  var loaded = document.getElementById('eventBarLoaded');
+  if (!empty || !loaded) return;
+
+  if (mode === 'empty') {
+    empty.style.display  = 'flex';
+    loaded.style.display = 'none';
+    return;
+  }
+
+  // mode === 'loaded'
+  empty.style.display  = 'none';
+  loaded.style.display = 'flex';
+
+  var chip      = document.getElementById('eventSourceChip');
+  var nameEl    = document.getElementById('eventLoadedName');
+  var metaEl    = document.getElementById('eventLoadedMeta');
+  if (!chip || !nameEl || !metaEl) return;
+
+  var key  = (ev && ev.key)  || '';
+  var name = (ev && ev.name) || '(unnamed event)';
+  var year = (ev && ev.year) || '';
+
+  // Tooltip on the chip explains what this source means; click on
+  // chip is a no-op (informational). The "Switch event" link beside
+  // it is the action.
+  if (key === 'adhoc') {
+    chip.textContent       = 'Quick';
+    chip.title             = 'Started fresh — no import. Use Teams to add real team numbers.';
+    chip.style.background  = 'var(--text-muted)';
+    chip.style.color       = '#fff';
+  } else if (!key || key.indexOf('pdf-') === 0) {
+    // Reserve 'pdf-' prefix for future use when PDF-imported events
+    // get their own keys. For now, an empty key fallback is treated
+    // as a custom event too.
+    chip.innerHTML         = 'Custom PDF <span style="margin-left:0.25rem;padding:0.05rem 0.3rem;background:#fff;color:#b35a00;border-radius:2px;font-size:0.55rem;font-weight:700;letter-spacing:0.05em;">BETA</span>';
+    chip.title             = 'EXPERIMENTAL — imported from a custom PDF. Verify the schedule before using it for a real event.';
+    chip.style.background  = '#b35a00';
+    chip.style.color       = '#fff';
+  } else {
+    chip.textContent       = 'FIRST';
+    chip.title             = 'Loaded from The Blue Alliance or FRC Events. ' + (key ? 'Key: ' + key : '');
+    chip.style.background  = 'var(--accent)';
+    chip.style.color       = '#fff';
+  }
+
+  nameEl.textContent = name;
+  metaEl.textContent = year ? ('· ' + year + (key && key !== 'adhoc' ? ' · ' + key : '')) : '';
+}
+
+// Clear the loaded event and return to the empty/picker state.
+// Triggered by the "Switch event" link in the loaded chip.
+function switchEvent() {
+  // Don't blow away the user's work — just unload the event so they
+  // can pick a new one. Schedule data + form fields stay where they
+  // are; loading a new event will overwrite them as today.
+  _currentEventId   = null;
+  _currentEventInfo = null;
+
+  var codeInput = document.getElementById('eventCodeInput');
+  if (codeInput) {
+    codeInput.value = '';
+    codeInput.classList.remove('valid');
+    codeInput.classList.remove('invalid');
+  }
+  var codeStatus = document.getElementById('eventCodeStatus');
+  if (codeStatus) codeStatus.textContent = '';
+  var eventSel = document.getElementById('eventSelect');
+  if (eventSel) eventSel.value = '';
+
+  document.getElementById('btnManageTeams').disabled    = true;
+  document.getElementById('btnSavedSchedules').disabled = true;
+  document.getElementById('btnDeleteEvent').disabled    = true;
+
+  renderEventBarState('empty');
+  // Focus the event-code input so keyboard users can keep typing.
+  if (codeInput) codeInput.focus();
+}
+
 // Set the active event in UI state
 async function activateEvent(ev) {
   _currentEventId = ev.id;
@@ -7057,8 +7218,11 @@ async function activateEvent(ev) {
   document.getElementById('btnManageTeams').disabled    = false;
   document.getElementById('btnSavedSchedules').disabled = false;
   document.getElementById('btnDeleteEvent').disabled    = false;
-  var adhocBtn = document.getElementById('btnAdhoc');
-  if (adhocBtn) adhocBtn.style.display = 'none';
+
+  // Swap the event bar from the empty-state input row to the loaded
+  // chip + name row. Source of the loaded event ('first' / 'adhoc' /
+  // 'pdf') is inferred from ev.key — see renderEventBarState() above.
+  renderEventBarState('loaded', ev);
 
   // Build overlay step list based on which auto flags are on — BEFORE any async work.
   var isAdhoc = (ev.key === 'adhoc');
@@ -7155,6 +7319,7 @@ async function deleteEvent() {
   try {
     await apiFetch('/api/events/' + _currentEventId, { method: 'DELETE' });
     _currentEventId = null;
+    _currentEventInfo = null;
     showApiStatus('Event deleted');
     await loadEvents();
     document.getElementById('eventSelect').value = '';
@@ -7162,11 +7327,11 @@ async function deleteEvent() {
     document.getElementById('eventCodeInput').className = '';
     document.getElementById('eventCodeStatus').textContent = '';
     document.getElementById('btnManageTeams').disabled    = true;
-  var adhocBtn2 = document.getElementById('btnAdhoc');
-  if (adhocBtn2) adhocBtn2.style.display = '';
     document.getElementById('btnSavedSchedules').disabled = true;
     document.getElementById('btnDeleteEvent').disabled    = true;
     document.getElementById('numTeams').disabled          = false;
+    // Swap event bar back to empty state.
+    if (typeof renderEventBarState === 'function') renderEventBarState('empty');
   } catch(e) { showApiStatus(e.message, true); }
 }
 
