@@ -20,15 +20,15 @@ for both text-only prompts (day-plan extraction, schedule parsing from
 extracted text) AND image prompts (vision strategy when text extraction
 fails). One endpoint, one health check, one config block.
 
-Sampling: temperature=0.1, top_p=0.9, repetition_penalty=1.1. We used to
-run pure greedy (temperature=0) but it interacted badly with grammar-
-constrained decoding on small models: the constrained sampler would
-lock into repetition loops on tabular PDF inputs and emit the same
-valid-but-redundant block until hitting max_tokens. Low-temp sampling
-plus a mild repetition penalty fixes this while keeping output ~stable
-across runs. Response is required to be strict JSON; we parse with
-tolerance for common minor format issues (markdown code fences,
-leading prose).
+Sampling: pure greedy by default (temperature=0, top_p=1.0, no
+repetition penalty). We rely on tight JSON Schema constraints (enum
+on `kind`, regex pattern on time fields) to prevent the model from
+emitting garbage even on confusing tabular inputs. The dedup pass in
+pdf_dayplan handles the harmless case where greedy decoding produces
+duplicate-but-valid blocks. All three sampler knobs are env-tunable
+(LLM_TEMPERATURE, LLM_TOP_P, LLM_REPETITION_PENALTY) for live tuning.
+Response is required to be strict JSON; we parse with tolerance for
+common minor format issues (markdown code fences, leading prose).
 """
 from __future__ import annotations
 
@@ -77,8 +77,16 @@ LLM_TIMEOUT_SECONDS = 180.0
 
 # Sampling knobs — tunable via env so bisecting causes of weird LLM
 # behaviour (repetition loops, request rejections, malformed output)
-# doesn't require a code change + redeploy. Defaults are the values
-# we converged on for Qwen2.5-VL-7B-AWQ on tabular day-plan PDFs.
+# doesn't require a code change + redeploy.
+#
+# Defaults are pure greedy decoding (temperature=0, top_p=1.0, no
+# repetition penalty). We tried temperature=0.1 + repetition_penalty=1.1
+# to break repetition loops, but combined with a permissive schema this
+# pushed the model into producing NON-repeating garbage (kind="20",
+# times like "20:0") instead of the valid duplicate blocks the dedup
+# pass already handles cleanly. Tightening the schema with enum +
+# pattern constraints is the right knob for "must be valid"; greedy
+# sampling + dedup is the right knob for "don't repeat".
 def _envf(name: str, default: float) -> float:
     """Read a float env var, returning default on missing/empty/invalid."""
     raw = os.getenv(name, "").strip()
@@ -89,11 +97,11 @@ def _envf(name: str, default: float) -> float:
     except ValueError:
         return default
 
-LLM_TEMPERATURE        = _envf("LLM_TEMPERATURE",        0.1)
-LLM_TOP_P              = _envf("LLM_TOP_P",              0.9)
-# Set LLM_REPETITION_PENALTY=1.0 (or unset) to disable. vLLM honours this
+LLM_TEMPERATURE        = _envf("LLM_TEMPERATURE",        0.0)
+LLM_TOP_P              = _envf("LLM_TOP_P",              1.0)
+# 1.0 = no penalty (omitted from request body). vLLM honours this
 # OpenAI-extension parameter; some other backends may reject it.
-LLM_REPETITION_PENALTY = _envf("LLM_REPETITION_PENALTY", 1.1)
+LLM_REPETITION_PENALTY = _envf("LLM_REPETITION_PENALTY", 1.0)
 
 
 def is_configured() -> bool:
@@ -356,15 +364,38 @@ DAYPLAN_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "kind":      {"type": "string"},
+                    # ENUM is critical here. Without it, the model can
+                    # emit any string for kind ("20", "abc", "Saturday",
+                    # gibberish) and the schema accepts it. With small
+                    # models on tabular inputs and any non-greedy
+                    # sampling, the kind field is the most common
+                    # source of garbage. xgrammar enforces enum at
+                    # decode time — the model literally cannot pick
+                    # an invalid token.
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "practice", "qual", "lunch", "break",
+                            "ceremony", "playoff",
+                        ],
+                    },
                     "day_index": {"type": "integer"},
-                    # HH:MM 24-hour format, or empty string when the PDF
-                    # gives only a start time (e.g. "Playoffs Begin 4:00 PM"
-                    # has no end). Adapter handles "" the same as missing.
-                    "start":     {"type": "string"},
-                    "end":       {"type": "string"},
-                    "label":     {"type": "string"},
-                    "details":   {"type": "string"},
+                    # HH:MM 24-hour format, OR empty string when the PDF
+                    # gives only a start time (e.g. "Playoffs Begin
+                    # 4:00 PM" has no end). Pattern enforces the
+                    # format at decode time so the model can't emit
+                    # "20:0" or "8 AM" or other almost-valid garbage.
+                    # Adapter handles "" the same as missing.
+                    "start": {
+                        "type": "string",
+                        "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$|^$",
+                    },
+                    "end": {
+                        "type": "string",
+                        "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$|^$",
+                    },
+                    "label":   {"type": "string"},
+                    "details": {"type": "string"},
                 },
                 "required": ["kind", "day_index"],
             },
@@ -409,22 +440,20 @@ async def _post(messages: list[dict[str, Any]], *,
         "model":       LLM_MODEL,
         "messages":    messages,
         "max_tokens":  max_tokens,
-        # Low temperature instead of pure greedy (temperature=0).
-        # Pure greedy + grammar-constrained decoding causes small models
-        # to lock into repetition loops on tabular inputs: when the same
-        # string is the highest-probability completion under the grammar
-        # at multiple positions, the model emits it over and over until
-        # max_tokens is hit. Adding a small amount of randomness lets
-        # the sampler escape these loops while keeping output ~stable
-        # across runs. Tunable via LLM_TEMPERATURE / LLM_TOP_P.
+        # Greedy decoding by default. We rely on tight schema constraints
+        # (enum on kind, regex pattern on times) to prevent the model
+        # from emitting garbage values, and on the dedup pass in
+        # pdf_dayplan to handle the case where greedy decoding produces
+        # duplicate-but-valid blocks. Tunable via LLM_TEMPERATURE /
+        # LLM_TOP_P env vars.
         "temperature": LLM_TEMPERATURE,
         "top_p":       LLM_TOP_P,
     }
     # Only include repetition_penalty if it's actually penalizing.
-    # 1.0 = no penalty; vLLM accepts it as an OpenAI extension but other
-    # OpenAI-compatible servers may reject it. Set
-    # LLM_REPETITION_PENALTY=1.0 to omit entirely if it ever causes
-    # request-level issues.
+    # 1.0 = no penalty; vLLM accepts it as an OpenAI extension but
+    # other backends may reject it. Off by default — turning it on
+    # without tightening the schema first pushes the model into
+    # NON-repeating garbage output.
     if abs(LLM_REPETITION_PENALTY - 1.0) > 0.001:
         body["repetition_penalty"] = LLM_REPETITION_PENALTY
     if json_schema is not None:
