@@ -3127,23 +3127,39 @@ async function loadDiversityReport(scheduleId) {
   const card = document.getElementById('diversityReportCard');
   if (!card) return;
   if (!scheduleId) {
+    // Truly no schedule context — hide the card. (Reset path also
+    // hits this, intentionally.)
     card.style.display = 'none';
     card.innerHTML = '';
     return;
   }
+  // The card may already be rendered from _finishGenerationInner
+  // with client-side data (B2B / Surrogates / basic facts). Don't
+  // wipe it with a "Loading…" placeholder — that flickered before
+  // and, worse, left the card blank if the fetch failed. Instead,
+  // fetch silently and re-render only on success. On failure the
+  // existing client-side render stays put.
   card.style.display = 'block';
-  card.innerHTML = '<div style="padding:1rem;color:var(--text-muted);text-align:center;">Loading diversity report…</div>';
   try {
     const r = await fetch(API + '/api/abstract-schedules/' + scheduleId + '/diversity-report');
     if (!r.ok) {
-      card.innerHTML = '<div style="padding:1rem;color:var(--text-muted);">Diversity report unavailable.</div>';
+      // 404 / 500 / etc. The card already shows client-side tiles;
+      // leaving it alone is the right call. We log so a developer
+      // sees the failure in the console without users seeing a
+      // half-blank card.
+      console.warn('Diversity report fetch returned HTTP', r.status);
       return;
     }
     const d = await r.json();
-    renderDiversityReport(card, d);
+    // Re-render via renderDiversityCard so the headline tiles get
+    // the richer server-side detail (avg partner/opponent, station
+    // imbalance specifics) AND the histogram/issues sections appear.
+    // The function stashes d on window._latestDiversityData so
+    // subsequent updateB2BStat calls keep the server data visible.
+    renderDiversityCard(card, d);
   } catch (e) {
     console.warn('Diversity report fetch failed:', e);
-    card.innerHTML = '<div style="padding:1rem;color:var(--text-muted);">Diversity report failed to load.</div>';
+    // Same logic — leave whatever client-side render exists.
   }
 }
 
@@ -4488,10 +4504,17 @@ function applyDayConfigToUI(dc) {
       if (day.start) row.querySelector('.day-start').value = day.start;
       if (day.end)   row.querySelector('.day-end').value   = day.end;
 
-      // Restore breaks
-      if (day.breaks && day.breaks.length) {
+      // Restore breaks. Reset the breaks-list UNCONDITIONALLY when
+      // the saved day has a `breaks` field — even if it's empty.
+      // Without this, a schedule saved with zero breaks ends up
+      // showing the default lunch break that buildDaysUI() adds at
+      // line ~3715 ("addBreak('12:00','13:00','Lunch')"). Treating
+      // missing-vs-empty differently was the bug: missing means "no
+      // saved data, leave defaults"; empty means "user removed all
+      // breaks, persist that state".
+      if (day.breaks !== undefined) {
         row.querySelector('.breaks-list').innerHTML = '';
-        day.breaks.forEach(function(b) {
+        (day.breaks || []).forEach(function(b) {
           addBreak(row.querySelector('.btn-add-break'), b.start, b.end, b.name);
         });
       }
@@ -4499,11 +4522,17 @@ function applyDayConfigToUI(dc) {
       // Restore day break
       if (day.earlyEnd != null) addDayEarlyEnd(row, day.earlyEnd);
 
-      // Restore per-day cycle changes (skip the isStart/start-of-day row — buildDaysUI adds it)
-      if (day.cycleChanges) {
-        // Clear any existing non-start cc rows first to prevent duplication on re-apply
+      // Restore per-day cycle changes. Reset the non-start rows
+      // UNCONDITIONALLY when the saved day has a cycleChanges
+      // field (mirrors the breaks logic above): the user might
+      // have legitimately saved zero cycle changes, which should
+      // round-trip as zero rather than picking up whatever rows
+      // exist in the UI from a prior schedule.
+      if (day.cycleChanges !== undefined) {
+        // Clear any existing non-start cc rows first to prevent
+        // duplication on re-apply / cross-schedule loads.
         Array.from(row.querySelectorAll('.day-cc-row[data-is-start="0"]')).forEach(function(r) { r.remove(); });
-        day.cycleChanges.forEach(function(cc) {
+        (day.cycleChanges || []).forEach(function(cc) {
           if (!cc.isStart && !isNaN(cc.afterMatch) && cc.afterMatch >= 1) {
             addDayCycleChange(row, cc.afterMatch, cc.time, false);
           } else if (cc.isStart) {
@@ -4709,16 +4738,10 @@ async function autoRunFromUrl() {
       _currentSeed       = absResp.seed || null;
       _currentAssignSeed = adResp.assign_seed || null;
       _currentSlotMap    = adResp.slot_map || null;
-      _abstractParams    = { numTeams: absResp.num_teams, matchesPerTeam: absResp.matches_per_team, cooldown: absResp.cooldown };
-      // Sync form fields to the abstract's parameters so any later
-      // generateSchedule() call (e.g. from a stray param-change handler)
-      // doesn't see stale form values that disagree with the loaded
-      // schedule. URL params should already match these, but it's a
-      // belt-and-suspenders sync.
-      var ntInp  = document.getElementById('numTeams');
-      var mptInp = document.getElementById('matchesPerTeam');
-      if (ntInp  && absResp.num_teams)        ntInp.value  = absResp.num_teams;
-      if (mptInp && absResp.matches_per_team) mptInp.value = absResp.matches_per_team;
+      // Form-field sync (numTeams/mpt/cooldown/cycleTime/breakBuffer)
+      // and applyDayConfigToUI happen inside loadAssignedSchedule
+      // now — see _syncBasicParamsFromSchedule + _syncCycleTimeFromDayConfig.
+      // Doing them here too would just be redundant work.
       updateSeedDisplay(_currentSeed, _currentAssignSeed);
       updateUrlFromState();
       // Restore event UI state (code input + status label + event select)
@@ -5523,19 +5546,113 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
 }
 
 function renderAgendaBlocks() {
-  // PDF qual blocks are listed in the agenda panel header area only.
-  // The visual bars are now generated from the actual schedule by renderScheduleBars().
+  // No-schedule fallback for the agenda fit panel. Three cases:
+  //   1) PDF was imported — `_agendaBlocks` has data; render those
+  //      as text-only summary rows (legacy behavior).
+  //   2) No PDF, but day-config form fields are populated — synthesize
+  //      one bar per day window so the user can see their schedule
+  //      structure visually before generating.
+  //   3) Nothing configured — empty container.
+  // Practice day is treated as another day (color = green via dayColor).
   var el = document.getElementById('agendaFitBlocks');
-  if (!_agendaBlocks || !_agendaBlocks.length) { el.innerHTML = ''; return; }
-  el.innerHTML = _agendaBlocks.map(function(b) {
-    return '<div class="agenda-block-row">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-        '<span style="font-weight:600;font-size:0.78rem;color:var(--accent2);">' + b.day + '</span>' +
-        '<span style="color:var(--text-muted);font-size:0.72rem;">' +
-          fmtTime12(b.start) + '\u2013' + fmtTime12(b.end) + ' \u00b7 ' + b.duration + ' min' +
-        '</span>' +
-      '</div>' +
-    '</div>';
+  if (!el) return;
+
+  // Case 1: PDF agenda blocks present — preserve legacy text rendering.
+  if (_agendaBlocks && _agendaBlocks.length) {
+    el.innerHTML = _agendaBlocks.map(function(b) {
+      return '<div class="agenda-block-row">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<span style="font-weight:600;font-size:0.78rem;color:var(--accent2);">' + b.day + '</span>' +
+          '<span style="color:var(--text-muted);font-size:0.72rem;">' +
+            fmtTime12(b.start) + '\u2013' + fmtTime12(b.end) + ' \u00b7 ' + b.duration + ' min' +
+          '</span>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+    return;
+  }
+
+  // Case 2 + 3: synthesize from day-config form fields. Read day rows
+  // (start/end/breaks) and emit one timeline-style bar per day. Same
+  // visual treatment as renderScheduleBars but with empty fill since
+  // there's no committed schedule yet — the bar shows the day window
+  // and any breaks as ticks.
+  function dayColor(n) {
+    if (n === 0) return "#5daf78";
+    return _DAY_COLORS[(n - 1) % _DAY_COLORS.length];
+  }
+  var sections = [];
+  // Practice day first (when enabled), then qual days.
+  var pCb = document.getElementById('practiceDayEnabled');
+  if (pCb && pCb.checked) {
+    var pStart = timeStrToMin(document.getElementById('practiceStart').value);
+    var pEnd   = timeStrToMin(document.getElementById('practiceEnd').value);
+    if (pEnd > pStart) {
+      var pBreaks = Array.from(document.querySelectorAll('#pdayBreaksList .pday-break-row')).map(function(r) {
+        return {
+          start: timeStrToMin(r.querySelector('.break-start').value),
+          end:   timeStrToMin(r.querySelector('.break-end').value),
+          name:  r.querySelector('.break-name').value || 'Break',
+        };
+      }).filter(function(b) { return b.end > b.start; });
+      sections.push({ dayNum: 0, label: 'Practice', start: pStart, end: pEnd, breaks: pBreaks });
+    }
+  }
+  var dayRows = document.querySelectorAll('.day-row');
+  dayRows.forEach(function(row, i) {
+    var s = timeStrToMin(row.querySelector('.day-start').value);
+    var e = timeStrToMin(row.querySelector('.day-end').value);
+    if (e <= s) return;
+    var brks = Array.from(row.querySelectorAll('.break-row')).map(function(br) {
+      return {
+        start: timeStrToMin(br.querySelector('.break-start').value),
+        end:   timeStrToMin(br.querySelector('.break-end').value),
+        name:  br.querySelector('.break-name').value || 'Break',
+      };
+    }).filter(function(b) { return b.end > b.start; });
+    sections.push({ dayNum: i + 1, label: 'Day ' + (i + 1), start: s, end: e, breaks: brks });
+  });
+
+  if (!sections.length) { el.innerHTML = ''; return; }
+
+  el.innerHTML = sections.map(function(s) {
+    var dur = s.end - s.start;
+    // Available = day window minus break overlaps.
+    var brkMin = s.breaks.reduce(function(sum, b) {
+      var ov = Math.max(0, Math.min(s.end, b.end) - Math.max(s.start, b.start));
+      return sum + ov;
+    }, 0);
+    var avail = dur - brkMin;
+    var dc = dayColor(s.dayNum);
+    // Render small ticks for breaks > AGENDA_BREAK_THRESHOLD inside
+    // the bar (matching the schedule-based bars). Position is the
+    // break's % offset from day start.
+    var ticksHtml = s.breaks.filter(function(b) {
+      return (b.end - b.start) > AGENDA_BREAK_THRESHOLD;
+    }).map(function(b) {
+      var pos = dur > 0 ? ((b.start - s.start) / dur * 100) : 0;
+      var bDur = Math.round(b.end - b.start);
+      return '<div title="' + (b.name || 'Break') + ' (' + bDur + '\u202fmin)" '
+           + 'style="position:absolute;top:0;bottom:0;left:' + pos.toFixed(1) + '%;'
+           + 'width:2px;background:rgba(255,255,255,0.4);pointer-events:auto;cursor:default;"></div>';
+    }).join('');
+    var label = s.label + ' \u00b7 ' + Math.round(avail) + '\u202fmin available'
+              + (s.breaks.length ? ' \u00b7 ' + s.breaks.length + ' break' + (s.breaks.length !== 1 ? 's' : '') : '');
+    return '<div class="agenda-block-row">'
+         +   '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.25rem;">'
+         +     '<span style="font-weight:600;font-size:0.78rem;color:' + dc + ';">' + s.label + '</span>'
+         +     '<span style="font-size:0.68rem;color:var(--text-muted);">'
+         +       fmtTime12(s.start) + '\u2013' + fmtTime12(s.end)
+         +     '</span>'
+         +     '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(avail) + '\u202fmin avail</span>'
+         +   '</div>'
+         +   '<div class="agenda-timeline-bar" style="position:relative;border-color:' + dc + ';background:' + dc + '22;">'
+         +     ticksHtml
+         +     '<div style="position:absolute;left:0.6rem;top:0;bottom:0;display:flex;align-items:center;font-size:0.68rem;color:var(--text-muted);font-style:italic;">'
+         +       label + ' \u00b7 not yet scheduled'
+         +     '</div>'
+         +   '</div>'
+         + '</div>';
   }).join('');
 }
 
@@ -9302,6 +9419,58 @@ async function assignTeams() {
 }
 
 // Load and display an assigned schedule (Stage 2 result)
+// ─────────────────────────────────────────────────────────────────────
+// Schedule load helpers
+//
+// Both URL-restore and Saved-Schedules-modal-load funnel through
+// loadAssignedSchedule(). For state to be consistent after load, we
+// MUST restore three things together:
+//   1. Basic form fields (numTeams, matchesPerTeam, cooldown,
+//      cycleTime, breakBuffer) from the schedule record itself
+//   2. Day config (numDays, day rows, breaks, cycle changes,
+//      practice day) via applyDayConfigToUI
+//   3. Server-side diversity report so Schedule Quality renders
+//      with full data, not just client-side tiles
+//
+// Previously these were scattered across 6 different load paths
+// with various subsets called — leading to "loaded a schedule but
+// the form shows old values, my cycle changes are missing, the
+// quality card is half-blank." The single call site below covers
+// every load path that goes through loadAssignedSchedule.
+// ─────────────────────────────────────────────────────────────────────
+
+function _syncBasicParamsFromSchedule(sched) {
+  // sched: response from /api/assigned-schedules/{id} (contains
+  // num_teams, matches_per_team, cooldown from the underlying
+  // abstract). Also valid for /api/abstract-schedules/{id}.
+  if (!sched) return;
+  var nt  = document.getElementById('numTeams');
+  var mpt = document.getElementById('matchesPerTeam');
+  var cd  = document.getElementById('cooldown');
+  if (nt  && sched.num_teams        != null) nt.value  = sched.num_teams;
+  if (mpt && sched.matches_per_team != null) mpt.value = sched.matches_per_team;
+  if (cd  && sched.cooldown         != null) cd.value  = sched.cooldown;
+  // Track loaded params so onParamChanged can detect structural drift
+  // and warn the user before stale parameters get re-saved.
+  if (sched.num_teams != null) {
+    _abstractParams = {
+      numTeams: sched.num_teams,
+      matchesPerTeam: sched.matches_per_team,
+      cooldown: sched.cooldown,
+    };
+  }
+}
+
+function _syncCycleTimeFromDayConfig(dc) {
+  // Top-level cycleTime + breakBuffer come from day_config (not
+  // the schedule record itself), so they need a separate sync
+  // step. Called immediately before applyDayConfigToUI which
+  // handles day rows etc.
+  if (!dc) return;
+  if (dc.cycleTime   != null) document.getElementById('cycleTime').value   = dc.cycleTime;
+  if (dc.breakBuffer != null) document.getElementById('breakBuffer').value = dc.breakBuffer;
+}
+
 async function loadAssignedSchedule(scheduleId, dayConfig) {
   window._frcAbstractMode  = false; // real team numbers are now available
   window._frcShowFakeTeams = false;
@@ -9312,10 +9481,23 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
   try {
     const sched = await apiFetch('/api/assigned-schedules/' + scheduleId);
     _currentAssignedScheduleId = scheduleId;
+    _currentAbstractScheduleId = sched.abstract_schedule_id;
     _currentSlotMap = sched.slot_map || null;
     _currentSeed = sched.seed || _currentSeed;
     _currentAssignSeed = sched.assign_seed || null;
     updateSeedDisplay(_currentSeed, _currentAssignSeed);
+
+    // ── Restore UI state to match the loaded schedule ───────────
+    // (Done BEFORE finishGeneration so it reads consistent values
+    // from the form rather than stale ones from a previous load.)
+    var effectiveDayConfig = dayConfig || sched.day_config;
+    _syncBasicParamsFromSchedule(sched);
+    _syncCycleTimeFromDayConfig(effectiveDayConfig);
+    if (effectiveDayConfig && typeof applyDayConfigToUI === 'function') {
+      try { applyDayConfigToUI(effectiveDayConfig); }
+      catch(e) { console.warn('applyDayConfigToUI failed during load:', e); }
+    }
+
     const matches = sched.matches.map(function(m) {
       return {
         red:           m.red,
@@ -9329,7 +9511,18 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
     );
     window._frcAbstractMode = false;
     finishGeneration(matches, roundBoundaries, sched.surrogate_count,
-      0, 0, dayConfig || sched.day_config, sched.practice_matches || null);
+      0, 0, effectiveDayConfig, sched.practice_matches || null);
+
+    // ── Fetch diversity report so Schedule Quality renders with
+    // full data (partner/opponent averages, stacked bars, issues).
+    // Without this, only the client-side tiles (B2B, Surrogates)
+    // appear. Fire-and-forget — render is async and degrades
+    // gracefully if it fails. See loadDiversityReport for failure
+    // handling.
+    if (sched.abstract_schedule_id && typeof loadDiversityReport === 'function') {
+      loadDiversityReport(sched.abstract_schedule_id);
+    }
+
     showApiStatus('Schedule loaded');
   } catch(e) { showApiStatus(e.message, true); }
 }
