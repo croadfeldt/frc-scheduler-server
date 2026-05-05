@@ -356,13 +356,17 @@ async def _post(messages: list[dict[str, Any]], *,
     }
     if json_schema is not None:
         # vLLM's structured-output spec. The "guided_json" key takes a
-        # JSON Schema and the decoder enforces it. Documented at:
+        # JSON Schema and the decoder enforces it — output is guaranteed
+        # to be syntactically valid JSON matching the structure (assuming
+        # sufficient max_tokens). Documented at:
         # https://docs.vllm.ai/en/latest/features/structured_outputs.html
+        #
+        # NOTE: do NOT also set response_format={"type": "json_object"}.
+        # vLLM treats both as guided-decoding modes and rejects with
+        # "you can only use one kind of guided decoding" when both are
+        # present. guided_json is strictly stronger (it's schema-enforced
+        # vs. just "must be JSON object"), so it's the right choice.
         body["guided_json"] = json_schema
-        # Belt-and-suspenders: also set the OpenAI-standard response_format,
-        # which more recent vLLM versions and other servers honor. If both
-        # are present, vLLM uses guided_json.
-        body["response_format"] = {"type": "json_object"}
 
     url = f"{LLM_ENDPOINT}/chat/completions"
     log.info(
