@@ -1,0 +1,296 @@
+"""Derive scheduler parameters from a match list when no parameters
+block is present in the import source.
+
+Used by /api/schedules/import-xlsx and /api/schedules/import-csv to
+pre-fill the form fields after a "Restore from file" with a match-only
+file. The user can override anything that looks wrong before
+regenerating.
+
+What we derive (and how reliable each is):
+
+  num_teams          — distinct team numbers across all matches.
+                       ALWAYS reliable.
+  matches_per_team   — mode of appearance counts per team. Reliable
+                       when the schedule is even; uses the most
+                       common count when teams have varied
+                       appearances.
+  cycle_time_min     — modal time delta between consecutive matches
+                       not separated by a break. Reliable when the
+                       cadence is consistent. Reports the most
+                       common delta.
+  cooldown           — minimum gap between consecutive appearances
+                       of the same team, in match slots. Reliable
+                       lower bound; the actual cooldown may have
+                       been higher.
+  num_days           — count of distinct day boundaries in the
+                       input. With single-sheet CSV/XLSX exports
+                       this defaults to 1; multi-sheet workbooks
+                       can hint at more.
+  day_config         — best-effort: span (earliest match to latest
+                       match plus one cycle), gaps over 30 min
+                       become breaks. Practice day not derivable
+                       from match data alone.
+
+For each derived value, we also return a confidence flag ("high" /
+"medium" / "low") so the UI can decide whether to silently apply
+or to flag it as uncertain.
+"""
+from __future__ import annotations
+
+import logging
+from collections import Counter
+from typing import Any
+
+log = logging.getLogger(__name__)
+
+
+def _hhmm_to_min(t: str | None) -> int | None:
+    """'08:30' -> 510. None / blank / malformed -> None."""
+    if not t:
+        return None
+    s = str(t).strip()
+    if not s:
+        return None
+    parts = s.split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        h, m = int(parts[0]), int(parts[1])
+        if 0 <= h < 48 and 0 <= m < 60:  # allow next-day overflow up to 47:59
+            return h * 60 + m
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _min_to_hhmm(m: int | None) -> str:
+    """510 -> '08:30'. None -> ''."""
+    if m is None:
+        return ""
+    h, mm = divmod(int(m) % (24 * 60), 60)
+    return f"{h:02d}:{mm:02d}"
+
+
+def derive_parameters(matches: list[dict]) -> dict[str, Any]:
+    """Inspect a match list and return derived scheduler parameters
+    plus a per-field confidence map.
+
+    Args:
+        matches: list of dicts with at minimum {match_num, time,
+                 red[], blue[]}. Same shape as PDF/XLSX/CSV
+                 importer output.
+
+    Returns:
+        {
+            "parameters": {
+                "num_teams":        int,
+                "matches_per_team": int,
+                "cycle_time_min":   float,
+                "cooldown":         int,
+                "num_days":         int,
+            },
+            "day_config": {
+                "days": [{"start": "HH:MM", "end": "HH:MM",
+                          "breaks": [{"name": "Break", "start": ...,
+                                       "end": ...}]}],
+                ...
+            },
+            "confidence": {
+                "num_teams":        "high",
+                "matches_per_team": "high"|"medium",
+                ...
+            },
+            "notes": [<human-readable warnings>],
+        }
+
+    Raises ValueError if matches is empty.
+    """
+    if not matches:
+        raise ValueError("Cannot derive parameters from empty match list")
+
+    # Sort by match number first; we rely on order for cycle/cooldown.
+    sorted_matches = sorted(matches, key=lambda m: int(m.get("match_num") or 0))
+
+    confidence: dict[str, str] = {}
+    notes: list[str] = []
+
+    # ── num_teams ───────────────────────────────────────────────────
+    teams: set[int] = set()
+    for m in sorted_matches:
+        for t in (m.get("red")  or []): teams.add(t)
+        for t in (m.get("blue") or []): teams.add(t)
+    num_teams = len(teams)
+    confidence["num_teams"] = "high"
+
+    # ── matches_per_team ────────────────────────────────────────────
+    # Count appearances per team. The mode (most common count) is the
+    # nominal MPT. If there's a clear modal value, that's high
+    # confidence; if appearance counts are scattered (some teams
+    # with N matches, many with N+1 — surrogates / partial day),
+    # confidence drops.
+    appearances = Counter()
+    for m in sorted_matches:
+        for t in (m.get("red")  or []): appearances[t] += 1
+        for t in (m.get("blue") or []): appearances[t] += 1
+    if appearances:
+        count_dist = Counter(appearances.values())
+        modal_count, modal_freq = count_dist.most_common(1)[0]
+        matches_per_team = modal_count
+        # If 90%+ of teams hit the modal count, high confidence.
+        if num_teams > 0 and modal_freq / num_teams >= 0.9:
+            confidence["matches_per_team"] = "high"
+        elif modal_freq / num_teams >= 0.7:
+            confidence["matches_per_team"] = "medium"
+        else:
+            confidence["matches_per_team"] = "low"
+            notes.append(
+                f"Per-team match counts are uneven — modal value {modal_count} "
+                f"covers only {modal_freq}/{num_teams} teams. "
+                f"Verify Matches Per Team before regenerating."
+            )
+    else:
+        matches_per_team = 0
+        confidence["matches_per_team"] = "low"
+
+    # ── cycle_time_min ──────────────────────────────────────────────
+    # Walk consecutive matches; record time deltas. Drop deltas above
+    # 30 minutes (those are breaks, not the cycle cadence). Take the
+    # mode of remaining deltas. A clean schedule has all deltas equal
+    # — that's high confidence. Variance > 50% drops confidence.
+    deltas: list[int] = []
+    prev_min: int | None = None
+    for m in sorted_matches:
+        t_min = _hhmm_to_min(m.get("time"))
+        if t_min is not None and prev_min is not None:
+            d = t_min - prev_min
+            if 0 < d <= 30:  # ignore breaks (>30 min) and back-in-time anomalies
+                deltas.append(d)
+        if t_min is not None:
+            prev_min = t_min
+
+    if deltas:
+        delta_dist = Counter(deltas)
+        modal_delta, modal_freq = delta_dist.most_common(1)[0]
+        cycle_time_min = float(modal_delta)
+        # Variance check: how often does the modal delta actually appear?
+        if modal_freq / len(deltas) >= 0.85:
+            confidence["cycle_time_min"] = "high"
+        elif modal_freq / len(deltas) >= 0.6:
+            confidence["cycle_time_min"] = "medium"
+        else:
+            confidence["cycle_time_min"] = "low"
+            notes.append(
+                f"Inconsistent cycle times — modal {modal_delta} min "
+                f"covers {modal_freq}/{len(deltas)} consecutive pairs. "
+                f"There may be cycle-time changes during the day."
+            )
+    else:
+        cycle_time_min = 8.0  # safe default
+        confidence["cycle_time_min"] = "low"
+        notes.append("Could not derive cycle time (no consecutive match times).")
+
+    # ── cooldown ────────────────────────────────────────────────────
+    # Minimum gap (in match slots) between consecutive appearances of
+    # the same team. Tracked as match-number distance. e.g. team 2052
+    # appears in matches 1, 5, 9 -> gaps of 4 and 4 -> cooldown >= 3
+    # (cooldown N means N matches between appearances).
+    last_seen: dict[int, int] = {}
+    min_gap: int | None = None
+    for m in sorted_matches:
+        mn = int(m.get("match_num") or 0)
+        for t in (m.get("red") or []) + (m.get("blue") or []):
+            if t in last_seen:
+                gap = mn - last_seen[t] - 1   # cooldown = matches between, exclusive
+                if gap >= 0 and (min_gap is None or gap < min_gap):
+                    min_gap = gap
+            last_seen[t] = mn
+
+    cooldown = min_gap if min_gap is not None else 3
+    # Cooldown derived from data is a tight lower bound — the original
+    # constraint may have been ≥ this value. Confidence is "medium"
+    # because we can't tell whether the minimum we observed is the
+    # constraint or just an incidental value.
+    confidence["cooldown"] = "medium" if min_gap is not None else "low"
+
+    # ── num_days ────────────────────────────────────────────────────
+    # Default to 1. Caller can override based on file structure (e.g.
+    # multi-sheet XLSX with day labels). With a single match list and
+    # 24-hour HH:MM, there's no reliable way to detect day rollover.
+    num_days = 1
+    confidence["num_days"] = "medium"
+
+    # ── day_config ──────────────────────────────────────────────────
+    # Single-day best-effort: span from earliest to latest match plus
+    # one cycle, with gaps > 30 min becoming breaks. Real day_config
+    # is richer (practice day, cycle changes) — those default to off.
+    day_start_min: int | None = None
+    day_end_min:   int | None = None
+    breaks: list[dict] = []
+
+    times_sorted = [
+        _hhmm_to_min(m.get("time")) for m in sorted_matches
+    ]
+    times_sorted = [t for t in times_sorted if t is not None]
+    if times_sorted:
+        day_start_min = times_sorted[0]
+        # End is last match's time + one cycle (so the last match has
+        # time to actually run before the day ends).
+        day_end_min = times_sorted[-1] + int(round(cycle_time_min))
+
+        # Breaks: any gap > 30 min between consecutive matches becomes
+        # a break block. Naming is generic ("Lunch" if it spans noon,
+        # else "Break").
+        for i in range(1, len(times_sorted)):
+            gap = times_sorted[i] - times_sorted[i - 1]
+            if gap > 30:
+                start = times_sorted[i - 1] + int(round(cycle_time_min))
+                end   = times_sorted[i]
+                # Skip pathological "negative" breaks (cycle_time was
+                # bigger than the gap due to noisy data).
+                if start >= end:
+                    continue
+                # Heuristic naming: if the break covers any minute
+                # between 11:30 and 13:30, call it Lunch.
+                noon_low, noon_high = 11 * 60 + 30, 13 * 60 + 30
+                is_lunch = (start <= noon_high) and (end >= noon_low)
+                breaks.append({
+                    "name":  "Lunch" if is_lunch else "Break",
+                    "start": _min_to_hhmm(start),
+                    "end":   _min_to_hhmm(end),
+                })
+
+    day_config = {
+        "days": [
+            {
+                "start":  _min_to_hhmm(day_start_min) or "08:30",
+                "end":    _min_to_hhmm(day_end_min)   or "17:00",
+                "breaks": breaks,
+                "earlyEnd":     None,
+                "cycleChanges": [],
+            }
+        ],
+        "practiceDay": {
+            "enabled": False,
+            "start":   "",
+            "end":     "",
+            "ct":      cycle_time_min,
+            "guaranteed": 1,
+        },
+        "timeline_blocks": [],
+        "autoPopulate":  True,
+        "autoMaxCycles": True,
+        "autoAssign":    False,
+    }
+
+    return {
+        "parameters": {
+            "num_teams":        num_teams,
+            "matches_per_team": matches_per_team,
+            "cycle_time_min":   cycle_time_min,
+            "cooldown":         cooldown,
+            "num_days":         num_days,
+        },
+        "day_config": day_config,
+        "confidence": confidence,
+        "notes":      notes,
+    }

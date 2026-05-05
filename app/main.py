@@ -42,6 +42,9 @@ from app import frc_events as frc_client
 from app import pdf_extract
 from app import pdf_dayplan
 from app import pdf_validate
+from app import xlsx_extract
+from app import csv_extract
+from app import schedule_derive
 from app import llm_client
 from app.auth import (
     get_current_user, require_auth,
@@ -2119,6 +2122,296 @@ async def import_pdf(
         "matches":         matches,
         "validation":      validation,
         "notes":           parsed.get("notes", ""),
+        "_cache":          "miss",
+    }
+
+
+@app.post("/api/schedules/import-xlsx")
+async def import_xlsx(
+    file: UploadFile = File(...),
+    event_id: int | None = Query(None),
+    nocache: bool = Query(False, description="Bypass content-hash cache"),
+    current_user: dict | None = Depends(get_current_user),
+):
+    """Parse an FMS-style schedule XLSX file. Reliable round-trip path
+    for xlsx files exported by this app (or any FMS-compatible export).
+
+    Returns the same shape as /import-pdf for match-list cache hits, so
+    the existing preview UI in static/index.html can render the result
+    without changes. Commits go through /import-pdf/commit just like
+    PDF imports.
+
+    Unlike PDF import, this doesn't need an LLM endpoint — the format
+    is structured and we parse it deterministically.
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Empty file")
+
+    # XLSX files are zip archives starting with PK\x03\x04. Cheap
+    # magic-byte check to fail fast on the wrong format.
+    if not content.startswith(b"PK\x03\x04"):
+        raise HTTPException(
+            400,
+            "File is not an XLSX (missing zip magic bytes). Make sure "
+            "you're uploading the .xlsx file, not a CSV or PDF."
+        )
+
+    pdf_hash = pdf_extract.hash_pdf(content)  # reuse the same hasher
+    log.info(
+        "import_xlsx request: file=%s size=%d hash=%s event_id=%s",
+        file.filename, len(content), pdf_hash[:8], event_id,
+    )
+
+    # Same cache strategy as PDF — content-hash keyed in pdf_imports.
+    if not nocache:
+        async with AsyncSessionLocal() as db:
+            existing = await db.execute(
+                select(PdfImport).where(PdfImport.pdf_hash == pdf_hash)
+            )
+            cached = existing.scalar_one_or_none()
+            if cached:
+                cached_parsed = cached.parsed if isinstance(cached.parsed, dict) else {}
+                log.info("XLSX cache hit: %s (%s)", pdf_hash[:8], file.filename)
+                roster = None
+                if event_id:
+                    roster_result = await db.execute(
+                        select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+                    )
+                    roster = [r[0] for r in roster_result.all()] or None
+                validation = pdf_validate.validate_schedule(
+                    cached_parsed.get("matches", []), roster,
+                )
+                return {
+                    "kind":            "matches",
+                    "pdf_import_id":   cached.id,
+                    "pdf_hash":        pdf_hash,
+                    "file_name":       cached.file_name,
+                    "page_count":      cached.page_count,
+                    "method":          cached.method or "xlsx",
+                    "format_detected": cached.format_detected,
+                    "matches":         cached_parsed.get("matches", []),
+                    "validation":      validation,
+                    "notes":           cached_parsed.get("notes", ""),
+                    "derived":         _safe_derive(cached_parsed.get("matches", [])),
+                    "_cache":          "hit",
+                }
+
+    # Parse fresh.
+    try:
+        parsed = xlsx_extract.parse_xlsx(content)
+    except ValueError as e:
+        raise HTTPException(422, f"XLSX parse failed: {e}")
+    except Exception as e:
+        log.exception("Unexpected error parsing XLSX")
+        raise HTTPException(500, f"XLSX parser error: {type(e).__name__}: {e}")
+
+    matches = parsed.get("matches", [])
+
+    # Validate against roster if event provided.
+    roster = None
+    async with AsyncSessionLocal() as db:
+        if event_id:
+            roster_result = await db.execute(
+                select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+            )
+            roster = [r[0] for r in roster_result.all()] or None
+    validation = pdf_validate.validate_schedule(matches, roster)
+
+    # Cache the parse — upsert on conflict, same pattern as PDF.
+    async with AsyncSessionLocal() as db:
+        pdf_import = PdfImport(
+            pdf_hash=pdf_hash,
+            file_name=file.filename,
+            byte_size=len(content),
+            page_count=parsed.get("page_count", 1),
+            parsed={"matches": matches, "notes": parsed.get("notes", "")},
+            validation=validation,
+            format_detected=parsed.get("format_detected"),
+            method="xlsx",
+        )
+        db.add(pdf_import)
+        try:
+            await db.commit()
+            await db.refresh(pdf_import)
+        except IntegrityError:
+            await db.rollback()
+            log.info(
+                "XLSX row already existed for hash=%s; updating in-place",
+                pdf_hash[:8],
+            )
+            existing = await db.execute(
+                select(PdfImport).where(PdfImport.pdf_hash == pdf_hash)
+            )
+            pdf_import = existing.scalar_one()
+            pdf_import.file_name       = file.filename
+            pdf_import.byte_size       = len(content)
+            pdf_import.page_count      = parsed.get("page_count", 1)
+            pdf_import.parsed          = {"matches": matches, "notes": parsed.get("notes", "")}
+            pdf_import.validation      = validation
+            pdf_import.format_detected = parsed.get("format_detected")
+            pdf_import.method          = "xlsx"
+            await db.commit()
+            await db.refresh(pdf_import)
+
+    return {
+        "kind":            "matches",
+        "pdf_import_id":   pdf_import.id,
+        "pdf_hash":        pdf_hash,
+        "file_name":       file.filename,
+        "page_count":      parsed.get("page_count", 1),
+        "method":          "xlsx",
+        "format_detected": parsed.get("format_detected"),
+        "matches":         matches,
+        "validation":      validation,
+        "notes":           parsed.get("notes", ""),
+        # Derive parameters from the match list. The XLSX export shape
+        # doesn't carry numTeams / MPT / cycle time / day_config, so
+        # we re-create them from the data. The frontend pre-fills the
+        # form fields with these so the user doesn't have to retype
+        # known values. Confidence flags let the UI flag uncertain
+        # values for the user to verify.
+        "derived":         _safe_derive(matches),
+        "_cache":          "miss",
+    }
+
+
+def _safe_derive(matches: list[dict]) -> dict | None:
+    """Wrap derivation so a bad match list doesn't break the import."""
+    try:
+        return schedule_derive.derive_parameters(matches)
+    except Exception as e:
+        log.warning("Parameter derivation failed: %s", e)
+        return None
+
+
+@app.post("/api/schedules/import-csv")
+async def import_csv_endpoint(
+    file: UploadFile = File(...),
+    event_id: int | None = Query(None),
+    nocache: bool = Query(False, description="Bypass content-hash cache"),
+    current_user: dict | None = Depends(get_current_user),
+):
+    """Parse a schedule CSV. Accepts both the flat layout we export
+    (Match,Time,Type,Blue 1-3,Red 1-3) and the FMS layout (Time,
+    Description with embedded match number, Blue 1-3, Red 1-3).
+
+    Same response shape as import-xlsx — the frontend reuses the
+    PDF preview UI for both. Pre-fills form parameters via the
+    derive step.
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Empty file")
+
+    # CSV doesn't have a clean magic-byte signature. We accept anything
+    # decodable as text. parse_csv() will surface format-mismatch errors
+    # with useful messages.
+    pdf_hash = pdf_extract.hash_pdf(content)
+    log.info(
+        "import_csv request: file=%s size=%d hash=%s event_id=%s",
+        file.filename, len(content), pdf_hash[:8], event_id,
+    )
+
+    if not nocache:
+        async with AsyncSessionLocal() as db:
+            existing = await db.execute(
+                select(PdfImport).where(PdfImport.pdf_hash == pdf_hash)
+            )
+            cached = existing.scalar_one_or_none()
+            if cached:
+                cached_parsed = cached.parsed if isinstance(cached.parsed, dict) else {}
+                log.info("CSV cache hit: %s (%s)", pdf_hash[:8], file.filename)
+                roster = None
+                if event_id:
+                    roster_result = await db.execute(
+                        select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+                    )
+                    roster = [r[0] for r in roster_result.all()] or None
+                validation = pdf_validate.validate_schedule(
+                    cached_parsed.get("matches", []), roster,
+                )
+                return {
+                    "kind":            "matches",
+                    "pdf_import_id":   cached.id,
+                    "pdf_hash":        pdf_hash,
+                    "file_name":       cached.file_name,
+                    "page_count":      cached.page_count,
+                    "method":          cached.method or "csv",
+                    "format_detected": cached.format_detected,
+                    "matches":         cached_parsed.get("matches", []),
+                    "validation":      validation,
+                    "notes":           cached_parsed.get("notes", ""),
+                    "derived":         _safe_derive(cached_parsed.get("matches", [])),
+                    "_cache":          "hit",
+                }
+
+    try:
+        parsed = csv_extract.parse_csv(content)
+    except ValueError as e:
+        raise HTTPException(422, f"CSV parse failed: {e}")
+    except Exception as e:
+        log.exception("Unexpected error parsing CSV")
+        raise HTTPException(500, f"CSV parser error: {type(e).__name__}: {e}")
+
+    matches = parsed.get("matches", [])
+
+    roster = None
+    async with AsyncSessionLocal() as db:
+        if event_id:
+            roster_result = await db.execute(
+                select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+            )
+            roster = [r[0] for r in roster_result.all()] or None
+    validation = pdf_validate.validate_schedule(matches, roster)
+
+    async with AsyncSessionLocal() as db:
+        pdf_import = PdfImport(
+            pdf_hash=pdf_hash,
+            file_name=file.filename,
+            byte_size=len(content),
+            page_count=parsed.get("page_count", 1),
+            parsed={"matches": matches, "notes": parsed.get("notes", "")},
+            validation=validation,
+            format_detected=parsed.get("format_detected"),
+            method="csv",
+        )
+        db.add(pdf_import)
+        try:
+            await db.commit()
+            await db.refresh(pdf_import)
+        except IntegrityError:
+            await db.rollback()
+            log.info(
+                "CSV row already existed for hash=%s; updating in-place",
+                pdf_hash[:8],
+            )
+            existing = await db.execute(
+                select(PdfImport).where(PdfImport.pdf_hash == pdf_hash)
+            )
+            pdf_import = existing.scalar_one()
+            pdf_import.file_name       = file.filename
+            pdf_import.byte_size       = len(content)
+            pdf_import.page_count      = parsed.get("page_count", 1)
+            pdf_import.parsed          = {"matches": matches, "notes": parsed.get("notes", "")}
+            pdf_import.validation      = validation
+            pdf_import.format_detected = parsed.get("format_detected")
+            pdf_import.method          = "csv"
+            await db.commit()
+            await db.refresh(pdf_import)
+
+    return {
+        "kind":            "matches",
+        "pdf_import_id":   pdf_import.id,
+        "pdf_hash":        pdf_hash,
+        "file_name":       file.filename,
+        "page_count":      parsed.get("page_count", 1),
+        "method":          "csv",
+        "format_detected": parsed.get("format_detected"),
+        "matches":         matches,
+        "validation":      validation,
+        "notes":           parsed.get("notes", ""),
+        "derived":         _safe_derive(matches),
         "_cache":          "miss",
     }
 

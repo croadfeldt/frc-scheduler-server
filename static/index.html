@@ -1057,6 +1057,10 @@
         <a href="#" id="lnkAdhoc" onclick="event.preventDefault();loadAdhocEvent();"
            style="color:var(--accent);text-decoration:none;margin-left:0.25rem;"
            title="Start fresh — create an ad-hoc schedule with 12 placeholder teams.">Start with 12 teams</a>
+        <span style="margin:0 0.4rem;color:var(--border);">·</span>
+        <a href="#" id="lnkRestoreFile" onclick="event.preventDefault();triggerRestoreFromFile();"
+           style="color:var(--accent);text-decoration:none;"
+           title="Load a schedule from a file you exported earlier. Supports .json (full restore including parameters and day config) and .xlsx (match list only).">Restore from file</a>
         <span id="lnkPdfSep" style="display:none;margin:0 0.4rem;color:var(--border);">·</span>
         <a href="#" id="lnkImportPdf" onclick="event.preventDefault();openPdfImportModal();"
            style="display:none;color:var(--accent);text-decoration:none;"
@@ -1089,6 +1093,9 @@
            the empty-state one for power users — same modal, existing
            event id. Visibility controlled by checkLlmStatus(). -->
       <span style="margin-left:auto;display:flex;align-items:center;gap:0.6rem;flex-shrink:0;">
+        <a href="#" id="lnkRestoreFileLoaded" onclick="event.preventDefault();triggerRestoreFromFile();"
+           style="font-size:0.72rem;color:var(--accent);text-decoration:none;"
+           title="Load a schedule from a file you exported earlier. JSON does a full restore (parameters + day config + schedule); XLSX restores the match list only.">Restore from file</a>
         <a href="#" id="lnkImportPdfLoaded" onclick="event.preventDefault();openPdfImportModal();"
            style="display:none;font-size:0.72rem;color:var(--accent);text-decoration:none;"
            title="EXPERIMENTAL — overlay a custom PDF schedule onto this event. Best when the event roster is already loaded so the importer can validate team numbers.">
@@ -1812,6 +1819,362 @@ async function checkLlmStatus() {
 }
 
 let _pdfImportState = null;   // {pdf_import_id, matches, validation, ...}
+
+// ─────────────────────────────────────────────────────────────────────
+// Restore from file
+//
+// Dispatches based on file extension:
+//   .json — full restore in-browser (parameters + day_config + schedule)
+//   .xlsx — server-side parse via /api/schedules/import-xlsx, reuses
+//           the same preview/commit pipeline as PDF match-list import
+//
+// Other extensions get a clear error. We use a hidden <input type=file>
+// created on demand because adding it to the DOM at load time complicates
+// the event bar layout for no benefit — the only entry points are the
+// "Restore from file" links in the empty and loaded states.
+// ─────────────────────────────────────────────────────────────────────
+
+function triggerRestoreFromFile() {
+  // Build a one-shot file picker. Reusing one across calls is tempting
+  // but `value` doesn't reset reliably across browsers when the user
+  // picks the same file twice; a fresh element avoids that.
+  var input = document.createElement('input');
+  input.type    = 'file';
+  input.accept  = '.json,.xlsx,.csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv';
+  input.onchange = function(ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (f) restoreFromFile(f);
+  };
+  input.click();
+}
+
+async function restoreFromFile(file) {
+  var name = (file.name || '').toLowerCase();
+  if (name.endsWith('.json')) {
+    return restoreFromJsonFile(file);
+  }
+  if (name.endsWith('.xlsx')) {
+    return restoreFromXlsxFile(file);
+  }
+  if (name.endsWith('.csv')) {
+    return restoreFromCsvFile(file);
+  }
+  showApiStatus(
+    'Unsupported file type. Use .json (full restore), .xlsx, or .csv ' +
+    '(match list). For arbitrary PDFs, use the Import a PDF link.',
+    true,
+  );
+}
+
+async function restoreFromJsonFile(file) {
+  // Full client-side restore. The exported JSON carries everything we
+  // need: numTeams / MPT / cooldown / cycleTime / numDays in
+  // `parameters`, full day_config, and the per-day schedule entries
+  // (matches, breaks, cycle changes). We:
+  //
+  //   1. Parse + validate shape
+  //   2. Auto-create an ad-hoc event if none is loaded (mirroring the
+  //      PDF-import flow)
+  //   3. Apply parameters to form fields
+  //   4. Apply day_config via the existing applyDayConfigToUI helper
+  //   5. Reconstruct window._frcScheduled from days[].entries[] and
+  //      hand off to the existing render path
+  var text;
+  try {
+    text = await file.text();
+  } catch (e) {
+    showApiStatus('Could not read file: ' + e.message, true);
+    return;
+  }
+  var data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    showApiStatus('Invalid JSON: ' + e.message, true);
+    return;
+  }
+
+  // Light shape check. We don't enforce a strict schema here because
+  // the user might be reloading an older export with slightly different
+  // field names — instead, we read what's available and fall back to
+  // sensible defaults. Hard-fail only if the basic structure (days[]
+  // with entries) is missing, since without that we can't reconstruct
+  // anything useful.
+  if (!data || !Array.isArray(data.days) || !data.days.length) {
+    showApiStatus(
+      'JSON file does not look like a schedule export ' +
+      '(missing "days" array). If this is from a different tool, ' +
+      'use Import a PDF or build the schedule from scratch.',
+      true,
+    );
+    return;
+  }
+
+  // Auto-create event if needed (same reasoning as openPdfImportModal).
+  if (!_currentEventId) {
+    try {
+      showApiStatus('⏳ Preparing event for restore…');
+      const ev = await apiFetch('/api/events/adhoc');
+      if (ev.teams && ev.teams.length > 0) {
+        for (var i = 0; i < ev.teams.length; i++) {
+          await apiFetch('/api/events/' + ev.id + '/teams/' + ev.teams[i].number, { method: 'DELETE' })
+            .catch(function() {});
+        }
+        ev.teams = [];
+      }
+      await activateEvent(ev);
+    } catch (e) {
+      showApiStatus('Could not prepare event: ' + e.message, true);
+      return;
+    }
+  }
+
+  // Apply parameters to form fields. Each is independently optional;
+  // we update only the ones the file carries. Round-tripping the
+  // app's own export will hit all of them.
+  try {
+    var p = data.parameters || {};
+    function setField(id, value) {
+      if (value === undefined || value === null) return;
+      var el = document.getElementById(id);
+      if (el) el.value = String(value);
+    }
+    setField('numTeams',        p.num_teams);
+    setField('matchesPerTeam',  p.matches_per_team);
+    setField('cooldown',        p.cooldown);
+    setField('cycleTime',       p.cycle_time_min);
+    setField('numDays',         p.num_days);
+
+    // Apply day config if present. applyDayConfigToUI rebuilds the
+    // day inputs (start/end times, breaks, cycle changes, practice
+    // day) so the form mirrors the file.
+    if (data.day_config && typeof applyDayConfigToUI === 'function') {
+      applyDayConfigToUI(data.day_config);
+    }
+  } catch (e) {
+    // Field application errors are non-fatal — the schedule itself
+    // can still render.
+    console.warn('Parameter apply failed:', e);
+  }
+
+  // Reconstruct window._frcScheduled from the days/entries shape.
+  // The export uses time strings ("08:30") plus time_min in some
+  // cases; we prefer time_min when present, otherwise convert.
+  function timeToMin(t) {
+    if (typeof t !== 'string') return 0;
+    var m = t.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return 0;
+    return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  }
+
+  var scheduled = data.days.map(function(d) {
+    var entries = (d.entries || []).map(function(e) {
+      if (e.type === 'match') {
+        var red  = e.red  || [];
+        var blue = e.blue || [];
+        var redSurr  = red.map(function() { return false; });
+        var blueSurr = blue.map(function() { return false; });
+        (e.surrogates || []).forEach(function(s) {
+          var arr = (s.alliance === 'red') ? red : blue;
+          var flags = (s.alliance === 'red') ? redSurr : blueSurr;
+          var idx = arr.indexOf(s.team);
+          if (idx >= 0) flags[idx] = true;
+        });
+        return {
+          type:           'match',
+          num:            e.match,
+          startMin:       (typeof e.time_min === 'number') ? e.time_min : timeToMin(e.time),
+          red:            red,
+          blue:           blue,
+          redSurrogate:   redSurr,
+          blueSurrogate:  blueSurr,
+        };
+      }
+      if (e.type === 'break') {
+        return {
+          type:  'break',
+          name:  e.name || 'Break',
+          start: timeToMin(e.start),
+          end:   timeToMin(e.end),
+        };
+      }
+      if (e.type === 'cycle-change') {
+        return {
+          type:        'cycle-change',
+          afterMatch:  e.after_match,
+          newTime:     e.new_cycle_min,
+          atMin:       timeToMin(e.at),
+        };
+      }
+      return null;
+    }).filter(function(x) { return x !== null; });
+
+    return {
+      dayNum:       d.day,
+      entries:      entries,
+      isPracticeDay: false,
+    };
+  });
+
+  window._frcScheduled = scheduled;
+
+  // Trigger the existing render path. The simplest reliable way is to
+  // call renderSchedule() if it exists; if not, fall back to whatever
+  // function rebuilds the day-list UI. We try a few in order.
+  try {
+    if (typeof renderSchedule === 'function') {
+      renderSchedule();
+    } else if (typeof displayCurrentSchedule === 'function') {
+      displayCurrentSchedule();
+    } else if (typeof refreshScheduleDisplay === 'function') {
+      refreshScheduleDisplay();
+    }
+  } catch (e) {
+    console.warn('Schedule render after restore failed:', e);
+  }
+
+  // Restore seeds / abstract IDs if the file carries them — useful
+  // for "open this schedule, regenerate with same seed for verification"
+  // workflows.
+  if (data.seed)                  _currentSeed              = data.seed;
+  if (data.assign_seed)           _currentAssignSeed        = data.assign_seed;
+  if (data.abstract_schedule_id)  _currentAbstractScheduleId = data.abstract_schedule_id;
+  if (data.assigned_schedule_id)  _currentAssignedScheduleId = data.assigned_schedule_id;
+  if (typeof updateSeedDisplay === 'function') {
+    try { updateSeedDisplay(_currentSeed, _currentAssignSeed); } catch(e) {}
+  }
+
+  var n = 0;
+  scheduled.forEach(function(d) {
+    (d.entries || []).forEach(function(e) { if (e.type === 'match') n++; });
+  });
+  showApiStatus('✓ Restored ' + n + ' match' + (n === 1 ? '' : 'es') + ' from JSON');
+}
+
+async function restoreFromXlsxFile(file) {
+  return _restoreMatchListFile(file, '/api/schedules/import-xlsx', 'XLSX');
+}
+
+async function restoreFromCsvFile(file) {
+  return _restoreMatchListFile(file, '/api/schedules/import-csv', 'CSV');
+}
+
+async function _restoreMatchListFile(file, endpoint, label) {
+  // Shared upload pipeline for XLSX and CSV. Both produce match-list
+  // responses in the same shape, so the preview UI is identical.
+  // Differences are just the endpoint URL and the user-facing label
+  // for status messages.
+  if (!_currentEventId) {
+    try {
+      showApiStatus('⏳ Preparing event for ' + label + ' import…');
+      const ev = await apiFetch('/api/events/adhoc');
+      if (ev.teams && ev.teams.length > 0) {
+        for (var i = 0; i < ev.teams.length; i++) {
+          await apiFetch('/api/events/' + ev.id + '/teams/' + ev.teams[i].number, { method: 'DELETE' })
+            .catch(function() {});
+        }
+        ev.teams = [];
+      }
+      await activateEvent(ev);
+    } catch (e) {
+      showApiStatus('Could not prepare event: ' + e.message, true);
+      return;
+    }
+  }
+
+  // Open the modal in stage 2 (loading); on success swap to preview;
+  // on error go to stage 1 with the error inline.
+  document.getElementById('pdfImportStage1').style.display = 'none';
+  document.getElementById('pdfImportStage2').style.display = 'block';
+  document.getElementById('pdfImportStage3').style.display = 'none';
+  document.getElementById('pdfImportStage3Footer').style.display = 'none';
+  document.getElementById('pdfImportError').style.display = 'none';
+  var eventInfo = document.getElementById('pdfImportEventInfo');
+  if (eventInfo) {
+    var eventName = document.getElementById('eventName');
+    var eventCode = document.getElementById('eventCodeInput');
+    eventInfo.textContent = (eventName ? eventName.textContent : '') ||
+                            (eventCode ? eventCode.value : '') ||
+                            ('Event #' + _currentEventId);
+  }
+  openModal('modalPdfImport');
+
+  var formData = new FormData();
+  formData.append('file', file);
+  try {
+    const headers = {};
+    const tok = getToken(); if (tok) headers['Authorization'] = 'Bearer ' + tok;
+    const url = API + endpoint + '?event_id=' + encodeURIComponent(_currentEventId);
+    const r = await fetch(url, { method: 'POST', body: formData, headers });
+    if (!r.ok) {
+      const errText = await r.text();
+      let msg = errText || ('HTTP ' + r.status);
+      try {
+        const j = JSON.parse(errText);
+        if (j && j.detail) msg = (typeof j.detail === 'string') ? j.detail : JSON.stringify(j.detail);
+      } catch(_) {}
+      throw new Error(msg);
+    }
+    const d = await r.json();
+    _pdfImportState = d;
+    // If the importer derived parameters (numTeams / MPT / cycle /
+    // cooldown / numDays + day_config), apply them to the form so
+    // the user doesn't have to retype values that are clearly
+    // present in the source data.
+    if (d.derived) applyDerivedParameters(d.derived);
+    renderPdfImportPreview(d);
+  } catch (e) {
+    document.getElementById('pdfImportStage1').style.display = '';
+    document.getElementById('pdfImportStage2').style.display = 'none';
+    var err = document.getElementById('pdfImportError');
+    err.textContent = 'Import failed: ' + e.message;
+    err.style.display = '';
+  }
+}
+
+function applyDerivedParameters(derived) {
+  // Apply the parameters derived from a match-only import (XLSX/CSV)
+  // to the form fields. The derive step also returns confidence
+  // flags ("high"/"medium"/"low") per field — we trust "high" silently
+  // and warn the user about anything lower so they know to verify.
+  if (!derived || !derived.parameters) return;
+  var p = derived.parameters;
+  function setField(id, value) {
+    if (value === undefined || value === null) return;
+    var el = document.getElementById(id);
+    if (el) el.value = String(value);
+  }
+  setField('numTeams',        p.num_teams);
+  setField('matchesPerTeam',  p.matches_per_team);
+  setField('cooldown',        p.cooldown);
+  setField('cycleTime',       p.cycle_time_min);
+  setField('numDays',         p.num_days);
+  if (derived.day_config && typeof applyDayConfigToUI === 'function') {
+    try { applyDayConfigToUI(derived.day_config); }
+    catch(e) { console.warn('applyDayConfigToUI failed:', e); }
+  }
+
+  // Build a one-line summary of low-confidence fields. Only flag the
+  // ones the user actually needs to double-check; high-confidence
+  // values get applied silently.
+  var c = derived.confidence || {};
+  var labels = {
+    num_teams:        'team count',
+    matches_per_team: 'matches per team',
+    cycle_time_min:   'cycle time',
+    cooldown:         'cooldown',
+    num_days:         'day count',
+  };
+  var uncertain = [];
+  Object.keys(labels).forEach(function(k) {
+    if (c[k] === 'low') uncertain.push(labels[k]);
+  });
+  if (uncertain.length || (derived.notes && derived.notes.length)) {
+    var msg = 'Parameters auto-filled from match list.';
+    if (uncertain.length) msg += ' Verify: ' + uncertain.join(', ') + '.';
+    showApiStatus(msg);
+  }
+}
 
 async function openPdfImportModal() {
   // If no event is loaded, transparently create an ad-hoc one to
