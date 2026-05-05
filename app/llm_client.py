@@ -75,6 +75,26 @@ LLM_ENDPOINT, LLM_MODEL, LLM_API_KEY = _resolve_endpoint()
 # 180s ceiling is "give up, the server is wedged."
 LLM_TIMEOUT_SECONDS = 180.0
 
+# Sampling knobs — tunable via env so bisecting causes of weird LLM
+# behaviour (repetition loops, request rejections, malformed output)
+# doesn't require a code change + redeploy. Defaults are the values
+# we converged on for Qwen2.5-VL-7B-AWQ on tabular day-plan PDFs.
+def _envf(name: str, default: float) -> float:
+    """Read a float env var, returning default on missing/empty/invalid."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+LLM_TEMPERATURE        = _envf("LLM_TEMPERATURE",        0.1)
+LLM_TOP_P              = _envf("LLM_TOP_P",              0.9)
+# Set LLM_REPETITION_PENALTY=1.0 (or unset) to disable. vLLM honours this
+# OpenAI-extension parameter; some other backends may reject it.
+LLM_REPETITION_PENALTY = _envf("LLM_REPETITION_PENALTY", 1.1)
+
 
 def is_configured() -> bool:
     """True if LLM extraction is available."""
@@ -396,16 +416,17 @@ async def _post(messages: list[dict[str, Any]], *,
         # at multiple positions, the model emits it over and over until
         # max_tokens is hit. Adding a small amount of randomness lets
         # the sampler escape these loops while keeping output ~stable
-        # across runs.
-        "temperature": 0.1,
-        "top_p":       0.9,
-        # Penalize recently-emitted tokens. With grammar-constrained
-        # decoding, this is the most reliable knob for preventing the
-        # model from endlessly repeating valid-but-redundant array
-        # elements. 1.0 = no penalty; 1.1 is the conventional starting
-        # value and has minimal side effects on quality.
-        "repetition_penalty": 1.1,
+        # across runs. Tunable via LLM_TEMPERATURE / LLM_TOP_P.
+        "temperature": LLM_TEMPERATURE,
+        "top_p":       LLM_TOP_P,
     }
+    # Only include repetition_penalty if it's actually penalizing.
+    # 1.0 = no penalty; vLLM accepts it as an OpenAI extension but other
+    # OpenAI-compatible servers may reject it. Set
+    # LLM_REPETITION_PENALTY=1.0 to omit entirely if it ever causes
+    # request-level issues.
+    if abs(LLM_REPETITION_PENALTY - 1.0) > 0.001:
+        body["repetition_penalty"] = LLM_REPETITION_PENALTY
     if json_schema is not None:
         # vLLM's structured-output spec. The "guided_json" key takes a
         # JSON Schema and the decoder enforces it — output is guaranteed

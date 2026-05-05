@@ -218,16 +218,28 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
     # slips through, at least we don't show the user 30 identical
     # qual rows. Two blocks are "duplicate" iff they share kind,
     # day_index, start, end. Label and details may differ harmlessly.
+    #
+    # Defensive: cast all key components through str() to handle
+    # cases where the model emits non-string values for fields that
+    # the schema declares as strings (rare but happens with edge-case
+    # outputs from quantized models).
+    def _norm(v: Any) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, str):
+            return v.strip().lower()
+        return str(v).strip().lower()
+
     seen_keys: set[tuple] = set()
     deduped: list[dict] = []
     for b in blocks:
         if not isinstance(b, dict):
             continue
         key = (
-            (b.get("kind") or "").lower().strip(),
-            b.get("day_index"),
-            (b.get("start") or "").strip(),
-            (b.get("end") or "").strip(),
+            _norm(b.get("kind")),
+            b.get("day_index") if isinstance(b.get("day_index"), int) else 0,
+            _norm(b.get("start")),
+            _norm(b.get("end")),
         )
         if key in seen_keys:
             continue
@@ -243,7 +255,7 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
     for b in blocks:
         if not isinstance(b, dict):
             continue
-        kind = (b.get("kind") or "").lower().strip()
+        kind = _norm(b.get("kind"))
         di = b.get("day_index")
         if not isinstance(di, int):
             di = 0
@@ -278,7 +290,7 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
 
     # Build practiceDay payload
     if practice_block:
-        details = (practice_block.get("details") or "").lower()
+        details = _norm(practice_block.get("details"))
         # Try to pull a cycle time hint out of details ("10-minute cycles", "11min")
         ct_practice = None
         for token in details.replace("-", " ").split():
@@ -318,7 +330,7 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
     # → output days[0] = Saturday's qual content.
     qual_day_indices = sorted(
         di for di, lst in by_day.items()
-        if any((b.get("kind") or "").lower() == "qual" for b in lst)
+        if any(_norm(b.get("kind")) == "qual" for b in lst)
     )
 
     days_out: list[dict] = []
@@ -330,8 +342,8 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
         # Span = earliest qual start → latest qual end. Lunch and break
         # blocks become entries in `breaks`; the span never includes them
         # at the edges, only between qual segments.
-        qual_blocks = [b for b in day_blocks if (b.get("kind") or "").lower() == "qual"]
-        non_qual    = [b for b in day_blocks if (b.get("kind") or "").lower() in ("lunch", "break")]
+        qual_blocks = [b for b in day_blocks if _norm(b.get("kind")) == "qual"]
+        non_qual    = [b for b in day_blocks if _norm(b.get("kind")) in ("lunch", "break")]
 
         if not qual_blocks:
             continue
@@ -356,7 +368,7 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
             if (e_min is not None and day_e_min is not None and e_min > day_e_min):
                 continue
             breaks_out.append({
-                "name":  b.get("label") or ("Lunch" if (b.get("kind") or "").lower() == "lunch" else "Break"),
+                "name":  b.get("label") or ("Lunch" if _norm(b.get("kind")) == "lunch" else "Break"),
                 "start": s,
                 "end":   e,
             })

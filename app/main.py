@@ -1819,29 +1819,66 @@ async def import_pdf(
             raise HTTPException(503, str(e))
         except ValueError as e:
             raise HTTPException(502, f"LLM returned malformed day-plan: {e}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Catch-all so the user sees what actually broke instead of a
+            # generic "Internal Server Error". Pod logs get the full
+            # traceback via log.exception(); the browser gets the type
+            # and message, which is usually enough to diagnose.
+            log.exception("Unexpected error during day-plan LLM extraction")
+            raise HTTPException(
+                500,
+                f"Day-plan extraction failed: {type(e).__name__}: {e}"
+            )
+
         if not dayplan:
             raise HTTPException(503, "LLM extraction not configured")
 
-        # Convert to today's day_config schema for direct form-field apply
-        legacy_cfg = pdf_dayplan.to_legacy_day_config(dayplan)
+        # Convert to today's day_config schema for direct form-field apply.
+        # Wrapped because the adapter touches arbitrary model output and
+        # we'd rather surface "AttributeError: 'list' object has no
+        # attribute 'lower'" than a 500 with no body.
+        try:
+            legacy_cfg = pdf_dayplan.to_legacy_day_config(dayplan)
+        except Exception as e:
+            log.exception(
+                "Day-plan adapter failed. dayplan keys: %s, blocks count: %s",
+                list(dayplan.keys()) if isinstance(dayplan, dict) else "(not dict)",
+                len(dayplan.get("blocks", [])) if isinstance(dayplan, dict) else "(N/A)",
+            )
+            raise HTTPException(
+                500,
+                f"Day-plan adapter error: {type(e).__name__}: {e}. "
+                f"This usually means the model output didn't match the "
+                f"expected schema. Check scheduler pod logs for details."
+            )
 
         # Save to cache. Reuse the PdfImport table — `kind` is encoded in
         # the method field ("llm:dayplan:<strategy>") so the commit endpoint
         # can dispatch correctly.
-        async with AsyncSessionLocal() as db:
-            pdf_import = PdfImport(
-                pdf_hash=pdf_hash,
-                file_name=file.filename,
-                byte_size=len(content),
-                page_count=extracted["page_count"],
-                parsed={"dayplan": dayplan, "day_config": legacy_cfg},
-                validation={"dayplan_blocks": len(dayplan.get("blocks", []))},
-                format_detected=dayplan.get("format_detected"),
-                method=f"llm:dayplan:{strategy}",
+        try:
+            async with AsyncSessionLocal() as db:
+                pdf_import = PdfImport(
+                    pdf_hash=pdf_hash,
+                    file_name=file.filename,
+                    byte_size=len(content),
+                    page_count=extracted["page_count"],
+                    parsed={"dayplan": dayplan, "day_config": legacy_cfg},
+                    validation={"dayplan_blocks": len(dayplan.get("blocks", []))},
+                    format_detected=dayplan.get("format_detected"),
+                    method=f"llm:dayplan:{strategy}",
+                )
+                db.add(pdf_import)
+                await db.commit()
+                await db.refresh(pdf_import)
+        except Exception as e:
+            log.exception("Day-plan cache write failed")
+            raise HTTPException(
+                500,
+                f"Day-plan import succeeded but cache write failed: "
+                f"{type(e).__name__}: {e}"
             )
-            db.add(pdf_import)
-            await db.commit()
-            await db.refresh(pdf_import)
 
         return {
             "kind":            "dayplan",
