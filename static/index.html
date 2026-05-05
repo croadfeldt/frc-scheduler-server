@@ -10295,7 +10295,11 @@ function openFMSSetupSheet() {
     '      image: { type: "jpeg", quality: 0.95 },' +
     '      html2canvas: { scale: 2, useCORS: true, logging: false },' +
     '      jsPDF: { unit: "in", format: "letter", orientation: "portrait" },' +
-    '      pagebreak: { mode: ["avoid-all", "css", "legacy"] }' +
+    // pagebreak: explicit avoid targets rather than `avoid-all` mode.
+    // html2pdf 0.10.1 has a known issue where avoid-all can produce
+    // a blank first page if any element is too tall to fit. Targeted
+    // avoid is more reliable.
+    '      pagebreak: { mode: ["css", "legacy"], avoid: ["tr", "h2", "h3", ".day-section", ".qr-section"] }' +
     '    }).from(clone).save().then(function() {' +
     '      if (btn) { btn.disabled = false; btn.textContent = "Save as PDF"; }' +
     '    }).catch(function(err) {' +
@@ -10439,6 +10443,11 @@ function printSchedule() {
   html += '.round-row td{color:#555;font-size:7.5pt;background:#f0f0f0;text-align:center;letter-spacing:0.05em;text-transform:uppercase;}';
   html += '@media print{@page{margin:1cm;size:portrait;}body{margin:0;}.day-title{page-break-before:auto;}}';
   html += '</style></head><body>';
+  // Wrap printable content so PDF mode can target it directly
+  // (avoids html2canvas trying to render the injected <script> tags
+  // and the html2pdf library itself as DOM elements, which leaves
+  // a blank-looking PDF in some browsers).
+  html += '<div id="frcPrintRoot">';
 
   html += '<h1>' + (eventName ? eventName + ' &mdash; ' : '') + 'FRC Match Schedule</h1>';
   html += '<div class="meta">' + numTeams + ' teams &middot; ' + mpt + ' matches/team';
@@ -10509,6 +10518,7 @@ function printSchedule() {
     html += '</tbody></table>';
   });
 
+  html += '</div>';     // /#frcPrintRoot
   html += '</body></html>';
 
   var w = window.open('', '_blank');
@@ -10520,31 +10530,67 @@ function printSchedule() {
   if (asPdf) {
     var pdfFile = (typeof getScheduleFilenameSlug === 'function')
                     ? getScheduleFilenameSlug('.pdf') : 'frc_schedule.pdf';
-    // Inject html2pdf script + invoker just before </body>
+    // Inject html2pdf script + invoker just before </body>.
+    //
+    // History: previous version called .from(document.body) which
+    // captured the injected <script> tags and the html2pdf library
+    // chunk as DOM nodes. In some browsers this caused html2canvas to
+    // render a tall blank canvas (just whitespace where the scripts
+    // would otherwise be), producing a "blank PDF." Targeting a
+    // dedicated #frcPrintRoot wrapper avoids that.
+    //
+    // Also: previous version used a fixed setTimeout(200ms) which
+    // is too short — fonts/CSS may not have applied. We now await
+    // both element availability AND document.fonts.ready before
+    // calling html2pdf, with a long fallback so a font-loading
+    // hang still produces output rather than nothing.
     var injection =
       '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>' +
       '<script>' +
-      '  window.addEventListener("load", function() {' +
+      '  (function() {' +
       '    var fname = ' + JSON.stringify(pdfFile) + ';' +
+      '    var fired = false;' +
+      '    function fail(msg) {' +
+      '      if (fired) return; fired = true;' +
+      '      document.title = "PDF generation failed";' +
+      '      var d = document.createElement("div");' +
+      '      d.style.cssText = "padding:1rem;background:#ffe1e1;color:#a3261a;font:14px system-ui;border-radius:4px;margin:1rem;";' +
+      '      d.textContent = msg + " Use the Print button and choose Save as PDF instead.";' +
+      '      document.body.insertBefore(d, document.body.firstChild);' +
+      '    }' +
       '    function go() {' +
-      '      if (typeof html2pdf !== "function") {' +
-      '        document.title = "PDF library failed";' +
-      '        document.body.insertAdjacentHTML("afterbegin", "<div style=\\"padding:1rem;background:#ffe1e1;color:#a3261a;\\">PDF generation library failed to load. Use the Print button and choose Save as PDF instead.</div>");' +
-      '        return;' +
-      '      }' +
+      '      if (fired) return;' +
+      '      var root = document.getElementById("frcPrintRoot");' +
+      '      if (!root) { fail("Print root element missing."); return; }' +
+      '      if (typeof html2pdf !== "function") { fail("PDF library failed to load."); return; }' +
+      '      fired = true;' +
       '      html2pdf().set({' +
       '        margin: [0.4, 0.4, 0.4, 0.4],' +
       '        filename: fname,' +
       '        image: { type: "jpeg", quality: 0.95 },' +
-      '        html2canvas: { scale: 2, useCORS: true, logging: false },' +
+      '        html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: root.scrollWidth || 900 },' +
       '        jsPDF: { unit: "in", format: "letter", orientation: "portrait" },' +
-      '        pagebreak: { mode: ["avoid-all", "css", "legacy"] }' +
-      '      }).from(document.body).save().then(function() {' +
-      '        setTimeout(function() { window.close(); }, 500);' +
+      '        pagebreak: { mode: ["css", "legacy"], avoid: ["tr", ".day-title"] }' +
+      '      }).from(root).save().then(function() {' +
+      '        setTimeout(function() { window.close(); }, 800);' +
+      '      }).catch(function(err) {' +
+      '        fail("PDF generation error: " + (err && err.message ? err.message : "unknown") + ".");' +
       '      });' +
       '    }' +
-      '    setTimeout(go, 200);' +
-      '  });' +
+      '    function ready() {' +
+      // Wait for fonts (so html2canvas captures laid-out text), then run.
+      // Some browsers don't have document.fonts; fall back to direct go().
+      '      if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {' +
+      '        document.fonts.ready.then(go);' +
+      '      } else {' +
+      '        go();' +
+      '      }' +
+      '    }' +
+      '    if (document.readyState === "complete") { setTimeout(ready, 50); }' +
+      '    else { window.addEventListener("load", function() { setTimeout(ready, 50); }); }' +
+      // Hard fallback: if neither path fires within 8 seconds, force render.
+      '    setTimeout(function() { if (!fired) ready(); }, 8000);' +
+      '  })();' +
       '<\/script>';
     html = html.replace('</body></html>', injection + '</body></html>');
   }

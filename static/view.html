@@ -2500,26 +2500,69 @@ function exportPdf() {
   foot.textContent = footBits.join(' · ');
   wrap.appendChild(foot);
 
-  // html2pdf needs the source attached briefly to size correctly
-  wrap.style.position = 'absolute';
-  wrap.style.left = '-9999px';
-  wrap.style.top = '0';
-  wrap.style.width = '7.5in';  // letter width minus 0.5in margins
+  // Mount the source so html2canvas can lay it out. We use
+  // visibility:hidden + clip rather than position:absolute;left:-9999px:
+  // off-screen positioning can cause html2canvas to capture
+  // zero-dimensional output in some browser/library combos, producing
+  // a blank PDF. visibility:hidden keeps the element in the layout
+  // flow (so it has computed dimensions) but invisible to the user;
+  // clip-path takes it out of the visible viewport even further.
+  wrap.style.position   = 'absolute';
+  wrap.style.left       = '0';
+  wrap.style.top        = '0';
+  wrap.style.width      = '7.5in';  // letter width minus 0.5in margins
+  wrap.style.visibility = 'hidden';
+  wrap.style.pointerEvents = 'none';
+  wrap.style.zIndex     = '-1';
   document.body.appendChild(wrap);
 
-  html2pdf().set({
-    margin: [0.4, 0.4, 0.4, 0.4],
-    filename: getFilenameSlug('.pdf'),
-    image: { type: 'jpeg', quality: 0.95 },
-    html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
-    jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
-    pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' },
-  }).from(wrap).save().then(function() {
-    document.body.removeChild(wrap);
-  }).catch(function(err) {
-    console.error(err);
-    document.body.removeChild(wrap);
-    alert('PDF generation failed: ' + err.message);
+  // Wait for fonts to be ready before snapshotting. html2canvas
+  // captures whatever has computed layout at the moment .from() is
+  // called — if web fonts haven't applied yet, captured text may be
+  // unstyled/unsized, producing pages of effectively-blank output.
+  // document.fonts.ready resolves once font loading settles. Hard
+  // fallback at 4 seconds so a font-load hang doesn't break export
+  // entirely.
+  function _runHtml2Pdf() {
+    html2pdf().set({
+      margin: [0.4, 0.4, 0.4, 0.4],
+      filename: getFilenameSlug('.pdf'),
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        // Force the canvas to use the wrap's natural width — without
+        // this, off-screen/absolute elements can be measured at viewport
+        // width which mismatches the inline 7.5in size we set.
+        windowWidth: wrap.scrollWidth || 720,
+      },
+      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' },
+    }).from(wrap).save().then(function() {
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    }).catch(function(err) {
+      console.error(err);
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      alert('PDF generation failed: ' + err.message);
+    });
+  }
+
+  var fontsP = (document.fonts && document.fonts.ready &&
+                typeof document.fonts.ready.then === 'function')
+                 ? document.fonts.ready
+                 : Promise.resolve();
+  // Race fonts.ready against a 4s ceiling so a hung font load doesn't
+  // permanently block export.
+  var ceiling = new Promise(function(resolve) { setTimeout(resolve, 4000); });
+  Promise.race([fontsP, ceiling]).then(function() {
+    // Two RAFs after fonts settle — gives the browser one frame to
+    // apply font metrics and another to recompute layout before
+    // html2canvas snapshots.
+    requestAnimationFrame(function() {
+      requestAnimationFrame(_runHtml2Pdf);
+    });
   });
 }
 
