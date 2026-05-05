@@ -2420,9 +2420,10 @@ async def import_csv_endpoint(
 @app.post("/api/schedules/render-pdf")
 async def render_schedule_pdf_endpoint(
     body: dict,
+    format: str = "pdf",
     current_user: dict | None = Depends(get_current_user),
 ):
-    """Render a schedule to PDF.
+    """Render a schedule to PDF or HTML.
 
     Body shape (see app.pdf_render docstring for details):
         {
@@ -2431,32 +2432,62 @@ async def render_schedule_pdf_endpoint(
             "branding": {primary_color, logo_text, title, subtitle}  // optional
         }
 
-    Returns:
-        PDF binary stream with appropriate content-disposition headers.
+    Query params:
+        format: "pdf" (default) — returns PDF binary for download.
+                "html"           — returns a self-contained HTML page
+                                   for the browser print popup.
 
-    Replaces the previous client-side html2pdf flow which suffered
-    from cross-browser inconsistencies, font-loading races, and
-    unreliable table page-breaks. WeasyPrint produces deterministic,
-    text-based PDFs.
+    Both formats are rendered from the same template (see
+    app/pdf_render.py:_build_full_html), so Print and PDF outputs
+    are guaranteed visually identical.
+
+    The PDF path replaces the previous client-side html2pdf flow
+    (cross-browser inconsistencies, blank pages, off-page content,
+    font-loading races, table page-break bugs). WeasyPrint produces
+    deterministic, text-based PDFs.
+
+    The HTML path lets the browser-print popup display the same
+    template and call window.print(), so the user can choose
+    "Save as PDF" or send to a printer with output that matches the
+    PDF download exactly.
     """
     if not isinstance(body, dict) or "schedule" not in body:
         raise HTTPException(400, "Missing 'schedule' in request body")
 
+    fmt = (format or "pdf").lower()
+    if fmt not in ("pdf", "html"):
+        raise HTTPException(400, f"format must be 'pdf' or 'html', got '{fmt}'")
+
     try:
-        pdf_bytes = pdf_render.render_schedule_pdf(
-            body, branding=body.get("branding"),
-        )
+        if fmt == "html":
+            html_text = pdf_render.render_schedule_html(
+                body, branding=body.get("branding"),
+            )
+        else:
+            pdf_bytes = pdf_render.render_schedule_pdf(
+                body, branding=body.get("branding"),
+            )
     except ValueError as e:
         raise HTTPException(422, f"Invalid schedule data: {e}")
     except RuntimeError as e:
-        # weasyprint import / system-dep error
+        # weasyprint import / system-dep error (PDF path only)
         log.exception("PDF rendering runtime error")
         raise HTTPException(503, str(e))
     except Exception as e:
-        log.exception("Unexpected error rendering PDF")
-        raise HTTPException(500, f"PDF render error: {type(e).__name__}: {e}")
+        log.exception("Unexpected error rendering schedule")
+        raise HTTPException(500, f"Render error: {type(e).__name__}: {e}")
 
-    # Filename: prefer event-derived, fall back to generic.
+    # HTML response: serve as text/html so the popup can render it.
+    # No download disposition — the popup window receives this and
+    # calls window.print(); we don't want it to trigger a download.
+    if fmt == "html":
+        return Response(
+            content=html_text,
+            media_type="text/html; charset=utf-8",
+        )
+
+    # PDF response: filename derived from event metadata for nicer
+    # download UX.
     schedule = body.get("schedule") or {}
     event_name = schedule.get("event_name") or "schedule"
     year = schedule.get("event_year")

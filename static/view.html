@@ -580,17 +580,12 @@
 
   /* ── Print ───────────────────────────────────────────────────────────── */
   @page { size: letter; margin: 0.5in; }
-  /* Page-break markers — applied dynamically by _applyPrintMarkers when
-     the user opens the Print/PDF options modal. We use both the modern
-     `break-before` and the legacy `page-break-before` because html2pdf's
-     html2canvas reads the legacy property, while modern browsers prefer
-     the new one. The print-pb-before class is also tagged with the
-     non-conditional version so it works during PDF generation (when
-     @media print rules don't apply). */
-  tr.print-pb-before {
-    page-break-before: always;
-    break-before: page;
-  }
+  /* Note: print and PDF for this page go through the server-side
+     render endpoint (POST /api/schedules/render-pdf with format=html
+     for browser print, format=pdf for download) — see view.html's
+     serverRender(). The @media print rules below only style the
+     hide-toolbar/header tweaks for the browser's "print this page"
+     menu (Ctrl+P on the live view), which prints the live DOM as-is. */
   @media print {
     body { background: #fff; }
     .page { padding: 0; max-width: 100%; }
@@ -1444,10 +1439,15 @@ function rerender() {
 
   computed.forEach(entry => {
     if (entry.type === 'match') totalMatches++;
-    // Apply onlyMine filter
+    // Apply onlyMine filter. Day-dividers ALWAYS stay visible —
+    // they're how the user sees Practice vs Day 1/Day 2 separation,
+    // which is still informative even when filtered (an empty day
+    // shown after a divider tells the user "no matches for me here").
+    // Breaks and info-blocks are skipped because they're not relevant
+    // to a specific team's view.
     if (onlyMine && hasSelection) {
       if (entry.type === 'match' && !matchHasAnySelectedTeam(entry)) return;
-      if (entry.type === 'break' || entry.type === 'day-divider') return;
+      if (entry.type === 'break' || entry.type === 'info-block')      return;
     }
     if (entry.type === 'day-divider') {
       html += '<tr class="day-divider"><td colspan="8">' + escapeHtml(entry.label) + '</td></tr>';
@@ -2139,7 +2139,11 @@ function updateNextMatch(nowMatchNum) {
     }
   }
 
-  detail.innerHTML = leadLabel + ': <strong>Q' + target.matchNum + '</strong> · ' + etaText + driftHtml;
+  // Match-number prefix: P for practice, Q for qual. The next-match
+  // card and the last-completed display both used hard-coded "Q",
+  // which produced "Q1" for what was actually "P1" during practice.
+  var matchPrefix = target.isPractice ? 'P' : 'Q';
+  detail.innerHTML = leadLabel + ': <strong>' + matchPrefix + target.matchNum + '</strong> · ' + etaText + driftHtml;
 
   // Determine alliance + station
   let alliance = null, station = null;
@@ -2233,8 +2237,13 @@ function updateNextMatch(nowMatchNum) {
     const live = STATE.liveByMatch[lastCompleted.matchNum];
     const allianceKey = (alliance || '').toLowerCase();
     const bd = live.score_breakdown && live.score_breakdown[allianceKey];
+    // P/Q prefix — TBA only tracks qualifications today, so this is
+    // effectively always 'Q', but matching the convention everywhere
+    // protects against future schedule sources that might track
+    // practice match results too.
+    const lcPrefix = lastCompleted.isPractice ? 'P' : 'Q';
     if (bd) {
-      metaHtml += '<details class="breakdown"><summary>Q' + lastCompleted.matchNum +
+      metaHtml += '<details class="breakdown"><summary>' + lcPrefix + lastCompleted.matchNum +
                   ' breakdown (your alliance)</summary>' +
                   renderScoreBreakdown(bd) + '</details>';
     }
@@ -2242,7 +2251,7 @@ function updateNextMatch(nowMatchNum) {
     if (live.videos && live.videos.length) {
       const yt = live.videos.find(v => v.type === 'youtube');
       if (yt && yt.key) {
-        metaHtml += '<details class="video-embed"><summary>Watch Q' + lastCompleted.matchNum + '</summary>' +
+        metaHtml += '<details class="video-embed"><summary>Watch ' + lcPrefix + lastCompleted.matchNum + '</summary>' +
                     '<iframe loading="lazy" src="https://www.youtube.com/embed/' + escapeAttr(yt.key) + '" ' +
                     'frameborder="0" allowfullscreen></iframe></details>';
       }
@@ -2309,7 +2318,7 @@ function exportCsv() {
     e.blue.forEach((t, i) => { if (e.blueSur[i]) surr.push(t); });
     e.red.forEach( (t, i) => { if (e.redSur[i])  surr.push(t); });
     rows.push([
-      minToTime12(e.startMin), 'Q' + e.matchNum,
+      minToTime12(e.startMin), (e.isPractice ? 'P' : 'Q') + e.matchNum,
       e.blue[0], e.blue[1], e.blue[2],
       e.red[0],  e.red[1],  e.red[2],
       surr.join(';'),
@@ -2692,23 +2701,52 @@ function _viewBuildPdfPayload(opts) {
   };
 }
 
-async function serverRenderPdf(opts) {
-  // POST schedule to /api/schedules/render-pdf, get PDF bytes back,
-  // trigger a download.
+// ─────────────────────────────────────────────────────────────────────
+// Server-side render — Print and PDF from one template
+//
+// Both Print (browser print dialog via popup) and PDF (download) go
+// through /api/schedules/render-pdf. The same WeasyPrint template
+// feeds both, so output is guaranteed visually identical. Replaces
+// the previous client-side html2pdf flow and the tbody-splitting
+// browser print hack — neither was reliable across browsers.
+// See docs/ARCHITECTURE.md for the full reasoning.
+// ─────────────────────────────────────────────────────────────────────
+
+async function serverRender(format, opts) {
+  // format: 'pdf' (download) or 'html' (open popup, print)
+  // opts:   { breakAfterPractice, breakBetweenDays }
   var payload = _viewBuildPdfPayload(opts || {});
   if (!payload.schedule.days.length) {
-    alert('No schedule to download.');
+    alert('No schedule to ' + (format === 'pdf' ? 'download' : 'print') + '.');
     return;
   }
 
-  // Show a transient "generating" message — replaces the table
-  // count briefly so the user knows something's happening.
+  // For Print, open the popup BEFORE the async fetch. Browser
+  // popup blockers tie permission to the originating click event;
+  // waiting for the fetch causes the popup to be blocked.
+  var popup = null;
+  if (format === 'html') {
+    popup = window.open('', '_blank');
+    if (!popup) {
+      alert('Pop-up blocked — please allow pop-ups for this site to print.');
+      return;
+    }
+    popup.document.write(
+      '<!DOCTYPE html><html><head><title>Generating…</title>' +
+      '<style>body{font:14px system-ui;padding:2rem;color:#555;}</style>' +
+      '</head><body>Generating schedule…</body></html>'
+    );
+    popup.document.close();
+  }
+
+  // Brief inline status — replaces the table count temporarily.
   var countEl = document.getElementById('tableCount');
   var origCount = countEl ? countEl.textContent : '';
-  if (countEl) countEl.textContent = 'Generating PDF…';
+  if (countEl) countEl.textContent = format === 'pdf' ? 'Generating PDF…' : 'Preparing print view…';
 
   try {
-    var r = await fetch('/api/schedules/render-pdf', {
+    var url = '/api/schedules/render-pdf?format=' + encodeURIComponent(format);
+    var r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -2722,146 +2760,55 @@ async function serverRenderPdf(opts) {
       } catch(_) {}
       throw new Error(msg);
     }
-    var blob = await r.blob();
-    triggerDownload(blob, getFilenameSlug('.pdf'));
+
+    if (format === 'pdf') {
+      var blob = await r.blob();
+      triggerDownload(blob, getFilenameSlug('.pdf'));
+    } else {
+      // HTML response → write into the already-open popup, then
+      // call popup.print() as a backup to the popup's own auto-print
+      // snippet (the snippet uses a _printed flag to prevent double-
+      // printing).
+      var htmlText = await r.text();
+      popup.document.open();
+      popup.document.write(htmlText);
+      popup.document.close();
+      popup.focus();
+      setTimeout(function() {
+        try {
+          if (!popup._printed) { popup._printed = true; popup.print(); }
+        } catch (_) {
+          // Cross-origin restriction in some browsers; the popup's
+          // auto-print is the backup.
+        }
+      }, 400);
+    }
   } catch (err) {
-    console.error('PDF generation failed:', err);
-    alert('PDF generation failed: ' + (err && err.message ? err.message : err));
+    console.error(format + ' generation failed:', err);
+    if (popup) {
+      try {
+        popup.document.body.innerHTML =
+          '<div style="padding:2rem;font:14px system-ui;color:#a3261a;">' +
+          'Failed to generate print view: ' +
+          (err.message || 'unknown error') +
+          '</div>';
+      } catch(_) {}
+    }
+    alert((format === 'pdf' ? 'PDF generation failed: ' : 'Print preparation failed: ') +
+          (err && err.message ? err.message : err));
   } finally {
     if (countEl) countEl.textContent = origCount;
   }
 }
 
-// Legacy entry point for any code still calling exportPdf().
+// Legacy aliases.
+async function serverRenderPdf(opts) { return serverRender('pdf', opts); }
 function exportPdf(pdfOpts) {
   pdfOpts = pdfOpts || {};
-  serverRenderPdf({
+  serverRender('pdf', {
     breakAfterPractice: pdfOpts.breakAfterPractice !== false,
     breakBetweenDays:   pdfOpts.breakBetweenDays   !== false,
   });
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Print: tbody-splitting approach
-//
-// Single <tbody> with page breaks on rows is browser-fragile. We
-// instead split the tbody at page-break boundaries and set inline
-// page-break-before:always on each non-first tbody. Restore on cleanup.
-// ─────────────────────────────────────────────────────────────────────
-
-function _applyPrintMarkers(opts) {
-  var table = document.querySelector('table.matches');
-  var origTbody = document.getElementById('matchesTbody');
-  if (!table || !origTbody) {
-    console.warn('[print-markers] table or tbody not found');
-    return null;
-  }
-
-  // Walk rows once to identify break boundaries. Each "section" is a
-  // contiguous run of rows that should print together.
-  var allRows = Array.from(origTbody.querySelectorAll('tr'));
-  if (!allRows.length) return null;
-
-  // Boundaries are row indices where a page break should occur BEFORE
-  // them. We collect these, then split the tbody after the marker
-  // walk completes.
-  var boundaries = [];
-  var seenPractice = false;
-  var seenQual = false;
-  var lastDayLabel = null;
-
-  allRows.forEach(function(tr, idx) {
-    if (tr.classList.contains('day-divider')) {
-      var label = tr.textContent.trim();
-      if (opts.breakBetweenDays && lastDayLabel !== null && label !== lastDayLabel) {
-        boundaries.push(idx);
-      }
-      lastDayLabel = label;
-      return;
-    }
-    if (!tr.classList.contains('match-row')) return;
-
-    var matchCell = tr.querySelector('.col-match') || tr.cells[1];
-    var label = matchCell ? matchCell.textContent.trim() : '';
-    var isPractice = label.charAt(0) === 'P';
-
-    if (isPractice) {
-      seenPractice = true;
-    } else {
-      if (opts.breakAfterPractice && seenPractice && !seenQual) {
-        boundaries.push(idx);
-      }
-      seenQual = true;
-    }
-  });
-
-  console.log('[print-markers] boundaries at row indices:', boundaries,
-              'total rows:', allRows.length);
-
-  if (!boundaries.length) {
-    // No splits needed — single tbody is fine.
-    return { newTbodies: [], origTbody: origTbody, origRows: allRows };
-  }
-
-  // Split into multiple tbodies. Section i contains rows from
-  // boundaries[i-1] (or 0) to boundaries[i] (exclusive).
-  var sectionStarts = [0].concat(boundaries);
-  var sectionEnds   = boundaries.concat([allRows.length]);
-
-  // Build new tbodies, then swap them in.
-  var newTbodies = [];
-  for (var s = 0; s < sectionStarts.length; s++) {
-    var tbody = document.createElement('tbody');
-    if (s === 0) {
-      // Reuse the original tbody for the first section so its id stays
-      // pointing at something rendered on screen; we'll restore later.
-      tbody = origTbody.cloneNode(false);  // shallow clone (no children)
-      tbody.id = 'matchesTbody-pb-0';
-    } else {
-      tbody.id = 'matchesTbody-pb-' + s;
-      // Inline style: page-break-before:always wins over any cascade.
-      tbody.style.pageBreakBefore = 'always';
-      tbody.style.breakBefore     = 'page';
-    }
-    for (var i = sectionStarts[s]; i < sectionEnds[s]; i++) {
-      tbody.appendChild(allRows[i]);
-    }
-    newTbodies.push(tbody);
-  }
-
-  // Replace original tbody with the first new tbody, then insert the
-  // rest after it. Order matters: insert in reverse so each insertion
-  // goes after the original.
-  origTbody.parentNode.replaceChild(newTbodies[0], origTbody);
-  for (var k = newTbodies.length - 1; k >= 1; k--) {
-    newTbodies[0].parentNode.insertBefore(newTbodies[k], newTbodies[0].nextSibling);
-  }
-
-  return {
-    newTbodies: newTbodies,
-    origTbody:  origTbody,
-    origRows:   allRows,
-  };
-}
-
-function _removePrintMarkers(token) {
-  if (!token || !token.newTbodies || !token.newTbodies.length) return;
-  // Move all rows back into the original tbody, then put the original
-  // tbody back where the first new tbody is and remove the rest.
-  var first = token.newTbodies[0];
-  if (!first || !first.parentNode) return;
-  token.origRows.forEach(function(tr) {
-    token.origTbody.appendChild(tr);
-  });
-  // Restore id (the first new tbody had taken matchesTbody-pb-0)
-  token.origTbody.id = 'matchesTbody';
-  first.parentNode.replaceChild(token.origTbody, first);
-  for (var i = 1; i < token.newTbodies.length; i++) {
-    if (token.newTbodies[i].parentNode) {
-      token.newTbodies[i].parentNode.removeChild(token.newTbodies[i]);
-    }
-  }
-  console.log('[print-markers] cleanup complete');
 }
 
 function runExportAction(action) {
@@ -2869,8 +2816,12 @@ function runExportAction(action) {
   var selected = document.querySelector('input[name="exportFormat"]:checked');
   var fmt = selected ? selected.value : 'print_pdf';
 
-  // Read print/PDF options up front because we need them for both
-  // dispatch paths and the modal close happens before those run.
+  // Close the modal first so popup-window opening isn't fighting an
+  // animating overlay.
+  var modal = document.getElementById('exportModal');
+  if (modal) modal.classList.remove('open');
+
+  // Read print options up front (modal might close before dispatch).
   var optBreakAfterPractice = false, optBreakBetweenDays = false;
   if (fmt === 'print_pdf') {
     var cb1 = document.getElementById('vPrintOptPageBreakAfterPractice');
@@ -2879,43 +2830,14 @@ function runExportAction(action) {
     optBreakBetweenDays   = cb2 ? cb2.checked : true;
   }
 
-  // Close the modal up front. Most actions trigger a download or a
-  // popup; both work better with the modal already gone.
-  var modal = document.getElementById('exportModal');
-  if (modal) modal.classList.remove('open');
-
-  // Print path is special: window.print() must run within the user-
-  // gesture window or some browsers (Safari, certain Chromium
-  // configs) silently no-op. We do NOT wrap it in setTimeout for
-  // that reason. Other formats use setTimeout to let the modal
-  // close animation complete.
-  if (fmt === 'print_pdf' && action === 'print') {
-    var token = _applyPrintMarkers({
-      breakAfterPractice: optBreakAfterPractice,
-      breakBetweenDays:   optBreakBetweenDays,
-    });
-    var cleanup = function() {
-      _removePrintMarkers(token);
-      window.removeEventListener('afterprint', cleanup);
-    };
-    window.addEventListener('afterprint', cleanup);
-    // Defensive cleanup: some browsers don't fire afterprint reliably
-    // (notably Safari). 30 seconds covers any normal interaction
-    // without prematurely removing markers if the user is reviewing.
-    setTimeout(function() { _removePrintMarkers(token); }, 30000);
-    window.print();
-    return;
-  }
-
   setTimeout(function() {
     if (fmt === 'print_pdf') {
-      // action === 'pdf' here (the print branch returned above).
-      // Server-side render — no html2canvas, no font-loading races,
-      // reliable page breaks.
-      serverRenderPdf({
+      var renderOpts = {
         breakAfterPractice: optBreakAfterPractice,
         breakBetweenDays:   optBreakBetweenDays,
-      });
+      };
+      if (action === 'pdf') serverRender('pdf',  renderOpts);
+      else                  serverRender('html', renderOpts);
       return;
     }
     if (fmt === 'xlsx')  { exportXlsx(); return; }

@@ -10720,13 +10720,28 @@ function _buildPdfPayload(opts) {
   };
 }
 
-async function serverRenderPdf() {
-  // Read the same options as printSchedule reads, build the payload,
-  // POST to /api/schedules/render-pdf, trigger a download.
-  if (!window._frcScheduled) { showApiStatus('No schedule to download', true); return; }
+// ─────────────────────────────────────────────────────────────────────
+// Server-side render — Print and PDF from one template
+//
+// Both Print (browser print dialog via popup) and PDF (download)
+// go through /api/schedules/render-pdf. The same WeasyPrint
+// template feeds both:
+//   - format=pdf  → server returns PDF bytes; we trigger download
+//   - format=html → server returns a self-contained HTML page;
+//                   we open it in a popup and call window.print()
+//
+// Because they're rendered from the same template, Print and PDF
+// outputs are guaranteed visually identical. See docs/ARCHITECTURE.md
+// for the full reasoning. Replaces the previous client-side
+// html2canvas/html2pdf flow which had cross-browser inconsistencies,
+// blank pages, off-page content, and font-loading races.
+// ─────────────────────────────────────────────────────────────────────
 
+function _readPrintOpts() {
+  // Read every printOpt* checkbox into the opts shape that
+  // _buildPdfPayload expects. Used by both serverRender paths.
   var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
-  var opts = {
+  return {
     cycleTimes:     document.getElementById('printOptCycleTimes').checked,
     cycleChanges:   document.getElementById('printOptCycleChanges').checked,
     breaks:         document.getElementById('printOptBreaks').checked,
@@ -10739,14 +10754,45 @@ async function serverRenderPdf() {
       document.getElementById('printOptPageBreakAfterPractice').checked
     ),
   };
+}
 
+async function serverRender(format) {
+  // format: 'pdf' (download) or 'html' (open in popup, print)
+  if (!window._frcScheduled) {
+    showApiStatus('No schedule to ' + (format === 'pdf' ? 'download' : 'print'), true);
+    return;
+  }
+
+  var opts = _readPrintOpts();
   var payload = _buildPdfPayload(opts);
-  showApiStatus('⏳ Generating PDF…');
+
+  // For Print, open the popup BEFORE the async fetch. Browser popup
+  // blockers tie permission to the originating click event — if we
+  // wait for the fetch to complete, the popup gets blocked. Open
+  // it immediately, write a placeholder, then replace once we have
+  // the rendered HTML.
+  var popup = null;
+  if (format === 'html') {
+    popup = window.open('', '_blank');
+    if (!popup) {
+      showApiStatus('Pop-up blocked — allow pop-ups to print', true);
+      return;
+    }
+    popup.document.write(
+      '<!DOCTYPE html><html><head><title>Generating…</title>' +
+      '<style>body{font:14px system-ui;padding:2rem;color:#555;}</style>' +
+      '</head><body>Generating schedule…</body></html>'
+    );
+    popup.document.close();
+  }
+
+  showApiStatus(format === 'pdf' ? '⏳ Generating PDF…' : '⏳ Preparing print view…');
 
   try {
     var headers = { 'Content-Type': 'application/json' };
     var tok = getToken(); if (tok) headers['Authorization'] = 'Bearer ' + tok;
-    var r = await fetch(API + '/api/schedules/render-pdf', {
+    var url = API + '/api/schedules/render-pdf?format=' + encodeURIComponent(format);
+    var r = await fetch(url, {
       method: 'POST', headers: headers, body: JSON.stringify(payload),
     });
     if (!r.ok) {
@@ -10758,19 +10804,63 @@ async function serverRenderPdf() {
       } catch(_) {}
       throw new Error(msg);
     }
-    var blob = await r.blob();
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = (typeof getScheduleFilenameSlug === 'function')
-                   ? getScheduleFilenameSlug('.pdf') : 'frc_schedule.pdf';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
-    showApiStatus('✓ PDF downloaded');
+
+    if (format === 'pdf') {
+      var blob = await r.blob();
+      var blobUrl = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = (typeof getScheduleFilenameSlug === 'function')
+                     ? getScheduleFilenameSlug('.pdf') : 'frc_schedule.pdf';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1000);
+      showApiStatus('✓ PDF downloaded');
+    } else {
+      // HTML path: replace popup contents with the rendered page.
+      // The HTML response includes its own auto-print snippet, but
+      // we also call popup.print() here as a belt-and-suspenders
+      // fallback — some browsers throttle scripts in just-opened
+      // popups, so the auto-print may not fire.
+      var htmlText = await r.text();
+      popup.document.open();
+      popup.document.write(htmlText);
+      popup.document.close();
+      popup.focus();
+      // Give the popup time to layout before triggering print.
+      // The popup's own auto-print snippet has a similar 200ms
+      // delay; whichever fires first wins (the snippet sets a
+      // _printed flag so we don't double-print).
+      setTimeout(function() {
+        try {
+          if (!popup._printed) { popup._printed = true; popup.print(); }
+        } catch (_) {
+          // Cross-origin restrictions may block this in some
+          // configurations; the popup's auto-print is the backup.
+        }
+      }, 400);
+      showApiStatus('✓ Print view ready');
+    }
   } catch (e) {
-    showApiStatus('PDF generation failed: ' + e.message, true);
+    if (popup) {
+      try {
+        popup.document.body.innerHTML =
+          '<div style="padding:2rem;font:14px system-ui;color:#a3261a;">' +
+          'Failed to generate print view: ' +
+          (e.message || 'unknown error') +
+          '</div>';
+      } catch(_) {}
+    }
+    showApiStatus(
+      (format === 'pdf' ? 'PDF generation failed: ' : 'Print preparation failed: ') + e.message,
+      true
+    );
   }
 }
+
+// Legacy aliases — kept so code that already calls these continues
+// to work. Both route through serverRender now.
+function serverRenderPdf() { return serverRender('pdf'); }
+function printSchedule()   { return serverRender('html'); }
 
 function runExportAction(action) {
   // action: 'print' | 'pdf' | 'download' | 'open'
@@ -10787,9 +10877,9 @@ function runExportAction(action) {
   setTimeout(function() {
     if (fmt === 'print_pdf') {
       if (action === 'pdf') {
-        serverRenderPdf();   // async; will show its own status
+        serverRender('pdf');
       } else {
-        printSchedule();     // browser print via popup window
+        serverRender('html');
       }
       return;
     }
@@ -10801,217 +10891,9 @@ function runExportAction(action) {
   }, 50);
 }
 
-// Legacy entry points — kept so any code still calling these works.
-// Both route to the unified Export modal with appropriate preselection.
+// Legacy entry points — preserved so external callers still work.
 function openPrintDialog()      { openExportModal(); }
-function downloadSchedulePDF() {
-  // Open modal pre-set to PDF action affordance — easiest is to
-  // select Print/PDF format and let the user click "Save as PDF".
-  openExportModal();
-}
-
-function printSchedule() {
-  var scheduled = window._frcScheduled;
-  if (!scheduled) return;
-  closeModal('modalPrint');
-
-  var opts = {
-    cycleTimes:     document.getElementById('printOptCycleTimes').checked,
-    cycleChanges:   document.getElementById('printOptCycleChanges').checked,
-    breaks:         document.getElementById('printOptBreaks').checked,
-    dayBreaks:      document.getElementById('printOptDayBreaks').checked,
-    teamNums:       document.getElementById('printOptTeamNums').checked,
-    roundDividers:  document.getElementById('printOptRoundDividers').checked,
-    pageBreak:      document.getElementById('printOptPageBreak').checked,
-    // New: page-break between practice and qualification matches.
-    // Default true (the existing checkbox is `checked` in markup).
-    // Reads as false if the checkbox was unchecked OR if for some
-    // reason the checkbox isn't in the DOM (defensive).
-    pageBreakAfterPractice: !!(
-      document.getElementById('printOptPageBreakAfterPractice') &&
-      document.getElementById('printOptPageBreakAfterPractice').checked
-    ),
-  };
-
-  var hasAssignment = !window._frcAbstractMode && _currentSlotMap && Object.keys(_currentSlotMap).length > 0;
-  var showTeamNums  = hasAssignment && opts.teamNums;
-
-  // Active schedule filters — used to skip non-matching matches in print
-  var activeFilters = window._frcFilters || { teams: [], alliance: null };
-  var hasTeamFilter = activeFilters.teams && activeFilters.teams.length > 0;
-
-  // After Stage 2 assignment, entry.red/blue already contain real team numbers
-  // (the server resolves slot indices → team numbers in the API response).
-  // teamLabel just controls display: show the value or a dash.
-  function teamLabel(val) {
-    return showTeamNums ? String(val) : '—';
-  }
-
-  // Check if a match passes the active team filter (for print)
-  // entry.red/blue are real team numbers when assigned, slot indices otherwise
-  function matchPassesPrintFilter(entry) {
-    if (!hasTeamFilter) return true;
-    var matchTeams = entry.red.concat(entry.blue);
-    return activeFilters.teams.some(function(ft) { return matchTeams.indexOf(ft) !== -1; });
-  }
-
-  var titleParts = (typeof getScheduleTitleParts === 'function') ? getScheduleTitleParts() : { full: '' };
-  var eventName  = titleParts.full ||
-                   (document.getElementById('eventCodeStatus') ? document.getElementById('eventCodeStatus').textContent : '');
-  var numTeams  = document.getElementById('numTeams').value;
-  var mpt       = document.getElementById('matchesPerTeam').value;
-
-  // Build print HTML
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">';
-  html += '<title>' + (eventName ? eventName + ' — ' : '') + 'FRC Schedule</title>';
-  html += '<style>';
-  html += 'body{font-family:Arial,sans-serif;font-size:10pt;margin:1cm;color:#000;}';
-  html += 'h1{font-size:14pt;margin:0 0 2px 0;}';
-  html += '.meta{font-size:8pt;color:#555;margin-bottom:12px;}';
-  // Always emit the .page-break rule. Both opts.pageBreak (between
-  // days) and opts.pageBreakAfterPractice apply this same class to
-  // .day-title elements; emitting the rule conditionally on
-  // opts.pageBreak made the after-practice toggle silently no-op
-  // when the user unchecked between-days. Modern + legacy variants
-  // both included for browser coverage.
-  html += '.day-title{font-size:11pt;font-weight:bold;margin:14px 0 4px 0;border-bottom:2px solid #000;padding-bottom:2px;}';
-  html += '.day-title.page-break{page-break-before:always;break-before:page;margin-top:0;}';
-  html += 'table{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:9pt;}';
-  html += 'th{background:#222;color:#fff;padding:3px 6px;text-align:left;font-size:8pt;}';
-  html += 'td{padding:2px 6px;border-bottom:1px solid #ddd;}';
-  html += 'tr:nth-child(even) td{background:#f7f7f7;}';
-  html += '.red{color:#c0392b;font-weight:600;}';
-  html += '.blue{color:#1a5276;font-weight:600;}';
-  html += '.sur{font-size:7pt;background:#e67e22;color:#fff;border-radius:2px;padding:0 2px;margin-left:1px;vertical-align:super;}';
-  html += '.break-row td{color:#b7770d;font-style:italic;background:#fef9e7;font-size:8pt;}';
-  html += '.cc-row td{color:#555;font-style:italic;background:#f0f4ff;font-size:8pt;}';
-  html += '.round-row td{color:#555;font-size:7.5pt;background:#f0f0f0;text-align:center;letter-spacing:0.05em;text-transform:uppercase;}';
-  // @media print: just margins/size, NO override of page-break-before.
-  // Previous version reset .day-title page-break-before to auto here,
-  // which silently negated the .page-break class because of source-
-  // order specificity. The .day-title.page-break selector is more
-  // specific, so it now wins regardless.
-  html += '@media print{@page{margin:1cm;size:portrait;}body{margin:0;}}';
-  html += '</style></head><body>';
-  // Wrap printable content so PDF mode can target it directly
-  // (avoids html2canvas trying to render the injected <script> tags
-  // and the html2pdf library itself as DOM elements, which leaves
-  // a blank-looking PDF in some browsers).
-  html += '<div id="frcPrintRoot">';
-
-  html += '<h1>' + (eventName ? eventName + ' &mdash; ' : '') + 'FRC Match Schedule</h1>';
-  html += '<div class="meta">' + numTeams + ' teams &middot; ' + mpt + ' matches/team';
-  html += ' &middot; Generated ' + new Date().toLocaleString() + '</div>';
-
-  var rb = window._frcRoundBoundaries || new Map();
-  var matchNumToRound = new Map();
-  rb.forEach(function(matchIdx, round) { matchNumToRound.set(matchIdx + 1, round); });
-
-  var teamSpan = function(slot, isSur, cls) {
-    var label = teamLabel(slot);
-    var sur = isSur ? '<span class="sur">S</span>' : '';
-    return '<span class="' + cls + '">' + label + sur + '</span>';
-  };
-
-  // Track practice→qual transition for the page-break-after-practice
-  // option. We emit the page break on the first non-practice day-title
-  // that appears after at least one practice day. (If there are no
-  // practice days, no break.) This is independent of the
-  // page-break-between-days option, so both can be enabled together
-  // without doubling up.
-  var seenPracticeDay = false;
-  var emittedPracticeBreak = false;
-
-  scheduled.forEach(function(day) {
-    // Day header
-    var dayMatches = day.entries.filter(function(e) { return e.type === 'match'; });
-    var dayCCs     = day.entries.filter(function(e) { return e.type === 'cycle-change'; });
-    var ctInfo = '';
-    if (opts.cycleTimes && dayMatches.length > 0) {
-      var firstCt = (dayMatches[0].endMin || 0) - (dayMatches[0].startMin || 0);
-      if (dayCCs.length > 0 && opts.cycleChanges) {
-        var parts = [firstCt];
-        dayCCs.forEach(function(cc) { if (cc.newTime !== parts[parts.length-1]) parts.push(cc.newTime); });
-        ctInfo = ' &middot; cycle: ' + parts.map(function(t){ return (t%1===0?t:t.toFixed(1))+'min'; }).join(' &rarr; ');
-      } else {
-        ctInfo = ' &middot; ' + (firstCt%1===0?firstCt:firstCt.toFixed(1)) + 'min/match';
-      }
-    }
-    var isFirstDay = (scheduled.indexOf(day) === 0);
-    // Decide whether THIS day-title gets a page break before it.
-    // Two reasons it might:
-    //   (a) opts.pageBreak (between-days) and not the first day
-    //   (b) opts.pageBreakAfterPractice and this is the first qual
-    //       day after at least one practice day
-    var practiceBreakHere =
-      opts.pageBreakAfterPractice &&
-      seenPracticeDay &&
-      !day.isPracticeDay &&
-      !emittedPracticeBreak;
-    var betweenDayBreak = opts.pageBreak && !isFirstDay;
-    var pageBreakClass = (practiceBreakHere || betweenDayBreak) ? ' page-break' : '';
-
-    var dayLabel = day.isPracticeDay ? 'Practice' : ('Day ' + day.dayNum);
-    html += '<div class="day-title' + pageBreakClass + '">' + dayLabel + ' &mdash; ' + dayMatches.length + ' matches' + ctInfo + '</div>';
-
-    if (practiceBreakHere) emittedPracticeBreak = true;
-    if (day.isPracticeDay)  seenPracticeDay = true;
-
-    html += '<table><thead><tr><th>#</th><th>Time</th><th>Red Alliance</th><th>Blue Alliance</th></tr></thead><tbody>';
-
-    day.entries.forEach(function(entry) {
-      if (entry.type === 'break') {
-        if (!opts.breaks) return;
-        html += '<tr class="break-row"><td colspan="4">&#9646; ' + entry.name + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.start) + ' &ndash; ' + minToTime(entry.end) + '</td></tr>';
-      } else if (entry.type === 'cycle-change') {
-        if (!opts.cycleChanges) return;
-        html += '<tr class="cc-row"><td colspan="4">&#8645; Cycle time &rarr; <strong>' + entry.newTime + ' min</strong> from match ' + (entry.afterMatch + 1) + ' &nbsp;&middot;&nbsp; ' + minToTime(entry.atMin) + '</td></tr>';
-      } else if (entry.type === 'match') {
-        // Round boundary
-        if (opts.roundDividers && matchNumToRound.has(entry.num)) {
-          var rn = matchNumToRound.get(entry.num);
-          var rnote = rn === 1 ? 'all teams guaranteed a first match' : 'approximate boundary';
-          html += '<tr class="round-row"><td colspan="4">Round ' + rn + ' &mdash; ' + rnote + '</td></tr>';
-        }
-        // Day break marker
-        if (entry.isDayBreak && !opts.dayBreaks) return;
-
-        // Apply team filter — skip matches that don't include filtered teams
-        if (!matchPassesPrintFilter(entry)) return;
-
-        // Only show surrogate badge when team numbers are visible (slot position may change)
-        var red  = entry.red.map(function(t,i){
-          var isSur = showTeamNums && entry.redSurrogate && entry.redSurrogate[i];
-          return teamSpan(t, isSur, 'red');
-        }).join(' &middot; ');
-        var blue = entry.blue.map(function(t,i){
-          var isSur = showTeamNums && entry.blueSurrogate && entry.blueSurrogate[i];
-          return teamSpan(t, isSur, 'blue');
-        }).join(' &middot; ');
-        html += '<tr><td>' + (entry.practiceMatch ? 'P' : 'Q') + entry.num + '</td><td>' + minToTime(entry.startMin) + '</td><td>' + red + '</td><td>' + blue + '</td></tr>';
-      }
-    });
-
-    html += '</tbody></table>';
-  });
-
-  html += '</div>';     // /#frcPrintRoot
-  html += '</body></html>';
-
-  var w = window.open('', '_blank');
-  if (!w) { showApiStatus('Pop-up blocked — allow pop-ups to print', true); return; }
-
-  // Browser print path. PDF is no longer generated client-side here —
-  // the modal's "Save as PDF" button calls serverRenderPdf() which
-  // POSTs to /api/schedules/render-pdf and gets a real PDF back.
-  // Eliminates the html2canvas/html2pdf failure modes (blank pages,
-  // off-page content, font-loading races).
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  // Small delay so popup styles settle before triggering print dialog.
-  setTimeout(function() { w.print(); }, 300);
-}
+function downloadSchedulePDF()  { openExportModal(); }
 </script>
 <script type="text/plain" id="workerSrc">
 
