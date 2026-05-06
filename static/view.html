@@ -210,6 +210,26 @@
   .next-match-countdown.soon  { color: var(--next-match-accent); }
   .next-match-countdown.close { color: var(--next-match-accent); animation: countdown-pulse 1s ease-in-out infinite alternate; }
   .next-match-countdown.now   { color: var(--secondary); animation: countdown-pulse 0.7s ease-in-out infinite alternate; }
+  /* Absolute target — "Sat, Apr 4 · 9:00 AM" — appended to both
+     countdown displays. Subordinate visual weight: same family
+     but smaller, weaker color, no letter-spacing tracking. The
+     containing element (.field-status-countdown / .next-match-
+     countdown) provides the primary "in 2d 3h" big-text; the
+     absolute target gives the user the actual date/time anchor
+     they need to plan their day. */
+  .field-status-countdown .cd-abs,
+  .next-match-countdown   .cd-abs {
+    font-size: 0.72em;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--text-muted);
+    margin-left: 0.25em;
+  }
+  /* Animations only target the relative span — don't pulse the
+     absolute timestamp since it doesn't change. */
+  .field-status.close   .field-status-countdown .cd-abs,
+  .next-match-countdown.close .cd-abs,
+  .next-match-countdown.now   .cd-abs { animation: none; }
   @keyframes countdown-pulse {
     from { opacity: 0.85; }
     to   { opacity: 1; transform: scale(1.02); }
@@ -1954,6 +1974,27 @@ function computeMatchTimes() {
     return WK[d.getDay()] + ', ' + MO[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
   }
 
+  // Derive a YYYY-MM-DD date for a day index when the day_config
+  // doesn't carry per-day dates (older schedules predate that
+  // feature). We anchor on the event's start_date and add `offset`
+  // days. Without this fallback, past-event days never get the
+  // gray "elapsed" overlay because the date comparison in
+  // renderAgendaFitView always sees an empty d.date and bails out.
+  // Returns '' if no anchor available.
+  function _deriveDayDate(offset) {
+    var ev = sch.event || {};
+    var startDate = ev.start_date || '';
+    if (!startDate || typeof startDate !== 'string') return '';
+    var m = startDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return '';
+    var d = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+    if (isNaN(d.getTime())) return '';
+    d.setDate(d.getDate() + offset);
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0');
+  }
+
   const matches = sch.matches || [];
   const practiceMatches = sch.practice_matches || [];
 
@@ -1974,7 +2015,11 @@ function computeMatchTimes() {
       done:  false,
     })).sort((a, b) => a.start - b.start);
 
-    var pDateLabel = pday.dateLabel || formatDateLabel(pday.date);
+    // Resolve the practice day's calendar date — explicit pday.date
+    // wins; otherwise derive from the event start_date (offset 0
+    // since practice is always the first event day when present).
+    var pResolvedDate = pday.date || _deriveDayDate(0);
+    var pDateLabel = pday.dateLabel || formatDateLabel(pResolvedDate);
     // Event-day numbering: practice day is always Day 1 of the
     // event when practice is enabled (it always is here, since
     // we're inside the practice-block). Append the kind label
@@ -1989,7 +2034,7 @@ function computeMatchTimes() {
       // Raw YYYY-MM-DD for the agenda-fit progress indicator.
       // Renderer compares this to today's date to decide whether to
       // shade the bar gray (past), red-line (current), or leave alone.
-      date: pday.date || '',
+      date: pResolvedDate,
     });
 
     let pCursor = pStart;
@@ -2056,7 +2101,17 @@ function computeMatchTimes() {
     // Date is joined with the same middle-dot separator the agenda
     // fit and editor schedule output use, so all day labels read
     // consistently across editor and view.
-    var dateLabel = day.dateLabel || formatDateLabel(day.date);
+    // Resolve the qual day's calendar date — explicit day.date
+    // wins, otherwise derive from event start_date by offset. The
+    // offset accounts for the practice day occupying day 0 when
+    // present: practice = offset 0, qual1 = offset 1, etc.
+    var _qualOffset = (computed.length > 0 &&
+                       computed[0].type === 'day-divider' &&
+                       !!computed[0].isPractice)
+                      ? (di + 1)   // practice on → qual day di is offset di+1
+                      : di;        // no practice → qual day di is offset di
+    var qResolvedDate = day.date || _deriveDayDate(_qualOffset);
+    var dateLabel = day.dateLabel || formatDateLabel(qResolvedDate);
     // Detect whether the practice block above was emitted, so qual
     // day numbering shifts by 1 when present (practice = Day 1,
     // first qual = Day 2). Inspecting the first computed entry is
@@ -2076,7 +2131,7 @@ function computeMatchTimes() {
       start: startMin, end: endMin,
       // Raw YYYY-MM-DD for the agenda-fit progress indicator (see
       // matching field on the practice divider above).
-      date: day.date || '',
+      date: qResolvedDate,
     });
 
     while (matchIdx < matches.length) {
@@ -3488,7 +3543,14 @@ function _tickCountdown() {
     _stopCountdown();
     return;
   }
-  el.textContent = text;
+  // Absolute target — date + time — appended after the relative
+  // countdown so users know exactly when their team's next match is
+  // scheduled, not just "in 1h 23m". Same format as the field-level
+  // countdown for visual consistency.
+  var absTarget = (typeof _formatAbsoluteTarget === 'function')
+    ? _formatAbsoluteTarget(_countdownTargetTs) : '';
+  el.innerHTML = '<span class="cd-rel">' + text + '</span>' +
+                 (absTarget ? ' <span class="cd-abs">\u00b7 ' + absTarget + '</span>' : '');
   el.classList.toggle('soon',  ms > 0 && ms <= 60 * 60 * 1000);  // <1h
   el.classList.toggle('close', ms > 0 && ms <= 10 * 60 * 1000);  // <10m
   el.classList.toggle('now',   ms <= 0);                          // starting
@@ -3557,54 +3619,131 @@ function updateFieldStatus() {
   var cd    = document.getElementById('fieldStatusCountdown');
   if (!block || !line || !cd) return;
 
-  // Only show when in live mode AND there's actual live data to base
-  // the field state on. Without Nexus data, we have no way to know
-  // what's actually on the field — fall back to hiding the block.
   var hasLive = STATE.liveMode && STATE.liveByMatch && Object.keys(STATE.liveByMatch).length > 0;
-  if (!hasLive) {
+  if (hasLive) {
+    // Live path — Nexus knows what's actually on the field.
+    var t = _findFieldStatusTargets();
+    if (t.current) {
+      // Playing now — count UP from match start
+      var ts = _resolveMatchTimestamp(t.current);
+      block.style.display = '';
+      block.classList.remove('upcoming');
+      block.classList.add('playing');
+      line.innerHTML = 'Now playing: <strong>Q' + t.current.matchNum + '</strong>';
+      if (ts) {
+        _fieldCountdownIsPlaying = true;
+        _fieldCountdownTargetTs = ts;
+        _startFieldCountdown();
+      } else {
+        cd.textContent = 'PLAYING';
+        _stopFieldCountdown();
+      }
+      return;
+    }
+    if (t.next) {
+      // Nothing playing — count DOWN to next match start
+      var ts2 = _resolveMatchTimestamp(t.next);
+      block.style.display = '';
+      block.classList.remove('playing');
+      block.classList.add('upcoming');
+      line.innerHTML = 'Up next: <strong>Q' + t.next.matchNum + '</strong>';
+      if (ts2) {
+        _fieldCountdownIsPlaying = false;
+        _fieldCountdownTargetTs = ts2;
+        _startFieldCountdown();
+      } else {
+        cd.textContent = 'queued';
+        _stopFieldCountdown();
+      }
+      return;
+    }
+    // Live data exists but no current/next found — all completed.
     block.style.display = 'none';
     _stopFieldCountdown();
     return;
   }
 
-  var t = _findFieldStatusTargets();
-  if (t.current) {
-    // Playing now — count UP from match start
-    var ts = _resolveMatchTimestamp(t.current);
-    block.style.display = '';
-    block.classList.remove('upcoming');
-    block.classList.add('playing');
-    line.innerHTML = 'Now playing: <strong>Q' + t.current.matchNum + '</strong>';
-    if (ts) {
-      _fieldCountdownIsPlaying = true;
-      _fieldCountdownTargetTs = ts;
-      _startFieldCountdown();
-    } else {
-      cd.textContent = 'PLAYING';
-      _stopFieldCountdown();
-    }
+  // No live data — fall back to planned schedule times. Walk
+  // STATE.computed, find the next match whose planned timestamp is
+  // in the future, and show its countdown. Practice and qual both
+  // count: "Up next" should always reflect what the user will see
+  // play on the field next, regardless of kind. When all planned
+  // matches are in the past, show the last one with a "Last match"
+  // tag so the user has SOME context.
+  if (!STATE.computed || !STATE.computed.length) {
+    block.style.display = 'none';
+    _stopFieldCountdown();
     return;
   }
-  if (t.next) {
-    // Nothing playing — count DOWN to next match start
-    var ts2 = _resolveMatchTimestamp(t.next);
+
+  var nowMs = Date.now();
+  var nextEntry = null;
+  var lastEntry = null;
+  for (var i = 0; i < STATE.computed.length; i++) {
+    var e = STATE.computed[i];
+    if (e.type !== 'match') continue;
+    var entryTs = _resolveMatchTimestamp(e);
+    if (entryTs == null) continue;
+    if (entryTs > nowMs && !nextEntry) nextEntry = e;
+    lastEntry = e; // keep updating; ends as the chronologically last match
+  }
+
+  if (nextEntry) {
+    var nts = _resolveMatchTimestamp(nextEntry);
     block.style.display = '';
     block.classList.remove('playing');
     block.classList.add('upcoming');
-    line.innerHTML = 'Up next: <strong>Q' + t.next.matchNum + '</strong>';
-    if (ts2) {
-      _fieldCountdownIsPlaying = false;
-      _fieldCountdownTargetTs = ts2;
-      _startFieldCountdown();
-    } else {
-      cd.textContent = 'queued';
-      _stopFieldCountdown();
-    }
+    var prefix = nextEntry.isPractice ? 'P' : 'Q';
+    line.innerHTML = 'Up next: <strong>' + prefix + nextEntry.matchNum + '</strong>';
+    _fieldCountdownIsPlaying = false;
+    _fieldCountdownTargetTs = nts;
+    _startFieldCountdown();
     return;
   }
-  // No current or upcoming match — all completed, or no match data
+  if (lastEntry) {
+    // All planned matches are past — show the last one as a finale
+    // marker. No countdown (would be negative).
+    var lts = _resolveMatchTimestamp(lastEntry);
+    block.style.display = '';
+    block.classList.remove('playing');
+    block.classList.remove('upcoming');
+    var prefixL = lastEntry.isPractice ? 'P' : 'Q';
+    line.innerHTML = 'Last match: <strong>' + prefixL + lastEntry.matchNum + '</strong>';
+    _fieldCountdownIsPlaying = false;
+    _fieldCountdownTargetTs = lts;
+    // Display absolute time only — no countdown ticking.
+    cd.textContent = lts ? _formatAbsoluteTarget(lts) : '';
+    _stopFieldCountdown();
+    return;
+  }
   block.style.display = 'none';
   _stopFieldCountdown();
+}
+
+// Format a target timestamp into a human-readable absolute label —
+// "Sat, Apr 4 · 9:00 AM" — used to display the actual target time
+// alongside the relative countdown so users see exactly when the
+// next match is scheduled. Mirrors the editor's formatDayDate +
+// minToTime12 conventions to stay consistent across pages.
+function _formatAbsoluteTarget(ts) {
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  var WK = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var datePart = WK[d.getDay()] + ', ' + MO[d.getMonth()] + ' ' + d.getDate();
+  // Time formatter — view is 12h by default; if the editor's
+  // 24h preference has been mirrored to view, reflect it here too.
+  var h = d.getHours(), m = d.getMinutes();
+  var timePart;
+  if (window._frcUse24h) {
+    timePart = (h<10?'0':'') + h + ':' + (m<10?'0':'') + m;
+  } else {
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    var h12 = h % 12; if (h12 === 0) h12 = 12;
+    timePart = h12 + ':' + (m<10?'0':'') + m + ' ' + ampm;
+  }
+  return datePart + ' \u00b7 ' + timePart;
 }
 
 function _startFieldCountdown() {
@@ -3620,28 +3759,36 @@ function _tickFieldCountdown() {
   var block = document.getElementById('fieldStatus');
   if (!cd || !block || !_fieldCountdownTargetTs) return;
   var ms = _fieldCountdownTargetTs - Date.now();
+  // Absolute target — "Sat, Apr 4 · 9:00 AM" — shown alongside the
+  // relative countdown so users know exactly when, not just "in 2d 3h".
+  // Stored once per tick to avoid repeated formatting.
+  var absTarget = _formatAbsoluteTarget(_fieldCountdownTargetTs);
   if (_fieldCountdownIsPlaying) {
     // Count UP — match started at ts, show elapsed since
     var elapsed = -ms; // ms is negative once match has started
     if (elapsed < 0) {
       // Edge case: scheduled time is in the future but Nexus says playing
-      cd.textContent = 'PLAYING';
+      cd.innerHTML = '<span class="cd-rel">PLAYING</span>' +
+                     (absTarget ? ' <span class="cd-abs">\u00b7 ' + absTarget + '</span>' : '');
       return;
     }
     var s = Math.floor(elapsed / 1000);
     var m = Math.floor(s / 60); var sec = s % 60;
-    cd.textContent = m > 0 ? ('started ' + m + 'm ' + (sec < 10 ? '0' : '') + sec + 's ago')
+    var elapsedTxt = m > 0 ? ('started ' + m + 'm ' + (sec < 10 ? '0' : '') + sec + 's ago')
                             : ('started ' + sec + 's ago');
+    cd.innerHTML = '<span class="cd-rel">' + elapsedTxt + '</span>' +
+                   (absTarget ? ' <span class="cd-abs">\u00b7 ' + absTarget + '</span>' : '');
     block.classList.remove('close');
   } else {
     // Count DOWN to start
     var text = _formatCountdown(ms);
+    var relTxt = (text === null) ? 'STARTING NOW' : text;
+    cd.innerHTML = '<span class="cd-rel">' + relTxt + '</span>' +
+                   (absTarget ? ' <span class="cd-abs">\u00b7 ' + absTarget + '</span>' : '');
     if (text === null) {
-      cd.textContent = 'STARTING NOW';
       block.classList.remove('close');
       return;
     }
-    cd.textContent = text;
     block.classList.toggle('close', ms > 0 && ms <= 5 * 60 * 1000);
   }
 }

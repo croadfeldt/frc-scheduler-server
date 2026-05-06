@@ -1692,8 +1692,8 @@
             onkeydown="if(event.key==='Enter')loadEventByCode()"
             oninput="onEventCodeInput()" autocomplete="off" spellcheck="false">
           <div id="tbaDropdown" style="display:none;position:absolute;top:calc(100% + 2px);left:0;right:0;z-index:200;
-               background:var(--surface);border:1px solid var(--accent);border-radius:4px;
-               max-height:240px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.4);">
+               background:var(--surface);border:1px solid var(--accent);border-radius:6px;
+               max-height:380px;overflow-y:auto;box-shadow:0 6px 22px rgba(0,0,0,0.45);">
             <div id="tbaDropdownList" style="display:flex;flex-direction:column;"></div>
           </div>
         </div>
@@ -2793,6 +2793,11 @@ function triggerRestoreFromFile() {
 }
 
 async function restoreFromFile(file) {
+  // Wipe any current schedule before pulling the file's contents.
+  // The restore handlers will repopulate state from the file; this
+  // ensures we don't blend in any leftovers from the active event.
+  // Silent because the user-explicit action is the file pick.
+  try { if (typeof fullReset === 'function') fullReset(true); } catch(_) {}
   var name = (file.name || '').toLowerCase();
   if (name.endsWith('.json')) {
     return restoreFromJsonFile(file);
@@ -5807,20 +5812,31 @@ async function duplicateSchedule() {
 
 
 // ── Full reset — clear all state and return to blank slate ───────────────────
-function fullReset() {
-  var choice = confirm(
-    'Reset schedule results and start fresh?\n\n' +
-    'Click OK to clear results (keeping your parameters).\n' +
-    'Click Cancel to abort.'
-  );
-  if (!choice) return;
+// Full reset of all schedule state. When `silent` is true, skips
+// the user-facing confirms and treats it as a programmatic
+// "wipe everything to start fresh" — used by event-switch flows
+// (loadEventByCode, loadAdhocEvent, restoreFromFile, recent
+// event picker) so loading a different event doesn't leave
+// stale schedule data on the screen. Silent mode also resets
+// parameters so the new event starts from a clean slate.
+function fullReset(silent) {
+  if (!silent) {
+    var choice = confirm(
+      'Reset schedule results and start fresh?\n\n' +
+      'Click OK to clear results (keeping your parameters).\n' +
+      'Click Cancel to abort.'
+    );
+    if (!choice) return;
+  }
 
-  // Offer to also reset parameters
-  var resetParams = confirm(
-    'Also reset all parameters to defaults?\n\n' +
-    'OK = reset parameters too\n' +
-    'Cancel = keep current parameters'
-  );
+  // Offer to also reset parameters (only when interactive)
+  var resetParams = silent
+    ? true   // event-switch flows want a full clean slate
+    : confirm(
+        'Also reset all parameters to defaults?\n\n' +
+        'OK = reset parameters too\n' +
+        'Cancel = keep current parameters'
+      );
 
   // Cancel any in-flight request
   if (_s1AbortController) { _s1AbortController.abort(); _s1AbortController = null; }
@@ -6542,6 +6558,18 @@ async function fetchAndRenderAgendaFit(eventKey, startDate, endDate) {
     badge.textContent = 'No PDF';
     badge.style.cssText = 'font-size:0.68rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:3px;background:rgba(127,132,156,0.15);color:var(--text-muted);';
     statsEl.style.display = 'grid';
+    // No PDF doesn't mean no agenda fit — synthesize bars from the
+    // day-config form fields the user has set (or that came from a
+    // restored schedule). renderScheduleBars handles the case where
+    // a real schedule is loaded and falls back to renderAgendaBlocks
+    // (which reads the form) when no schedule exists. Either way the
+    // user sees the per-day timeline instead of a blank panel.
+    blocksEl.style.display = 'block';
+    if (window._frcScheduled && window._frcScheduled.length) {
+      renderScheduleBars();
+    } else {
+      renderAgendaBlocks();
+    }
     updateAgendaFit();
     // PDF unavailable — run auto-max then auto-generate with existing day config
     var autoMaxFail = document.getElementById('autoMaxCycles');
@@ -8990,10 +9018,52 @@ async function loadEvents() {
 async function onEventSelectChange() {
   const id = document.getElementById('eventSelect').value;
   if (!id) return;
+  // Switching events from the recent-events dropdown — wipe stale
+  // schedule state from the previous event before loading. Silent so
+  // the user-explicit action (the dropdown pick) is the only confirm
+  // they need.
+  try {
+    if (typeof fullReset === 'function' && _currentEventId !== parseInt(id)) {
+      fullReset(true);
+    }
+  } catch(_) {}
   try {
     const ev = await apiFetch('/api/events/' + id);
     activateEvent(ev);
+    // Recent events should land on the most recent saved schedule —
+    // not an empty output. Pull the latest assigned schedule for this
+    // event id and replay it. Non-fatal if there isn't one yet.
+    try {
+      await _loadLatestAssignedForEvent(parseInt(id));
+    } catch(_) {}
   } catch(e) { showApiStatus(e.message, true); }
+}
+
+// Find the latest assigned schedule for a given event ID and load
+// it into the editor. Used by both loadEventByCode and the recent-
+// events dropdown so users see their most recent saved work
+// immediately. The endpoint /api/events/{id}/assigned-schedules
+// returns newest-first (created_at DESC); we pick the first entry.
+// No-op if the event has no saved schedules. Returns the schedule
+// id loaded (or null).
+async function _loadLatestAssignedForEvent(eventId) {
+  if (!eventId) return null;
+  try {
+    var list = await apiFetch('/api/events/' + eventId + '/assigned-schedules');
+    if (!Array.isArray(list) || list.length === 0) return null;
+    var pick = list[0];
+    if (!pick || !pick.id) return null;
+    // Reuse the standard loader. day_config comes back inside the
+    // assigned schedule response itself; pass null so the loader
+    // pulls fresh from the API.
+    if (typeof loadAssignedSchedule === 'function') {
+      await loadAssignedSchedule(pick.id, null);
+      return pick.id;
+    }
+    return null;
+  } catch(_) {
+    return null;
+  }
 }
 
 // Primary workflow: type event code, press Enter or Load
@@ -9043,6 +9113,9 @@ function exportTeamList() {
 async function loadAdhocEvent() {
   // Get or create the persistent ad-hoc event, then activate it like any other event.
   // Clear any existing teams first so each ad-hoc session starts fresh.
+  // Wipe any stale schedule from a previous event so the user doesn't
+  // see ghost data; silent so they don't get a confirm dialog.
+  try { if (typeof fullReset === 'function') fullReset(true); } catch(_) {}
   try {
     showApiStatus('⏳ Loading ad-hoc event…');
     const ev = await apiFetch('/api/events/adhoc');
@@ -9072,6 +9145,20 @@ async function loadEventByCode() {
   const status = document.getElementById('eventCodeStatus');
   input.className = 'loading'; status.textContent = 'Looking up…';
 
+  // Switching events — wipe stale schedule state from the previous
+  // event so the new one starts from a clean slate. Silent so the
+  // user doesn't get confirm dialogs they didn't ask for. Only run
+  // when the codeInput value differs from the current event's key
+  // (avoids pointless resets when re-loading the same event).
+  try {
+    if (typeof fullReset === 'function' && _currentEventInfo &&
+        _currentEventInfo.key && _currentEventInfo.key !== code) {
+      fullReset(true);
+    } else if (typeof fullReset === 'function' && !_currentEventInfo) {
+      fullReset(true);
+    }
+  } catch(_) {}
+
   try {
     // Check if we already have it locally
     const events = await apiFetch('/api/events');
@@ -9079,6 +9166,13 @@ async function loadEventByCode() {
     if (local) {
       const ev = await apiFetch('/api/events/' + local.id);
       activateEvent(ev);
+      // After event is activated, attempt to load its latest assigned
+      // schedule from the DB so the user lands on the most recent saved
+      // result, not an empty schedule output. Non-fatal — if there's no
+      // assigned schedule yet, the empty state is correct.
+      try {
+        await _loadLatestAssignedForEvent(local.id);
+      } catch(_) {}
       input.className = 'valid';
       status.textContent = '✓ ' + local.name;
       return;
@@ -9256,15 +9350,15 @@ function populateTbaDropdown(events) {
     tipParts.push('Source: ' + srcLabel);
     row.title = tipParts.join(' · ');
 
-    row.style.cssText = 'display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.7rem;cursor:pointer;border-bottom:1px solid var(--border);font-size:0.8rem;';
+    row.style.cssText = 'display:flex;align-items:center;gap:0.6rem;padding:0.55rem 0.85rem;cursor:pointer;border-bottom:1px solid var(--border);font-size:0.88rem;line-height:1.3;';
     row.innerHTML =
-      '<span style="font-family:Barlow Condensed,sans-serif;font-weight:700;color:var(--accent);min-width:5rem;flex-shrink:0;">' + ev.key + '</span>' +
+      '<span style="font-family:Barlow Condensed,sans-serif;font-weight:700;color:var(--accent);min-width:5.5rem;flex-shrink:0;font-size:0.95rem;">' + ev.key + '</span>' +
       '<span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (ev.name || '') + '</span>' +
-      (ev.location ? '<span style="color:var(--text-muted);font-size:0.68rem;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;" title="' + ev.location + '">' + ev.location + '</span>' : '') +
-      '<span style="color:var(--text-muted);font-size:0.7rem;flex-shrink:0;">' + (ev.start_date || '') + '</span>' +
-      '<span style="font-size:0.58rem;font-family:Barlow Condensed,sans-serif;font-weight:700;letter-spacing:0.06em;' +
+      (ev.location ? '<span style="color:var(--text-muted);font-size:0.74rem;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;" title="' + ev.location + '">' + ev.location + '</span>' : '') +
+      '<span style="color:var(--text-muted);font-size:0.76rem;flex-shrink:0;font-variant-numeric:tabular-nums;">' + (ev.start_date || '') + '</span>' +
+      '<span style="font-size:0.62rem;font-family:Barlow Condensed,sans-serif;font-weight:700;letter-spacing:0.06em;' +
         'color:' + srcColor + ';background:' + srcBg + ';border:1px solid ' + srcColor + ';' +
-        'border-radius:3px;padding:1px 4px;flex-shrink:0;">' + srcLabel + '</span>';
+        'border-radius:3px;padding:1px 5px;flex-shrink:0;">' + srcLabel + '</span>';
     row.addEventListener('mouseenter', function() { this.style.background = 'var(--surface2)'; });
     row.addEventListener('mouseleave', function() { this.style.background = ''; });
     row.addEventListener('mousedown', function(e) {
@@ -12291,6 +12385,23 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
       try { updateAgendaFit(); }
       catch(e) { console.warn('updateAgendaFit failed during load:', e); }
     }
+    // Render the per-day timeline bars too. updateAgendaFit only
+    // refreshes the stats grid; the bar visualization is owned by
+    // renderScheduleBars (which falls back to renderAgendaBlocks
+    // when there's no _frcScheduled). Without this call, the bars
+    // panel can be left empty after a saved schedule loads against
+    // an event that had no agenda PDF.
+    if (typeof renderScheduleBars === 'function') {
+      try { renderScheduleBars(); }
+      catch(e) { console.warn('renderScheduleBars failed during load:', e); }
+    }
+    // Ensure the agenda fit panel and its blocks container are
+    // visible — the PDF-fail path hides blocksEl, and we may have
+    // landed here without ever going through that path.
+    var _afp = document.getElementById('agendaFitPanel');
+    var _afb = document.getElementById('agendaFitBlocks');
+    if (_afp) _afp.style.display = 'block';
+    if (_afb) _afb.style.display = 'block';
 
     // Push aid/sid into the URL so refresh restores the same load.
     // Without this, loadAssignedSchedule completes silently and a
