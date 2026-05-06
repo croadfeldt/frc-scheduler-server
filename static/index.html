@@ -117,10 +117,10 @@
 
   .layout { display: grid; grid-template-columns: 390px 1fr; gap: 2rem; align-items: start; }
 
-  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.18); }
 
   .panel-header {
-    background: var(--surface2); padding: 0.75rem 1.25rem;
+    background: var(--surface2); padding: 0.65rem 1.1rem;
     font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 0.8rem;
     letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-strong);
     border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.5rem;
@@ -128,6 +128,42 @@
   .panel-header::before {
     content: ''; width: 6px; height: 6px; background: var(--accent); border-radius: 50%;
     animation: pulse 2s infinite;
+  }
+  /* Schedule-output composite header — combines the section label,
+     inline stats (matches/teams/mpt/days), and the Export button
+     into a single row. Saves ~30px of vertical chrome compared to
+     the previous stacked panel-header + schedule-meta layout. The
+     stats span has its own divider on the left so the eye separates
+     the title from the numbers; on narrow screens the row wraps and
+     the divider hides automatically. */
+  .schedule-output-header .schedule-meta-inline {
+    display: inline-flex; align-items: baseline; flex-wrap: wrap;
+    gap: 0.4rem 0.55rem;
+    font-family: 'Barlow', sans-serif; font-weight: 400;
+    font-size: 0.78rem; color: var(--text-muted);
+    letter-spacing: normal; text-transform: none;
+    padding-left: 0.85rem; margin-left: 0.4rem;
+    border-left: 1px solid var(--border);
+  }
+  .schedule-output-header .schedule-meta-inline strong {
+    color: var(--text-strong);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 600; font-size: 0.92rem;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+    margin-right: 0.1rem;
+  }
+  .schedule-output-header .schedule-meta-inline .sep { color: var(--border); user-select: none; }
+  /* Wrap behavior: when the row wraps because the panel is narrow,
+     the stats span flows below the title with the left divider
+     suppressed so it doesn't visually float in the middle. */
+  @media (max-width: 720px) {
+    .schedule-output-header .schedule-meta-inline {
+      border-left: none;
+      padding-left: 0;
+      margin-left: 0;
+      flex-basis: 100%;
+    }
   }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -183,7 +219,7 @@
   .section-label {
     font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 0.7rem;
     letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted);
-    margin-bottom: 0.75rem; margin-top: 1.25rem; padding-top: 1.25rem;
+    margin-bottom: 0.65rem; margin-top: 1rem; padding-top: 1rem;
     border-top: 1px solid var(--border);
   }
   .section-label:first-child { margin-top: 0; padding-top: 0; border-top: none; }
@@ -676,45 +712,34 @@
 
   .results-panel { position: sticky; top: 2rem; }
 
-  /* Schedule meta line — basic facts (matches/teams/per-team/days)
-     shown as a single thin row right above the schedule table.
-     Replaces the old 6-tile .stats-bar; quality stats (B2B,
-     surrogates, partner/opponent repeats) all live in the diversity
-     report card above the panel header now. */
-  .schedule-meta {
-    display: flex; align-items: baseline; flex-wrap: wrap;
-    gap: 0.4rem 0.7rem;
-    padding: 0.4rem 1.25rem 0.6rem;
-    border-bottom: 1px solid var(--border);
-    font-size: 0.78rem; color: var(--text-muted);
-    font-family: 'Barlow', sans-serif;
-  }
-  .schedule-meta strong {
-    color: var(--text-strong);
-    font-family: 'Barlow Condensed', sans-serif;
-    font-weight: 600; font-size: 0.95rem;
-    letter-spacing: 0.02em;
-    font-variant-numeric: tabular-nums;
-    margin-right: 0.15rem;
-  }
-  .schedule-meta .sep { color: var(--border); user-select: none; }
+  /* Schedule meta is now rendered inline inside the panel-header
+     via .schedule-meta-inline (see schedule-output-header rules
+     above). The old .schedule-meta block was a standalone row
+     between the header and the table — replaced by the composite
+     header design. */
 
   .schedule-output { padding: 1.25rem; max-height: 70vh; overflow-y: auto; }
   .schedule-output::-webkit-scrollbar { width: 5px; }
   .schedule-output::-webkit-scrollbar-track { background: var(--bg); }
   .schedule-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-  .day-block { margin-bottom: 2rem; }
+  .day-block { margin-bottom: 1.5rem; }
   .day-block[id] { scroll-margin-top: 0.5rem; }
+  /* Day title — section heading inside the schedule output. Sized
+     to feel like a section header rather than a panel header — the
+     panel-header sits above and is the dominant heading; day-title
+     subordinates beneath it without overpowering the actual schedule
+     content. Letter-spacing dialed back from 0.12em to 0.08em so
+     the text reads compact at the smaller size. */
   .day-title {
-    font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 1.1rem;
-    letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-strong);
-    margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.75rem;
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 0.95rem;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-strong);
+    margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.6rem;
   }
   .day-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
   .day-title .day-jump {
     cursor: pointer; transition: color 0.15s;
-    font-size: 1.35rem; letter-spacing: 0.1em;
+    font-size: 1.1rem; letter-spacing: 0.06em;
   }
   .day-title .day-jump:hover { color: var(--accent); }
 
@@ -742,8 +767,8 @@
   .cycle-change-display { background: rgba(122,164,240,0.04); border-left: 3px solid rgba(122,164,240,0.35); }
   .cycle-change-display td { color: var(--text-muted); font-size: 0.72rem; letter-spacing: 0.04em; padding: 0.3rem 0.7rem; font-style: italic; }
 
-  .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4rem 2rem; color: var(--text-muted); text-align: center; gap: 1rem; }
-  .empty-icon { font-size: 3rem; opacity: 0.25; }
+  .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 3rem 2rem; color: var(--text-muted); text-align: center; gap: 1rem; }
+  .empty-icon { font-size: 2.5rem; opacity: 0.25; }
   .empty-state p { font-size: 0.85rem; letter-spacing: 0.05em; }
 
   .warning-box { background: rgba(204,85,85,0.08); border: 1px solid rgba(204,85,85,0.35); border-radius: 4px; padding: 0.75rem 1rem; font-size: 0.82rem; color: #d97070; margin-bottom: 1rem; }
@@ -804,16 +829,27 @@
   .filter-chip.surrogate-filter { background: rgba(200,153,42,0.12); border-color: rgba(200,153,42,0.55); color: var(--amber); }
   .filter-chip.surrogate-filter:hover { background: rgba(200,153,42,0.22); }
 
-  /* Filter bar */
+  /* Filter bar — slim strip in the empty state (just the "Filters: None
+     active" hint), expands gracefully when chips are added. The
+     min-height matches the panel-header so the chrome reads as a
+     consistent stack of slim rows above the schedule. */
   .filter-bar {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 0.5rem;
-    padding: 0.6rem 1.25rem;
+    padding: 0.4rem 1.1rem;
     background: var(--surface2);
     border-bottom: 1px solid var(--border);
-    min-height: 44px;
+    min-height: 30px;
+  }
+  /* When chips exist (filters active), the row gets slightly more
+     vertical room so chips can display comfortably. The :has()
+     selector is supported in all modern browsers and degrades
+     gracefully (older browsers see the slim variant). */
+  .filter-bar:has(.filter-chip) {
+    padding: 0.55rem 1.1rem;
+    min-height: 38px;
   }
   .filter-bar-label {
     font-family: 'Barlow Condensed', sans-serif;
@@ -2400,9 +2436,24 @@
            Stage 1 generation completes (renderDiversityReport in
            static/index.html); kept hidden until then. -->
       <div id="diversityReportCard" class="diversity-report" style="display:none;"></div>
-      <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;border-top:none;">
+      <!-- Schedule Output panel-header — composite row with label,
+           inline stats (matches/teams/mpt/days), and Export button.
+           Combining these saves ~30px of vertical chrome compared to
+           the previous stacked panel-header + schedule-meta layout.
+           The #scheduleMeta and stat IDs are preserved so existing JS
+           continues to populate them without changes. -->
+      <div class="panel-header schedule-output-header" style="display:flex;align-items:center;flex-wrap:wrap;gap:0.5rem;border-top:none;">
         <span>Schedule Output</span>
-        <div id="downloadBar" style="display:none;gap:0.4rem;display:none;align-items:center;">
+        <span class="schedule-meta-inline" id="scheduleMeta" style="display:none;">
+          <span><strong id="statMatches">&#8212;</strong> matches</span>
+          <span class="sep">&middot;</span>
+          <span><strong id="statTeams">&#8212;</strong> teams</span>
+          <span class="sep">&middot;</span>
+          <span><strong id="statPerTeam">&#8212;</strong> mpt</span>
+          <span class="sep">&middot;</span>
+          <span><strong id="statDays">&#8212;</strong> days</span>
+        </span>
+        <div id="downloadBar" style="display:none;gap:0.4rem;align-items:center;margin-left:auto;">
           <!-- Single Export button — opens the Export modal where the
                user picks format and per-format options. Replaces the
                previous toolbar of CSV/JSON/XLSX/PDF/FMS/Setup/Print
@@ -2411,21 +2462,6 @@
                (renderScheduleAfterRun, etc.) continues to work. -->
           <button class="btn-export" id="btnExport" onclick="openExportModal()" title="Print, save as PDF, or download as XLSX/CSV/JSON/FMS">&#11015; Print / Export&hellip;</button>
         </div>
-      </div>
-      <!-- Schedule meta line — basic facts (matches/teams/etc).
-           Replaces the previous 6-tile stats-bar; quality stats
-           (B2B, surrogates, partner repeats, etc) all live in the
-           diversity report card above. The IDs match the old
-           stat-value spans so existing populate/reset JS continues
-           to work without changes. -->
-      <div class="schedule-meta" id="scheduleMeta" style="display:none;">
-        <span><strong id="statMatches">&#8212;</strong> matches</span>
-        <span class="sep">&middot;</span>
-        <span><strong id="statTeams">&#8212;</strong> teams</span>
-        <span class="sep">&middot;</span>
-        <span><strong id="statPerTeam">&#8212;</strong> matches/team</span>
-        <span class="sep">&middot;</span>
-        <span><strong id="statDays">&#8212;</strong> days</span>
       </div>
       <div class="filter-bar" id="filterBar" style="display:none">
         <span class="filter-bar-label">Filters:</span>
@@ -4393,9 +4429,18 @@ function renumberDays() {
     row.style.borderColor  = dc + '50';
     var label = row.querySelector('.day-row-header .day-label-link');
     if (label) {
-      label.textContent  = 'Day ' + (i + 1);
-      label.title        = 'Scroll schedule to Day ' + (i + 1);
+      // Event-day numbering — same rule as buildDaysUI: shift by 1
+      // when practice is enabled. Renumbering happens whenever days
+      // are added/removed; togglePracticeDay also calls this so
+      // toggling practice updates qual-day labels in place.
+      var practiceOn = !!(document.getElementById('practiceDayEnabled') &&
+                          document.getElementById('practiceDayEnabled').checked);
+      var eventDay = practiceOn ? (i + 2) : (i + 1);
+      label.textContent  = 'Day ' + eventDay;
+      label.title        = 'Scroll schedule to Day ' + eventDay;
       label.style.color  = dc;
+      // The internal scrollToDay arg stays as i+1 (qual day index) — the
+      // routing semantics haven't changed, only the display label.
       label.onclick = (function(dn) { return function() { scrollToDay(dn); }; })(i + 1);
     }
     row.dataset.day = i;
@@ -4459,9 +4504,17 @@ function buildDaysUI() {
     // Muted day color: low-opacity tint on background, matching border accent
     d.style.background = dc + '14';   // ~8% opacity tint
     d.style.borderColor = dc + '50';  // ~31% opacity border
+    // Event-day numbering — qual day rows shift by 1 when practice
+    // is enabled (practice = Day 1, first qual = Day 2). Computed
+    // here at row-build time; togglePracticeDay() also calls
+    // _renumberV1QualRows() to keep the labels in sync when the
+    // practice checkbox is toggled.
+    const _practiceOn = !!(document.getElementById('practiceDayEnabled') &&
+                           document.getElementById('practiceDayEnabled').checked);
+    const _eventDay = _practiceOn ? (i + 2) : (i + 1);
     d.innerHTML =
       '<div class="day-row-header" style="display:flex;align-items:center;justify-content:space-between;">' +
-        '<span class="day-label-link" style="color:' + dc + ';" onclick="scrollToDay(' + (i+1) + ')" title="Scroll schedule to Day ' + (i+1) + '">Day ' + (i+1) + '</span>' +
+        '<span class="day-label-link" style="color:' + dc + ';" onclick="scrollToDay(' + (i+1) + ')" title="Scroll schedule to Day ' + _eventDay + '">Day ' + _eventDay + '</span>' +
         '<button class="btn-icon" title="Remove day" style="font-size:0.75rem;opacity:0.6;' + (i === 0 ? 'display:none;' : '') + '" onclick="removeDay(this.closest(\'.day-row\'))">&#x2715;</button>' +
       '</div>' +
       '<div class="day-times">' +
@@ -5946,6 +5999,31 @@ function formatDayDate(dateStr) {
   return WK[d.getDay()] + ', ' + MO[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
 }
 
+// Build a standardized day label using event-day numbering — the
+// practice day (when present) is Day 1 of the event, qualification
+// days follow as Day 2, Day 3, etc. This lets users on any tab or
+// page see consistent day numbers regardless of whether they're
+// looking at the practice day or qual days.
+//
+// Inputs:
+//   internalDayNum  — the system-internal index. Practice = 0,
+//                     qual days = 1, 2, 3 ... in order.
+//   isPractice      — whether this is the practice day (kind label).
+//   practiceEnabled — whether the schedule has a practice day at
+//                     all (controls the offset for qual days).
+//
+// Returns: a label like "Day 2 · Qualification" or "Day 1 · Practice".
+// Caller can append a date with " \u00b7 " separator if available.
+function eventDayLabel(internalDayNum, isPractice, practiceEnabled) {
+  var eventNum = practiceEnabled ? (internalDayNum + 1) : internalDayNum;
+  // Defensive: when internal numbering has been munged (e.g.
+  // external callers pass dayNum=0 without setting practiceEnabled),
+  // clamp to at least 1 so the user never sees "Day 0".
+  if (eventNum < 1) eventNum = 1;
+  var kind = isPractice ? 'Practice' : 'Qualification';
+  return 'Day ' + eventNum + ' \u00b7 ' + kind;
+}
+
 // Time formatter — checks window._frcUse24h to switch between 12h
 // (default, "9:00 AM") and 24h ("09:00") format. The toggle lives in
 // the editor header; user preference persists in localStorage. Name
@@ -6621,12 +6699,21 @@ function renderScheduleBars() {
   // Segment widths are proportional to wall-clock duration.
   // Each match-run carries match count + minutes scheduled + total
   // available + cycle times list. Tooltip adds average ct.
+  // practiceEnabled — whether the FIRST scheduled day is the
+  // practice day. Used by eventDayLabel to compute the offset
+  // for qualification day numbering. Computed once before the
+  // forEach loop so every day in the panel gets a consistent
+  // numbering.
+  var _practiceEnabled = window._frcScheduled.length > 0 &&
+                         !!window._frcScheduled[0].isPracticeDay;
   var perDay = [];
   window._frcScheduled.forEach(function(day) {
     if (!day.entries) return;
     var dayNum   = (day.dayNum != null) ? day.dayNum : 1;
     var isPractice = !!day.isPracticeDay;
-    var dayLabel = isPractice ? 'Practice' : 'Day ' + dayNum;
+    // Event-day numbering keeps practice + qual days on the same
+    // numbered scale: Day 1, Day 2, Day 3 ... regardless of kind.
+    var dayLabel = eventDayLabel(dayNum, isPractice, _practiceEnabled);
     var dStart = (day.start != null) ? day.start : null;
     var dEnd   = (day.end   != null) ? day.end   : null;
     if (dStart == null || dEnd == null) {
@@ -7293,6 +7380,16 @@ function togglePracticeDay() {
   var enabled = document.getElementById('practiceDayEnabled').checked;
   document.getElementById('practiceDayBody').style.display = enabled ? '' : 'none';
   document.getElementById('practiceDayHeader').style.borderBottomColor = enabled ? 'var(--border)' : 'transparent';
+  // Re-label qualification day rows (v1 config) and v2 day tags so
+  // the event-day numbering stays consistent: practice on shifts
+  // qual rows from "Day N" to "Day N+1". The renumber helpers
+  // both no-op safely when their respective UI isn't visible.
+  if (typeof renumberDays === 'function') {
+    try { renumberDays(); } catch(_) {}
+  }
+  if (typeof _v2renumberDays === 'function') {
+    try { _v2renumberDays(); } catch(_) {}
+  }
   onCycleTimeChanged();
 }
 
@@ -10914,8 +11011,14 @@ function buildV2Day(day, idx) {
   // Head (collapsed by default)
   var head = document.createElement('div');
   head.className = 'v2-day-head';
+  // Event-day numbering: v2 enumerates ALL day blocks in one list
+  // (practice and qual mixed), so idx+1 IS the event day. Append
+  // the kind so users see "Day 1 · Practice" / "Day 2 · Qual" at
+  // a glance — same convention as the schedule output and agenda
+  // fit. "Qual" is abbreviated here only because the chip is small.
+  var _kindTag = (dayKind === 'practice' ? 'Practice' : 'Qual');
   head.innerHTML =
-    '<span class="v2-day-tag">' + (dayKind === 'practice' ? 'Practice' : 'Day ' + (idx + 1)) + '</span>' +
+    '<span class="v2-day-tag">Day ' + (idx + 1) + ' \u00b7 ' + _kindTag + '</span>' +
     '<input class="v2-day-date" type="date" value="' + _v2attrEsc(day.date || '') + '" title="Date">' +
     '<input class="v2-day-label" type="text" placeholder="Label" value="' + _v2attrEsc(day.label || '') + '">' +
     '<span class="v2-day-summary"></span>' +
@@ -10965,7 +11068,10 @@ function _v2renumberDays() {
     var kind = hasPractice && !hasQual ? 'practice' : 'qual';
     dayEl.dataset.kind = kind;
     var tag = dayEl.querySelector('.v2-day-tag');
-    if (tag) tag.textContent = kind === 'practice' ? 'Practice' : ('Day ' + (i + 1));
+    // Match buildV2Day's tag format: "Day N · Practice" or "Day N · Qual".
+    // Idx is the event-day index already since v2 enumerates all
+    // day blocks in one list.
+    if (tag) tag.textContent = 'Day ' + (i + 1) + ' \u00b7 ' + (kind === 'practice' ? 'Practice' : 'Qual');
   });
 }
 
@@ -12992,15 +13098,20 @@ function renderSchedule() {
     title.className = 'day-title';
     // Date sits between the day name and the match count, joined by
     // the same middle-dot the match count + cycle time use, so the
-    // full readout is "Day 1 · Fri, Apr 3 · 36 matches · ~8 min".
+    // full readout is "Day 1 · Practice · Fri, Apr 3 · 36 matches · ~8 min".
     var dayDateStr = formatDayDate(day.date || '');
     var dayDateHtml = dayDateStr
       ? ' <span style="font-size:0.78rem;color:var(--text-muted);font-weight:400">\u00b7 ' + dayDateStr + '</span>'
       : '';
+    // Event-day numbering: practice day is always Day 1 of the
+    // event, qualification days follow as Day 2, Day 3, etc.
+    // practiceEnabled is derived from the first scheduled day.
+    var _practiceEnabled = scheduled.length > 0 && scheduled[0].isPracticeDay;
+    var _evtLabel = eventDayLabel(day.dayNum, !!day.isPracticeDay, _practiceEnabled);
     title.innerHTML =
       '<span class="filterable day-jump' + (f.day === day.dayNum ? ' active' : '') + '" ' +
       'onclick="scrollToDay(' + day.dayNum + ')" title="Click to scroll here · Shift+click to filter">' +
-      (day.isPracticeDay ? 'Practice' : 'Day ' + day.dayNum) + '</span>' +
+      escapeHtml(_evtLabel) + '</span>' +
       dayDateHtml +
       ' <span style="font-size:0.78rem;color:var(--text-muted);font-weight:400">' + (dayDateStr ? '\u00b7 ' : '') + matchCount + ' matches' + cycleTimeInfo + '</span>';
     block.appendChild(title);

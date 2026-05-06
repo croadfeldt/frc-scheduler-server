@@ -1536,6 +1536,26 @@ var TEAM_COLORS = [
   '#ff8b73',  // 6: coral pink
 ];
 
+// Build a standardized day label using event-day numbering — the
+// practice day (when present) is Day 1 of the event, qualification
+// days follow as Day 2, Day 3, etc. Mirrors the helper in
+// index.html so editor and view stay in sync.
+//
+// Inputs:
+//   internalDayNum  — system-internal index. Practice = 0,
+//                     qual days = 1, 2, 3 ... in order.
+//   isPractice      — whether this is the practice day (kind label).
+//   practiceEnabled — whether the schedule has a practice day at
+//                     all (controls offset for qual days).
+//
+// Returns: e.g. "Day 1 \u00b7 Practice" or "Day 2 \u00b7 Qualification".
+// Caller appends a date with " \u00b7 " separator if available.
+function eventDayLabel(internalDayNum, isPractice, practiceEnabled) {
+  var eventNum = practiceEnabled ? (internalDayNum + 1) : internalDayNum;
+  if (eventNum < 1) eventNum = 1;
+  var kind = isPractice ? 'Practice' : 'Qualification';
+  return 'Day ' + eventNum + ' \u00b7 ' + kind;
+}
 // Pick a readable text color (near-black or white) for a given
 // background hex. Uses a quick luminance heuristic — bright fills
 // (lime, vivid yellow, cyan) get dark text; saturated mid-tones
@@ -1955,9 +1975,16 @@ function computeMatchTimes() {
     })).sort((a, b) => a.start - b.start);
 
     var pDateLabel = pday.dateLabel || formatDateLabel(pday.date);
+    // Event-day numbering: practice day is always Day 1 of the
+    // event when practice is enabled (it always is here, since
+    // we're inside the practice-block). Append the kind label
+    // ("Practice") so each day's identity is explicit on either
+    // page. Date follows after the kind label, separated by the
+    // same middle-dot used elsewhere.
+    var pBaseLabel = eventDayLabel(0, true, true);
     computed.push({
       type: 'day-divider', dayNum: 0,
-      label: 'Practice Day' + (pDateLabel ? ' \u00b7 ' + pDateLabel : ''),
+      label: pBaseLabel + (pDateLabel ? ' \u00b7 ' + pDateLabel : ''),
       start: pStart, end: pEnd, isPractice: true,
       // Raw YYYY-MM-DD for the agenda-fit progress indicator.
       // Renderer compares this to today's date to decide whether to
@@ -2030,10 +2057,22 @@ function computeMatchTimes() {
     // fit and editor schedule output use, so all day labels read
     // consistently across editor and view.
     var dateLabel = day.dateLabel || formatDateLabel(day.date);
+    // Detect whether the practice block above was emitted, so qual
+    // day numbering shifts by 1 when present (practice = Day 1,
+    // first qual = Day 2). Inspecting the first computed entry is
+    // simpler than re-deriving from cfg here, and matches whatever
+    // the practice block actually decided.
+    const _practiceEnabled = computed.length > 0 &&
+                              computed[0].type === 'day-divider' &&
+                              !!computed[0].isPractice;
+    var qBaseLabel = eventDayLabel(di + 1, false, _practiceEnabled);
+    // Preserve any user-provided custom day label (when it differs
+    // from the default "Day N") by appending it after the kind.
+    var userLabelExtra = (day.label && day.label !== ('Day ' + (di + 1)))
+      ? ' \u00b7 ' + day.label : '';
     computed.push({
       type: 'day-divider', dayNum: di + 1,
-      label: 'Day ' + (di + 1) + (day.label && day.label !== ('Day ' + (di + 1)) ? ' \u00b7 ' + day.label : '')
-                    + (dateLabel ? ' \u00b7 ' + dateLabel : ''),
+      label: qBaseLabel + userLabelExtra + (dateLabel ? ' \u00b7 ' + dateLabel : ''),
       start: startMin, end: endMin,
       // Raw YYYY-MM-DD for the agenda-fit progress indicator (see
       // matching field on the practice divider above).
