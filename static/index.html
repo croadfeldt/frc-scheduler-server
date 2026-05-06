@@ -1946,9 +1946,6 @@
             <input type="number" id="matchesPerTeam" value="8" min="1" max="50">
           </div>
         </div>
-        <div style="display:flex;gap:0.4rem;margin-top:-0.25rem;margin-bottom:0.5rem;">
-          <button class="btn-sm" id="btnShowFakeTeams" onclick="toggleFakeTeams()" style="display:none;" title="Toggle display of slot numbers in abstract schedule">&#128065; Show Slot Numbers</button>
-        </div>
         <div class="field-row">
           <div class="field">
             <label>Minutes per Match</label>
@@ -1958,6 +1955,30 @@
             <label>Number of Days</label>
             <input type="number" id="numDays" value="2" min="1" max="5">
           </div>
+        </div>
+        <!-- Advanced competition parameters — Cooldown + Break Buffer
+             belong with the rest of the scheduler config in this
+             section. Lives outside v1/v2 day-config wrappers so
+             toggling editors doesn't hide them. -->
+        <details style="margin-bottom:0.5rem;">
+          <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Advanced</summary>
+          <div class="field-row" style="margin-top:0.5rem;">
+            <div class="field" title="Minimum matches that must pass before a team can play again. Higher = fewer back-to-backs.">
+              <label>Match Cooldown</label>
+              <input type="number" id="cooldown" value="3" min="1" max="20">
+            </div>
+            <div class="field" title="Minimum minutes remaining before a break or end of day to still schedule one more match.">
+              <label>Break Buffer (min)</label>
+              <input type="number" id="breakBuffer" value="5" min="0" max="60" step="any">
+            </div>
+          </div>
+        </details>
+        <!-- Show Slot Numbers toggle. Bottom of Competition Parameters
+             so it's easy to find but doesn't crowd the primary inputs.
+             Visible only after a schedule is generated; toggleFakeTeams
+             flips between assigned team numbers and slot indices. -->
+        <div style="display:flex;gap:0.4rem;margin-top:0.25rem;margin-bottom:0.5rem;">
+          <button class="btn-sm" id="btnShowFakeTeams" onclick="toggleFakeTeams()" style="display:none;" title="Toggle display of slot numbers in abstract schedule">&#128065; Show Slot Numbers</button>
         </div>
         <!-- Day-config editor toggle (v1 ↔ v2). The v1 form is the
              original markup (practice day section + days container +
@@ -2045,46 +2066,10 @@
           <div id="v2TimeErrorMsg" class="time-error-msg"></div>
         </div>
 
-        <!-- Advanced + Placement Criteria + autoAssign live OUTSIDE
-             both v1DaysWrapper and v2DaysWrapper so they remain
-             visible regardless of which day-config editor is active.
-             They configure the scheduler itself, not the day layout. -->
-        <details style="margin-bottom:0.5rem;">
-          <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Advanced</summary>
-          <div class="field-row" style="margin-top:0.5rem;">
-            <div class="field" title="Minimum matches that must pass before a team can play again. Higher = fewer back-to-backs.">
-              <label>Match Cooldown</label>
-              <input type="number" id="cooldown" value="3" min="1" max="20">
-            </div>
-            <div class="field" title="Minimum minutes remaining before a break or end of day to still schedule one more match.">
-              <label>Break Buffer (min)</label>
-              <input type="number" id="breakBuffer" value="5" min="0" max="60" step="any">
-            </div>
-          </div>
-        </details>
-
-        <!-- Placement Criteria — exposes the scheduler's scoring weights for power users.
-             Defaults match the FIRST/MatchMaker algorithm. Deviating triggers a notice
-             that the resulting schedule won't match official FIRST scheduling.
-             URL-encoded as wb/wg/wc/wo/wp/ws/wsr params for reproducibility. -->
-        <details id="placementCriteriaPanel">
-          <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Placement Criteria (FIRST-aligned)</summary>
-          <div style="margin-top:0.5rem;font-size:0.72rem;color:var(--text-muted);line-height:1.4;margin-bottom:0.6rem;">
-            How heavily each scheduling concern is weighted. Defaults align with the FIRST
-            <a href="https://idleloop.com/matchmaker/" target="_blank" rel="noopener" style="color:var(--accent);">MatchMaker</a>
-            algorithm used by FMS. Higher = more important relative to the others.
-          </div>
-          <div id="placementCriteriaWeights" class="weights-grid"></div>
-          <div style="display:flex;gap:0.4rem;margin-top:0.5rem;flex-wrap:wrap;">
-            <button class="btn btn-secondary" id="btnFirstStrict" onclick="resetWeightsToFirstStrict()" type="button"
-                    title="Reset all weights to canonical FIRST values">⊕ Match FIRST defaults</button>
-          </div>
-          <div id="weightsDeviationNotice" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-top:0.5rem;font-size:0.75rem;color:var(--amber);line-height:1.4;">
-            &#9888; <strong>Custom weights in use.</strong> The generated schedule will not match what official FIRST scheduling would produce. Click "Match FIRST defaults" to align with FRC manual §10.5.2 / MatchMaker.
-          </div>
-        </details>
-
-        <!-- autoPopulate and autoMaxCycles are always on; hidden to reduce UI noise -->
+        <!-- autoPopulate / autoMaxCycles are always on; hidden to
+             reduce UI noise. autoAssign is user-configurable. These
+             belong outside both day-config wrappers so toggling
+             editors doesn't hide them. -->
         <input type="checkbox" id="autoPopulate" checked style="display:none;">
         <input type="checkbox" id="autoMaxCycles" checked style="display:none;">
         <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0.5rem 0 0.75rem;font-size:0.75rem;color:var(--text);user-select:none;" title="Automatically runs team assignment after generating the schedule structure">
@@ -2114,6 +2099,30 @@
             Schedule structure ready. Select an event with a matching team count to assign real team numbers.
           </div>
           <div id="stage2Status" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
+          <!-- Placement Criteria — scheduler scoring weights. Lives in
+               the Assign Teams section because that's where the team
+               placement actually happens; tweaking weights here
+               affects the next assignment run. Defaults match
+               FIRST/MatchMaker (FMS-aligned); deviating triggers a
+               notice that the result won't match official FIRST
+               scheduling. URL-encoded as wb/wg/wc/wo/wp/ws/wsr for
+               reproducibility. -->
+          <details id="placementCriteriaPanel" style="margin-bottom:0.5rem;">
+            <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Placement Criteria (FIRST-aligned)</summary>
+            <div style="margin-top:0.5rem;font-size:0.72rem;color:var(--text-muted);line-height:1.4;margin-bottom:0.6rem;">
+              How heavily each scheduling concern is weighted. Defaults align with the FIRST
+              <a href="https://idleloop.com/matchmaker/" target="_blank" rel="noopener" style="color:var(--accent);">MatchMaker</a>
+              algorithm used by FMS. Higher = more important relative to the others.
+            </div>
+            <div id="placementCriteriaWeights" class="weights-grid"></div>
+            <div style="display:flex;gap:0.4rem;margin-top:0.5rem;flex-wrap:wrap;">
+              <button class="btn btn-secondary" id="btnFirstStrict" onclick="resetWeightsToFirstStrict()" type="button"
+                      title="Reset all weights to canonical FIRST values">⊕ Match FIRST defaults</button>
+            </div>
+            <div id="weightsDeviationNotice" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-top:0.5rem;font-size:0.75rem;color:var(--amber);line-height:1.4;">
+              &#9888; <strong>Custom weights in use.</strong> The generated schedule will not match what official FIRST scheduling would produce. Click "Match FIRST defaults" to align with FRC manual §10.5.2 / MatchMaker.
+            </div>
+          </details>
           <details style="margin-bottom:0.5rem;">
             <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Advanced</summary>
             <div class="field-row single" style="margin-top:0.5rem;margin-bottom:0.25rem;">
@@ -5507,6 +5516,21 @@ function parseTime12agenda(s) {
   return h * 60 + min;
 }
 
+// Format a YYYY-MM-DD date string as "Fri, Apr 3" for display in
+// day labels (schedule output, agenda fit bars, view-page day
+// dividers). Returns '' for empty/invalid input. Mirrors the
+// helper in view.html so both pages format dates identically.
+function formatDayDate(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return '';
+  var m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return '';
+  var d = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  if (isNaN(d.getTime())) return '';
+  var WK = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return WK[d.getDay()] + ', ' + MO[d.getMonth()] + ' ' + d.getDate();
+}
+
 // Time formatter — checks window._frcUse24h to switch between 12h
 // (default, "9:00 AM") and 24h ("09:00") format. The toggle lives in
 // the editor header; user preference persists in localStorage. Name
@@ -6262,6 +6286,7 @@ function renderScheduleBars() {
     perDay.push({
       dayNum: dayNum,
       dayLabel: dayLabel,
+      dayDate: day.date || '',
       isPractice: isPractice,
       start: dStart,
       end: dEnd,
@@ -6338,11 +6363,16 @@ function renderScheduleBars() {
            + '</div>';
     }).join('');
 
-    // Day head — label, window, summary
+    // Day head — label, date, window, summary
+    var dateLabelStr = formatDayDate(d.dayDate || '');
+    var dateLabelHtml = dateLabelStr
+      ? '<span style="font-size:0.68rem;color:var(--text-muted);">\u00b7 ' + dateLabelStr + '</span>'
+      : '';
     var headHtml =
       '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.25rem;">'
       + '<span class="day-label-link" style="color:' + dc + ';font-weight:600;font-size:0.78rem;" '
       +     'onclick="scrollToDay(' + d.dayNum + ')" title="Scroll to ' + d.dayLabel + '">' + d.dayLabel + '</span>'
+      + dateLabelHtml
       + '<span style="font-size:0.68rem;color:var(--text-muted);">' + fmtTime(d.start) + '\u2013' + fmtTime(d.end) + '</span>'
       + '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">'
       +   '<strong style="color:var(--text);">' + totalMatches + '</strong> matches'
@@ -6678,6 +6708,42 @@ function togglePracticeDay() {
 }
 
 function getPracticeConfig() {
+  // V2 mode: read from the v2 day data directly. The v1 form fields
+  // (#practiceStart, #practiceGuaranteed, etc.) are NOT synced when
+  // v2 is the active editor — they hold whatever they had before
+  // toggling. Reading them in v2 mode produced stale values, which
+  // is why edits to the v2 practice block weren't taking effect.
+  // We funnel through downgradeToV1 so we get the same field names
+  // (ct/filler/guaranteed) the rest of the codepath expects.
+  var v2cb = document.getElementById('dayConfigUseV2');
+  if (v2cb && v2cb.checked) {
+    var v2dc = (typeof collectDayConfigV2 === 'function') ? collectDayConfigV2() : null;
+    if (v2dc) {
+      var v1 = downgradeToV1(v2dc);
+      var pd = v1 && v1.practiceDay;
+      if (!pd || !pd.enabled || !pd.start || !pd.end) return null;
+      var startMin = timeToMin(pd.start), endMin = timeToMin(pd.end);
+      if (endMin <= startMin) return null;
+      var breaksMin = (pd.breaks || []).map(function(b) {
+        return { name: b.name || 'Break', start: timeToMin(b.start), end: timeToMin(b.end) };
+      }).filter(function(b) { return b.end > b.start; })
+        .sort(function(a, b) { return a.start - b.start; });
+      return {
+        start: pd.start, end: pd.end,
+        startMin: startMin, endMin: endMin,
+        guaranteed: pd.guaranteed != null ? pd.guaranteed : 3,
+        filler:     pd.filler     != null ? pd.filler     : 99,
+        ct:         pd.ct         != null ? pd.ct         : 11,
+        breaks: breaksMin,
+        cycleChanges: pd.cycleChanges || [],
+        earlyEnd: pd.earlyEnd || null,
+        date: pd.date || '',
+      };
+    }
+    // v2 active but no schedule data — fall through to v1 form-field
+    // path (which will return null since practiceDayEnabled is off).
+  }
+  // V1 mode: read from the v1 form fields directly.
   var enabled = document.getElementById('practiceDayEnabled');
   if (!enabled || !enabled.checked) return null;
   var start = document.getElementById('practiceStart').value;
@@ -6700,6 +6766,12 @@ function getPracticeConfig() {
     breaks: breaks,
     cycleChanges: getPracticeCycleChanges(),
     earlyEnd: getPracticeEarlyEnd(),
+    // Practice-day date round-trip: v2 carries it on the day card,
+    // v1 stashes it on window._frcPreservedDayDates during
+    // applyDayConfigToUI so v1 doesn't drop it on save. Either way
+    // it lands in collectDayConfig().practiceDay.date and we read
+    // it back here so renderSchedule + agenda fit show the date.
+    date: (window._frcPreservedDayDates && window._frcPreservedDayDates.practice) || '',
   };
 }
 
@@ -9710,9 +9782,15 @@ function migrateLegacyDayConfig(dc) {
     var pBlock = {
       type: 'practice',
       start: pd.start, end: pd.end,
-      cycleTime:  pd.cycleTime || dc.cycleTime || 11,
+      // Accept both the canonical v1 field names (ct, filler) and the
+      // older v2-downgrade field names (cycleTime, maxFiller) that
+      // some saved schedules may still use. New writes use canonical
+      // names — this just keeps old data round-tripping correctly.
+      cycleTime:  pd.ct != null ? pd.ct
+                  : (pd.cycleTime != null ? pd.cycleTime : (dc.cycleTime || 11)),
       guaranteed: pd.guaranteed != null ? pd.guaranteed : 3,
-      maxFiller:  pd.maxFiller  != null ? pd.maxFiller  : 99,
+      maxFiller:  pd.filler    != null ? pd.filler
+                  : (pd.maxFiller != null ? pd.maxFiller : 99),
       breaks: (pd.breaks || []).map(function(b) {
         return { type: 'break', start: b.start, end: b.end,
                  label: b.name || 'Break',
@@ -9818,9 +9896,14 @@ function downgradeToV1(dc) {
         date:  day.date  || '',
         start: first.start,
         end:   pBlocks[pBlocks.length - 1].end,
-        cycleTime:  first.cycleTime,
+        // Use canonical v1 field names (ct, filler) — getPracticeConfig
+        // and applyDayConfigToUI both read these specific keys, NOT
+        // the v2 internal names (cycleTime, maxFiller). Without this
+        // alignment, edits to the v2 practice block were dropped on
+        // the floor when the schedule generated.
+        ct:         first.cycleTime,
         guaranteed: first.guaranteed != null ? first.guaranteed : 3,
-        maxFiller:  first.maxFiller  != null ? first.maxFiller  : 99,
+        filler:     first.maxFiller  != null ? first.maxFiller  : 99,
         breaks: allBreaks.map(function(b) { return { start: b.start, end: b.end, name: b.label || 'Break' }; })
                           .sort(function(a, b) { return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start); }),
         cycleChanges: _v2blockChangesToV1(first, globalMatchOffset),
@@ -10485,6 +10568,13 @@ function _v2attrEsc(s) {
 function onV2Change() {
   if (typeof onScheduleParamsChanged === 'function') onScheduleParamsChanged();
   if (typeof updateUrlFromState === 'function') updateUrlFromState();
+  // Arm the autoPopulate regenerate timer for v2 edits, mirroring
+  // what v1 form fields do via oninput="onCycleTimeChanged()".
+  // Without this, edits to v2 day/practice/qual blocks updated the
+  // agenda fit display but never triggered a regenerate — the user
+  // had to manually click Generate. onParamChanged respects the
+  // _frcLoadingSchedule guard, so loads still don't auto-regen.
+  if (typeof onParamChanged === 'function') onParamChanged();
 }
 
 // ─── Toggle wiring ────────────────────────────────────────────────
@@ -10537,6 +10627,20 @@ function updateUrlFromState() {
 // purely in the editor for now. The v2 form-state is never lost
 // because toggling back to v1 round-trips through migrate/downgrade.
 function collectDayConfig() {
+  // Always refresh the dates side-channel from the current editor
+  // state at the END of this function. getPracticeConfig() and the
+  // day-render loops read from window._frcPreservedDayDates rather
+  // than the v1/v2 day_config object directly, so they need a
+  // current snapshot whenever collectDayConfig runs.
+  function _stashDatesFromDc(dc) {
+    var holder = {};
+    if (dc.practiceDay && dc.practiceDay.date) holder.practice = dc.practiceDay.date;
+    (dc.days || []).forEach(function(d, i) {
+      if (d && d.date) holder['day' + (i + 1)] = d.date;
+    });
+    window._frcPreservedDayDates = holder;
+  }
+
   var v2cb = document.getElementById('dayConfigUseV2');
   if (v2cb && v2cb.checked) {
     var v2dc = collectDayConfigV2();
@@ -10551,6 +10655,7 @@ function collectDayConfig() {
       v1.autoPopulate  = elAP ? elAP.checked : false;
       v1.autoMaxCycles = elAM ? elAM.checked : false;
       v1.autoAssign    = elAS ? elAS.checked : false;
+      _stashDatesFromDc(v1);
       return v1;
     }
   }
@@ -11530,7 +11635,9 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       });
 
       scheduled.push({ dayNum: 0, isPracticeDay: true,
-        start: _pracCfg.startMin, end: _pracCfg.endMin, entries: _pracEntries });
+        start: _pracCfg.startMin, end: _pracCfg.endMin,
+        date: (_pracCfg && _pracCfg.date) || '',
+        entries: _pracEntries });
 
       // Status line in the panel
       var _pdSt = document.getElementById('practiceDayStatus');
@@ -11700,7 +11807,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       entries.push({type:'break', name:b.name, start:b.start, end:b.end});
     });
 
-    scheduled.push({dayNum: d+1, start: day.start, end: day.end, entries});
+    scheduled.push({dayNum: d+1, start: day.start, end: day.end, date: day.date || '', entries});
   }
 
   // Update stats. The meta line (#scheduleMeta) holds basic facts;
@@ -11992,11 +12099,19 @@ function renderSchedule() {
     }
     var title = document.createElement('div');
     title.className = 'day-title';
+    // Date sits between the day name and the match count, joined by
+    // the same middle-dot the match count + cycle time use, so the
+    // full readout is "Day 1 · Fri, Apr 3 · 36 matches · ~8 min".
+    var dayDateStr = formatDayDate(day.date || '');
+    var dayDateHtml = dayDateStr
+      ? ' <span style="font-size:0.78rem;color:var(--text-muted);font-weight:400">\u00b7 ' + dayDateStr + '</span>'
+      : '';
     title.innerHTML =
       '<span class="filterable day-jump' + (f.day === day.dayNum ? ' active' : '') + '" ' +
       'onclick="scrollToDay(' + day.dayNum + ')" title="Click to scroll here · Shift+click to filter">' +
       (day.isPracticeDay ? 'Practice' : 'Day ' + day.dayNum) + '</span>' +
-      ' <span style="font-size:0.78rem;color:var(--text-muted);font-weight:400">' + matchCount + ' matches' + cycleTimeInfo + '</span>';
+      dayDateHtml +
+      ' <span style="font-size:0.78rem;color:var(--text-muted);font-weight:400">' + (dayDateStr ? '\u00b7 ' : '') + matchCount + ' matches' + cycleTimeInfo + '</span>';
     block.appendChild(title);
 
     var table = document.createElement('table');

@@ -1405,7 +1405,7 @@ function computeMatchTimes() {
     var pDateLabel = pday.dateLabel || formatDateLabel(pday.date);
     computed.push({
       type: 'day-divider', dayNum: 0,
-      label: 'Practice Day' + (pDateLabel ? ' — ' + pDateLabel : ''),
+      label: 'Practice Day' + (pDateLabel ? ' \u00b7 ' + pDateLabel : ''),
       start: pStart, end: pEnd, isPractice: true,
     });
 
@@ -1469,12 +1469,15 @@ function computeMatchTimes() {
     const earlyEnd = day.earlyEnd;
     let dayMatchCount = 0;
 
-    // Insert day divider — annotate with formatted date when present
+    // Insert day divider — annotate with formatted date when present.
+    // Date is joined with the same middle-dot separator the agenda
+    // fit and editor schedule output use, so all day labels read
+    // consistently across editor and view.
     var dateLabel = day.dateLabel || formatDateLabel(day.date);
     computed.push({
       type: 'day-divider', dayNum: di + 1,
-      label: 'Day ' + (di + 1) + (day.label && day.label !== ('Day ' + (di + 1)) ? ' · ' + day.label : '')
-                    + (dateLabel ? ' — ' + dateLabel : ''),
+      label: 'Day ' + (di + 1) + (day.label && day.label !== ('Day ' + (di + 1)) ? ' \u00b7 ' + day.label : '')
+                    + (dateLabel ? ' \u00b7 ' + dateLabel : ''),
       start: startMin, end: endMin,
     });
 
