@@ -916,6 +916,62 @@
   .btn-sm.btn-danger:hover { border-color: var(--danger); color: var(--danger); background: rgba(204,85,85,0.08); }
   .btn-sm.btn-accent { background: var(--accent); color: #0e1320; border-color: var(--accent); }
   .btn-sm.btn-accent:hover { background: #93b8f5; }
+  /* Lock button — solid amber when active, hollow when off. The
+     active state stands out so users can tell at a glance whether
+     the schedule is locked. */
+  .btn-sm.is-locked {
+    background: var(--amber);
+    color: #1a1206;
+    border-color: var(--amber);
+  }
+  .btn-sm.is-locked:hover { background: #d8b248; border-color: #d8b248; color: #1a1206; }
+  /* Body-level indicator stripe and disabled controls when locked.
+     Form fields go visually muted but stay readable so users can
+     reference values; clicking them does nothing because the
+     handlers short-circuit on window._frcLocked. */
+  body.frc-locked #btnGenerate,
+  body.frc-locked #btnAssign,
+  body.frc-locked #btnSaveEvent,
+  body.frc-locked #btnCommit,
+  body.frc-locked #btnDuplicate {
+    opacity: 0.45;
+    pointer-events: none;
+    filter: grayscale(0.4);
+  }
+  body.frc-locked .panel input[type="number"],
+  body.frc-locked .panel input[type="text"],
+  body.frc-locked .panel input[type="time"],
+  body.frc-locked .panel input[type="date"],
+  body.frc-locked .panel select,
+  body.frc-locked .panel textarea {
+    background: var(--surface2);
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+  body.frc-locked .panel button.btn-add-break,
+  body.frc-locked .panel .v2-add-cc,
+  body.frc-locked .panel .v2-add-nested-break,
+  body.frc-locked #btnAddDay,
+  body.frc-locked #btnAddDayV2 {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  /* Subtle banner so users always know the lock is on */
+  body.frc-locked::before {
+    content: "\1F512  Schedule locked \u2014 edits & saves disabled. Click \u201CUnlock\u201D in the event bar to resume editing.";
+    display: block;
+    background: var(--amber);
+    color: #1a1206;
+    text-align: center;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 600;
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    padding: 0.4rem 0.75rem;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
 
   /* Modal */
   .modal-overlay {
@@ -1099,6 +1155,46 @@
     text-shadow: none;
     font-weight: 600;
     font-size: 0.64rem;
+  }
+  /* Unallocated time within a day window — light hatched fill so it
+     visually reads as "empty / available" rather than an actual
+     scheduled segment. Lower contrast keeps focus on real blocks. */
+  .agenda-seg-idle {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        rgba(127,127,127,0.10),
+        rgba(127,127,127,0.10) 6px,
+        rgba(127,127,127,0.20) 6px,
+        rgba(127,127,127,0.20) 12px
+      );
+    color: var(--text-muted);
+    text-shadow: none;
+    font-size: 0.62rem;
+    font-weight: 500;
+    cursor: default;
+  }
+  /* Match segment can be split visually into a committed sub-region
+     (colored, full opacity) and an idle tail (semi-transparent). */
+  .agenda-seg-matches-inner {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+  }
+  .agenda-seg-tail {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        rgba(255,255,255,0.10),
+        rgba(255,255,255,0.10) 5px,
+        rgba(255,255,255,0.22) 5px,
+        rgba(255,255,255,0.22) 10px
+      );
+    height: 100%;
+    pointer-events: none;
   }
   .agenda-seg-line1 {
     font-size: 0.7rem;
@@ -1536,6 +1632,14 @@
            timing/structure metadata updates. Disabled until there's
            an event + schedule loaded AND the user has touched a param. -->
       <button class="btn-sm" id="btnSaveEvent" onclick="saveEventChanges()" disabled title="Save day-config / parameter changes to the active schedule (preserves team assignments)">&#x1f4be; Save</button>
+      <!-- Lock schedule: prevents accidental edits / regenerates /
+           saves while leaving everything visible and exportable.
+           Disables Generate / Assign / Save Event, freezes form
+           inputs, and short-circuits onParamChanged so any
+           scripted edits don't auto-regen. State is URL-persistent
+           via ?locked=1 — refresh keeps the lock. NOT saved to DB;
+           it's a per-session UI safety net. -->
+      <button class="btn-sm" id="btnLockSchedule" onclick="toggleLockSchedule()" title="Lock schedule against any edits, generates, or saves">&#x1f513; Lock</button>
       <button class="btn-sm btn-danger" id="btnDeleteEvent" onclick="deleteEvent()" disabled style="margin-left:auto;">&#x2715;</button>
     </div>
   </div>
@@ -4710,6 +4814,9 @@ function buildShareUrl() {
   if (_currentAssignSeed)          params.set('aseed', _currentAssignSeed);
   if (_currentAbstractScheduleId)  params.set('sid',   _currentAbstractScheduleId);
   if (_currentAssignedScheduleId)  params.set('aid',   _currentAssignedScheduleId);
+  // Lock state — URL-only (not persisted to DB). Refresh keeps the
+  // lock so users coming back via shared link see the same state.
+  if (window._frcLocked) params.set('locked', '1');
 
   // Encode per-day schedule: d1=HH:MM-HH:MM, d1b=Name|HH:MM|HH:MM,...
   document.querySelectorAll('.day-row').forEach(function(row, i) {
@@ -4847,6 +4954,7 @@ function parseUrlParams() {
     pde:             p.get('pde')   || null,
     sid:             p.get('sid')   ? parseInt(p.get('sid'))  : null,
     aid:             p.get('aid')   ? parseInt(p.get('aid'))  : null,
+    locked:          p.get('locked') === '1',
     autoPopulate:    parseBoolFlag('autoPopulate'),
     autoMaxCycles:   parseBoolFlag('autoMaxCycles'),
     autoAssign:      parseBoolFlag('autoAssign'),
@@ -5127,6 +5235,12 @@ function applyUrlParams(params) {
 // Auto-run from URL params on load
 async function autoRunFromUrl() {
   const params = parseUrlParams();
+  // Even with no schedule params, ?locked=1 alone should apply the
+  // lock. Handle that case before the early-return below — the
+  // lock state is independent of any schedule restoration.
+  if (params.locked && typeof applyLockState === 'function') {
+    applyLockState(true);
+  }
   if (!params.seed && !params.n && !params.days && !params.sid && !params.aid) return;
   // Set the loading guard BEFORE applyUrlParams, which populates
   // form fields via the same oninput-triggering path that
@@ -5319,6 +5433,14 @@ async function autoRunFromUrl() {
     window._frcLoadingSchedule = false;
     clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
     clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
+    // Apply lock state AFTER all schedule restoration completes.
+    // Doing it earlier would lock the form fields before
+    // applyDayConfigToUI populates them. The setTimeout(0) here
+    // already defers past the synchronous oninput cascade — adding
+    // applyLockState in the same tick keeps it ordered.
+    if (params.locked && typeof applyLockState === 'function') {
+      applyLockState(true);
+    }
   }, 0);
 }
 
@@ -6235,6 +6357,12 @@ function renderScheduleBars() {
         type: isPractice ? 'practice' : 'qual',
         kind: 'matches',
         start: run.start, end: slotEndUse,
+        // matchEnd lets the renderer split the match segment into a
+        // committed sub-region (start → matchEnd) and an idle tail
+        // (matchEnd → slotEndUse), so unallocated time at the end of
+        // a match block is visually distinct from the colored
+        // committed portion. matchEnd === slotEndUse means no tail.
+        matchEnd: run.lastEnd || run.start,
         matchCount: run.matchCount,
         committed: committed,
         available: available,
@@ -6283,6 +6411,51 @@ function renderScheduleBars() {
       }
     });
     flushRun(dEnd);
+
+    // Post-process: insert explicit `idle` segments anywhere there's
+    // a time gap inside the day window. Without this, gaps between
+    // matches & breaks show as blank space in the bar with no label,
+    // and trailing idle inside a match block is invisible (just
+    // counted in the committed/available text).
+    //
+    // Idle segments to insert:
+    //   - Before the first segment if its start > day start
+    //   - Between consecutive segments where prev.end < next.start
+    //   - After the last segment if its end < day end
+    //   - Inside a match segment for the matchEnd → end tail
+    //
+    // The within-match tail is rendered as a sub-region of the match
+    // segment in the render phase rather than a separate segment, so
+    // the segment-level idle insertion below only handles between-block
+    // gaps. Threshold of 1 minute filters out floating-point dust.
+    var IDLE_THRESHOLD = 1;
+    if (dStart != null && dEnd != null && segments.length > 0) {
+      // Sort segments by start to be safe (they should already be ordered)
+      segments.sort(function(a, b) { return a.start - b.start; });
+      var withIdle = [];
+      // Leading idle (day start → first segment start)
+      var first = segments[0];
+      if (first.start - dStart >= IDLE_THRESHOLD) {
+        withIdle.push({ kind: 'idle', start: dStart, end: first.start });
+      }
+      withIdle.push(first);
+      // Between-segment idle
+      for (var i = 1; i < segments.length; i++) {
+        var prev = segments[i - 1];
+        var cur  = segments[i];
+        if (cur.start - prev.end >= IDLE_THRESHOLD) {
+          withIdle.push({ kind: 'idle', start: prev.end, end: cur.start });
+        }
+        withIdle.push(cur);
+      }
+      // Trailing idle (last segment end → day end)
+      var last = withIdle[withIdle.length - 1];
+      if (dEnd - last.end >= IDLE_THRESHOLD) {
+        withIdle.push({ kind: 'idle', start: last.end, end: dEnd });
+      }
+      segments = withIdle;
+    }
+
     perDay.push({
       dayNum: dayNum,
       dayLabel: dayLabel,
@@ -6327,6 +6500,19 @@ function renderScheduleBars() {
     var segHtml = d.segments.map(function(seg) {
       var segDur = seg.end - seg.start;
       var widthPct = dayDur > 0 ? (segDur / dayDur * 100) : 0;
+      if (seg.kind === 'idle') {
+        var idur = Math.round(segDur);
+        var inline = segDur >= 25 ? (idur + ' min idle')
+                                  : (segDur >= 10 ? (idur + 'm') : '');
+        var tipI = 'Unallocated \u2014 '
+                 + fmtTime(seg.start) + '\u2013' + fmtTime(seg.end)
+                 + ' (' + idur + ' min)';
+        return '<div class="agenda-seg agenda-seg-idle" '
+             + 'style="width:' + widthPct.toFixed(2) + '%;" '
+             + 'title="' + tipI.replace(/"/g, '&quot;') + '">'
+             + inline
+             + '</div>';
+      }
       if (seg.kind === 'break') {
         var bgColor = '#ec8a3f';
         var inline = segDur >= 30 ? seg.label : (segDur >= 12 ? '\u23F8' : '');
@@ -6345,21 +6531,44 @@ function renderScheduleBars() {
       var ctList = seg.cycleProgression.map(fmtCt).join('\u2192') + ' min';
       var avgCtStr = fmtCt(seg.avgCt) + ' min avg';
       var line1 = matches + ' match' + (matches !== 1 ? 'es' : '');
-      var line2 = Math.round(seg.committed) + '/' + Math.round(seg.available) + ' min \u00b7 ' + ctList;
-      // Tooltip: full detail including average
+      var idleTailMin = Math.max(0, (seg.end || 0) - (seg.matchEnd || seg.end));
+      var line2 = Math.round(seg.committed) + '/' + Math.round(seg.available) + ' min'
+                + (idleTailMin >= 1 ? ' \u00b7 ' + Math.round(idleTailMin) + ' min idle' : '')
+                + ' \u00b7 ' + ctList;
+      // Tooltip: full detail including average + idle tail
       var tip = (d.isPractice ? 'Practice' : 'Qualification')
               + ' \u2014 ' + fmtTime(seg.start) + '\u2013' + fmtTime(seg.end)
               + '\n' + matches + ' match' + (matches !== 1 ? 'es' : '')
               + (seg.firstMatchNum ? ' (starting ' + (d.isPractice ? 'P' : 'Q') + seg.firstMatchNum + ')' : '')
               + '\n' + Math.round(seg.committed) + ' min scheduled / ' + Math.round(seg.available) + ' min available'
+              + (idleTailMin >= 1 ? '\nIdle tail: ' + Math.round(idleTailMin) + ' min' : '')
               + '\nCycle: ' + ctList
               + '\nAverage: ' + avgCtStr;
+      // Split the match segment into committed + idle tail when there's
+      // a non-trivial unused gap at the end of the block. Committed part
+      // gets the dense color; tail gets the hatched semi-transparent
+      // overlay so unallocated time is visually obvious within the bar.
+      var innerHtml;
+      if (idleTailMin >= 1 && segDur > 0) {
+        var committedPct = ((seg.matchEnd - seg.start) / segDur) * 100;
+        var tailPct = 100 - committedPct;
+        innerHtml =
+          '<div class="agenda-seg-matches-inner" style="width:' + committedPct.toFixed(2) + '%;background:' + segColor + ';">'
+          + '<div class="agenda-seg-line1">' + line1 + '</div>'
+          + (widthPct >= 14 ? '<div class="agenda-seg-line2">' + line2 + '</div>' : '')
+          + '</div>'
+          + '<div class="agenda-seg-tail" style="width:' + tailPct.toFixed(2) + '%;background:' + segColor + '40;"></div>';
+      } else {
+        innerHtml =
+            '<div class="agenda-seg-line1">' + line1 + '</div>'
+          + (widthPct >= 14 ? '<div class="agenda-seg-line2">' + line2 + '</div>' : '');
+      }
       return '<div class="agenda-seg agenda-seg-matches" '
-           + 'style="width:' + widthPct.toFixed(2) + '%;background:' + segColor + ';" '
+           + 'style="width:' + widthPct.toFixed(2) + '%;background:'
+           + (idleTailMin >= 1 ? 'transparent' : segColor) + ';display:flex;flex-direction:row;padding:0;" '
            + 'title="' + tip.replace(/"/g, '&quot;') + '" '
            + 'onclick="' + (seg.firstMatchNum ? 'scrollToMatch(' + seg.firstMatchNum + ')' : 'scrollToDay(' + d.dayNum + ')') + '">'
-           + '<div class="agenda-seg-line1">' + line1 + '</div>'
-           + (widthPct >= 14 ? '<div class="agenda-seg-line2">' + line2 + '</div>' : '')
+           + innerHtml
            + '</div>';
     }).join('');
 
@@ -7243,6 +7452,12 @@ function onParamChanged() {
   // reloadEvent. Without it, refresh on a saved schedule and the
   // in-app Reload button both blow away assignments.
   if (window._frcLoadingSchedule) return;
+  // Lock guard: when the user has explicitly locked the schedule,
+  // refuse to arm the autoPopulate regenerate timer. Even if a
+  // form input does change (programmatically or via a stray
+  // unguarded handler), the lock prevents the cascading regenerate
+  // that would otherwise wipe the team assignment.
+  if (window._frcLocked) return;
   if (_abstractParams !== null) {
     // Only mark stale and disable assign if structural params changed.
     // Time/day/break/cycle changes affect the rendered schedule but not the
@@ -8870,6 +9085,51 @@ async function createEvent() {
 // when the user wants a clean refresh of side-data (e.g. teams added
 // remotely) WITHOUT losing the active schedule. Re-runs the same
 // loaders the event-code path uses on initial load.
+// ── Lock schedule ────────────────────────────────────────────────
+// User-controlled "freeze" of the editor. Disables generate /
+// assign / save-event / regenerate-on-edit, freezes form inputs,
+// and surfaces a banner. State persists in the URL via ?locked=1
+// (NOT in the DB — it's a per-session UI safety net, not a
+// permanent property of the schedule). Refresh keeps the lock so
+// users coming back via shared link see the locked editor as the
+// owner left it.
+function toggleLockSchedule() {
+  applyLockState(!window._frcLocked);
+  if (typeof updateUrlFromState === 'function') updateUrlFromState();
+  showApiStatus(window._frcLocked
+    ? '\u{1f512} Schedule locked'
+    : '\u{1f513} Schedule unlocked');
+}
+
+// Idempotent setter — safe to call from URL restore + button click
+// + recovery paths. Updates body class, button label, button class,
+// and any pending timers.
+function applyLockState(locked) {
+  window._frcLocked = !!locked;
+  // body class drives the global CSS — disabled buttons, frozen
+  // inputs, and the top-of-page banner.
+  document.body.classList.toggle('frc-locked', !!locked);
+  // Button visual state
+  var btn = document.getElementById('btnLockSchedule');
+  if (btn) {
+    if (locked) {
+      btn.classList.add('is-locked');
+      btn.innerHTML = '\u{1f512} Unlock';
+      btn.title = 'Schedule is locked \u2014 click to unlock';
+    } else {
+      btn.classList.remove('is-locked');
+      btn.innerHTML = '\u{1f513} Lock';
+      btn.title = 'Lock schedule against any edits, generates, or saves';
+    }
+  }
+  // Cancel any pending auto-generate timers when locking, so a
+  // last-second user keystroke before the lock can't fire after.
+  if (locked) {
+    clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
+    clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
+  }
+}
+
 async function reloadEvent() {
   if (!_currentEventId) {
     showApiStatus('No event loaded', true);
@@ -8938,6 +9198,12 @@ async function reloadEvent() {
 // changes after teams are already assigned and just wants those
 // changes persisted to the active schedule.
 async function saveEventChanges() {
+  // Lock guard: refuse to push changes to the server when locked.
+  // The whole point of locking is to prevent unexpected writes.
+  if (window._frcLocked) {
+    showApiStatus('Schedule is locked \u2014 unlock to save changes', true);
+    return;
+  }
   if (!_currentAssignedScheduleId) {
     showApiStatus('No active schedule to save to. Generate + assign first.', true);
     return;
@@ -9346,6 +9612,14 @@ async function deleteSchedule(scheduleId) {
 
 // ── Stage 1: Generate abstract schedule (slot structure, no team numbers) ─────
 async function generateSchedule() {
+  // Lock guard: when the schedule is locked, refuse any new generate
+  // run. The button is also visually disabled via body.frc-locked
+  // CSS, but covering the function entry point ensures any keyboard
+  // shortcut or programmatic call also short-circuits.
+  if (window._frcLocked) {
+    showApiStatus('Schedule is locked \u2014 unlock to generate', true);
+    return;
+  }
   // Cancel any pending auto-populate debounce so it can't fire a duplicate run
   clearTimeout(_autoPopulateTimeout);
   _autoPopulateTimeout = null;
@@ -10990,6 +11264,11 @@ function collectPracticeMatchesForSave() {
 }
 
 async function assignTeams() {
+  // Lock guard: refuse new team assignments when locked.
+  if (window._frcLocked) {
+    showApiStatus('Schedule is locked \u2014 unlock to assign teams', true);
+    return;
+  }
   // Defensive logging — helps diagnose "button appears to do nothing" cases.
   // The state of these IDs is the most common cause of silent bail.
   console.log('[assignTeams]', {
