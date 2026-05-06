@@ -157,6 +157,169 @@
   .next-match-meta { font-size: 13px; color: var(--text-muted); }
   .next-match-meta strong { color: var(--text); font-weight: 600; }
   .next-match-card.empty { color: var(--text-muted); font-style: italic; }
+
+  /* Live indicator pill in the status card label. Sits inline with
+     "Status" text, becomes visible only when STATE.liveMode is true.
+     Pulses to mirror Nexus + TBA polling activity. */
+  .card-label { display: flex; justify-content: space-between; align-items: center; }
+  .status-live-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px;
+    background: rgba(220,38,38,0.10);
+    color: #dc2626;
+    border: 1px solid rgba(220,38,38,0.3);
+    border-radius: 999px;
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .status-live-pill::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: #dc2626;
+    animation: pulse-dot 1.5s infinite;
+  }
+  html[data-theme="dark"] .status-live-pill {
+    background: rgba(243,139,168,0.18);
+    color: #f38ba8;
+    border-color: rgba(243,139,168,0.4);
+  }
+  html[data-theme="dark"] .status-live-pill::before { background: #f38ba8; }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .status-live-pill {
+      background: rgba(243,139,168,0.18);
+      color: #f38ba8;
+      border-color: rgba(243,139,168,0.4);
+    }
+    html:not([data-theme]) .status-live-pill::before { background: #f38ba8; }
+  }
+
+  /* Schedule delta box — the big "Behind by X min" / "On time" /
+     "Ahead by X min" headline computed from TBA actual_time on the
+     last completed qual match. Color-coded:
+       behind   = red    (event running late)
+       on-time  = green  (within ±1 min)
+       ahead    = blue   (rare, but happens at smaller events)
+       none     = grey   (no live data yet) */
+  .status-delta-box {
+    padding: 0.75rem 0.9rem;
+    border-radius: 6px;
+    margin-bottom: 0.8rem;
+    border-left: 4px solid var(--border);
+    background: rgba(0,0,0,0.025);
+  }
+  .status-delta-box.behind  { background: rgba(220,38,38,0.07); border-left-color: #dc2626; }
+  .status-delta-box.ontime  { background: rgba(22,163,74,0.07); border-left-color: #16a34a; }
+  .status-delta-box.ahead   { background: rgba(37,99,235,0.07); border-left-color: var(--accent); }
+  html[data-theme="dark"] .status-delta-box         { background: rgba(255,255,255,0.04); }
+  html[data-theme="dark"] .status-delta-box.behind  { background: rgba(243,139,168,0.10); border-left-color: #f38ba8; }
+  html[data-theme="dark"] .status-delta-box.ontime  { background: rgba(166,227,161,0.10); border-left-color: #a6e3a1; }
+  html[data-theme="dark"] .status-delta-box.ahead   { background: rgba(137,180,250,0.10); border-left-color: #89b4fa; }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .status-delta-box         { background: rgba(255,255,255,0.04); }
+    html:not([data-theme]) .status-delta-box.behind  { background: rgba(243,139,168,0.10); border-left-color: #f38ba8; }
+    html:not([data-theme]) .status-delta-box.ontime  { background: rgba(166,227,161,0.10); border-left-color: #a6e3a1; }
+    html:not([data-theme]) .status-delta-box.ahead   { background: rgba(137,180,250,0.10); border-left-color: #89b4fa; }
+  }
+  .status-delta-headline {
+    font-size: 20px; font-weight: 700; line-height: 1.1;
+    color: var(--text-muted);
+  }
+  .status-delta-box.behind  .status-delta-headline { color: #dc2626; }
+  .status-delta-box.ontime  .status-delta-headline { color: #16a34a; }
+  .status-delta-box.ahead   .status-delta-headline { color: var(--accent); }
+  html[data-theme="dark"] .status-delta-box.behind  .status-delta-headline { color: #f38ba8; }
+  html[data-theme="dark"] .status-delta-box.ontime  .status-delta-headline { color: #a6e3a1; }
+  html[data-theme="dark"] .status-delta-box.ahead   .status-delta-headline { color: #89b4fa; }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .status-delta-box.behind  .status-delta-headline { color: #f38ba8; }
+    html:not([data-theme]) .status-delta-box.ontime  .status-delta-headline { color: #a6e3a1; }
+    html:not([data-theme]) .status-delta-box.ahead   .status-delta-headline { color: #89b4fa; }
+  }
+  .status-delta-sub {
+    font-size: 12px; color: var(--text-muted); margin-top: 4px;
+    line-height: 1.4;
+  }
+  .status-delta-sub strong { color: var(--text); font-weight: 600; }
+
+  /* Nexus 3-up grid — On field / On deck / Queueing. Each stage
+     is a small card showing the match number plus subtitle. When
+     Nexus data is available, subtitle has team rosters or "in N min".
+     When only TBA/scheduled data is available, the stages render
+     muted with scheduled times as placeholders. */
+  .status-three-up {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 0.8rem;
+  }
+  .status-stage {
+    background: rgba(0,0,0,0.025);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.55rem 0.65rem;
+    display: flex; flex-direction: column; gap: 3px;
+    min-width: 0;
+  }
+  .status-stage.muted { opacity: 0.55; }
+  html[data-theme="dark"] .status-stage { background: rgba(255,255,255,0.04); }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .status-stage { background: rgba(255,255,255,0.04); }
+  }
+  .status-stage-label {
+    font-size: 9px; letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted); font-weight: 600;
+    display: flex; align-items: center; gap: 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  }
+  .status-dot-field    { background: #5daf78; animation: pulse-dot 1s infinite; }
+  .status-dot-deck     { background: #66bb6a; }
+  .status-dot-queueing { background: #fd9c43; animation: pulse-dot 1.5s infinite; }
+  .status-stage-match {
+    font-size: 17px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .status-stage-meta {
+    font-size: 11px; color: var(--text-muted);
+    line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .status-stage-meta strong { color: var(--text); font-weight: 600; }
+  .status-stage-meta em     { color: var(--text-muted); font-style: italic; }
+  /* Mobile: stack the 3-up vertically when narrow */
+  @media (max-width: 480px) {
+    .status-three-up { grid-template-columns: 1fr; }
+  }
+
+  /* Footer links to Phil's cycle times tool and Bennett's dashboard.
+     Always visible in the status card so the deep-dive analytics
+     are one click away regardless of live data state. */
+  .status-links {
+    display: flex; flex-wrap: wrap; gap: 0.4rem;
+    margin-top: 0.7rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid var(--border);
+  }
+  .status-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: border-color 0.12s, color 0.12s;
+    background: transparent;
+  }
+  .status-link:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .status-link-icon { font-size: 13px; line-height: 1; }
+
   /* Field-level status block — shown above the team-specific info
      when live data is available. Two states:
        playing:  "Now playing: Q42" + elapsed time
@@ -1219,20 +1382,80 @@
         </div>
       </div>
 
-      <!-- Next match card -->
+      <!-- Status card. Three-section layout:
+           1. Schedule delta box — derived from TBA actual_time on the
+              last completed qual match. Shows "Behind by 12 min" /
+              "On time" / "Ahead by 5 min" with a subtitle giving the
+              last match number, its actual finish vs. scheduled, and
+              the cycle time for context (matches Phil's cycle-times
+              tool format). Hidden when no matches have completed.
+           2. Nexus 3-up — on-field / on-deck / queueing matches per
+              Nexus queue_status. Greyed out (scheduled-time placeholders)
+              when Nexus data isn't available; hidden entirely when no
+              live data at all.
+           3. Team countdown — same per-team detail line + relative
+              countdown that was here before.
+           Footer: links to Phil's cycle times tool (deep-linked to
+           the current event when key is available) and Bennett's
+           dashboard. -->
       <div class="card next-match-card empty" id="nextMatchCard">
-        <div class="card-label">Status</div>
-        <!-- Field-level status: shows the match currently playing (or up
-             next) per Nexus, with its own countdown. Independent of the
-             team-specific info below. Hidden when no live data is
-             available. -->
+        <div class="card-label" id="statusCardLabel">
+          <span>Status</span>
+          <span class="status-live-pill" id="statusLivePill" style="display:none;">LIVE</span>
+        </div>
+
+        <!-- Schedule delta — populated by _renderScheduleDelta() -->
+        <div class="status-delta-box" id="statusDeltaBox" style="display:none;">
+          <div class="status-delta-headline" id="statusDeltaHeadline"></div>
+          <div class="status-delta-sub" id="statusDeltaSub"></div>
+        </div>
+
+        <!-- 3-up Nexus row — populated by _renderFieldThreeUp() -->
+        <div class="status-three-up" id="statusThreeUp" style="display:none;">
+          <div class="status-stage" data-stage="field">
+            <div class="status-stage-label"><span class="status-dot status-dot-field"></span>On field</div>
+            <div class="status-stage-match" id="stageFieldMatch">—</div>
+            <div class="status-stage-meta" id="stageFieldMeta"></div>
+          </div>
+          <div class="status-stage" data-stage="deck">
+            <div class="status-stage-label"><span class="status-dot status-dot-deck"></span>On deck</div>
+            <div class="status-stage-match" id="stageDeckMatch">—</div>
+            <div class="status-stage-meta" id="stageDeckMeta"></div>
+          </div>
+          <div class="status-stage" data-stage="queueing">
+            <div class="status-stage-label"><span class="status-dot status-dot-queueing"></span>Queueing</div>
+            <div class="status-stage-match" id="stageQueueingMatch">—</div>
+            <div class="status-stage-meta" id="stageQueueingMeta"></div>
+          </div>
+        </div>
+
+        <!-- Legacy field-status block — kept for back-compat with code
+             paths that still reference fieldStatusLine etc. The new
+             3-up + delta layout supersedes this; we hide it permanently
+             but leave the markup so updateFieldStatus's existing DOM
+             writes don't NPE during rollover. -->
         <div class="field-status" id="fieldStatus" style="display:none;">
           <div class="field-status-line" id="fieldStatusLine"></div>
           <div class="field-status-countdown" id="fieldStatusCountdown"></div>
         </div>
+
         <div class="next-match-detail" id="nextMatchDetail">Enter your team number to find your matches</div>
         <div class="next-match-countdown" id="nextMatchCountdown" style="display:none;"></div>
         <div class="next-match-meta" id="nextMatchMeta"></div>
+
+        <!-- External-tool footer. Renders unconditionally so the
+             links are always one click away even before live data
+             arrives. Phil's URL deep-links by event.key when known. -->
+        <div class="status-links" id="statusLinks">
+          <a class="status-link" id="statusLinkPhil" href="http://lopreiato.me/frc-cycle-times/" target="_blank" rel="noopener" title="Cycle time analysis by Phil Lopreiato">
+            <span class="status-link-icon">📊</span>
+            <span>Cycle stats</span>
+          </a>
+          <a class="status-link" id="statusLinkBennett" href="https://frcdashboard.bennettn.org" target="_blank" rel="noopener" title="Multi-event dashboard by Bennett">
+            <span class="status-link-icon">📡</span>
+            <span>Event dashboard</span>
+          </a>
+        </div>
       </div>
     </div>
 
@@ -3612,6 +3835,344 @@ var _fieldCountdownTargetTs = null;
 var _fieldCountdownIsPlaying = false;
 var _fieldCountdownHandle = null;
 
+// ── Schedule delta computation (TBA-derived ahead/behind) ────────
+//
+// Compute how far ahead or behind the event is running, based on
+// the most recent COMPLETED qualification match's actual_time vs.
+// its scheduled timestamp. Mirrors Phil Lopreiato's frc-cycle-times
+// methodology (https://github.com/phil-lopreiato/frc-cycle-times)
+// and Bennett's FRC Event Dashboard
+// (https://github.com/Bennett2977/FRC-Event-Dashboard) — both use the
+// same TBA fields (actual_time, post_result_time) to derive this.
+//
+// Returns {
+//   minutes:        number — positive = behind, negative = ahead
+//   lastMatchNum:   int    — the qual match used for the comparison
+//   lastActualTs:   ms     — actual_time × 1000 (or null)
+//   lastSchedTs:    ms     — scheduled timestamp of last completed match
+//   lastCycleMin:   number — actual cycle (matchN actual − matchN-1 actual)
+//   schedCycleMin:  number — scheduled cycle for the same pair
+// } | null when no completed qual matches exist with timestamps.
+function _computeScheduleDelta() {
+  if (!STATE.computed || !STATE.computed.length) return null;
+  if (!STATE.liveByMatch) return null;
+
+  // Collect qual matches in chronological order. We need their planned
+  // timestamps (via _resolveMatchTimestamp) AND their TBA actuals
+  // (via STATE.liveByMatch).
+  var qualMatches = [];
+  for (var i = 0; i < STATE.computed.length; i++) {
+    var e = STATE.computed[i];
+    if (e.type !== 'match' || e.isPractice) continue;
+    qualMatches.push(e);
+  }
+  if (!qualMatches.length) return null;
+
+  // Walk forward to find the most recent completed match. TBA marks
+  // a match completed when post_result_time is set (per their API).
+  // actual_time alone means "match started but score not posted",
+  // which we use for "currently playing" detection but NOT for the
+  // delta — its time is the START, not the END, so comparing it to
+  // the next match's scheduled start can be misleading.
+  var lastCompleted = null;
+  var prevCompleted = null;
+  for (var j = 0; j < qualMatches.length; j++) {
+    var m = qualMatches[j];
+    var live = STATE.liveByMatch[m.matchNum];
+    if (live && live.actual_time && live.post_result_time) {
+      prevCompleted = lastCompleted;
+      lastCompleted = m;
+    }
+  }
+  if (!lastCompleted) return null;
+
+  var schedTs = _resolveMatchTimestamp(lastCompleted);
+  if (schedTs == null) return null;
+
+  // TBA times are unix seconds; multiply for ms.
+  var liveLast = STATE.liveByMatch[lastCompleted.matchNum];
+  var actualTs = liveLast.actual_time * 1000;
+  var deltaMs = actualTs - schedTs;
+  var deltaMin = deltaMs / 60000;
+
+  // Last cycle — only meaningful if previous match also completed.
+  var lastCycleMin = null;
+  var schedCycleMin = null;
+  if (prevCompleted) {
+    var livePrev = STATE.liveByMatch[prevCompleted.matchNum];
+    if (livePrev && livePrev.actual_time) {
+      lastCycleMin = (liveLast.actual_time - livePrev.actual_time) / 60;
+      var prevSched = _resolveMatchTimestamp(prevCompleted);
+      if (prevSched != null) {
+        schedCycleMin = (schedTs - prevSched) / 60000;
+      }
+    }
+  }
+
+  return {
+    minutes:        deltaMin,
+    lastMatchNum:   lastCompleted.matchNum,
+    lastActualTs:   actualTs,
+    lastSchedTs:    schedTs,
+    lastCycleMin:   lastCycleMin,
+    schedCycleMin:  schedCycleMin,
+  };
+}
+
+// Render the schedule delta box (Behind / On time / Ahead). Hides
+// the box if no completed matches exist, defers to the 3-up + team
+// sections below. Threshold: |delta| < 1.0 min counts as "on time"
+// to match the rounding humans expect (a 30s drift isn't worth
+// flagging in red).
+function _renderScheduleDelta() {
+  var box = document.getElementById('statusDeltaBox');
+  var headEl = document.getElementById('statusDeltaHeadline');
+  var subEl  = document.getElementById('statusDeltaSub');
+  if (!box || !headEl || !subEl) return;
+
+  var d = _computeScheduleDelta();
+  if (!d) {
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = '';
+  // Reset variant classes
+  box.classList.remove('behind', 'ontime', 'ahead');
+
+  var absMin = Math.abs(d.minutes);
+  var headline, variant;
+  if (absMin < 1.0) {
+    variant  = 'ontime';
+    headline = 'On time';
+  } else if (d.minutes > 0) {
+    variant  = 'behind';
+    headline = 'Behind by ' + Math.round(absMin) + ' min';
+  } else {
+    variant  = 'ahead';
+    headline = 'Ahead by ' + Math.round(absMin) + ' min';
+  }
+  box.classList.add(variant);
+  headEl.textContent = headline;
+
+  // Subtitle: "Q34 finished at 2:23 PM, scheduled 2:11 PM · last cycle 9.2 min (sched 8.0)"
+  var actualTime = _formatTimeOnly(d.lastActualTs);
+  var schedTime  = _formatTimeOnly(d.lastSchedTs);
+  var sub = 'Q' + d.lastMatchNum + ' finished at <strong>' + actualTime + '</strong>';
+  if (variant !== 'ontime') {
+    sub += ', scheduled <strong>' + schedTime + '</strong>';
+  } else {
+    sub += ', exactly on schedule';
+  }
+  if (d.lastCycleMin != null) {
+    sub += ' \u00b7 last cycle <strong>' + d.lastCycleMin.toFixed(1) + ' min</strong>';
+    if (d.schedCycleMin != null && Math.abs(d.lastCycleMin - d.schedCycleMin) >= 0.3) {
+      sub += ' (sched ' + d.schedCycleMin.toFixed(1) + ')';
+    }
+  }
+  subEl.innerHTML = sub;
+}
+
+// Format a unix-ms timestamp into time-of-day per user preference.
+// Helper used by the delta subtitle and 3-up meta lines. Mirrors
+// the format produced by _formatAbsoluteTarget but without the date
+// portion — same visual style throughout the status panel.
+function _formatTimeOnly(ts) {
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  var h = d.getHours(), m = d.getMinutes();
+  if (window._frcUse24h) {
+    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+  }
+  var ampm = h >= 12 ? 'PM' : 'AM';
+  var h12 = h % 12; if (h12 === 0) h12 = 12;
+  return h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+}
+
+// ── Nexus 3-up: on-field / on-deck / queueing ────────────────────
+//
+// Walk STATE.liveByMatch for matches with queue_status of 'on_field',
+// 'on_deck', or 'now_queueing' (Nexus's terminology). Returns up to
+// one match entry per stage. Falls back to the next-three-not-yet-
+// completed scheduled matches when Nexus data isn't present, so the
+// 3-up still shows something useful from TBA-only data.
+//
+// Returns { field, deck, queueing, source } where source is:
+//   'nexus'     — Nexus reported at least one queue status
+//   'scheduled' — only TBA / planned data; show greyed out
+//   null        — nothing playable found (event hasn't started)
+function _findFieldThreeUp() {
+  if (!STATE.computed || !STATE.computed.length) {
+    return { field: null, deck: null, queueing: null, source: null };
+  }
+  // Build matchNum → entry map for cross-references with liveByMatch.
+  var byNum = {};
+  STATE.computed.forEach(function(e) {
+    if (e.type === 'match' && !e.isPractice) byNum[e.matchNum] = e;
+  });
+
+  var nexusField = null, nexusDeck = null, nexusQueueing = null;
+  var anyNexus = false;
+  for (var k in (STATE.liveByMatch || {})) {
+    var live = STATE.liveByMatch[k];
+    if (!live || live.comp_level !== 'qm') continue;
+    var entry = byNum[live.match_number];
+    if (!entry) continue;
+    var qs = live.queue_status;
+    if (!qs) continue;
+    anyNexus = true;
+    if (qs === 'on_field' && !nexusField) nexusField = entry;
+    else if (qs === 'on_deck' && !nexusDeck) nexusDeck = entry;
+    else if ((qs === 'now_queueing' || qs === 'queueing_soon') && !nexusQueueing) nexusQueueing = entry;
+  }
+
+  // Also detect "TBA-playing" — match has actual_time set but no
+  // post_result_time. Use as on_field fallback when Nexus is silent.
+  if (!nexusField) {
+    for (var kk in (STATE.liveByMatch || {})) {
+      var lv = STATE.liveByMatch[kk];
+      if (!lv || lv.comp_level !== 'qm') continue;
+      if (lv.actual_time && !lv.post_result_time) {
+        if (byNum[lv.match_number]) { nexusField = byNum[lv.match_number]; break; }
+      }
+    }
+  }
+
+  if (anyNexus || nexusField) {
+    // Backfill any missing stage with the next-not-completed scheduled
+    // match, so the 3-up always shows three slots when there's any
+    // live activity. Walk the schedule in order, skipping completed
+    // and already-claimed entries.
+    var claimedNums = {};
+    [nexusField, nexusDeck, nexusQueueing].forEach(function(x) {
+      if (x) claimedNums[x.matchNum] = true;
+    });
+    var fillCandidates = [];
+    for (var i2 = 0; i2 < STATE.computed.length; i2++) {
+      var e2 = STATE.computed[i2];
+      if (e2.type !== 'match' || e2.isPractice) continue;
+      if (claimedNums[e2.matchNum]) continue;
+      var l2 = STATE.liveByMatch[e2.matchNum];
+      if (l2 && l2.post_result_time) continue;       // skip completed
+      fillCandidates.push(e2);
+      if (fillCandidates.length >= 3) break;
+    }
+    var fillIdx = 0;
+    if (!nexusDeck     && fillIdx < fillCandidates.length) nexusDeck     = fillCandidates[fillIdx++];
+    if (!nexusQueueing && fillIdx < fillCandidates.length) nexusQueueing = fillCandidates[fillIdx++];
+    return {
+      field: nexusField, deck: nexusDeck, queueing: nexusQueueing,
+      source: 'nexus',
+    };
+  }
+
+  // No Nexus, no TBA-playing — pure scheduled fallback. Show the next
+  // three scheduled qual matches whose planned time hasn't passed.
+  var nowMs = Date.now();
+  var pending = [];
+  for (var i3 = 0; i3 < STATE.computed.length; i3++) {
+    var e3 = STATE.computed[i3];
+    if (e3.type !== 'match' || e3.isPractice) continue;
+    var ts = _resolveMatchTimestamp(e3);
+    if (ts != null && ts <= nowMs) continue;          // past
+    pending.push(e3);
+    if (pending.length >= 3) break;
+  }
+  if (!pending.length) return { field: null, deck: null, queueing: null, source: null };
+  return {
+    field:    pending[0] || null,
+    deck:     pending[1] || null,
+    queueing: pending[2] || null,
+    source:   'scheduled',
+  };
+}
+
+// Render the 3-up Nexus row (On field / On deck / Queueing). Each
+// stage shows the match number plus a meta line — team rosters or
+// "in N min". Hidden entirely when no upcoming matches exist.
+function _renderFieldThreeUp() {
+  var grid = document.getElementById('statusThreeUp');
+  if (!grid) return;
+  var t = _findFieldThreeUp();
+  if (!t.field && !t.deck && !t.queueing) {
+    grid.style.display = 'none';
+    return;
+  }
+  grid.style.display = '';
+  var muted = (t.source === 'scheduled');
+  var stages = [
+    { match: t.field,    matchEl: 'stageFieldMatch',    metaEl: 'stageFieldMeta',    fallback: 'Awaiting match' },
+    { match: t.deck,     matchEl: 'stageDeckMatch',     metaEl: 'stageDeckMeta',     fallback: '—' },
+    { match: t.queueing, matchEl: 'stageQueueingMatch', metaEl: 'stageQueueingMeta', fallback: '—' },
+  ];
+  stages.forEach(function(s, idx) {
+    var matchEl = document.getElementById(s.matchEl);
+    var metaEl  = document.getElementById(s.metaEl);
+    var stageEl = grid.querySelectorAll('.status-stage')[idx];
+    if (!matchEl || !metaEl || !stageEl) return;
+    if (s.match) {
+      stageEl.classList.toggle('muted', !!muted);
+      matchEl.textContent = 'Q' + s.match.matchNum;
+      // Meta line: prefer team rosters if Nexus has it; otherwise
+      // show planned time-of-day (or "in N min" countdown).
+      var meta = '';
+      if (!muted && s.match.red && s.match.blue && s.match.red.length === 3) {
+        meta = '<strong>' + s.match.red.join(' ') + '</strong> vs <strong>' + s.match.blue.join(' ') + '</strong>';
+      } else {
+        var ts = _resolveMatchTimestamp(s.match);
+        if (ts != null) {
+          var rel = ts - Date.now();
+          if (rel > 0 && rel < 60 * 60 * 1000) {
+            meta = '<em>in ~' + Math.round(rel / 60000) + ' min</em>';
+          } else {
+            meta = '<em>scheduled ' + _formatTimeOnly(ts) + '</em>';
+          }
+        }
+      }
+      metaEl.innerHTML = meta;
+    } else {
+      stageEl.classList.add('muted');
+      matchEl.textContent = '—';
+      metaEl.innerHTML = '<em>' + s.fallback + '</em>';
+    }
+  });
+}
+
+// Compute live URLs for Phil's cycle-times tool (deep-linked by
+// event.key, e.g. "#event/2026mnst") and Bennett's dashboard. The
+// links are static at the top level but updated whenever the
+// schedule's event_key changes.
+function _updateStatusLinks() {
+  var phil    = document.getElementById('statusLinkPhil');
+  var bennett = document.getElementById('statusLinkBennett');
+  if (!phil || !bennett) return;
+  var sch = STATE.schedule || {};
+  var ev  = sch.event || {};
+  var key = (ev.key || '').toLowerCase().trim();
+  if (key && /^\d{4}[a-z0-9]+$/.test(key)) {
+    // Phil's URL pattern: http://lopreiato.me/frc-cycle-times/#event/2026mnst
+    phil.setAttribute('href', 'http://lopreiato.me/frc-cycle-times/#event/' + key);
+    phil.setAttribute('title', 'Cycle times for ' + key.toUpperCase() + ' — by Phil Lopreiato');
+  } else {
+    phil.setAttribute('href', 'http://lopreiato.me/frc-cycle-times/');
+    phil.setAttribute('title', 'Cycle time analysis by Phil Lopreiato');
+  }
+  // Bennett's dashboard doesn't have a documented per-event deep-link
+  // pattern (the home page lists all active events). Always link to
+  // the dashboard root.
+  bennett.setAttribute('href', 'https://frcdashboard.bennettn.org');
+}
+
+// Toggle the LIVE pill in the status card label based on the
+// current live-mode state. Runs whenever the status panel renders.
+function _renderLivePill() {
+  var pill = document.getElementById('statusLivePill');
+  if (!pill) return;
+  var hasLive = !!(STATE.liveMode && STATE.liveByMatch && Object.keys(STATE.liveByMatch).length > 0);
+  pill.style.display = hasLive ? '' : 'none';
+}
+
+
 function _findFieldStatusTargets() {
   // Walk live data + computed schedule to find current + next field match.
   // Returns { current: matchEntry|null, next: matchEntry|null } where
@@ -3649,10 +4210,25 @@ function _findFieldStatusTargets() {
 }
 
 function updateFieldStatus() {
-  var block = document.getElementById('fieldStatus');
-  var line  = document.getElementById('fieldStatusLine');
-  var cd    = document.getElementById('fieldStatusCountdown');
-  if (!block || !line || !cd) return;
+  // The richer status panel (LIVE pill, schedule delta, 3-up Nexus
+  // grid, dashboard links) is composed of independent renderers that
+  // each defend against missing data internally. Run them all every
+  // time the panel refreshes — calling order doesn't matter, they
+  // read STATE.* and write to disjoint DOM nodes.
+  try { _renderLivePill();        } catch(_) {}
+  try { _renderScheduleDelta();   } catch(_) {}
+  try { _renderFieldThreeUp();    } catch(_) {}
+  try { _updateStatusLinks();     } catch(_) {}
+
+  // Hide the legacy single-line field-status block. Its DOM nodes
+  // are kept (some downstream code still queries them) but the new
+  // 3-up + delta layout supersedes it.
+  var legacy = document.getElementById('fieldStatus');
+  if (legacy) legacy.style.display = 'none';
+  _stopFieldCountdown();
+}
+
+function _legacy_updateFieldStatus_unused() {
 
   var hasLive = STATE.liveMode && STATE.liveByMatch && Object.keys(STATE.liveByMatch).length > 0;
   if (hasLive) {
