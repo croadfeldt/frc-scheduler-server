@@ -349,88 +349,110 @@
 
   /* ── Day Config v2 (block view) ─────────────────────────────────
      Block-based editor styling. Each day is a card; each block
-     within is a row with a type pill, time inputs, and (for match
-     blocks) inline cycle-time + after-match changes. */
-  .v2-days-container { display: flex; flex-direction: column; gap: 0.6rem; }
-  .v2-day-row {
+     within is a row with a type pill, time inputs, and inline
+     summary. Rows collapse to a single line; chevron toggles body. */
+  .v2-days-container { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  .v2-day {
     background: rgba(122,164,240,0.06);
     border: 1px solid rgba(122,164,240,0.22);
     border-left: 3px solid var(--accent);
-    border-radius: 6px;
-    padding: 0.5rem 0.6rem 0.55rem;
+    border-radius: 5px;
   }
-  .v2-day-row[data-is-practice="1"] {
+  .v2-day[data-kind="practice"] {
     background: rgba(93,175,120,0.06);
     border-color: rgba(93,175,120,0.22);
     border-left-color: #5daf78;
   }
   .v2-day-head {
-    display: flex; align-items: center; gap: 0.5rem;
-    margin-bottom: 0.45rem;
-    flex-wrap: wrap;
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.4rem 0.55rem;
   }
   .v2-day-tag {
-    font-size: 0.78rem; font-weight: 600;
-    color: var(--accent); min-width: 50px;
+    font-size: 0.72rem; font-weight: 600;
+    color: var(--accent); flex-shrink: 0;
   }
-  .v2-day-row[data-is-practice="1"] .v2-day-tag { color: #5daf78; }
-  .v2-day-label {
-    flex: 1; min-width: 100px; max-width: 220px;
+  .v2-day[data-kind="practice"] .v2-day-tag { color: #5daf78; }
+  .v2-day-date {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: 3px;
-    padding: 0.2rem 0.45rem;
-    font-size: 0.75rem;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.7rem;
     font-family: inherit;
+    width: 110px;
   }
-  .v2-day-x {
-    margin-left: auto;
-    cursor: pointer; opacity: 0.4;
-    font-size: 1rem; padding: 0 0.4rem;
-    user-select: none;
+  .v2-day-label {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 3px;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.72rem;
+    font-family: inherit;
+    flex: 1; min-width: 60px; max-width: 120px;
+  }
+  .v2-day-summary {
+    font-size: 0.65rem;
     color: var(--text-muted);
+    margin-left: auto;
+    padding-right: 0.2rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .v2-day-x:hover { opacity: 0.9; color: var(--danger); }
+  .v2-day-summary strong { color: var(--text); font-weight: 600; }
+  .v2-day-chev, .v2-day-x {
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+    padding: 0 0.25rem;
+  }
+  .v2-day-chev { font-size: 0.7rem; opacity: 0.6; }
+  .v2-day-x   { font-size: 0.85rem; opacity: 0.45; }
+  .v2-day-x:hover { opacity: 0.95; color: var(--danger); }
+  .v2-day-body {
+    padding: 0 0.55rem 0.45rem;
+    display: flex; flex-direction: column;
+    gap: 0.2rem;
+  }
 
-  .v2-blocks { display: flex; flex-direction: column; gap: 0.25rem; }
+  /* Individual block row */
   .v2-block {
     background: rgba(255,255,255,0.025);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 4px;
-    padding: 0.35rem 0.45rem;
   }
   .v2-block.expanded {
-    background: rgba(122,164,240,0.04);
-    border-color: rgba(122,164,240,0.25);
-    padding-bottom: 0.5rem;
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.15);
   }
   .v2-block-head {
-    display: flex; align-items: center; gap: 0.4rem;
-    flex-wrap: wrap;
-  }
-  .v2-block-handle {
-    color: rgba(127,132,156,0.5);
-    cursor: grab; user-select: none;
-    font-family: monospace; font-size: 0.75rem;
-    padding: 0 0.15rem;
-  }
-  .v2-block-pill {
-    display: inline-flex; align-items: center;
+    display: flex; align-items: center;
     gap: 0.3rem;
-    padding: 0.15rem 0.55rem;
-    border-radius: 12px;
-    font-size: 0.7rem; font-weight: 600;
+    padding: 0.25rem 0.5rem;
+  }
+  .v2-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.08rem 0.5rem;
+    border-radius: 10px;
+    font-size: 0.66rem;
+    font-weight: 600;
     cursor: pointer;
     user-select: none;
-    min-width: 90px;
+    flex-shrink: 0;
+    min-width: 56px;
+    justify-content: center;
   }
-  .v2-block-pill.t-practice      { background: rgba(93,175,120,0.18);  color: #5daf78; }
-  .v2-block-pill.t-qualification { background: rgba(122,164,240,0.18); color: var(--accent); }
-  .v2-block-pill.t-lunch         { background: rgba(236,138,63,0.18);  color: #ec8a3f; }
-  .v2-block-pill.t-break         { background: rgba(236,138,63,0.10);  color: #ec8a3f; }
-  .v2-block-swatch {
-    width: 8px; height: 8px;
+  .v2-pill-practice      { background: rgba(93,175,120,0.18);  color: #5daf78; }
+  .v2-pill-qualification { background: rgba(122,164,240,0.18); color: var(--accent); }
+  .v2-pill-break         { background: rgba(236,138,63,0.16);  color: #ec8a3f; }
+  .v2-swatch {
+    width: 7px; height: 7px;
     border-radius: 50%;
     flex-shrink: 0;
   }
@@ -439,120 +461,127 @@
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: 3px;
-    padding: 0.15rem 0.4rem;
-    font-size: 0.72rem;
+    padding: 0.08rem 0.3rem;
+    font-size: 0.7rem;
     font-family: inherit;
-    width: 78px;
+    width: 64px;
     font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+  .v2-block-time.v2-conflict {
+    border-color: var(--danger);
+    background: rgba(243,139,168,0.08);
   }
   .v2-block-summary {
     flex: 1; min-width: 0;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     color: var(--text-muted);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-left: 0.15rem;
   }
-  .v2-block-summary strong { color: var(--text); }
-  .v2-block-chevron {
-    cursor: pointer; user-select: none;
-    color: var(--text-muted); font-size: 0.7rem;
-    padding: 0 0.3rem;
-  }
-  .v2-block-x {
-    cursor: pointer; opacity: 0.4;
+  .v2-block-summary strong { color: var(--text); font-weight: 600; }
+  .v2-block-chev, .v2-block-x {
     color: var(--text-muted);
-    font-size: 0.95rem;
-    padding: 0 0.3rem;
+    cursor: pointer;
     user-select: none;
+    flex-shrink: 0;
+    padding: 0 0.2rem;
   }
-  .v2-block-x:hover { opacity: 0.9; color: var(--danger); }
+  .v2-block-chev { font-size: 0.65rem; opacity: 0.6; }
+  .v2-block-x { font-size: 0.78rem; opacity: 0.45; }
+  .v2-block-x:hover { opacity: 0.95; color: var(--danger); }
 
+  /* Block expanded body */
   .v2-block-body {
-    margin-top: 0.45rem;
-    padding-top: 0.4rem;
-    padding-left: 1.3rem;
-    border-top: 1px dashed rgba(255,255,255,0.06);
+    padding: 0.4rem 0.7rem 0.5rem 1.2rem;
+    border-top: 1px dashed rgba(255,255,255,0.08);
     display: flex; flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.35rem;
   }
   .v2-body-row {
     display: flex; align-items: center;
-    gap: 0.5rem; flex-wrap: wrap;
-    font-size: 0.72rem;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    font-size: 0.7rem;
+    color: var(--text-muted);
   }
   .v2-body-label {
     color: var(--text-muted);
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    min-width: 80px;
+    min-width: 86px;
+    flex-shrink: 0;
   }
   .v2-body-input {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: 3px;
-    padding: 0.15rem 0.4rem;
-    font-size: 0.72rem;
+    padding: 0.1rem 0.35rem;
+    font-size: 0.7rem;
     font-family: inherit;
     width: 50px;
     font-variant-numeric: tabular-nums;
   }
-  .v2-body-input.wide { width: 130px; }
-  .v2-cc-list { display: flex; flex-direction: column; gap: 0.2rem; }
+  .v2-body-section { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.2rem; }
+
+  /* Cycle change rows */
+  .v2-cc-list { display: flex; flex-direction: column; gap: 0.15rem; }
   .v2-cc-row {
     display: grid;
-    grid-template-columns: auto 56px auto 56px auto;
-    gap: 0.3rem;
+    grid-template-columns: auto 50px auto 50px auto auto;
+    gap: 0.25rem;
     align-items: center;
-    padding: 0.18rem 0.4rem 0.18rem 0.25rem;
-    background: rgba(255,255,255,0.03);
+    padding: 0.15rem 0.45rem 0.15rem 0.3rem;
+    background: rgba(255,255,255,0.025);
     border-radius: 3px;
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     color: var(--text-muted);
   }
-  .v2-cc-arrow { color: var(--text-muted); padding: 0 0.15rem; }
+  .v2-cc-arrow { color: var(--text-muted); padding: 0 0.1rem; }
   .v2-cc-x {
-    cursor: pointer; color: var(--text-muted);
-    opacity: 0.5;
+    cursor: pointer; opacity: 0.5;
+    color: var(--text-muted);
     font-size: 0.85rem;
     padding: 0 0.2rem;
     text-align: center;
   }
   .v2-cc-x:hover { opacity: 0.95; color: var(--danger); }
 
-  .v2-add-cc, .v2-add-block {
+  /* Nested break list (inside a match block body) */
+  .v2-nested-list { display: flex; flex-direction: column; gap: 0.18rem; }
+
+  /* Add buttons */
+  .v2-add-cc, .v2-add-block, .v2-add-nested-break {
     align-self: flex-start;
     background: transparent;
     border: 1px dashed rgba(127,132,156,0.3);
     border-radius: 3px;
-    padding: 0.18rem 0.55rem;
-    font-size: 0.68rem;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.65rem;
     color: var(--text-muted);
     cursor: pointer;
     font-family: inherit;
   }
-  .v2-add-cc:hover, .v2-add-block:hover {
+  .v2-add-cc:hover, .v2-add-block:hover, .v2-add-nested-break:hover {
     color: var(--accent);
     border-color: var(--accent);
   }
-  .v2-add-block { margin-top: 0.35rem; }
+  .v2-add-block { margin-top: 0.3rem; align-self: flex-start; }
 
+  /* Picker dropdown */
   .v2-block-picker {
     position: absolute;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 0.25rem 0;
-    width: 180px;
+    min-width: 160px;
     box-shadow: 0 6px 20px rgba(0,0,0,0.4);
     z-index: 1000;
-  }
-  .v2-block-picker .section-hdr {
-    font-size: 0.6rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 0.25rem 0.7rem 0.15rem;
   }
   .v2-block-picker .picker-item {
     display: flex; align-items: center;
@@ -563,11 +592,6 @@
     cursor: pointer;
   }
   .v2-block-picker .picker-item:hover { background: rgba(255,255,255,0.05); }
-  .v2-block-picker .picker-divider {
-    height: 1px;
-    background: var(--border);
-    margin: 0.25rem 0;
-  }
   .day-row { border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem; }
   .day-row-header { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent2); margin-bottom: 0.6rem; }
   .day-label-link { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 1rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent2); cursor: pointer; transition: color 0.15s; }
@@ -8655,8 +8679,11 @@ async function enrichTeamFromTba(teamNumber) {
  *
  * Supported formats (auto-detected):
  *   JSON array:   [254, 1114, 2056]
- *   CSV row(s):   254, 1114, 2056  or  254\n1114\n2056
- *   YAML list:    - 254\n  - 1114
+ *   CSV row(s):   254, 1114, 2056  or  254
+1114
+2056
+ *   YAML list:    - 254
+  - 1114
  *   Plain text:   one number per line, or space/comma separated
  *
  * Non-numeric tokens are silently skipped. Duplicates are removed.
@@ -9152,43 +9179,44 @@ async function generateSchedule() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Day Config v2 — block-based representation
+// Day Config v2 — block-based representation (NESTED)
 //
-// The v2 model collapses three v1 concepts (practiceDay, days[i].breaks,
-// days[i].cycleChanges) into a single ordered list of typed blocks
-// per day. See ARCHITECTURE.md (and the design conversation that
-// shipped this) for rationale.
+// Each day has an ordered list of top-level blocks. Each match block
+// (practice or qualification) can contain a `breaks` array of nested
+// sub-breaks. Top-level break blocks (between two unrelated blocks)
+// also exist for awards, ceremonies, gaps, etc.
 //
 // Block shape:
-//   { type: 'practice'|'qualification'|'lunch'|'break',
+//   { type: 'practice'|'qualification'|'break',
 //     start: 'HH:MM', end: 'HH:MM',
 //     // match blocks only:
 //     cycleTime: number,
 //     changes: [{ afterMatch: number, cycleTime: number }, ...],
+//     breaks:  [{ type: 'break', start, end, label, breakKind }, ...],
 //     // practice block only:
 //     guaranteed: number, maxFiller: number,
-//     // time blocks only:
-//     label: string }
+//     // break blocks only:
+//     label: string,
+//     breakKind: 'lunch'|'break'|'other' }
 //
 // Day shape:
-//   { label: string,           // optional, defaults to "Day N"
-//     blocks: [...]            // ordered, contiguous (last.end == next.start)
-//                              //   when no gap intended; gaps allowed
-//                              //   for explicit empty time
-//   }
+//   { label: string,           // optional; defaults to "Day N" or "Practice"
+//     date:  string,           // YYYY-MM-DD; optional
+//     blocks: [...] }
 //
-// dayConfigVersion: 2 marker tells loaders this is the new shape.
+// dayConfigVersion: 2 marker on the root day_config object.
 // ─────────────────────────────────────────────────────────────────────
 
-// Block type metadata — drives the picker, color, and field set per
-// type. Single source of truth used by both the editor and the
-// agenda-fit timeline renderer.
+// Block type metadata — color, schedulability, fields. Single source
+// of truth used by the editor, the migration shim, and the agenda-fit
+// timeline renderer.
 var V2_BLOCK_TYPES = {
-  practice:       { label: 'Practice',      color: '#5daf78', schedulable: true,  hasCycleChanges: true,  practiceFields: true  },
-  qualification:  { label: 'Qualification', color: '#7aa4f0', schedulable: true,  hasCycleChanges: true,  practiceFields: false },
-  lunch:          { label: 'Lunch',         color: '#ec8a3f', schedulable: false, hasCycleChanges: false, practiceFields: false },
-  break:          { label: 'Break',         color: '#ec8a3f', schedulable: false, hasCycleChanges: false, practiceFields: false },
+  practice:       { label: 'Practice', shortLabel: 'Practice', color: '#5daf78', schedulable: true,  practiceFields: true,  hasNestedBreaks: true  },
+  qualification:  { label: 'Qual',     shortLabel: 'Qual',     color: '#7aa4f0', schedulable: true,  practiceFields: false, hasNestedBreaks: true  },
+  break:          { label: 'Break',    shortLabel: 'Break',    color: '#ec8a3f', schedulable: false, practiceFields: false, hasNestedBreaks: false },
 };
+var V2_BREAK_KINDS = ['lunch', 'break', 'other'];
+var V2_DEFAULT_LUNCH = { type: 'break', start: '12:00', end: '13:00', label: 'Lunch', breakKind: 'lunch' };
 
 // HH:MM ↔ minute helpers used throughout v2 logic.
 function _v2timeStrToMin(s) {
@@ -9206,175 +9234,152 @@ function _v2minToTimeStr(m) {
   return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
 }
 
+// Detect a v1 break's break-kind from its name (heuristic). v1 has
+// only a single freeform `name` field; v2 split this into kind +
+// label so labels can be customized while kind drives type-aware
+// behavior (e.g. agenda-fit segment text).
+function _v2detectBreakKind(name) {
+  if (/lunch/i.test(name || '')) return 'lunch';
+  return 'break';
+}
+
+// Given a list of v1-style breaks and a list of v1-style match-time
+// windows (start/end), return:
+//   { nested:   { startTimeStr: [breaks that fall inside this window] },
+//     siblings: [breaks that don't overlap any window] }
+// "Falls inside" = break's start >= window.start AND break's end <= window.end.
+// Breaks that partially overlap a window are kept as siblings (they
+// don't fit cleanly as nested sub-breaks).
+function _v2classifyBreaks(breaks, windows) {
+  var nested = {}, siblings = [];
+  windows.forEach(function(w) { nested[w.start] = []; });
+  (breaks || []).forEach(function(b) {
+    var bs = _v2timeStrToMin(b.start), be = _v2timeStrToMin(b.end);
+    if (bs == null || be == null) return;
+    var fitWindow = null;
+    for (var i = 0; i < windows.length; i++) {
+      var ws = _v2timeStrToMin(windows[i].start), we = _v2timeStrToMin(windows[i].end);
+      if (bs >= ws && be <= we) { fitWindow = windows[i]; break; }
+    }
+    if (fitWindow) nested[fitWindow.start].push(b);
+    else           siblings.push(b);
+  });
+  return { nested: nested, siblings: siblings };
+}
+
 // Migrate a v1 day_config → v2 form. Returns the same object back if
-// already v2 (idempotent — safe to call on every load). Lossless for
-// v1 inputs; v1's three concepts (practiceDay, breaks, cycleChanges)
-// fold into v2's block list:
+// already v2 (idempotent). Lossless for v1 inputs.
 //
-//   practiceDay (if enabled) → one practice block on day 0 with the
-//                               same start/end/cycleTime/guaranteed/
-//                               maxFiller. Practice-day breaks/CCs
-//                               translate the same way as qual days.
-//   days[i].breaks[]          → break/lunch blocks interleaved with
-//                               qual blocks. Heuristic: name contains
-//                               "lunch" → lunch; else break.
-//   days[i].cycleChanges[]    → split the qual block at each change,
-//                               OR attach as `changes` on the qual
-//                               block if afterMatch-based. Time-based
-//                               (isStart) changes affect the first
-//                               block's cycleTime; afterMatch-based
-//                               attach to the block containing that
-//                               match. Since v1 numbered matches
-//                               continuously across days, we attach
-//                               by position in the global qual stream.
+// Mapping:
+//   practiceDay (if enabled) → its own day with a single practice
+//                               block; v1 breaks nest inside the
+//                               block's `breaks` array.
+//   days[i].breaks[]          → either nest into the day's qual block
+//                               (if they fit inside the qual's window)
+//                               or stay as sibling break blocks.
+//   days[i].cycleChanges[]    → attached to the qual block as `changes`
+//                               (afterMatch entries) or set the qual's
+//                               base cycleTime (isStart entries).
 function migrateLegacyDayConfig(dc) {
   if (!dc) return dc;
-  if (dc.dayConfigVersion === 2) return dc; // already v2
-  if (!dc.days) return dc; // unknown shape; pass through
+  if (dc.dayConfigVersion === 2) return dc;
+  if (!dc.days) return dc;
 
   var out = {
     dayConfigVersion: 2,
-    cycleTime:   dc.cycleTime,    // top-level base ct preserved for compat
+    cycleTime:   dc.cycleTime,
     breakBuffer: dc.breakBuffer,
     days: [],
   };
 
-  // Insert practiceDay as day 0 if present and enabled. v1's UI only
-  // ever had 0 or 1 practice days; if we find a practiceDay object
-  // with start/end set, we treat it as enabled and create a block.
   var pd = dc.practiceDay;
   if (pd && pd.enabled && pd.start && pd.end) {
-    var pBlocks = _v2interleaveBreaksAndMatches(
-      pd.start, pd.end,
-      _v2normalizeBreaks(pd.breaks),
-      'practice',
-      pd.cycleTime || dc.cycleTime || 11,
-      pd.cycleChanges || [],
-      { guaranteed: pd.guaranteed != null ? pd.guaranteed : 3,
-        maxFiller:  pd.maxFiller  != null ? pd.maxFiller  : 99 }
-    );
-    out.days.push({ label: pd.label || 'Practice', blocks: pBlocks, isPractice: true });
+    var pBlock = {
+      type: 'practice',
+      start: pd.start, end: pd.end,
+      cycleTime:  pd.cycleTime || dc.cycleTime || 11,
+      guaranteed: pd.guaranteed != null ? pd.guaranteed : 3,
+      maxFiller:  pd.maxFiller  != null ? pd.maxFiller  : 99,
+      breaks: (pd.breaks || []).map(function(b) {
+        return { type: 'break', start: b.start, end: b.end,
+                 label: b.name || 'Break',
+                 breakKind: _v2detectBreakKind(b.name) };
+      }),
+      changes: [],
+    };
+    // Practice cycle changes (afterMatch) attach to the practice block
+    var pAfterMatch = (pd.cycleChanges || []).filter(function(cc) {
+      return !cc.isStart && cc.afterMatch != null && !isNaN(cc.afterMatch) && cc.afterMatch >= 1;
+    }).map(function(cc) {
+      return { afterMatch: cc.afterMatch, cycleTime: parseFloat(cc.time) || pBlock.cycleTime };
+    });
+    if (pAfterMatch.length) pBlock.changes = pAfterMatch;
+    out.days.push({ label: pd.label || 'Practice', blocks: [pBlock] });
   }
 
-  // Walk qual days in order. Track running global qual match index
-  // so afterMatch cycle changes attach to the correct block.
   var globalMatchOffset = 0;
   (dc.days || []).forEach(function(day, i) {
-    var qBlocks = _v2interleaveBreaksAndMatches(
-      day.start, day.end,
-      _v2normalizeBreaks(day.breaks),
-      'qualification',
-      day.cycleTime || dc.cycleTime || 9,
-      day.cycleChanges || [],
-      null,                       // no practice fields
-      globalMatchOffset
-    );
-    // Crude estimate for next day's offset — sum of qual block
-    // durations / cycleTime. Won't be perfect but cycle changes
-    // attached out of range will simply be ignored at render time.
-    qBlocks.forEach(function(b) {
-      if (b.type === 'qualification') {
-        var dur = (_v2timeStrToMin(b.end) || 0) - (_v2timeStrToMin(b.start) || 0);
-        globalMatchOffset += Math.floor(dur / (b.cycleTime || 9));
+    // Treat each v1 day as a single qualification block + its breaks
+    // (nested when they fit; siblings otherwise).
+    var qualBlock = {
+      type: 'qualification',
+      start: day.start, end: day.end,
+      cycleTime: day.cycleTime || dc.cycleTime || 9,
+      breaks: [],
+      changes: [],
+    };
+    // isStart cycleChange resets base cycleTime
+    (day.cycleChanges || []).forEach(function(cc) {
+      if (cc.isStart && cc.time) {
+        var t = parseFloat(cc.time);
+        if (!isNaN(t) && t > 0) qualBlock.cycleTime = t;
       }
     });
-    out.days.push({ label: day.label || ('Day ' + (i + 1)), blocks: qBlocks });
+    // afterMatch changes — attach if afterMatch falls in this day's
+    // global match range (rough estimate using base cycle time).
+    var dur = (_v2timeStrToMin(day.end) || 0) - (_v2timeStrToMin(day.start) || 0);
+    var nMatchesEst = Math.max(0, Math.floor(dur / (qualBlock.cycleTime || 9)));
+    var dayMatchStart = globalMatchOffset + 1;
+    var dayMatchEnd   = globalMatchOffset + nMatchesEst;
+    var afterMatchCcs = (day.cycleChanges || []).filter(function(cc) {
+      return !cc.isStart && cc.afterMatch != null && !isNaN(cc.afterMatch) && cc.afterMatch >= 1
+             && cc.afterMatch >= dayMatchStart && cc.afterMatch < dayMatchEnd + nMatchesEst;
+    }).map(function(cc) {
+      return { afterMatch: cc.afterMatch, cycleTime: parseFloat(cc.time) || qualBlock.cycleTime };
+    });
+    if (afterMatchCcs.length) qualBlock.changes = afterMatchCcs;
+
+    var classification = _v2classifyBreaks(day.breaks, [{ start: day.start, end: day.end }]);
+    qualBlock.breaks = (classification.nested[day.start] || []).map(function(b) {
+      return { type: 'break', start: b.start, end: b.end,
+               label: b.name || 'Break',
+               breakKind: _v2detectBreakKind(b.name) };
+    });
+    var siblings = (classification.siblings || []).map(function(b) {
+      return { type: 'break', start: b.start, end: b.end,
+               label: b.name || 'Break',
+               breakKind: _v2detectBreakKind(b.name) };
+    });
+
+    // Construct day block list: qualBlock interleaved with sibling
+    // breaks at their time positions. (In practice v1 breaks always
+    // fit inside the day window so siblings is usually empty.)
+    var dayBlocks = [qualBlock].concat(siblings).sort(function(a, b) {
+      return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start);
+    });
+    out.days.push({ label: day.label || ('Day ' + (i + 1)), date: day.date || '', blocks: dayBlocks });
+    globalMatchOffset += nMatchesEst;
   });
 
   return out;
 }
 
-// Normalize a v1 breaks array — strip empty entries, sort by start.
-function _v2normalizeBreaks(breaks) {
-  return (breaks || [])
-    .filter(function(b) { return b && b.start && b.end; })
-    .map(function(b) {
-      return { start: b.start, end: b.end, name: b.name || 'Break' };
-    })
-    .sort(function(a, b) { return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start); });
-}
-
-// Build a block list by interleaving match blocks (practice|qualification)
-// with break/lunch blocks across the day window [start, end].
-//   - Each break splits the surrounding match block in two, sharing
-//     cycleTime + practice fields.
-//   - cycleChanges: isStart entries set the first match block's
-//     cycleTime; afterMatch entries attach as `changes` on the
-//     match block whose match range covers afterMatch.
-//   - matchOffset is the running global match index; afterMatch is
-//     interpreted relative to that.
-function _v2interleaveBreaksAndMatches(start, end, breaks, matchType, baseCt, cycleChanges, practiceFields, matchOffset) {
-  matchOffset = matchOffset || 0;
-  var ct = baseCt;
-  // isStart cycleChange resets the base ct for the entire run.
-  (cycleChanges || []).forEach(function(cc) {
-    if (cc.isStart && cc.time) {
-      var t = parseFloat(cc.time);
-      if (!isNaN(t) && t > 0) ct = t;
-    }
-  });
-
-  // Lay out match-block ↔ break alternation in time order.
-  var blocks = [];
-  var cursor = start;
-  breaks.forEach(function(brk) {
-    // Match block from cursor to break start
-    if (_v2timeStrToMin(brk.start) > _v2timeStrToMin(cursor)) {
-      blocks.push(_v2makeMatchBlock(matchType, cursor, brk.start, ct, practiceFields));
-    }
-    // Break block — guess type from name
-    var btype = /lunch/i.test(brk.name || '') ? 'lunch' : 'break';
-    blocks.push({ type: btype, start: brk.start, end: brk.end, label: brk.name || (btype === 'lunch' ? 'Lunch' : 'Break') });
-    cursor = brk.end;
-  });
-  // Final match block to end of day
-  if (_v2timeStrToMin(end) > _v2timeStrToMin(cursor)) {
-    blocks.push(_v2makeMatchBlock(matchType, cursor, end, ct, practiceFields));
-  }
-
-  // Attach afterMatch-based cycle changes to whichever match block
-  // contains that match number. Walk match blocks, accumulate match
-  // counts using each block's cycleTime, and bin each cc accordingly.
-  var afterMatchCcs = (cycleChanges || []).filter(function(cc) {
-    return !cc.isStart && cc.afterMatch != null && !isNaN(cc.afterMatch) && cc.afterMatch >= 1;
-  }).sort(function(a, b) { return a.afterMatch - b.afterMatch; });
-  if (afterMatchCcs.length) {
-    var runningMatchIdx = matchOffset;
-    blocks.forEach(function(b) {
-      if (!V2_BLOCK_TYPES[b.type] || !V2_BLOCK_TYPES[b.type].hasCycleChanges) return;
-      var dur = (_v2timeStrToMin(b.end) || 0) - (_v2timeStrToMin(b.start) || 0);
-      var nMatches = Math.floor(dur / (b.cycleTime || baseCt));
-      var blockStartMatch = runningMatchIdx + 1;
-      var blockEndMatch   = runningMatchIdx + nMatches;
-      // Pull any cc whose afterMatch falls in [blockStartMatch, blockEndMatch)
-      var attached = afterMatchCcs.filter(function(cc) {
-        return cc.afterMatch >= blockStartMatch && cc.afterMatch < blockEndMatch;
-      });
-      if (attached.length) {
-        b.changes = attached.map(function(cc) {
-          return { afterMatch: cc.afterMatch, cycleTime: parseFloat(cc.time) || b.cycleTime };
-        });
-      }
-      runningMatchIdx = blockEndMatch;
-    });
-  }
-
-  return blocks;
-}
-
-function _v2makeMatchBlock(type, start, end, cycleTime, practiceFields) {
-  var b = { type: type, start: start, end: end, cycleTime: cycleTime };
-  if (practiceFields) {
-    b.guaranteed = practiceFields.guaranteed;
-    b.maxFiller  = practiceFields.maxFiller;
-  }
-  return b;
-}
-
-// Reverse migration: v2 → v1. Lossy for any v2-only structure (no
-// such structure today since both share the 4 block types, but the
-// shim is here for symmetry and for older v1-only code paths to
-// keep functioning without modification).
+// Reverse: v2 → v1. The scheduler and backend still consume v1, so
+// this runs at generate/save time. Lossless for the four block types
+// because v1 supports breaks (mapped from break sub-blocks AND any
+// sibling break blocks within a qual day) + cycleChanges (mapped from
+// match block `changes` arrays + the first match block's cycleTime as
+// isStart).
 function downgradeToV1(dc) {
   if (!dc || dc.dayConfigVersion !== 2) return dc;
   var v1 = {
@@ -9384,106 +9389,84 @@ function downgradeToV1(dc) {
   };
   var globalMatchOffset = 0;
   (dc.days || []).forEach(function(day, idx) {
-    if (day.isPractice) {
-      // Collect practice blocks from this day
-      var pBlocks = day.blocks.filter(function(b) { return b.type === 'practice'; });
-      var pBreaks = day.blocks.filter(function(b) { return b.type === 'lunch' || b.type === 'break'; });
-      if (pBlocks.length) {
-        var first = pBlocks[0], last = pBlocks[pBlocks.length - 1];
-        v1.practiceDay = {
-          enabled: true,
-          start: first.start, end: last.end,
-          cycleTime:  first.cycleTime,
-          guaranteed: first.guaranteed != null ? first.guaranteed : 3,
-          maxFiller:  first.maxFiller  != null ? first.maxFiller  : 99,
-          breaks:     pBreaks.map(function(b) { return { start: b.start, end: b.end, name: b.label }; }),
-          cycleChanges: _v2collectCycleChangesAcrossBlocks(pBlocks, globalMatchOffset),
-        };
-      }
-      return; // practice day doesn't enter v1.days
+    var pBlocks = (day.blocks || []).filter(function(b) { return b.type === 'practice'; });
+    var qBlocks = (day.blocks || []).filter(function(b) { return b.type === 'qualification'; });
+    var siblingBreaks = (day.blocks || []).filter(function(b) { return b.type === 'break'; });
+
+    // Practice-only day → v1.practiceDay
+    if (pBlocks.length && !qBlocks.length) {
+      var first = pBlocks[0];
+      // Collect all breaks (nested in practice blocks + siblings)
+      var allBreaks = siblingBreaks.slice();
+      pBlocks.forEach(function(pb) { (pb.breaks || []).forEach(function(b) { allBreaks.push(b); }); });
+      v1.practiceDay = {
+        enabled: true,
+        label: day.label || 'Practice',
+        start: first.start,
+        end:   pBlocks[pBlocks.length - 1].end,
+        cycleTime:  first.cycleTime,
+        guaranteed: first.guaranteed != null ? first.guaranteed : 3,
+        maxFiller:  first.maxFiller  != null ? first.maxFiller  : 99,
+        breaks: allBreaks.map(function(b) { return { start: b.start, end: b.end, name: b.label || 'Break' }; })
+                          .sort(function(a, b) { return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start); }),
+        cycleChanges: _v2blockChangesToV1(first, globalMatchOffset),
+      };
+      return;
     }
-    // Qual day
-    var qBlocks = day.blocks.filter(function(b) { return b.type === 'qualification'; });
-    var qBreaks = day.blocks.filter(function(b) { return b.type === 'lunch' || b.type === 'break'; });
-    if (!qBlocks.length) return;
-    var first = qBlocks[0], last = qBlocks[qBlocks.length - 1];
+
+    // Mixed or qual-only day → v1.days entry
+    if (!qBlocks.length && !pBlocks.length) return;
+    var firstM = (pBlocks.concat(qBlocks))[0];
+    var dayStart = firstM ? firstM.start : (day.blocks[0] && day.blocks[0].start) || '09:00';
+    var dayEnd   = (qBlocks.concat(pBlocks)).reduce(function(latest, b) {
+      return (_v2timeStrToMin(b.end) || 0) > (_v2timeStrToMin(latest) || 0) ? b.end : latest;
+    }, '09:00');
+    var allBreaks = siblingBreaks.slice();
+    qBlocks.forEach(function(qb) { (qb.breaks || []).forEach(function(b) { allBreaks.push(b); }); });
+    pBlocks.forEach(function(pb) { (pb.breaks || []).forEach(function(b) { allBreaks.push(b); }); });
+    var qFirst = qBlocks[0] || pBlocks[0];
     v1.days.push({
-      start: first.start, end: last.end,
-      cycleTime: first.cycleTime,
-      breaks: qBreaks.map(function(b) { return { start: b.start, end: b.end, name: b.label }; }),
-      cycleChanges: _v2collectCycleChangesAcrossBlocks(qBlocks, globalMatchOffset),
+      start: dayStart, end: dayEnd,
+      cycleTime: qFirst.cycleTime,
+      label: day.label || ('Day ' + (idx + 1)),
+      date:  day.date  || '',
+      breaks: allBreaks.map(function(b) { return { start: b.start, end: b.end, name: b.label || 'Break' }; })
+                       .sort(function(a, b) { return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start); }),
+      cycleChanges: _v2blockChangesToV1(qFirst, globalMatchOffset),
     });
-    qBlocks.forEach(function(b) {
+
+    // Track global match offset across days
+    qBlocks.concat(pBlocks).forEach(function(b) {
       var dur = (_v2timeStrToMin(b.end) || 0) - (_v2timeStrToMin(b.start) || 0);
-      globalMatchOffset += Math.floor(dur / (b.cycleTime || 9));
+      globalMatchOffset += Math.max(0, Math.floor(dur / (b.cycleTime || 9)));
     });
   });
   return v1;
 }
 
-// Helper: walk match blocks of a day and emit v1-style cycleChanges.
-// First block's cycleTime → isStart entry. Each subsequent block's
-// changes[] become afterMatch entries with the running match index.
-function _v2collectCycleChangesAcrossBlocks(blocks, startingMatchOffset) {
-  var ccs = [];
-  if (!blocks.length) return ccs;
-  ccs.push({ isStart: true, time: blocks[0].cycleTime });
-  var idx = startingMatchOffset;
-  blocks.forEach(function(b) {
-    var dur = (_v2timeStrToMin(b.end) || 0) - (_v2timeStrToMin(b.start) || 0);
-    var n = Math.floor(dur / (b.cycleTime || 9));
-    (b.changes || []).forEach(function(cc) {
-      ccs.push({ afterMatch: cc.afterMatch, time: cc.cycleTime, isStart: false });
-    });
-    idx += n;
+function _v2blockChangesToV1(matchBlock, matchOffset) {
+  if (!matchBlock) return [];
+  var ccs = [{ isStart: true, time: matchBlock.cycleTime }];
+  (matchBlock.changes || []).forEach(function(cc) {
+    ccs.push({ afterMatch: cc.afterMatch, time: cc.cycleTime, isStart: false });
   });
   return ccs;
 }
 
-// Collect the v2 form state into a day_config object. Read from the
-// v2 markup (#v2DaysContainer). If v2 isn't enabled, returns null.
+// Read v2 form state from DOM (#v2DaysContainer) into a day_config
+// object. Mirrors the markup created by buildV2DayRow / buildV2Block.
 function collectDayConfigV2() {
   var container = document.getElementById('v2DaysContainer');
   if (!container) return null;
-  var dayEls = container.querySelectorAll('.v2-day-row');
   var days = [];
-  dayEls.forEach(function(dayEl) {
+  container.querySelectorAll('.v2-day').forEach(function(dayEl) {
     var label = dayEl.querySelector('.v2-day-label').value || '';
-    var isPractice = dayEl.dataset.isPractice === '1';
+    var date  = dayEl.querySelector('.v2-day-date')  ? dayEl.querySelector('.v2-day-date').value || '' : '';
     var blocks = [];
-    dayEl.querySelectorAll('.v2-block').forEach(function(blockEl) {
-      var t = blockEl.dataset.type;
-      var b = {
-        type:  t,
-        start: blockEl.querySelector('.v2-block-start').value,
-        end:   blockEl.querySelector('.v2-block-end').value,
-      };
-      var meta = V2_BLOCK_TYPES[t];
-      if (meta && meta.schedulable) {
-        b.cycleTime = parseFloat(blockEl.querySelector('.v2-block-cycletime').value) || 9;
-        // After-match changes — read from .v2-cc-row inputs
-        var ccs = [];
-        blockEl.querySelectorAll('.v2-cc-row').forEach(function(ccEl) {
-          var afterMatch = parseInt(ccEl.querySelector('.v2-cc-after').value, 10);
-          var ct         = parseFloat(ccEl.querySelector('.v2-cc-time').value);
-          if (!isNaN(afterMatch) && afterMatch >= 1 && !isNaN(ct) && ct > 0) {
-            ccs.push({ afterMatch: afterMatch, cycleTime: ct });
-          }
-        });
-        if (ccs.length) b.changes = ccs;
-      }
-      if (meta && meta.practiceFields) {
-        b.guaranteed = parseInt(blockEl.querySelector('.v2-block-guaranteed').value, 10) || 3;
-        b.maxFiller  = parseInt(blockEl.querySelector('.v2-block-maxfiller').value,  10) || 99;
-      }
-      if (meta && !meta.schedulable) {
-        b.label = blockEl.querySelector('.v2-block-label').value || meta.label;
-      }
-      blocks.push(b);
+    dayEl.querySelectorAll(':scope > .v2-day-body > .v2-block').forEach(function(blockEl) {
+      blocks.push(_v2readBlockFromDom(blockEl));
     });
-    var d = { label: label, blocks: blocks };
-    if (isPractice) d.isPractice = true;
-    days.push(d);
+    days.push({ label: label, date: date, blocks: blocks });
   });
   return {
     dayConfigVersion: 2,
@@ -9493,248 +9476,543 @@ function collectDayConfigV2() {
   };
 }
 
+function _v2readBlockFromDom(blockEl) {
+  var t = blockEl.dataset.type;
+  var b = {
+    type:  t,
+    start: blockEl.querySelector('.v2-block-start').value,
+    end:   blockEl.querySelector('.v2-block-end').value,
+  };
+  var meta = V2_BLOCK_TYPES[t];
+  if (meta && meta.schedulable) {
+    var ctEl = blockEl.querySelector('.v2-ct-input');
+    b.cycleTime = ctEl ? (parseFloat(ctEl.value) || 9) : 9;
+    var ccs = [];
+    blockEl.querySelectorAll(':scope > .v2-block-body .v2-cc-row').forEach(function(ccEl) {
+      var afterMatch = parseInt(ccEl.querySelector('.v2-cc-after').value, 10);
+      var ct         = parseFloat(ccEl.querySelector('.v2-cc-time').value);
+      if (!isNaN(afterMatch) && afterMatch >= 1 && !isNaN(ct) && ct > 0) {
+        ccs.push({ afterMatch: afterMatch, cycleTime: ct });
+      }
+    });
+    if (ccs.length) b.changes = ccs;
+    if (meta.practiceFields) {
+      var gEl = blockEl.querySelector('.v2-guaranteed');
+      var fEl = blockEl.querySelector('.v2-maxfiller');
+      if (gEl) b.guaranteed = parseInt(gEl.value, 10) || 3;
+      if (fEl) b.maxFiller  = parseInt(fEl.value,  10) || 99;
+    }
+    if (meta.hasNestedBreaks) {
+      b.breaks = [];
+      blockEl.querySelectorAll(':scope > .v2-block-body .v2-nested-break').forEach(function(brEl) {
+        b.breaks.push(_v2readBlockFromDom(brEl));
+      });
+    }
+  } else {
+    // break block
+    var labelEl = blockEl.querySelector('.v2-block-label');
+    var kindEl  = blockEl.querySelector('.v2-break-kind');
+    b.label     = labelEl ? labelEl.value : '';
+    b.breakKind = kindEl  ? kindEl.value  : 'break';
+    if (!b.label) b.label = b.breakKind === 'lunch' ? 'Lunch' : (b.breakKind === 'break' ? 'Break' : 'Other');
+  }
+  return b;
+}
+
 // ─── v2 rendering ─────────────────────────────────────────────────
-// Render a v2 day_config object into the v2 editor markup. Blows
-// away whatever's in #v2DaysContainer and rebuilds. Called on
-// toggle-on, on data load, and after day/block add/remove operations.
+// Render a v2 day_config into the #v2DaysContainer markup. Day-level
+// rows are collapsible. Each block row is also independently
+// collapsible (clicking its chevron toggles only its body).
 function renderDayConfigV2(dc) {
   var container = document.getElementById('v2DaysContainer');
   if (!container) return;
   container.innerHTML = '';
   var days = (dc && dc.days) ? dc.days : [];
   if (!days.length) {
-    // Bootstrap a single empty Day 1 so the user has something to
-    // edit. Same default times v1 uses (9–5 with a noon lunch).
-    days = [{
-      label: 'Day 1',
-      blocks: [
-        { type: 'qualification', start: '09:00', end: '12:00', cycleTime: 9 },
-        { type: 'lunch',         start: '12:00', end: '13:00', label: 'Lunch' },
-        { type: 'qualification', start: '13:00', end: '17:00', cycleTime: 9 },
-      ],
-    }];
+    days = [_v2defaultDay(0)];
   }
-  days.forEach(function(day, i) { container.appendChild(buildV2DayRow(day, i)); });
+  days.forEach(function(day, i) { container.appendChild(buildV2Day(day, i)); });
 }
 
-function buildV2DayRow(day, idx) {
-  var isP = !!day.isPractice;
-  var row = document.createElement('div');
-  row.className = 'v2-day-row';
-  row.dataset.isPractice = isP ? '1' : '0';
-  var label = day.label || (isP ? 'Practice' : 'Day ' + (idx + 1));
-  // Header: tag + label input + delete
+function _v2defaultDay(idx) {
+  // New empty day = one qual block 9-5 with default lunch nested.
+  return {
+    label: 'Day ' + (idx + 1),
+    date: '',
+    blocks: [
+      { type: 'qualification', start: '09:00', end: '17:00', cycleTime: 9,
+        breaks: [Object.assign({}, V2_DEFAULT_LUNCH)], changes: [] }
+    ],
+  };
+}
+
+function buildV2Day(day, idx) {
+  var hasPractice = (day.blocks || []).some(function(b) { return b.type === 'practice'; });
+  var hasQual     = (day.blocks || []).some(function(b) { return b.type === 'qualification'; });
+  var dayKind = hasPractice && !hasQual ? 'practice' : 'qual';
+  var dayEl = document.createElement('div');
+  dayEl.className = 'v2-day';
+  dayEl.dataset.kind = dayKind;
+  // Head (collapsed by default)
   var head = document.createElement('div');
   head.className = 'v2-day-head';
   head.innerHTML =
-    '<span class="v2-day-tag">' + (isP ? 'Practice' : 'Day ' + (idx + 1)) + '</span>' +
-    '<input class="v2-day-label" type="text" placeholder="Optional label" value="' + _v2attrEsc(label) + '">' +
+    '<span class="v2-day-tag">' + (dayKind === 'practice' ? 'Practice' : 'Day ' + (idx + 1)) + '</span>' +
+    '<input class="v2-day-date" type="date" value="' + _v2attrEsc(day.date || '') + '" title="Date">' +
+    '<input class="v2-day-label" type="text" placeholder="Label" value="' + _v2attrEsc(day.label || '') + '">' +
+    '<span class="v2-day-summary"></span>' +
+    '<span class="v2-day-chev" title="Expand">\u25b8</span>' +
     '<span class="v2-day-x" title="Remove day">\u00d7</span>';
-  head.querySelector('.v2-day-x').addEventListener('click', function() { removeV2Day(row); });
-  row.appendChild(head);
-  // Blocks
-  var blocksWrap = document.createElement('div');
-  blocksWrap.className = 'v2-blocks';
-  (day.blocks || []).forEach(function(b) { blocksWrap.appendChild(buildV2Block(b)); });
-  row.appendChild(blocksWrap);
+  head.querySelector('.v2-day-chev').addEventListener('click', function() { _v2toggleDay(dayEl); });
+  head.querySelector('.v2-day-x').addEventListener('click', function() {
+    dayEl.remove();
+    _v2renumberDays();
+    onV2Change();
+  });
+  head.querySelectorAll('input').forEach(function(inp) {
+    inp.addEventListener('input', function() { onV2Change(); _v2updateDaySummary(dayEl); });
+  });
+  dayEl.appendChild(head);
+  // Body
+  var body = document.createElement('div');
+  body.className = 'v2-day-body';
+  body.style.display = 'none'; // collapsed
+  (day.blocks || []).forEach(function(b) { body.appendChild(buildV2Block(b)); });
   // Add-block button
   var addBtn = document.createElement('button');
+  addBtn.type = 'button';
   addBtn.className = 'v2-add-block';
   addBtn.textContent = '+ Add block';
-  addBtn.onclick = function(ev) { ev.preventDefault(); openV2BlockPicker(addBtn, blocksWrap); };
-  row.appendChild(addBtn);
-  return row;
+  addBtn.addEventListener('click', function(ev) { ev.preventDefault(); openV2BlockPicker(addBtn, body); });
+  body.appendChild(addBtn);
+  dayEl.appendChild(body);
+  _v2updateDaySummary(dayEl);
+  return dayEl;
 }
 
-function buildV2Block(b) {
+function _v2toggleDay(dayEl) {
+  var body = dayEl.querySelector('.v2-day-body');
+  var chev = dayEl.querySelector('.v2-day-chev');
+  if (!body) return;
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  chev.textContent = open ? '\u25b8' : '\u25be';
+}
+
+function _v2renumberDays() {
+  var dayEls = document.querySelectorAll('#v2DaysContainer > .v2-day');
+  dayEls.forEach(function(dayEl, i) {
+    var hasPractice = dayEl.querySelector('.v2-block[data-type="practice"]') != null;
+    var hasQual     = dayEl.querySelector('.v2-block[data-type="qualification"]') != null;
+    var kind = hasPractice && !hasQual ? 'practice' : 'qual';
+    dayEl.dataset.kind = kind;
+    var tag = dayEl.querySelector('.v2-day-tag');
+    if (tag) tag.textContent = kind === 'practice' ? 'Practice' : ('Day ' + (i + 1));
+  });
+}
+
+function _v2updateDaySummary(dayEl) {
+  var blocks = dayEl.querySelectorAll(':scope > .v2-day-body > .v2-block');
+  var times = []; var blockCount = blocks.length;
+  blocks.forEach(function(b) {
+    var s = b.querySelector('.v2-block-start').value;
+    var e = b.querySelector('.v2-block-end').value;
+    if (s) times.push(_v2timeStrToMin(s));
+    if (e) times.push(_v2timeStrToMin(e));
+  });
+  var sum = dayEl.querySelector('.v2-day-summary');
+  if (!sum) return;
+  if (!blockCount) { sum.innerHTML = '<em>empty</em>'; return; }
+  var minT = Math.min.apply(null, times);
+  var maxT = Math.max.apply(null, times);
+  var fmt = function(m) {
+    var h = Math.floor(m / 60), mm = m % 60;
+    var ampm = h >= 12 ? 'p' : 'a';
+    var hh = (h % 12 === 0 ? 12 : h % 12);
+    return hh + (mm ? ':' + (mm < 10 ? '0' : '') + mm : '') + ampm;
+  };
+  sum.innerHTML = '<strong>' + blockCount + '</strong> block' + (blockCount > 1 ? 's' : '') +
+                  ' \u00b7 ' + fmt(minT) + '\u2013' + fmt(maxT);
+}
+
+function buildV2Block(b, isNested) {
   var meta = V2_BLOCK_TYPES[b.type] || V2_BLOCK_TYPES.qualification;
-  var block = document.createElement('div');
-  block.className = 'v2-block';
-  block.dataset.type = b.type;
-  // Header
+  var blockEl = document.createElement('div');
+  blockEl.className = isNested ? 'v2-block v2-nested-break' : 'v2-block';
+  blockEl.dataset.type = b.type;
+  // Head
   var head = document.createElement('div');
   head.className = 'v2-block-head';
+  var pillCls = 'v2-pill v2-pill-' + b.type;
   head.innerHTML =
-    '<span class="v2-block-handle" title="Drag to reorder (not yet wired)">\u22ee\u22ee</span>' +
-    '<span class="v2-block-pill t-' + b.type + '"><span class="v2-block-swatch" style="background:' + meta.color + ';"></span>' + meta.label + ' \u25be</span>' +
+    '<span class="' + pillCls + '"><span class="v2-swatch" style="background:' + meta.color + ';"></span>' + meta.shortLabel + '</span>' +
     '<input class="v2-block-time v2-block-start" type="time" value="' + (b.start || '09:00') + '">' +
-    '<span style="color:var(--text-muted);font-size:0.72rem;">\u2013</span>' +
     '<input class="v2-block-time v2-block-end" type="time" value="' + (b.end || '17:00') + '">' +
     '<span class="v2-block-summary"></span>' +
-    (meta.schedulable ? '<span class="v2-block-chevron" title="Show details">\u25be</span>' : '') +
-    '<span class="v2-block-x" title="Remove block">\u00d7</span>';
-
-  // Pill click → block-type picker
-  head.querySelector('.v2-block-pill').addEventListener('click', function(ev) {
+    '<span class="v2-block-chev" title="Expand">\u25b8</span>' +
+    '<span class="v2-block-x" title="Remove">\u00d7</span>';
+  head.querySelector('.v2-pill-' + b.type).addEventListener('click', function(ev) {
     ev.stopPropagation();
-    openV2BlockTypePicker(head.querySelector('.v2-block-pill'), block);
+    openV2TypeChangePicker(head.querySelector('.v2-pill-' + b.type), blockEl, isNested);
   });
-  // Delete
   head.querySelector('.v2-block-x').addEventListener('click', function() {
-    block.remove();
-    onV2BlockChange();
+    blockEl.remove(); onV2Change(); _v2updateNearestSummary(head);
   });
-  // Time inputs trigger change
-  head.querySelectorAll('input').forEach(function(inp) {
-    inp.addEventListener('change', function() { updateV2BlockSummary(block); onV2BlockChange(); });
+  head.querySelector('.v2-block-chev').addEventListener('click', function() { _v2toggleBlock(blockEl); });
+  // Time inputs trigger summary update + boundary linking + validation
+  head.querySelectorAll('input.v2-block-time').forEach(function(inp) {
+    inp.addEventListener('change', function(ev) {
+      _v2propagateBoundary(blockEl, inp);
+      _v2validateAll();
+      _v2updateBlockSummary(blockEl);
+      _v2updateNearestSummary(blockEl);
+      onV2Change();
+    });
   });
-  block.appendChild(head);
-
-  // Body — only for schedulable blocks (cycle time + cycle changes
-  // + practice fields). Hidden by default; chevron toggles.
+  blockEl.appendChild(head);
+  // Body
+  var body = document.createElement('div');
+  body.className = 'v2-block-body';
+  body.style.display = 'none';
   if (meta.schedulable) {
-    var body = document.createElement('div');
-    body.className = 'v2-block-body';
-    body.style.display = 'none';
     var bodyHtml =
       '<div class="v2-body-row">' +
       '  <span class="v2-body-label">Cycle time</span>' +
-      '  <input class="v2-body-input v2-block-cycletime" type="number" min="0.5" step="any" value="' + (b.cycleTime || 9) + '"> min/match' +
+      '  <input class="v2-body-input v2-ct-input" type="number" min="0.5" step="any" value="' + (b.cycleTime || 9) + '"> min/match' +
       '</div>';
     if (meta.practiceFields) {
       bodyHtml +=
         '<div class="v2-body-row">' +
         '  <span class="v2-body-label">Guaranteed</span>' +
-        '  <input class="v2-body-input v2-block-guaranteed" type="number" min="1" max="20" value="' + (b.guaranteed != null ? b.guaranteed : 3) + '"> matches/team' +
+        '  <input class="v2-body-input v2-guaranteed" type="number" min="1" max="20" value="' + (b.guaranteed != null ? b.guaranteed : 3) + '"> matches/team' +
         '</div>' +
         '<div class="v2-body-row">' +
         '  <span class="v2-body-label">Max filler</span>' +
-        '  <input class="v2-body-input v2-block-maxfiller" type="number" min="0" max="99" value="' + (b.maxFiller != null ? b.maxFiller : 99) + '"> matches/team' +
+        '  <input class="v2-body-input v2-maxfiller" type="number" min="0" max="99" value="' + (b.maxFiller != null ? b.maxFiller : 99) + '"> matches/team' +
         '</div>';
     }
     bodyHtml +=
-      '<div>' +
-      '  <div class="v2-body-label" style="margin-bottom:0.25rem;">Cycle changes</div>' +
+      '<div class="v2-body-section">' +
+      '  <div class="v2-body-label">Cycle changes</div>' +
       '  <div class="v2-cc-list"></div>' +
-      '  <button class="v2-add-cc" type="button">+ Add cycle change</button>' +
+      '  <button type="button" class="v2-add-cc">+ change</button>' +
       '</div>';
+    if (meta.hasNestedBreaks && !isNested) {
+      bodyHtml +=
+        '<div class="v2-body-section">' +
+        '  <div class="v2-body-label">Breaks inside</div>' +
+        '  <div class="v2-nested-list"></div>' +
+        '  <button type="button" class="v2-add-nested-break">+ break</button>' +
+        '</div>';
+    }
     body.innerHTML = bodyHtml;
-    // Wire cc list
     var ccList = body.querySelector('.v2-cc-list');
     (b.changes || []).forEach(function(cc) { ccList.appendChild(buildV2CcRow(cc)); });
-    body.querySelector('.v2-add-cc').onclick = function(ev) {
+    body.querySelector('.v2-add-cc').addEventListener('click', function(ev) {
       ev.preventDefault();
-      ccList.appendChild(buildV2CcRow({ afterMatch: 1, cycleTime: parseFloat(body.querySelector('.v2-block-cycletime').value) || 9 }));
-      onV2BlockChange();
-    };
-    // Wire body inputs
-    body.querySelectorAll('input').forEach(function(inp) {
-      inp.addEventListener('change', function() { updateV2BlockSummary(block); onV2BlockChange(); });
+      var defaultCt = parseFloat(body.querySelector('.v2-ct-input').value) || 9;
+      ccList.appendChild(buildV2CcRow({ afterMatch: 1, cycleTime: defaultCt }));
+      _v2updateBlockSummary(blockEl);
+      onV2Change();
     });
-    // Chevron toggle
-    var chev = head.querySelector('.v2-block-chevron');
-    if (chev) {
-      chev.addEventListener('click', function() {
-        var open = body.style.display !== 'none';
-        body.style.display = open ? 'none' : '';
-        block.classList.toggle('expanded', !open);
-        chev.textContent = open ? '\u25be' : '\u25b4';
+    if (meta.hasNestedBreaks && !isNested) {
+      var nestedList = body.querySelector('.v2-nested-list');
+      (b.breaks || []).forEach(function(nb) { nestedList.appendChild(buildV2Block(nb, true)); });
+      body.querySelector('.v2-add-nested-break').addEventListener('click', function(ev) {
+        ev.preventDefault();
+        var nb = _v2defaultNestedBreak(blockEl);
+        nestedList.appendChild(buildV2Block(nb, true));
+        _v2updateBlockSummary(blockEl);
+        _v2validateAll();
+        onV2Change();
       });
     }
-    block.appendChild(body);
+    // Wire body inputs
+    body.querySelectorAll('input.v2-body-input, input.v2-ct-input').forEach(function(inp) {
+      inp.addEventListener('input', function() {
+        _v2updateBlockSummary(blockEl);
+        onV2Change();
+      });
+    });
   } else {
-    // Time blocks — use the summary area for the optional label
-    // input. We tuck a hidden label input inside the head's summary
-    // span so collectDayConfigV2 can find it.
-    var sum = head.querySelector('.v2-block-summary');
-    sum.innerHTML = '<input class="v2-block-label" type="text" placeholder="' + meta.label + '" value="' + _v2attrEsc(b.label || '') + '" style="background:transparent;border:none;color:var(--text-muted);font-size:0.7rem;width:100%;font-family:inherit;">';
-    sum.querySelector('input').addEventListener('change', onV2BlockChange);
+    // Break block expanded body — type selector + label
+    var bk = b.breakKind || _v2detectBreakKind(b.label || '');
+    body.innerHTML =
+      '<div class="v2-body-row">' +
+      '  <span class="v2-body-label">Type</span>' +
+      '  <select class="v2-body-input v2-break-kind">' +
+      V2_BREAK_KINDS.map(function(k) {
+        var sel = (k === bk) ? ' selected' : '';
+        var lab = k.charAt(0).toUpperCase() + k.slice(1);
+        return '<option value="' + k + '"' + sel + '>' + lab + '</option>';
+      }).join('') +
+      '  </select>' +
+      '</div>' +
+      '<div class="v2-body-row">' +
+      '  <span class="v2-body-label">Label</span>' +
+      '  <input class="v2-body-input v2-block-label" type="text" value="' + _v2attrEsc(b.label || '') + '" style="width:140px;">' +
+      '</div>';
+    body.querySelectorAll('input, select').forEach(function(inp) {
+      inp.addEventListener('input',  function() { _v2updateBlockSummary(blockEl); onV2Change(); });
+      inp.addEventListener('change', function() { _v2updateBlockSummary(blockEl); onV2Change(); });
+    });
   }
+  blockEl.appendChild(body);
+  _v2updateBlockSummary(blockEl);
+  return blockEl;
+}
 
-  updateV2BlockSummary(block);
-  return block;
+function _v2defaultNestedBreak(parentBlockEl) {
+  // Default 30-min break starting at parent midpoint, or after the
+  // last existing nested break.
+  var ps = _v2timeStrToMin(parentBlockEl.querySelector('.v2-block-start').value);
+  var pe = _v2timeStrToMin(parentBlockEl.querySelector('.v2-block-end').value);
+  if (ps == null || pe == null || pe <= ps) {
+    return { type: 'break', start: '12:00', end: '12:30', label: 'Break', breakKind: 'break' };
+  }
+  var existing = parentBlockEl.querySelectorAll(':scope > .v2-block-body .v2-nested-list > .v2-block');
+  var startMin;
+  if (existing.length) {
+    var last = existing[existing.length - 1];
+    startMin = _v2timeStrToMin(last.querySelector('.v2-block-end').value) || (ps + Math.floor((pe - ps) / 2));
+  } else {
+    startMin = ps + Math.floor((pe - ps) / 2);
+  }
+  var endMin = Math.min(startMin + 30, pe);
+  return { type: 'break', start: _v2minToTimeStr(startMin), end: _v2minToTimeStr(endMin), label: 'Break', breakKind: 'break' };
 }
 
 function buildV2CcRow(cc) {
   var row = document.createElement('div');
   row.className = 'v2-cc-row';
   row.innerHTML =
-    '<span>After match</span>' +
+    '<span>after</span>' +
     '<input class="v2-body-input v2-cc-after" type="number" min="1" value="' + (cc.afterMatch || 1) + '">' +
     '<span class="v2-cc-arrow">\u2192</span>' +
     '<input class="v2-body-input v2-cc-time" type="number" min="0.5" step="any" value="' + (cc.cycleTime || 9) + '">' +
-    '<span class="v2-cc-x" title="Remove">\u00d7</span>';
+    '<span style="color:var(--text-muted);">min</span>' +
+    '<span class="v2-cc-x">\u00d7</span>';
   row.querySelector('.v2-cc-x').addEventListener('click', function() {
+    var blockEl = row.closest('.v2-block');
     row.remove();
-    onV2BlockChange();
+    if (blockEl) _v2updateBlockSummary(blockEl);
+    onV2Change();
   });
   row.querySelectorAll('input').forEach(function(inp) {
-    inp.addEventListener('change', onV2BlockChange);
+    inp.addEventListener('input', function() {
+      var blockEl = row.closest('.v2-block');
+      if (blockEl) _v2updateBlockSummary(blockEl);
+      onV2Change();
+    });
   });
   return row;
 }
 
-// Update the one-line summary text shown on the block header.
-function updateV2BlockSummary(block) {
-  var meta = V2_BLOCK_TYPES[block.dataset.type];
-  if (!meta || !meta.schedulable) return; // time blocks use the input
-  var sum = block.querySelector('.v2-block-summary');
+function _v2toggleBlock(blockEl) {
+  var body = blockEl.querySelector(':scope > .v2-block-body');
+  var chev = blockEl.querySelector(':scope > .v2-block-head > .v2-block-chev');
+  if (!body || !chev) return;
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  chev.textContent = open ? '\u25b8' : '\u25be';
+  blockEl.classList.toggle('expanded', !open);
+}
+
+function _v2updateBlockSummary(blockEl) {
+  var meta = V2_BLOCK_TYPES[blockEl.dataset.type];
+  var sum = blockEl.querySelector(':scope > .v2-block-head > .v2-block-summary');
   if (!sum) return;
-  var ct = parseFloat(block.querySelector('.v2-block-cycletime').value) || 9;
-  var ccCount = block.querySelectorAll('.v2-cc-row').length;
-  var txt = '<strong>' + ct + '</strong> min/match';
-  if (ccCount) txt += ' \u00b7 <strong>' + ccCount + '</strong> change' + (ccCount > 1 ? 's' : '');
-  sum.innerHTML = txt;
+  if (!meta) { sum.textContent = ''; return; }
+  if (!meta.schedulable) {
+    var labelEl = blockEl.querySelector(':scope > .v2-block-body .v2-block-label');
+    var label = labelEl ? labelEl.value : '';
+    sum.textContent = label || meta.label;
+    return;
+  }
+  var ctEl = blockEl.querySelector(':scope > .v2-block-body .v2-ct-input');
+  var ct = ctEl ? parseFloat(ctEl.value) || 9 : 9;
+  var ccCount = blockEl.querySelectorAll(':scope > .v2-block-body .v2-cc-row').length;
+  var nestedCount = blockEl.querySelectorAll(':scope > .v2-block-body .v2-nested-list > .v2-block').length;
+  var parts = ['<strong>' + ct + '</strong> min'];
+  if (meta.practiceFields) {
+    var gEl = blockEl.querySelector(':scope > .v2-block-body .v2-guaranteed');
+    if (gEl) parts.push('guaranteed <strong>' + gEl.value + '</strong>');
+  }
+  if (ccCount)     parts.push('<strong>' + ccCount + '</strong> change' + (ccCount > 1 ? 's' : ''));
+  if (nestedCount) parts.push('<strong>' + nestedCount + '</strong> break' + (nestedCount > 1 ? 's' : ''));
+  sum.innerHTML = parts.join(' \u00b7 ');
 }
 
-// Block-type picker for an EXISTING block (changes its type in place).
-function openV2BlockTypePicker(anchorEl, blockEl) {
-  _v2closePickers();
-  var picker = _v2buildPicker(function(newType) {
-    var b = _v2blockToObj(blockEl);
-    b.type = newType;
-    // Reset type-specific fields when switching kinds
-    var meta = V2_BLOCK_TYPES[newType];
-    if (meta.schedulable && b.cycleTime == null) b.cycleTime = 9;
-    if (meta.practiceFields) {
-      if (b.guaranteed == null) b.guaranteed = 3;
-      if (b.maxFiller  == null) b.maxFiller  = 99;
+function _v2updateNearestSummary(el) {
+  var dayEl = el.closest('.v2-day');
+  if (dayEl) _v2updateDaySummary(dayEl);
+}
+
+// ── Boundary linking ─────────────────────────────────────────────
+// When the user edits a sibling block's start/end input, find the
+// adjacent sibling whose boundary previously matched and update it
+// to keep the link. Single-pair propagation only — does not cascade.
+var _v2lastTimes = new WeakMap();
+function _v2propagateBoundary(blockEl, changedInput) {
+  var prevValue = _v2lastTimes.get(changedInput);
+  var newValue  = changedInput.value;
+  _v2lastTimes.set(changedInput, newValue);
+  if (!prevValue || prevValue === newValue) return;
+  // Find sibling block and matching adjacency
+  var parent = blockEl.parentElement;
+  if (!parent) return;
+  var siblings = Array.from(parent.querySelectorAll(':scope > .v2-block'));
+  var idx = siblings.indexOf(blockEl);
+  var isStart = changedInput.classList.contains('v2-block-start');
+  var isEnd   = changedInput.classList.contains('v2-block-end');
+  if (isEnd && idx >= 0 && idx < siblings.length - 1) {
+    // Look at next sibling's start
+    var next = siblings[idx + 1];
+    var nextStart = next.querySelector('.v2-block-start');
+    if (nextStart && nextStart.value === prevValue) {
+      nextStart.value = newValue;
+      _v2lastTimes.set(nextStart, newValue);
+      var nextSummary = next; // update its own summary
+      _v2updateBlockSummary(nextSummary);
     }
-    if (!meta.schedulable) { delete b.cycleTime; delete b.changes; delete b.guaranteed; delete b.maxFiller; }
-    var fresh = buildV2Block(b);
-    blockEl.parentNode.replaceChild(fresh, blockEl);
-    onV2BlockChange();
-  });
-  _v2anchorPicker(picker, anchorEl);
+  } else if (isStart && idx > 0) {
+    var prev = siblings[idx - 1];
+    var prevEnd = prev.querySelector('.v2-block-end');
+    if (prevEnd && prevEnd.value === prevValue) {
+      prevEnd.value = newValue;
+      _v2lastTimes.set(prevEnd, newValue);
+      _v2updateBlockSummary(prev);
+    }
+  }
 }
 
-// Block picker for ADDING a new block to a day's blocks list.
-function openV2BlockPicker(anchorBtn, blocksWrap) {
+// ── Conflict validation ──────────────────────────────────────────
+// Walk all blocks, mark inputs that overlap or extend outside parent.
+// Debounced.
+var _v2valTimer = null;
+function _v2validateAll() {
+  if (_v2valTimer) clearTimeout(_v2valTimer);
+  _v2valTimer = setTimeout(_v2validateImmediate, 300);
+}
+function _v2validateImmediate() {
+  document.querySelectorAll('#v2DaysContainer .v2-block-time').forEach(function(inp) {
+    inp.classList.remove('v2-conflict');
+    inp.title = '';
+  });
+  document.querySelectorAll('#v2DaysContainer > .v2-day').forEach(function(dayEl) {
+    // Top-level siblings: detect overlaps
+    var siblings = Array.from(dayEl.querySelectorAll(':scope > .v2-day-body > .v2-block'));
+    siblings.forEach(function(b) { _v2validateBlockSelf(b); });
+    for (var i = 0; i < siblings.length; i++) {
+      for (var j = i + 1; j < siblings.length; j++) {
+        var a = siblings[i], b = siblings[j];
+        if (_v2blocksOverlap(a, b)) {
+          _v2markConflict(a, 'Overlaps with another block');
+          _v2markConflict(b, 'Overlaps with another block');
+        }
+      }
+    }
+    // Nested breaks inside match blocks
+    siblings.forEach(function(parent) {
+      var pStart = _v2timeStrToMin(parent.querySelector('.v2-block-start').value);
+      var pEnd   = _v2timeStrToMin(parent.querySelector('.v2-block-end').value);
+      var nested = Array.from(parent.querySelectorAll(':scope > .v2-block-body .v2-nested-list > .v2-block'));
+      nested.forEach(function(nb) {
+        _v2validateBlockSelf(nb);
+        var ns = _v2timeStrToMin(nb.querySelector('.v2-block-start').value);
+        var ne = _v2timeStrToMin(nb.querySelector('.v2-block-end').value);
+        if (ns == null || ne == null || pStart == null || pEnd == null) return;
+        if (ns < pStart || ne > pEnd) _v2markConflict(nb, 'Extends outside parent block window');
+      });
+      for (var i = 0; i < nested.length; i++) {
+        for (var j = i + 1; j < nested.length; j++) {
+          if (_v2blocksOverlap(nested[i], nested[j])) {
+            _v2markConflict(nested[i], 'Overlaps with another break');
+            _v2markConflict(nested[j], 'Overlaps with another break');
+          }
+        }
+      }
+    });
+  });
+}
+function _v2validateBlockSelf(blockEl) {
+  var s = _v2timeStrToMin(blockEl.querySelector('.v2-block-start').value);
+  var e = _v2timeStrToMin(blockEl.querySelector('.v2-block-end').value);
+  if (s != null && e != null && e <= s) _v2markConflict(blockEl, 'End time must be after start time');
+}
+function _v2blocksOverlap(a, b) {
+  var as = _v2timeStrToMin(a.querySelector('.v2-block-start').value);
+  var ae = _v2timeStrToMin(a.querySelector('.v2-block-end').value);
+  var bs = _v2timeStrToMin(b.querySelector('.v2-block-start').value);
+  var be = _v2timeStrToMin(b.querySelector('.v2-block-end').value);
+  if (as == null || ae == null || bs == null || be == null) return false;
+  return as < be && bs < ae;
+}
+function _v2markConflict(blockEl, msg) {
+  var s = blockEl.querySelector('.v2-block-start');
+  var e = blockEl.querySelector('.v2-block-end');
+  if (s) { s.classList.add('v2-conflict'); s.title = msg; }
+  if (e) { e.classList.add('v2-conflict'); e.title = msg; }
+}
+
+// ── Block-type pickers ───────────────────────────────────────────
+function openV2BlockPicker(anchorBtn, dayBody) {
   _v2closePickers();
-  var picker = _v2buildPicker(function(newType) {
+  var picker = _v2buildPicker(['practice', 'qualification', 'break'], function(newType) {
     var meta = V2_BLOCK_TYPES[newType];
-    // Default times: continue from previous block's end
-    var prev = blocksWrap.querySelector('.v2-block:last-child');
-    var prevEnd = prev ? prev.querySelector('.v2-block-end').value : '13:00';
-    var newStart = prevEnd;
-    var newEnd   = _v2minToTimeStr((_v2timeStrToMin(newStart) || 0) + (meta.schedulable ? 60 : 30));
-    var b = { type: newType, start: newStart, end: newEnd };
-    if (meta.schedulable) b.cycleTime = newType === 'practice' ? 11 : 9;
+    var lastBlock = dayBody.querySelector(':scope > .v2-block:last-of-type');
+    var startTime = lastBlock ? lastBlock.querySelector('.v2-block-end').value : '09:00';
+    var startMin  = _v2timeStrToMin(startTime) || 540;
+    var endMin    = startMin + (meta.schedulable ? 240 : 30);
+    var b = { type: newType, start: _v2minToTimeStr(startMin), end: _v2minToTimeStr(endMin) };
+    if (meta.schedulable) { b.cycleTime = newType === 'practice' ? 11 : 9; b.changes = []; b.breaks = []; }
     if (meta.practiceFields) { b.guaranteed = 3; b.maxFiller = 99; }
-    if (!meta.schedulable) b.label = '';
-    blocksWrap.appendChild(buildV2Block(b));
-    onV2BlockChange();
+    if (!meta.schedulable) { b.label = ''; b.breakKind = 'break'; }
+    var blockEl = buildV2Block(b);
+    dayBody.insertBefore(blockEl, dayBody.querySelector('.v2-add-block'));
+    _v2renumberDays(); onV2Change();
+    _v2updateNearestSummary(blockEl);
   });
   _v2anchorPicker(picker, anchorBtn);
 }
-
-function _v2buildPicker(onSelect) {
+function openV2TypeChangePicker(anchorEl, blockEl, isNested) {
+  _v2closePickers();
+  // Nested breaks can only be break type
+  var allowed = isNested ? ['break'] : ['practice', 'qualification', 'break'];
+  var picker = _v2buildPicker(allowed, function(newType) {
+    var b = _v2readBlockFromDom(blockEl);
+    b.type = newType;
+    var meta = V2_BLOCK_TYPES[newType];
+    if (meta.schedulable) {
+      if (b.cycleTime == null) b.cycleTime = 9;
+      if (!b.changes) b.changes = [];
+      if (!b.breaks)  b.breaks  = [];
+      if (meta.practiceFields) {
+        if (b.guaranteed == null) b.guaranteed = 3;
+        if (b.maxFiller  == null) b.maxFiller  = 99;
+      } else { delete b.guaranteed; delete b.maxFiller; }
+    } else {
+      delete b.cycleTime; delete b.changes; delete b.breaks; delete b.guaranteed; delete b.maxFiller;
+      if (!b.label) b.label = '';
+      if (!b.breakKind) b.breakKind = 'break';
+    }
+    var fresh = buildV2Block(b, isNested);
+    blockEl.parentNode.replaceChild(fresh, blockEl);
+    _v2renumberDays(); onV2Change();
+    _v2updateNearestSummary(fresh);
+  });
+  _v2anchorPicker(picker, anchorEl);
+}
+function _v2buildPicker(allowedTypes, onSelect) {
   var p = document.createElement('div');
   p.className = 'v2-block-picker';
-  p.innerHTML =
-    '<div class="section-hdr">Match blocks</div>' +
-    '<div class="picker-item" data-type="practice"><span class="v2-block-swatch" style="background:#5daf78;"></span>Practice</div>' +
-    '<div class="picker-item" data-type="qualification"><span class="v2-block-swatch" style="background:#7aa4f0;"></span>Qualification</div>' +
-    '<div class="picker-divider"></div>' +
-    '<div class="section-hdr">Time blocks</div>' +
-    '<div class="picker-item" data-type="lunch"><span class="v2-block-swatch" style="background:#ec8a3f;"></span>Lunch</div>' +
-    '<div class="picker-item" data-type="break"><span class="v2-block-swatch" style="background:#ec8a3f;opacity:0.7;"></span>Break</div>';
+  var rows = [];
+  if (allowedTypes.indexOf('practice') !== -1)      rows.push('<div class="picker-item" data-type="practice"><span class="v2-swatch" style="background:#5daf78;"></span>Practice</div>');
+  if (allowedTypes.indexOf('qualification') !== -1) rows.push('<div class="picker-item" data-type="qualification"><span class="v2-swatch" style="background:#7aa4f0;"></span>Qualification</div>');
+  if (allowedTypes.indexOf('break') !== -1)         rows.push('<div class="picker-item" data-type="break"><span class="v2-swatch" style="background:#ec8a3f;"></span>Break</div>');
+  p.innerHTML = rows.join('');
   p.querySelectorAll('.picker-item').forEach(function(it) {
-    it.addEventListener('click', function(ev) {
-      ev.stopPropagation();
-      onSelect(it.dataset.type);
-      _v2closePickers();
-    });
+    it.addEventListener('click', function(ev) { ev.stopPropagation(); onSelect(it.dataset.type); _v2closePickers(); });
   });
   return p;
 }
@@ -9743,7 +10021,6 @@ function _v2anchorPicker(picker, anchorEl) {
   var rect = anchorEl.getBoundingClientRect();
   picker.style.left = (window.scrollX + rect.left) + 'px';
   picker.style.top  = (window.scrollY + rect.bottom + 4) + 'px';
-  // Close on outside click (deferred so the click that opened doesn't immediately close).
   setTimeout(function() {
     document.addEventListener('click', _v2closePickers, { once: true });
   }, 0);
@@ -9752,19 +10029,11 @@ function _v2closePickers() {
   document.querySelectorAll('.v2-block-picker').forEach(function(p) { p.remove(); });
 }
 
-function _v2blockToObj(blockEl) {
-  var b = { type: blockEl.dataset.type };
-  b.start = blockEl.querySelector('.v2-block-start').value;
-  b.end   = blockEl.querySelector('.v2-block-end').value;
-  var ctEl = blockEl.querySelector('.v2-block-cycletime');
-  if (ctEl) b.cycleTime = parseFloat(ctEl.value);
-  var gEl = blockEl.querySelector('.v2-block-guaranteed');
-  if (gEl) b.guaranteed = parseInt(gEl.value, 10);
-  var fEl = blockEl.querySelector('.v2-block-maxfiller');
-  if (fEl) b.maxFiller = parseInt(fEl.value, 10);
-  var lEl = blockEl.querySelector('.v2-block-label');
-  if (lEl) b.label = lEl.value;
-  return b;
+function addDayV2() {
+  var container = document.getElementById('v2DaysContainer');
+  var idx = container.querySelectorAll(':scope > .v2-day').length;
+  container.appendChild(buildV2Day(_v2defaultDay(idx), idx));
+  _v2renumberDays(); onV2Change();
 }
 
 function _v2attrEsc(s) {
@@ -9773,57 +10042,24 @@ function _v2attrEsc(s) {
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Add a new day to the v2 container.
-function addDayV2() {
-  var container = document.getElementById('v2DaysContainer');
-  var idx = container.querySelectorAll('.v2-day-row').length;
-  // Default new day: 9-5 single qual block
-  var day = {
-    label: 'Day ' + (idx + 1),
-    blocks: [
-      { type: 'qualification', start: '09:00', end: '17:00', cycleTime: 9 },
-    ],
-  };
-  container.appendChild(buildV2DayRow(day, idx));
-  onV2BlockChange();
-}
-
-function removeV2Day(rowEl) {
-  rowEl.remove();
-  // Renumber day tags
-  document.querySelectorAll('#v2DaysContainer .v2-day-row').forEach(function(r, i) {
-    if (r.dataset.isPractice !== '1') {
-      var tag = r.querySelector('.v2-day-tag');
-      if (tag) tag.textContent = 'Day ' + (i + 1);
-    }
-  });
-  onV2BlockChange();
-}
-
-// Hook for any post-edit actions (agenda fit re-render, URL update).
-// Cheap to call after every change — same handlers as v1.
-function onV2BlockChange() {
+function onV2Change() {
   if (typeof onScheduleParamsChanged === 'function') onScheduleParamsChanged();
   if (typeof updateUrlFromState === 'function') updateUrlFromState();
 }
 
 // ─── Toggle wiring ────────────────────────────────────────────────
-// Swap between v1 and v2 editors. Persists choice in localStorage.
-// On switch, converts the in-memory day_config so both editors see
-// the same data.
 function toggleDayConfigEditor(useV2) {
   var v1Wrap = document.getElementById('v1DaysWrapper');
   var v2Wrap = document.getElementById('v2DaysWrapper');
   if (!v1Wrap || !v2Wrap) return;
   if (useV2) {
-    // Convert current v1 form state → v2 + render
     var v1dc = collectDayConfig();
     var v2dc = migrateLegacyDayConfig(v1dc);
     renderDayConfigV2(v2dc);
     v1Wrap.style.display = 'none';
     v2Wrap.style.display = '';
+    _v2validateAll();
   } else {
-    // Convert v2 → v1 + apply to v1 form
     var v2dc = collectDayConfigV2();
     var v1dc = downgradeToV1(v2dc);
     if (typeof applyDayConfigToUI === 'function' && v1dc) applyDayConfigToUI(v1dc);
@@ -9833,8 +10069,6 @@ function toggleDayConfigEditor(useV2) {
   try { localStorage.setItem('frcDayConfigUseV2', useV2 ? '1' : '0'); } catch(e) {}
 }
 
-// Restore toggle state on load. Called from the existing init path.
-// Wrapped in DOMContentLoaded so the toggle checkbox exists.
 document.addEventListener('DOMContentLoaded', function() {
   try {
     var stored = localStorage.getItem('frcDayConfigUseV2');
@@ -9842,7 +10076,6 @@ document.addEventListener('DOMContentLoaded', function() {
       var cb = document.getElementById('dayConfigUseV2');
       if (cb) {
         cb.checked = true;
-        // Defer toggle until v1 is built (buildDaysUI runs in init too)
         setTimeout(function() { toggleDayConfigEditor(true); }, 100);
       }
     }
