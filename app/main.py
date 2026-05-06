@@ -890,12 +890,17 @@ async def list_assigned_schedules(event_id: int, db: AsyncSession = Depends(get_
         .where(AssignedSchedule.event_id == event_id)
         .order_by(AssignedSchedule.created_at.desc())
     )
+    # Include lock fields so the saved-schedules modal can show a
+    # 🔒 indicator without a per-row GET. Display name comes from
+    # the snapshot stored at lock time.
     return [
         {"id": s.id, "name": s.name, "is_active": s.is_active,
          "abstract_schedule_id": s.abstract_schedule_id,
          "num_teams": s.abstract_schedule.num_teams,
          "matches_per_team": s.abstract_schedule.matches_per_team,
-         "created_at": s.created_at.isoformat()}
+         "created_at": s.created_at.isoformat(),
+         "locked_at":      s.locked_at.isoformat() if s.locked_at else None,
+         "locked_by_name": s.locked_by_name}
         for s in result.scalars()
     ]
 

@@ -925,6 +925,36 @@
     border-color: var(--amber);
   }
   .btn-sm.is-locked:hover { background: #d8b248; border-color: #d8b248; color: #1a1206; }
+
+  /* Parameter-change warning. Two visual levels driven by a class:
+     - .level-soft: amber, "click Save Event to apply" — for
+       day-timing changes that PATCH preserves teams for.
+     - .level-hard: red, "click Generate to apply (wipes teams)"
+       — for structural changes (numTeams / mpt / cooldown) that
+       require a full regenerate. */
+  .param-warning {
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.4;
+  }
+  .param-warning.level-soft {
+    background: rgba(200,153,42,0.12);
+    border: 1px solid var(--amber);
+    color: var(--amber);
+  }
+  .param-warning.level-hard {
+    background: rgba(204,85,85,0.12);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    font-weight: 600;
+  }
+  .param-warning .pw-action {
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .param-warning .pw-action:hover { opacity: 0.8; }
   /* Body-level indicator stripe and disabled controls when locked.
      Form fields go visually muted but stay readable so users can
      reference values; clicking them does nothing because the
@@ -2180,9 +2210,18 @@
           <input type="checkbox" id="autoAssign" style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
           Auto-assign teams after generating
         </label>
-        <div id="paramChangedWarning" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.75rem;color:var(--amber);">
-          &#9888; Parameters changed — regenerate the schedule before assigning teams.
-        </div>
+        <!-- Parameter-changed banner. State-aware:
+             - Pre-assignment, autoPopulate on: hidden (live regen
+               handles it; no banner needed)
+             - Post-assignment / loaded schedule, structural change
+               (numTeams / mpt / cooldown): RED. Regenerating will
+               wipe team assignments — user must explicitly Generate.
+             - Post-assignment / loaded schedule, non-structural
+               change (day timing, breaks, cycle changes): AMBER.
+               User clicks Save Event to PATCH without re-running
+               assignment.
+             Updated by updateParamChangedWarning(). -->
+        <div id="paramChangedWarning" class="param-warning" style="display:none;"></div>
 
         <div class="progress-wrap" id="progressWrap">
           <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill"></div></div>
@@ -6826,6 +6865,12 @@ function onCycleTimeChanged() {
   // Called when any cycle time value changes (start-of-day ct, or after-match ct).
   // 1. Update agenda fit immediately (lightweight, safe to run on every keystroke)
   onScheduleParamsChanged();
+  // Surface the warning when teams are already assigned. Doesn't
+  // matter what the user does next — they'll see the banner first.
+  if (_hasAssignment()) {
+    updateParamChangedWarning();
+    return;
+  }
   // 2. Debounce the heavy work (calcMaxMatches + generateSchedule) — don't fire
   //    mid-keystroke when user is typing e.g. "10" and field briefly shows "1"
   clearTimeout(_cycleTimeChangeTimeout);
@@ -6833,6 +6878,8 @@ function onCycleTimeChanged() {
     if (window._agendaFetchPending) return;
     if (window._assigningTeams) return;
     if (window._frcLoadingSchedule) return;
+    if (window._frcLocked) return;
+    if (_hasAssignment()) return;  // double-check: state may have changed
     var autoMax = document.getElementById('autoMaxCycles');
     if (autoMax && autoMax.checked) {
       clearTimeout(_autoPopulateTimeout);
@@ -7436,6 +7483,70 @@ function updateB2BStat() {
   renderDiversityCard(card, window._latestDiversityData || null);
 }
 
+// Returns true when the loaded schedule has team assignments. Used as
+// the primary gate for live-regenerate suppression: once teams are
+// assigned (either via explicit Stage 2 OR via auto-restore from a
+// saved event load), edits stop firing automatic regenerates so the
+// user's work isn't quietly destroyed by a debounced timer. The
+// pre-assignment "design phase" still gets live regen for fast
+// iteration. This single check replaces a sprawl of guard flags
+// (_frcLoadingSchedule, _frcLocked, etc.) as the primary defense —
+// those flags remain as belt-and-suspenders for edge cases.
+function _hasAssignment() {
+  return !!(_currentSlotMap && Object.keys(_currentSlotMap).length > 0);
+}
+
+// Decide which warning level (if any) to show for the currently-
+// edited form vs the loaded schedule's params. Called from
+// onParamChanged on each edit. Three outcomes:
+//   - hidden: no schedule loaded, or pre-assignment with autoPopulate
+//   - 'soft' (amber): assigned schedule + non-structural edits (day
+//     timing, breaks, cycle changes). PATCH-able — Save Event works.
+//   - 'hard' (red):   assigned schedule + structural edits (numTeams
+//     / matchesPerTeam / cooldown). Requires Generate, which wipes
+//     team assignments.
+function updateParamChangedWarning() {
+  var el = document.getElementById('paramChangedWarning');
+  if (!el) return;
+  if (!_hasAssignment() || _abstractParams === null) {
+    el.style.display = 'none';
+    el.className = 'param-warning';
+    el.innerHTML = '';
+    // Pre-assignment: assign button stays under the regular flow.
+    return;
+  }
+  var curNumTeams       = parseInt(document.getElementById('numTeams').value) || 0;
+  var curMatchesPerTeam = parseFloat(document.getElementById('matchesPerTeam').value) || 6;
+  var curCooldown       = parseInt(document.getElementById('cooldown').value) || 3;
+  var structuralChange  = (curNumTeams !== _abstractParams.numTeams ||
+                           curMatchesPerTeam !== _abstractParams.matchesPerTeam ||
+                           curCooldown !== _abstractParams.cooldown);
+  // Non-structural edits don't have a precise diff signal yet (would
+  // require comparing the full day_config to the loaded one). Heuristic:
+  // assume a change happened the moment user touched any field after
+  // load. We could refine this later by tracking a clean/dirty flag,
+  // but the false-positive cost is just a banner that says "click
+  // Save to apply" — non-destructive.
+  if (structuralChange) {
+    el.className = 'param-warning level-hard';
+    el.style.display = 'block';
+    el.innerHTML =
+      '\u26a0 <strong>Structural change</strong> (teams / matches-per-team / cooldown). ' +
+      'These can\'t be saved without regenerating, which will <strong>wipe team assignments</strong>. ' +
+      '<span class="pw-action" onclick="document.getElementById(\'btnGenerate\').click();">Click Generate</span> ' +
+      'to apply, or revert the change to keep the current schedule.';
+    var btnAssign = document.getElementById('btnAssign');
+    if (btnAssign) btnAssign.disabled = true;
+  } else {
+    el.className = 'param-warning level-soft';
+    el.style.display = 'block';
+    el.innerHTML =
+      '\u26a0 Schedule edited. ' +
+      '<span class="pw-action" onclick="document.getElementById(\'btnSaveEvent\').click();">Click Save</span> ' +
+      'to persist (preserves team assignments), or reload to revert.';
+  }
+}
+
 function onParamChanged() {
   // Don't debounce auto-generate during or immediately after Stage 2 assignment
   if (window._assigningTeams) return;
@@ -7443,25 +7554,24 @@ function onParamChanged() {
   // the chain calls generateSchedule() directly when ready
   if (window._agendaFetchPending) return;
   // Don't queue a debounced generate while we're in the middle of
-  // restoring a saved schedule. Loading populates day-config form
-  // fields via oninput="onCycleTimeChanged()" handlers, each of
-  // which would otherwise (re)arm the 2.5s autoPopulate timer.
-  // After the load awaits complete, the timer fires and calls
-  // generateSchedule() — wiping the team assignments we just
-  // restored. The flag is set/cleared by loadAssignedSchedule and
-  // reloadEvent. Without it, refresh on a saved schedule and the
-  // in-app Reload button both blow away assignments.
+  // restoring a saved schedule. Belt-and-suspenders alongside the
+  // _hasAssignment gate below — load paths set both.
   if (window._frcLoadingSchedule) return;
-  // Lock guard: when the user has explicitly locked the schedule,
-  // refuse to arm the autoPopulate regenerate timer. Even if a
-  // form input does change (programmatically or via a stray
-  // unguarded handler), the lock prevents the cascading regenerate
-  // that would otherwise wipe the team assignment.
+  // Lock guard: when locked, no edits, no auto-generate.
   if (window._frcLocked) return;
+
+  // ─── Primary gate: live regenerate is for the design phase only ───
+  // Once teams are assigned, edits stop auto-firing. The user gets
+  // a warning banner explaining what to do (Save for non-structural
+  // edits, Generate for structural ones — Generate wipes teams). The
+  // pre-assignment phase keeps live regen because nothing's at stake.
+  if (_hasAssignment()) {
+    updateParamChangedWarning();
+    return;
+  }
+
+  // Pre-assignment path: live-regen as before.
   if (_abstractParams !== null) {
-    // Only mark stale and disable assign if structural params changed.
-    // Time/day/break/cycle changes affect the rendered schedule but not the
-    // abstract slot structure — Stage 1 doesn't need to re-run for those.
     var curNumTeams       = parseInt(document.getElementById('numTeams').value) || 0;
     var curMatchesPerTeam = parseFloat(document.getElementById('matchesPerTeam').value) || 6;
     var curCooldown       = parseInt(document.getElementById('cooldown').value) || 3;
@@ -7469,13 +7579,21 @@ function onParamChanged() {
                              curMatchesPerTeam !== _abstractParams.matchesPerTeam ||
                              curCooldown !== _abstractParams.cooldown);
     if (structuralChange) {
-      document.getElementById('paramChangedWarning').style.display = 'block';
-      document.getElementById('btnAssign').disabled = true;
+      // Even pre-assignment, surface a soft notice so the user knows
+      // the existing Stage 1 result will be replaced. Reuses the
+      // soft-warning style; no Save action since there's nothing
+      // server-side to save yet.
+      var el = document.getElementById('paramChangedWarning');
+      if (el) {
+        el.className = 'param-warning level-soft';
+        el.style.display = 'block';
+        el.innerHTML = '\u26a0 Parameters changed \u2014 regenerating now\u2026';
+      }
+      var btnAssign = document.getElementById('btnAssign');
+      if (btnAssign) btnAssign.disabled = true;
     }
   }
-  // Auto-generate debounce fires for ALL param changes when autoPopulate is on,
-  // whether or not a schedule already exists — covers both initial generation
-  // (after event load) and re-generation (after param edits).
+  // Auto-generate debounce
   if (document.getElementById('autoPopulate').checked) {
     var numTeams = parseInt(document.getElementById('numTeams').value) || 0;
     if (numTeams >= 6) {
@@ -9286,6 +9404,16 @@ async function saveEventChanges() {
           0, 0, resp.day_config, resp.practice_matches || null);
       }
     }
+    // Save succeeded — the loaded schedule is now in sync with the
+    // form. Clear the soft warning so the user knows their edits
+    // landed. updateParamChangedWarning will reassess if they edit
+    // again.
+    var pwEl = document.getElementById('paramChangedWarning');
+    if (pwEl) {
+      pwEl.style.display = 'none';
+      pwEl.className = 'param-warning';
+      pwEl.innerHTML = '';
+    }
     showApiStatus('\u2713 Saved');
   } catch(e) {
     // Likely error: backend doesn't support PATCH yet. Surface the
@@ -9616,11 +9744,26 @@ async function loadSavedSchedules() {
 
         actionBtns += ' <button class="btn-sm btn-danger" onclick="deleteSchedule(' + s.id + ')" title="Delete this version" style="margin-left:0.2rem;">&#x2715;</button>';
 
+        // Lock badge — surfaces locker name so users know the
+        // schedule is read-only without having to load it. Empty
+        // string when unlocked. Hover shows full lock timestamp.
+        var lockBadge = '';
+        if (s.locked_at) {
+          var lockTitle = 'Locked' +
+            (s.locked_by_name ? ' by ' + s.locked_by_name : '') +
+            ' at ' + new Date(s.locked_at).toLocaleString();
+          lockBadge = ' <span class="version-badge" style="background:rgba(200,153,42,0.16);color:var(--amber);border-color:var(--amber);" title="' +
+                      lockTitle.replace(/"/g, '&quot;') + '">\u{1f512}' +
+                      (s.locked_by_name ? ' ' + s.locked_by_name : '') +
+                      '</span>';
+        }
+
         row.innerHTML =
           '<div style="flex:1;min-width:0;">' +
             '<div class="saved-sched-name" style="display:flex;align-items:center;gap:0.4rem;">' +
               (isLatest ? '<span class="version-badge older" style="background:rgba(122,164,240,0.12);color:var(--accent);border-color:var(--accent);">Latest</span>' : '<span class="version-badge older">v' + (versions.length - idx) + '</span>') +
               '<span>' + dt + '</span>' +
+              lockBadge +
               (s.is_active ? '' : '') +
             '</div>' +
             '<div class="saved-sched-meta">' + s.name + '</div>' +
@@ -9670,6 +9813,24 @@ async function generateSchedule() {
   if (window._frcLocked) {
     showApiStatus('Schedule is locked \u2014 unlock to generate', true);
     return;
+  }
+  // Confirmation prompt when teams are already assigned. Generating a
+  // new abstract schedule replaces the slot structure — the team
+  // assignment becomes meaningless and is discarded. Users hitting
+  // Generate on an event-loaded schedule almost never want this; the
+  // confirmation forces an explicit acknowledgement. Skip the prompt
+  // when the call is programmatic via `_internalGenerate=true`
+  // (e.g. fresh-design auto-fire), but that flag is only set within
+  // the autoPopulate timer path which already gates on _hasAssignment.
+  if (_hasAssignment() && !window._frcGenerateConfirmed) {
+    var msg = 'Generating will create a new schedule structure and ' +
+              'discard the current team assignments. ' +
+              'Continue?';
+    if (!window.confirm(msg)) return;
+    // Set a transient flag so the same call doesn't re-prompt if
+    // it were ever recursively re-entered.
+    window._frcGenerateConfirmed = true;
+    setTimeout(function() { window._frcGenerateConfirmed = false; }, 0);
   }
   // Cancel any pending auto-populate debounce so it can't fire a duplicate run
   clearTimeout(_autoPopulateTimeout);
