@@ -236,23 +236,50 @@
     font-size: 0.7rem;
     color: var(--text-muted);
     margin-left: auto;
+    /* Allow the legend to take a full row of its own when the
+       title plus legend exceeds one line. Without this, very wide
+       team selections push the title off-screen. */
+    min-width: 0;
   }
   .agenda-legend-item {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
   }
+  /* The selected-team container holds a "Teams:" label plus N
+     per-team chips. Force it to its own row in the legend (flex:
+     1 0 100%) so the chips have the full panel width to wrap into,
+     rather than competing for space with the static legend items
+     above. The static items stay on row 1; the team list flows
+     onto row 2 with as many wrapped lines as the team count
+     demands. */
+  #agendaLegendTeam {
+    flex: 1 0 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.45rem;
+    margin-top: 0.25rem;
+    margin-left: 0;     /* override parent's margin-left:auto on its row */
+    /* Parent margin-left:auto pushes the static legend to the right,
+       but we want the team row left-aligned. Override via auto-margin
+       reset above. */
+    min-width: 0;
+  }
   /* Per-team chip in the legend — swatch + team number, slightly
      more visual weight than the static legend items so users see
-     "ah, that's MY team's color" at a glance. */
+     "ah, that's MY team's color" at a glance. The margin-right
+     was redundant once the parent uses gap; remove it so chips
+     align tightly when the row wraps. */
   .agenda-legend-team {
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
-    margin-right: 0.45rem;
     font-weight: 600;
     color: var(--text);
     font-size: 0.7rem;
+    /* No wrap inside a chip — keep "● 2169" together. */
+    white-space: nowrap;
   }
   .agenda-legend-swatch {
     display: inline-block;
@@ -528,12 +555,23 @@
     table.matches td.col-time { font-size: 10px; padding-left: 0.3rem; }
     table.matches td.col-match { padding-left: 0.3rem; font-size: 10.5px; }
   }
-  /* Highlight rows containing my team */
-  tr.my-team { background: var(--my-team-row) !important; box-shadow: inset 4px 0 0 var(--my-team-bg); }
+  /* Highlight rows containing my team. The actual background and
+     box-shadow accent are applied inline per-row by the renderer
+     (see rerender's rowStyle) so multi-team rows get neutral tint
+     and single-team rows get the team's color. The CSS rule here
+     only handles the !important override that keeps the inline
+     style winning over zebra-stripe rules in tr.alt. */
   tr.my-team td { font-weight: 700; }
+  /* Selected-team cell — structural styling only. The background
+     color, text color, and outline are applied inline per-cell
+     by the renderer using _teamColor() / _readableTextOn() so each
+     team's selection has its own color. The font-weight + radius +
+     padding rules below stay structural (consistent across all
+     selected cells regardless of team). */
   td.my-team-cell {
-    background: var(--my-team-bg); color: #fff !important; font-weight: 700;
-    border-radius: 4px; padding: 4px 8px !important;
+    font-weight: 700;
+    border-radius: 4px;
+    padding: 4px 8px !important;
   }
   /* Currently-playing match (live mode) */
   tr.now-playing { box-shadow: inset 4px 0 0 var(--next-match-accent), 0 0 0 2px var(--next-match-accent) inset; }
@@ -972,8 +1010,18 @@
     .brand-header .logo { background: transparent; color: #000; }
     .card, .toolbar, .match-table-wrap { box-shadow: none; border-color: #ccc; }
     table.matches thead th { background: #f0f0f0 !important; color: #000 !important; }
-    tr.my-team { background: #ffe !important; }
-    td.my-team-cell { background: #fdf6b2 !important; color: #000 !important; }
+    /* Print: force ALL selected-team highlighting back to the
+       canonical green, regardless of which color the user's
+       per-team palette assigned on screen. The !important here
+       overrides the renderer's inline style so printed schedules
+       look consistent across users — a printed schedule is a
+       physical artifact, not a personal view, and the canonical
+       green is the FRC convention. The rules below cover both
+       single-team and multi-team rows since both use inline
+       styles on the live page. */
+    tr.my-team { background: #e8f5e9 !important; box-shadow: inset 4px 0 0 #5daf78 !important; }
+    td.my-team-cell { background: #5daf78 !important; color: #fff !important;
+                      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4) !important; }
     tr.day-divider td { background: #333 !important; color: #fff !important; }
     tr.break-row td { background: #fffbe6 !important; }
   }
@@ -1390,11 +1438,42 @@ function syncThemeButton() {
 var TEAM_COLORS = [
   '#e63ec1',  // 1: bright magenta
   '#22c5d6',  // 2: cyan
-  '#f4c430',  // 3: yellow-gold
+  '#facc15',  // 3: vivid yellow
   '#9aef3d',  // 4: lime green (lighter than practice)
   '#bd92f0',  // 5: light purple
   '#ff8b73',  // 6: coral pink
 ];
+
+// Pick a readable text color (near-black or white) for a given
+// background hex. Uses a quick luminance heuristic — bright fills
+// (lime, vivid yellow, cyan) get dark text; saturated mid-tones
+// (magenta, light purple, coral) get white. Threshold tuned for
+// the 6-color palette above. Falls back to black for malformed
+// input — total function is safer than throwing here since the
+// caller renders inline styles directly to HTML.
+function _readableTextOn(hex) {
+  var m = String(hex || '').match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) return '#000';
+  var r = parseInt(m[1], 16);
+  var g = parseInt(m[2], 16);
+  var b = parseInt(m[3], 16);
+  var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#1a1a1a' : '#fff';
+}
+
+// Convert a #rrggbb hex to an rgba() string with the requested
+// alpha. Used for row-tinting where we want a low-alpha version
+// of the team color. Falls back to neutral gray on malformed
+// input rather than throwing — same total-function rationale as
+// _readableTextOn above.
+function _hexAlpha(hex, alpha) {
+  var m = String(hex || '').match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) return 'rgba(127,127,127,' + alpha + ')';
+  var r = parseInt(m[1], 16);
+  var g = parseInt(m[2], 16);
+  var b = parseInt(m[3], 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
 
 // Look up a color by team's selection-order position. Returns
 // the palette color for index 0..5, then wraps for 6+. Returns
@@ -2128,12 +2207,38 @@ function rerender() {
       }
       if (status === 'completed') cls.push('completed');
 
-      // Per-team cell renderer — handles surrogate flag, my-team highlight,
-      // and (for completed matches) winning-alliance bold styling
+      // Row tint logic for selected-team rows — when ONE selected
+      // team is in this row, tint with that team's color (low alpha)
+      // + edge accent in solid team color. When TWO+ selected teams
+      // appear in the row, fall back to a neutral light gray tint
+      // so neither team's color "wins" visually — that protects
+      // the symmetry of multi-team highlighting in the cells. The
+      // box-shadow accent stays neutral too in that case.
+      let rowStyle = '';
+      if (matched) {
+        const teamsInRow = (entry.red || []).concat(entry.blue || [])
+          .filter(t => STATE.myTeams.has(t));
+        if (teamsInRow.length === 1) {
+          const c = _teamColor(teamsInRow[0]);
+          rowStyle = ' style="background:' + _hexAlpha(c, 0.13) + ' !important;' +
+                     'box-shadow:inset 4px 0 0 ' + c + ';"';
+        } else {
+          // Multi-team row — neutral tint so both teams' cell colors
+          // remain the dominant identifiers.
+          rowStyle = ' style="background:rgba(127,127,127,0.13) !important;' +
+                     'box-shadow:inset 4px 0 0 rgba(127,127,127,0.6);"';
+        }
+      }
+
       // Per-team cell renderer — handles surrogate flag, my-team highlight,
       // and (for completed matches) winning-alliance bold styling.
       // Cells are clickable: clicking a team toggles its membership in the
       // selection, just like the picker does.
+      // Selected cells get inline background+color from the team's
+      // palette slot via _teamColor() so multi-team selections
+      // differentiate visually. The CSS rule for .my-team-cell now
+      // only carries structural styling (font-weight, padding,
+      // border-radius); the inline style provides the color.
       const td = (val, isSur, side) => {
         const cellCls = ['col-' + side, 'team-cell-clickable'];
         const isSelected = STATE.myTeams && STATE.myTeams.has(val);
@@ -2141,7 +2246,18 @@ function rerender() {
         if (val === STATE.myPrimary) cellCls.push('my-team-primary');
         // When completed, bold the winning alliance's cells
         if (status === 'completed' && live.winning_alliance === side) cellCls.push('alliance-won');
-        return '<td class="' + cellCls.join(' ') + '" onclick="toggleTeamSelection(' + val + ')" ' +
+        // Per-team color via inline style. The darker inset shadow
+        // gives the cell a visible boundary so it reads as "marked"
+        // even when adjacent to another colored or tinted cell.
+        let inlineStyle = '';
+        if (isSelected) {
+          const c = _teamColor(val);
+          const txt = _readableTextOn(c);
+          inlineStyle = ' style="background:' + c + ';color:' + txt +
+                        ';box-shadow:inset 0 0 0 1px rgba(0,0,0,0.5);"';
+        }
+        return '<td class="' + cellCls.join(' ') + '"' + inlineStyle +
+               ' onclick="toggleTeamSelection(' + val + ')" ' +
                'title="Click to ' + (isSelected ? 'remove from' : 'add to') + ' your selection">' +
                val + (isSur ? '<span class="surr-flag">S</span>' : '') + '</td>';
       };
@@ -2179,7 +2295,7 @@ function rerender() {
         // Render team list with pipe separators inside score block
         const blueTeams = entry.blue.join(' · ');
         const redTeams  = entry.red.join(' · ');
-        html += '<tr class="' + cls.join(' ') + '">' +
+        html += '<tr class="' + cls.join(' ') + '"' + rowStyle + '>' +
                 '<td class="col-time">' + timeCell + '</td>' +
                 '<td class="col-match">' + matchCell + '</td>' +
                 '<td colspan="3" class="col-blue score-block' + (winBlue ? ' winner' : '') + '">' +
@@ -2194,7 +2310,7 @@ function rerender() {
                 '</td>' +
                 '</tr>';
       } else {
-        html += '<tr class="' + cls.join(' ') + '">' +
+        html += '<tr class="' + cls.join(' ') + '"' + rowStyle + '>' +
                 '<td class="col-time">' + timeCell + '</td>' +
                 '<td class="col-match">' + matchCell + '</td>' +
                 td(entry.blue[0], entry.blueSur[0], 'blue') +
