@@ -375,6 +375,26 @@
     text-shadow: none;
     font-weight: 500;
   }
+  /* Stack order inside .agenda-bar (which is overflow:hidden):
+       agenda-seg                   z=auto (default, base)
+       agenda-team-mark             z=2
+       agenda-seg-label             z=3 (text always reads on top)
+       agenda-progress-elapsed      z=auto (gray wash overlay)
+       agenda-progress-past         z=auto
+       agenda-now-line              z=4 (always topmost)
+     Without this, the team-mark divs (rendered later in DOM order)
+     paint on top of segment text labels and obscure them. The label
+     wrapper span sits in normal flow but with relative positioning
+     so its z-index takes effect.
+
+     The text-shadow on labels (already on .agenda-seg) survives the
+     z-stacking — it's part of the span's own paint. */
+  .agenda-seg-label {
+    position: relative;
+    z-index: 3;
+    pointer-events: none;
+  }
+
   /* Selected-team marker — vertical strips on the match segment
      showing where the team is competing. Positioned absolutely
      inside the agenda-bar so they overlay all underlying segments.
@@ -389,6 +409,7 @@
     bottom: 0;
     pointer-events: none;
     border-radius: 1px;
+    z-index: 2;
     /* Dark outline for contrast against any segment background.
        The outer drop-shadow adds a subtle halo so the mark
        reads as "above" the segments rather than blending in. */
@@ -2679,7 +2700,8 @@ function renderAgendaFitView() {
         return '<div class="agenda-seg agenda-seg-idle" ' +
                'style="width:' + widthPct.toFixed(2) + '%;" ' +
                'title="' + tipI.replace(/"/g, '&quot;') + '">' +
-               inline + '</div>';
+               (inline ? '<span class="agenda-seg-label">' + inline + '</span>' : '') +
+               '</div>';
       }
       if (seg.kind === 'break') {
         var inline2 = segDur >= 30 ? seg.label : (segDur >= 12 ? '\u23F8' : '');
@@ -2689,7 +2711,8 @@ function renderAgendaFitView() {
         return '<div class="agenda-seg agenda-seg-break" ' +
                'style="width:' + widthPct.toFixed(2) + '%;background:#ec8a3f;" ' +
                'title="' + tipB.replace(/"/g, '&quot;') + '">' +
-               inline2 + '</div>';
+               (inline2 ? '<span class="agenda-seg-label">' + inline2 + '</span>' : '') +
+               '</div>';
       }
       // matches segment
       var segColor = seg.isPractice ? 'var(--secondary)' : 'var(--blue-alliance)';
@@ -2703,18 +2726,23 @@ function renderAgendaFitView() {
                  Math.round(seg.end - seg.start) + ' min available' +
                  (idleTailMin >= 1 ? '\nIdle tail: ' + Math.round(idleTailMin) + ' min' : '');
       var inner;
+      // The text labels go inside <span class="agenda-seg-label">
+      // so the .agenda-seg-label CSS rule (z-index above team marks)
+      // keeps the labels visible on top of any team-mark strips
+      // that overlap them.
+      var labelHtml = (widthPct >= 8) ? '<span class="agenda-seg-label">' + line1 + '</span>' : '';
       if (idleTailMin >= 1 && segDur > 0) {
         var commPct = ((seg.matchEnd - seg.start) / segDur) * 100;
         var tailPct = 100 - commPct;
         inner =
           '<div style="display:flex;align-items:center;justify-content:center;height:100%;width:' + commPct.toFixed(2) + '%;background:' + segColor + ';">' +
-            (widthPct >= 8 ? line1 : '') +
+            labelHtml +
           '</div>' +
           '<div style="height:100%;width:' + tailPct.toFixed(2) + '%;background:' +
             (seg.isPractice ? 'rgba(93,175,120,0.25)' : 'rgba(9,105,218,0.25)') +
             ';background-image:repeating-linear-gradient(135deg,rgba(255,255,255,0.10),rgba(255,255,255,0.10) 5px,rgba(255,255,255,0.22) 5px,rgba(255,255,255,0.22) 10px);"></div>';
       } else {
-        inner = (widthPct >= 8 ? line1 : '');
+        inner = labelHtml;
       }
       var bg = (idleTailMin >= 1) ? 'transparent' : segColor;
       var click = seg.firstMatchNum

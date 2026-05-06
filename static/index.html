@@ -1167,6 +1167,34 @@
     border-radius: 4px;
     overflow: hidden;
     display: flex;
+    /* position: relative so absolute-positioned overlays (team marks)
+       anchor to the bar itself rather than the page. */
+    position: relative;
+  }
+  /* Stack order inside .agenda-day-bar:
+       agenda-seg                z=auto (base)
+       agenda-team-mark          z=2
+       agenda-seg-{label,line1,line2}  z=3 (text always on top)
+     The agenda-seg-label / line wrappers all need explicit
+     position so z-index actually applies. Without these rules
+     the team marks paint over the labels and obscure them. */
+  .agenda-seg-label,
+  .agenda-seg-line1,
+  .agenda-seg-line2 {
+    position: relative;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .agenda-team-mark {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    pointer-events: none;
+    border-radius: 1px;
+    z-index: 2;
+    box-shadow:
+      inset 0 0 0 1px rgba(0,0,0,0.55),
+      0 0 3px rgba(0,0,0,0.35);
   }
   .agenda-seg {
     display: flex;
@@ -1434,10 +1462,13 @@
   .readonly-banner .team-filter-group {
     display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem;
   }
+  .readonly-banner input[type="text"],
   .readonly-banner input[type="number"] {
     background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4);
-    color: #fff; padding: 0.25rem 0.5rem; border-radius: 4px; width: 80px;
+    color: #fff; padding: 0.25rem 0.5rem; border-radius: 4px;
+    font-size: 0.8rem;
   }
+  .readonly-banner input[type="text"]::placeholder,
   .readonly-banner input[type="number"]::placeholder { color: rgba(255,255,255,0.7); }
   .readonly-banner button {
     background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4);
@@ -1446,15 +1477,34 @@
   }
   .readonly-banner button:hover { background: rgba(255,255,255,0.3); }
 
-  /* Highlighted "my team" rows in readonly view */
-  body.readonly-mode tr.my-team {
-    background: rgba(93,175,120,0.2) !important;
-    box-shadow: inset 4px 0 0 #5daf78;
-  }
+  /* Highlighted "my team" rows in readonly view. Background and
+     box-shadow accent are applied inline by applyReadonlyHighlight()
+     using the per-team color palette — single-team rows use that
+     team's color at low alpha; multi-team rows use neutral gray.
+     The CSS rule here only carries structural styling
+     (font-weight) so the inline-style colors win without needing
+     to fight !important on color properties. */
   body.readonly-mode tr.my-team td { font-weight: 600; }
   body.readonly-mode .my-team-cell {
-    background: #5daf78 !important; color: #fff !important;
-    font-weight: 700; padding: 2px 6px; border-radius: 3px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  /* Print stylesheet — force canonical green for any selected
+     team row/cell so printed schedules are consistent regardless
+     of who's looking at them or how their palette assigned colors.
+     The !important here beats the inline styles applied by
+     applyReadonlyHighlight() ONLY in the print context. */
+  @media print {
+    body.readonly-mode tr.my-team {
+      background: #e8f5e9 !important;
+      box-shadow: inset 4px 0 0 #5daf78 !important;
+    }
+    body.readonly-mode .my-team-cell {
+      background: #5daf78 !important;
+      color: #fff !important;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4) !important;
+    }
   }
 </style>
 </head>
@@ -1483,9 +1533,11 @@
   <div class="readonly-banner" id="readonlyBanner">
     <span>&#128065; <strong>View Only</strong> &middot; <span id="readonlyEventLabel">Schedule</span></span>
     <span class="team-filter-group">
-      <label for="readonlyMyTeam">My team:</label>
-      <input type="number" id="readonlyMyTeam" placeholder="e.g. 2169" min="1" max="99999"
-             onchange="applyReadonlyHighlight()" oninput="applyReadonlyHighlight()">
+      <label for="readonlyMyTeam">My team(s):</label>
+      <input type="text" id="readonlyMyTeam" placeholder="e.g. 2169 or 2169,2530,3082"
+             pattern="[0-9, ]*"
+             onchange="applyReadonlyHighlight()" oninput="applyReadonlyHighlight()"
+             style="min-width:11rem;">
       <button onclick="applyReadonlyHighlight()">Highlight</button>
       <button onclick="window.print()" title="Print this schedule">&#128438; Print</button>
       <button onclick="downloadSchedulePDF()" title="Download PDF">&#11015; PDF</button>
@@ -2440,28 +2492,58 @@ if (window._frcReadonlyMode) {
   });
 }
 
-// Highlight the user's team in the rendered schedule output.
-// Called from the banner button and any time the schedule re-renders.
+// Highlight the user's team(s) in the rendered schedule output.
+// Parses the readonly input as comma-separated team numbers, stores
+// them in window._readonlyMyTeams (Set, insertion-ordered for
+// palette index), then walks the rendered schedule DOM to apply
+// inline per-team colors on cells and per-row tints. Multi-team
+// rows get a neutral gray tint; single-team rows tint with the
+// team's color. This mirrors the view.html behavior exactly so a
+// shared link with multiple teams highlights consistently across
+// editor and view.
 function applyReadonlyHighlight() {
   var inpEl = document.getElementById('readonlyMyTeam');
   if (!inpEl) return;
-  var val = parseInt(inpEl.value);
-  // Clear existing highlights first
+  // Parse the comma-separated value — strip whitespace, drop
+  // empties + non-numeric tokens. Set preserves insertion order
+  // which becomes the palette-index order.
+  var raw = String(inpEl.value || '');
+  var teams = raw.split(',')
+    .map(function(s) { return s.trim(); })
+    .filter(function(s) { return s.length > 0 && /^\d+$/.test(s); })
+    .map(function(s) { return parseInt(s, 10); })
+    .filter(function(n) { return !isNaN(n) && n > 0; });
+  // Dedup while preserving order.
+  var seen = {};
+  var ordered = [];
+  teams.forEach(function(t) {
+    if (!seen[t]) { seen[t] = true; ordered.push(t); }
+  });
+  window._readonlyMyTeams = new Set(ordered);
+  var hasSel = window._readonlyMyTeams.size > 0;
+
+  // Clear existing highlights first so a deletion in the input
+  // immediately removes its visual.
   document.querySelectorAll('tr.my-team').forEach(function(r) {
     r.classList.remove('my-team');
+    r.removeAttribute('style');  // wipe any prior inline tint
   });
   document.querySelectorAll('.my-team-cell').forEach(function(c) {
     c.classList.remove('my-team-cell');
+    c.style.removeProperty('background');
+    c.style.removeProperty('color');
+    c.style.removeProperty('box-shadow');
   });
-  if (!val || isNaN(val)) return;
-  var teamStr = String(val);
-  // Walk every team span (rendered by renderTeam — has class teams-red/teams-blue);
-  // mark spans whose first text node matches and tag the row.
+  if (!hasSel) return;
+
+  // Pass 1 — mark each team span whose number matches a selected
+  // team, then collect per-row counts so pass 2 can decide single
+  // vs multi-team tinting. Walking spans (not cells) because the
+  // editor renders teams via inline spans inside td cells.
+  var rowsHit = new Map();  // tr → array of team numbers selected
   document.querySelectorAll('span.teams-red, span.teams-blue').forEach(function(span) {
-    var raw = (span.textContent || '').trim();
-    // Strip trailing badges (surrogate "S", b2b "B2B") — they're in nested spans
-    // but their text gets concatenated with the team number. The team number
-    // comes first, so isolate by reading the first text node.
+    // Pull the leading text node — strips trailing badges like
+    // "S" (surrogate) or "B2B" without affecting the team match.
     var firstText = '';
     for (var i = 0; i < span.childNodes.length; i++) {
       if (span.childNodes[i].nodeType === Node.TEXT_NODE) {
@@ -2469,13 +2551,45 @@ function applyReadonlyHighlight() {
         break;
       }
     }
-    var teamNum = firstText || raw.replace(/[^\d].*/, '');
-    if (teamNum === teamStr) {
-      span.classList.add('my-team-cell');
-      var row = span.closest('tr');
-      if (row) row.classList.add('my-team');
+    var teamNum = parseInt(firstText || (span.textContent || '').replace(/[^\d].*/, ''), 10);
+    if (!teamNum || !window._readonlyMyTeams.has(teamNum)) return;
+    var c = _teamColor(teamNum);
+    var txt = _readableTextOn(c);
+    span.classList.add('my-team-cell');
+    span.style.background = c;
+    span.style.color = txt;
+    span.style.boxShadow = 'inset 0 0 0 1px rgba(0,0,0,0.5)';
+    var row = span.closest('tr');
+    if (row) {
+      row.classList.add('my-team');
+      var arr = rowsHit.get(row) || [];
+      arr.push(teamNum);
+      rowsHit.set(row, arr);
     }
   });
+
+  // Pass 2 — apply row tint inline. Single team in row → team's
+  // color at low alpha + edge accent. Multi → neutral gray. The
+  // !important on background here is to beat the zebra-stripe
+  // CSS which targets tr.alt; without !important the alt rows
+  // would lose the tint entirely.
+  rowsHit.forEach(function(teamsInRow, row) {
+    if (teamsInRow.length === 1) {
+      var c = _teamColor(teamsInRow[0]);
+      row.style.background = _hexAlpha(c, 0.13);
+      row.style.boxShadow = 'inset 4px 0 0 ' + c;
+    } else {
+      row.style.background = 'rgba(127,127,127,0.13)';
+      row.style.boxShadow = 'inset 4px 0 0 rgba(127,127,127,0.6)';
+    }
+  });
+
+  // Refresh the agenda fit panel so its team-mark overlays update
+  // to match the new selection. Best-effort — wrapped in try since
+  // the panel may not be rendered in every UI state.
+  if (typeof renderAgendaBlocks === 'function') {
+    try { renderAgendaBlocks(); } catch (_) {}
+  }
 }
 
 // ── Placement Criteria weights ────────────────────────────────────────────────
@@ -3991,6 +4105,70 @@ let _abstractParams = null;              // params snapshot when Stage 1 last ra
 let _autoPopulateTimeout = null;         // debounce timer
 let _s1AbortController = null;          // AbortController for in-flight Stage 1 request
 let _authUser = null;                    // {sub, email, provider, uid} or null
+
+// ── Selected-team color palette ────────────────────────────────────
+// Mirror of view.html's TEAM_COLORS — kept in sync so a team
+// gets the same color on both pages. Selection-order index maps
+// to palette index; wraps after 6.
+//
+// Colors avoid existing UI hues (qual blue, practice green,
+// break orange, danger red) and have at least 30° hue separation.
+var TEAM_COLORS = [
+  '#e63ec1',  // 1: bright magenta
+  '#22c5d6',  // 2: cyan
+  '#facc15',  // 3: vivid yellow
+  '#9aef3d',  // 4: lime green
+  '#bd92f0',  // 5: light purple
+  '#ff8b73',  // 6: coral pink
+];
+
+// Selected teams in readonly mode. Set so insertion order is
+// preserved (used as the index for palette assignment). Updated
+// from the readonly banner input every time it changes.
+window._readonlyMyTeams = new Set();
+
+// Pick palette color for a team based on its position in the
+// selection order. Wraps after 6. Falls back to gray for unknown
+// teams (shouldn't happen in normal flow, but keeps the function
+// total against malformed inputs). Coerces types so int/string
+// team values both resolve correctly.
+function _teamColor(team) {
+  if (!window._readonlyMyTeams || window._readonlyMyTeams.size === 0) return '#888';
+  var idx = -1, i = 0;
+  var ts = String(team);
+  window._readonlyMyTeams.forEach(function(v) {
+    if (idx >= 0) return;
+    if (String(v) === ts) idx = i;
+    i++;
+  });
+  if (idx < 0) return '#888';
+  return TEAM_COLORS[idx % TEAM_COLORS.length];
+}
+
+// Pick a readable text color (near-black or white) for a given
+// background hex. Quick luminance heuristic — bright fills get
+// dark text, saturated mid-tones get white. Threshold tuned for
+// the 6-color palette above.
+function _readableTextOn(hex) {
+  var m = String(hex || '').match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) return '#000';
+  var r = parseInt(m[1], 16);
+  var g = parseInt(m[2], 16);
+  var b = parseInt(m[3], 16);
+  var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#1a1a1a' : '#fff';
+}
+
+// Convert a #rrggbb hex to an rgba() string with the requested
+// alpha. Used for row tinting.
+function _hexAlpha(hex, alpha) {
+  var m = String(hex || '').match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) return 'rgba(127,127,127,' + alpha + ')';
+  var r = parseInt(m[1], 16);
+  var g = parseInt(m[2], 16);
+  var b = parseInt(m[3], 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
 let _currentSlotMap = null;              // {slot_str: team_number} from Stage 2
 let _currentSeed = null;                 // hex Stage 1 seed
 let _currentAssignSeed = null;           // hex Stage 2 seed
@@ -6605,7 +6783,7 @@ function renderScheduleBars() {
         return '<div class="agenda-seg agenda-seg-idle" '
              + 'style="width:' + widthPct.toFixed(2) + '%;" '
              + 'title="' + tipI.replace(/"/g, '&quot;') + '">'
-             + inline
+             + (inline ? '<span class="agenda-seg-label">' + inline + '</span>' : '')
              + '</div>';
       }
       if (seg.kind === 'break') {
@@ -6617,7 +6795,7 @@ function renderScheduleBars() {
         return '<div class="agenda-seg agenda-seg-break" '
              + 'style="width:' + widthPct.toFixed(2) + '%;background:' + bgColor + ';" '
              + 'title="' + tip.replace(/"/g, '&quot;') + '">'
-             + inline
+             + (inline ? '<span class="agenda-seg-label">' + inline + '</span>' : '')
              + '</div>';
       }
       // matches segment
@@ -6684,9 +6862,88 @@ function renderScheduleBars() {
       + '</span>'
       + '</div>';
 
+    // Team marks — vertical strips on the day bar at each timeslot
+    // where any selected team plays. Each strip uses the team's
+    // palette color so multi-team selections differentiate at a
+    // glance. Only renders when readonly highlight is in use; in
+    // normal editing flow the readonly input is empty and the marks
+    // contribute nothing.
+    //
+    // Match start times come from window._frcScheduled (set by
+    // _finishGenerationInner). End times are computed as the next
+    // match's start (within the segment) or, for last-of-segment,
+    // segment.matchEnd. This avoids needing to track per-match
+    // cycle time directly.
+    var teamMarksHtml = '';
+    var hasTeamSel = window._readonlyMyTeams && window._readonlyMyTeams.size > 0;
+    if (hasTeamSel && window._frcScheduled && window._frcScheduled.length) {
+      // The editor's _frcScheduled is keyed by day index — find the
+      // right day. Practice day is dayNum 0 in agenda fit, and lives
+      // in a separate slot if present; match _frcScheduled entries
+      // by their dayNum if the source carries it, otherwise skip.
+      var srcDay = window._frcScheduled.find(function(sd) {
+        return sd.dayNum === d.dayNum ||
+               (d.isPractice && sd.isPracticeDay);
+      });
+      if (srcDay && srcDay.entries) {
+        var matches = srcDay.entries.filter(function(e) { return e.type === 'match'; });
+        // Build a lookup for next match start, used to compute
+        // each match's end time. Sorted by startMin.
+        matches.sort(function(a, b) { return a.startMin - b.startMin; });
+        // Build a quick lookup: match.startMin → segment matchEnd
+        // (for last match in a segment, fall back to segment matchEnd).
+        // Cycle time at match index = (next start) - (this start),
+        // or fallback to the segment average if at end.
+        var cycleByIdx = {};
+        for (var mi = 0; mi < matches.length; mi++) {
+          if (mi + 1 < matches.length) {
+            cycleByIdx[mi] = matches[mi + 1].startMin - matches[mi].startMin;
+          } else {
+            // Last match — guess from average over all matches today
+            var spans = matches.length > 1
+              ? (matches[matches.length - 1].startMin - matches[0].startMin) / (matches.length - 1)
+              : (parseFloat(document.getElementById('cycleTime').value) || 8);
+            cycleByIdx[mi] = spans > 0 ? spans : 8;
+          }
+        }
+        matches.forEach(function(m, mi) {
+          var allTeams = (m.red || []).concat(m.blue || []);
+          var which = allTeams.filter(function(t) {
+            return window._readonlyMyTeams.has(t);
+          });
+          if (!which.length) return;
+          // Pick lowest-selection-index team for the strip color so
+          // multi-team-in-match defers to the user's first-listed
+          // team. Tooltip lists all teams in the match.
+          var primary = which[0];
+          var primaryIdx = Infinity;
+          var seli = 0;
+          window._readonlyMyTeams.forEach(function(v) {
+            if (which.indexOf(v) >= 0 && seli < primaryIdx) {
+              primaryIdx = seli; primary = v;
+            }
+            seli++;
+          });
+          var c = _teamColor(primary);
+          var cycleMin = cycleByIdx[mi] || 8;
+          var leftPct  = ((m.startMin - dStart) / dayDur) * 100;
+          var widthPct = (cycleMin / dayDur) * 100;
+          var tipT = 'Q' + m.num + ' \u2014 ' + fmtTime(m.startMin) +
+                     '\u2013' + fmtTime(m.startMin + cycleMin) +
+                     '\nSelected team' + (which.length > 1 ? 's' : '') + ': ' + which.join(', ');
+          teamMarksHtml += '<div class="agenda-team-mark" ' +
+                          'style="left:' + leftPct.toFixed(2) + '%;' +
+                                  'width:' + Math.max(widthPct, 0.4).toFixed(2) + '%;' +
+                                  'background:' + c + ';" ' +
+                          'title="' + tipT.replace(/"/g, '&quot;') + '"></div>';
+        });
+      }
+    }
+
     html += '<div class="agenda-block-row">' + headHtml
           + '<div class="agenda-day-bar" style="border-color:' + dc + ';background:' + dc + '22;">'
           + segHtml
+          + teamMarksHtml
           + '</div>'
           + '</div>';
   });
