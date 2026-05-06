@@ -378,10 +378,14 @@
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: 3px;
-    padding: 0.15rem 0.4rem;
-    font-size: 0.7rem;
+    padding: 0.15rem 0.3rem;
+    font-size: 0.68rem;
     font-family: inherit;
-    width: 110px;
+    width: 96px;
+    min-width: 0;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
   }
   .v2-day-label {
     background: var(--bg);
@@ -461,12 +465,23 @@
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: 3px;
-    padding: 0.08rem 0.3rem;
-    font-size: 0.7rem;
+    padding: 0.12rem 0.35rem;
+    font-size: 0.72rem;
     font-family: inherit;
-    width: 64px;
+    width: 56px;
+    min-width: 0;
+    box-sizing: border-box;
+    text-align: center;
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
+  }
+  .v2-block-time:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .v2-block-time::placeholder {
+    color: var(--text-muted);
+    opacity: 0.5;
   }
   .v2-block-time.v2-conflict {
     border-color: var(--danger);
@@ -9287,6 +9302,49 @@ function _v2minToTimeStr(m) {
   return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
 }
 
+// Normalize freeform user input to HH:MM (24-hour). Accepts:
+//   "9"      → "09:00"
+//   "09"     → "09:00"
+//   "930"    → "09:30"
+//   "0930"   → "09:30"
+//   "9:30"   → "09:30"
+//   "9:5"    → "09:05"
+//   "9am"    → "09:00"
+//   "1:30pm" → "13:30"
+// Bad input returns the original string (caller can flag as invalid).
+function _v2normalizeTimeStr(raw) {
+  if (raw == null) return '';
+  var s = String(raw).trim().toLowerCase();
+  if (!s) return '';
+  // Detect am/pm suffix. Order matters: check 'pm' before 'am' since
+  // 'pm' contains an 'm' but not 'a'. Match anywhere at end of string,
+  // optionally with dots (a.m., p.m.).
+  var ampm = null;
+  if (/p\.?m\.?$/.test(s))      ampm = 'pm';
+  else if (/a\.?m\.?$/.test(s)) ampm = 'am';
+  s = s.replace(/\s*[ap]\.?m?\.?\s*$/, '').replace(/\s+/g, '');
+  var h, m;
+  if (s.indexOf(':') >= 0) {
+    var parts = s.split(':');
+    h = parseInt(parts[0], 10);
+    m = parseInt(parts[1] || '0', 10);
+  } else if (/^\d{3,4}$/.test(s)) {
+    // "930" → 9:30, "0930" → 9:30, "1430" → 14:30
+    if (s.length === 3) { h = parseInt(s.charAt(0), 10); m = parseInt(s.substring(1), 10); }
+    else                { h = parseInt(s.substring(0, 2), 10); m = parseInt(s.substring(2), 10); }
+  } else if (/^\d{1,2}$/.test(s)) {
+    h = parseInt(s, 10);
+    m = 0;
+  } else {
+    return raw; // unparseable — return original so user can fix
+  }
+  if (isNaN(h) || isNaN(m)) return raw;
+  if (ampm === 'pm' && h < 12) h += 12;
+  if (ampm === 'am' && h === 12) h = 0;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return raw;
+  return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+}
+
 // Detect a v1 break's break-kind from its name (heuristic). v1 has
 // only a single freeform `name` field; v2 split this into kind +
 // label so labels can be customized while kind drives type-aware
@@ -9700,8 +9758,8 @@ function buildV2Block(b, isNested) {
   var pillCls = 'v2-pill v2-pill-' + b.type;
   head.innerHTML =
     '<span class="' + pillCls + '"><span class="v2-swatch" style="background:' + meta.color + ';"></span>' + meta.shortLabel + '</span>' +
-    '<input class="v2-block-time v2-block-start" type="time" value="' + (b.start || '09:00') + '">' +
-    '<input class="v2-block-time v2-block-end" type="time" value="' + (b.end || '17:00') + '">' +
+    '<input class="v2-block-time v2-block-start" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="' + (b.start || '09:00') + '">' +
+    '<input class="v2-block-time v2-block-end" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="' + (b.end || '17:00') + '">' +
     '<span class="v2-block-summary"></span>' +
     '<span class="v2-block-chev" title="Expand">\u25b8</span>' +
     '<span class="v2-block-x" title="Remove">\u00d7</span>';
@@ -9713,9 +9771,16 @@ function buildV2Block(b, isNested) {
     blockEl.remove(); onV2Change(); _v2updateNearestSummary(head);
   });
   head.querySelector('.v2-block-chev').addEventListener('click', function() { _v2toggleBlock(blockEl); });
-  // Time inputs trigger summary update + boundary linking + validation
+  // Time inputs trigger summary update + boundary linking + validation.
+  // The 'change' event fires on Enter or blur for text inputs; that's
+  // when we normalize the format (e.g. "9" → "09:00") and re-emit.
   head.querySelectorAll('input.v2-block-time').forEach(function(inp) {
+    // Track the last-known-good value so boundary linking can detect
+    // "user just changed this from X to Y" without false-positive
+    // when blur fires with no actual change.
     inp.addEventListener('change', function(ev) {
+      var normalized = _v2normalizeTimeStr(inp.value);
+      if (normalized !== inp.value) inp.value = normalized;
       _v2propagateBoundary(blockEl, inp);
       _v2validateAll();
       _v2updateBlockSummary(blockEl);
@@ -10075,12 +10140,26 @@ function _v2anchorPicker(picker, anchorEl) {
   var rect = anchorEl.getBoundingClientRect();
   picker.style.left = (window.scrollX + rect.left) + 'px';
   picker.style.top  = (window.scrollY + rect.bottom + 4) + 'px';
+  // Defer registration so the click that opened the picker doesn't
+  // immediately trip the close handler. Using a NAMED handler (not
+  // {once: true}) is critical: stopPropagation inside the picker
+  // means the once-true listener would never fire AND never auto-
+  // remove, leaving a stale listener that closes the NEXT picker
+  // immediately on its first click. Named handler + explicit
+  // removeEventListener in _v2closePickers fixes this.
   setTimeout(function() {
-    document.addEventListener('click', _v2closePickers, { once: true });
+    document.addEventListener('click', _v2outsideClickHandler);
   }, 0);
+}
+function _v2outsideClickHandler(ev) {
+  _v2closePickers();
 }
 function _v2closePickers() {
   document.querySelectorAll('.v2-block-picker').forEach(function(p) { p.remove(); });
+  // Always remove the document click listener — even if no pickers
+  // were open. Idempotent: removeEventListener on a non-registered
+  // listener is a no-op.
+  document.removeEventListener('click', _v2outsideClickHandler);
 }
 
 function addDayV2() {
