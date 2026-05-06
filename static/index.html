@@ -5691,10 +5691,12 @@ function parseTime12agenda(s) {
   return h * 60 + min;
 }
 
-// Format a YYYY-MM-DD date string as "Fri, Apr 3" for display in
-// day labels (schedule output, agenda fit bars, view-page day
-// dividers). Returns '' for empty/invalid input. Mirrors the
-// helper in view.html so both pages format dates identically.
+// Format a YYYY-MM-DD date string as "Fri, Apr 3, 2026" for display
+// in day labels (schedule output, agenda fit bars, view-page day
+// dividers). Year included for posterity — schedules persist for
+// years and ambiguous "Apr 3" reads poorly when looking back.
+// Returns '' for empty/invalid input. Mirrors the helper in
+// view.html so both pages format dates identically.
 function formatDayDate(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return '';
   var m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -5703,7 +5705,7 @@ function formatDayDate(dateStr) {
   if (isNaN(d.getTime())) return '';
   var WK = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return WK[d.getDay()] + ', ' + MO[d.getMonth()] + ' ' + d.getDate();
+  return WK[d.getDay()] + ', ' + MO[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
 }
 
 // Time formatter — checks window._frcUse24h to switch between 12h

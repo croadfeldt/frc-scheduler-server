@@ -1372,6 +1372,8 @@ function computeMatchTimes() {
   // annotate day dividers when the day's `date` field is populated
   // (v2 day_config). Returns empty string for missing/invalid input.
   function formatDateLabel(dateStr) {
+    // "Fri, Apr 3, 2026" — year included for posterity since
+    // schedules persist for years.
     if (!dateStr || typeof dateStr !== 'string') return '';
     var m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (!m) return '';
@@ -1379,7 +1381,7 @@ function computeMatchTimes() {
     if (isNaN(d.getTime())) return '';
     var WK = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return WK[d.getDay()] + ', ' + MO[d.getMonth()] + ' ' + d.getDate();
+    return WK[d.getDay()] + ', ' + MO[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
   }
 
   const matches = sch.matches || [];
@@ -1831,9 +1833,11 @@ function rerender() {
 
   // Append a date range to the Match Schedule title when the
   // schedule's day_config carries dates. Shows "Match Schedule —
-  // Apr 3" for single-day or "— Apr 3 – Apr 4" for multi-day.
-  // Uses formatDateLabel from computeMatchTimes (defined inline
-  // there); we re-derive here from the same dc.days[].date fields.
+  // Apr 3, 2026" for single-day or "— Apr 3 – Apr 4, 2026" for
+  // multi-day in the same year, or "— Apr 3, 2025 – Jan 2, 2026"
+  // when crossing years (rare but possible). Year only repeats
+  // when the range actually crosses a year boundary, otherwise
+  // it's appended once at the end to keep the title compact.
   (function() {
     var titleEl = document.getElementById('tableTitle');
     if (!titleEl) return;
@@ -1847,18 +1851,32 @@ function rerender() {
       titleEl.textContent = 'Match Schedule';
       return;
     }
-    function fmt(s) {
+    var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    function parseYmd(s) {
       var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (!m) return '';
+      if (!m) return null;
       var d = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
-      if (isNaN(d.getTime())) return '';
-      var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      return MO[d.getMonth()] + ' ' + d.getDate();
+      return isNaN(d.getTime()) ? null : d;
     }
+    function monthDay(d) { return MO[d.getMonth()] + ' ' + d.getDate(); }
     dates.sort();
-    var first = fmt(dates[0]);
-    var last  = fmt(dates[dates.length - 1]);
-    var range = first === last ? first : first + '\u2009\u2013\u2009' + last;
+    var firstD = parseYmd(dates[0]);
+    var lastD  = parseYmd(dates[dates.length - 1]);
+    if (!firstD || !lastD) {
+      titleEl.textContent = 'Match Schedule';
+      return;
+    }
+    var range;
+    if (firstD.getTime() === lastD.getTime()) {
+      range = monthDay(firstD) + ', ' + firstD.getFullYear();
+    } else if (firstD.getFullYear() === lastD.getFullYear()) {
+      range = monthDay(firstD) + '\u2009\u2013\u2009' + monthDay(lastD) +
+              ', ' + firstD.getFullYear();
+    } else {
+      range = monthDay(firstD) + ', ' + firstD.getFullYear() +
+              '\u2009\u2013\u2009' +
+              monthDay(lastD) + ', ' + lastD.getFullYear();
+    }
     titleEl.textContent = 'Match Schedule \u2014 ' + range;
   })();
 
