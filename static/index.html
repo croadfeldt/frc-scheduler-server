@@ -1362,6 +1362,11 @@
       <div class="subtitle">Competition Schedule Generator</div>
     </div>
     <div class="auth-bar" id="authBar">
+      <!-- 12h/24h toggle. Pure-display preference: doesn't affect
+           stored data (always HH:MM). Persists in localStorage as
+           frcUse24h '1'. Default 12h (am/pm). Click flips and
+           triggers a re-render of all visible time displays. -->
+      <button class="btn-auth" id="btnTimeFormat" onclick="toggleTimeFormat()" title="Toggle between 12-hour (AM/PM) and 24-hour time display" style="font-size:0.72rem;padding:0.2rem 0.5rem;letter-spacing:0.02em;">12h</button>
       <button class="btn-auth" id="btnTheme" onclick="toggleTheme()" title="Toggle light/dark mode" style="font-size:1rem;padding:0.2rem 0.5rem;">🌙</button>
       <button class="btn-auth" id="btnSignIn" onclick="openAuthModal()" style="display:none;">Sign In</button>
       <span class="user-chip" id="userChip" style="display:none;"></span>
@@ -4847,6 +4852,19 @@ function parseUrlParams() {
 // Mirrors applyUrlParams but reads from the day_config JSON structure directly.
 function applyDayConfigToUI(dc) {
   if (!dc) return;
+  // Stash dates from incoming day_config so v1 (which has no date
+  // input) doesn't drop them on save. v2 reads them directly via
+  // collectDayConfigV2 from the date <input> in each day card. If the
+  // user is on v1 (opted out), collectDayConfig later reads them
+  // back from this module-level holder. The map is keyed by day
+  // index (0 = practice if present, else day 1, etc.).
+  window._frcPreservedDayDates = {};
+  if (dc.practiceDay && dc.practiceDay.date) {
+    window._frcPreservedDayDates.practice = dc.practiceDay.date;
+  }
+  (dc.days || []).forEach(function(d, i) {
+    if (d && d.date) window._frcPreservedDayDates['day' + (i + 1)] = d.date;
+  });
   // If v2 is the active editor, also render the block view from
   // the same data so toggling between editors stays in sync.
   // Migrate first since incoming dc may be v1 from older saves.
@@ -5457,13 +5475,62 @@ function parseTime12agenda(s) {
   return h * 60 + min;
 }
 
+// Time formatter — checks window._frcUse24h to switch between 12h
+// (default, "9:00 AM") and 24h ("09:00") format. The toggle lives in
+// the editor header; user preference persists in localStorage. Name
+// kept as fmtTime12 for backwards compat with existing callers — the
+// "12" no longer means "always 12h" but "the canonical time
+// formatter that respects the user's preference."
 function fmtTime12(mins) {
   let h = Math.floor(mins / 60), m = mins % 60;
+  if (window._frcUse24h) {
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
   const ap = h >= 12 ? 'PM' : 'AM';
   if (h > 12) h -= 12;
   if (h === 0) h = 12;
   return h + ':' + String(m).padStart(2, '0') + ' ' + ap;
 }
+
+// Toggle between 12h and 24h time display. Persists choice in
+// localStorage and re-runs the main render functions so visible
+// time strings update immediately without a full page reload.
+function toggleTimeFormat() {
+  window._frcUse24h = !window._frcUse24h;
+  try { localStorage.setItem('frcUse24h', window._frcUse24h ? '1' : '0'); } catch(e) {}
+  var btn = document.getElementById('btnTimeFormat');
+  if (btn) btn.textContent = window._frcUse24h ? '24h' : '12h';
+  // Re-render anything that displays time strings. These functions
+  // are idempotent and safe to call repeatedly. Each one defends
+  // against missing dependencies internally.
+  if (typeof renderSchedule       === 'function') try { renderSchedule(); }       catch(e) {}
+  if (typeof renderScheduleBars   === 'function') try { renderScheduleBars(); }   catch(e) {}
+  if (typeof updateAgendaFit      === 'function') try { updateAgendaFit(); }      catch(e) {}
+  if (typeof renderDayConfigV2    === 'function') {
+    // v2 day cards include time strings in their summary lines —
+    // refresh those by re-collecting + re-rendering when v2 is on.
+    var v2cb = document.getElementById('dayConfigUseV2');
+    if (v2cb && v2cb.checked) {
+      try {
+        var cur = collectDayConfigV2();
+        if (cur) renderDayConfigV2(cur);
+      } catch(e) {}
+    }
+  }
+}
+
+// Restore preference on load. Defaults to 12h (am/pm) when no
+// stored value. Sets the button label to match.
+(function() {
+  try {
+    var stored = localStorage.getItem('frcUse24h');
+    window._frcUse24h = (stored === '1');
+  } catch(e) { window._frcUse24h = false; }
+  document.addEventListener('DOMContentLoaded', function() {
+    var btn = document.getElementById('btnTimeFormat');
+    if (btn) btn.textContent = window._frcUse24h ? '24h' : '12h';
+  });
+})();
 
 async function fetchAgendaPDF(eventCode) {
   const year = eventCode.substring(0, 4);
@@ -6178,6 +6245,9 @@ function renderScheduleBars() {
   // ── Render ──────────────────────────────────────────────────────
   function fmtTime(m) {
     var h = Math.floor(m / 60), mm = m % 60;
+    if (window._frcUse24h) {
+      return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+    }
     var ampm = h >= 12 ? 'p' : 'a';
     var hh = h % 12 || 12;
     return hh + (mm ? ':' + (mm < 10 ? '0' : '') + mm : '') + ampm;
@@ -9891,8 +9961,13 @@ function _v2updateDaySummary(dayEl) {
   if (!blockCount) { sum.innerHTML = '<em>empty</em>'; return; }
   var minT = Math.min.apply(null, times);
   var maxT = Math.max.apply(null, times);
+  // Format respects the global 12h/24h toggle so summary times match
+  // the rest of the editor.
   var fmt = function(m) {
     var h = Math.floor(m / 60), mm = m % 60;
+    if (window._frcUse24h) {
+      return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+    }
     var ampm = h >= 12 ? 'p' : 'a';
     var hh = (h % 12 === 0 ? 12 : h % 12);
     return hh + (mm ? ':' + (mm < 10 ? '0' : '') + mm : '') + ampm;
@@ -10358,8 +10433,12 @@ function toggleDayConfigEditor(useV2) {
 
 document.addEventListener('DOMContentLoaded', function() {
   try {
+    // v2 (block view) is now the DEFAULT. The user opts OUT explicitly
+    // by toggling the checkbox off (which writes '0' to localStorage).
+    // null/missing → default v2 on. The previous default was off.
     var stored = localStorage.getItem('frcDayConfigUseV2');
-    if (stored === '1') {
+    var useV2 = (stored !== '0'); // null → on, '0' → off, '1' → on
+    if (useV2) {
       var cb = document.getElementById('dayConfigUseV2');
       if (cb) {
         cb.checked = true;
@@ -10436,6 +10515,8 @@ function collectDayConfig() {
         breaks:        pdayBreaks,
         cycleChanges:  pdayCc,
         earlyEnd:      pdayEarlyEnd,
+        // Preserve practice-day date stashed during applyDayConfigToUI
+        date:          (window._frcPreservedDayDates && window._frcPreservedDayDates.practice) || '',
       };
     })(),
     breakBuffer:      parseFloat(document.getElementById('breakBuffer').value) || 5,
@@ -10444,7 +10525,7 @@ function collectDayConfig() {
     autoMaxCycles:    elAM ? elAM.checked : true,
     autoAssign:       elAS ? elAS.checked : false,
     cycleChanges: getCycleTimeChanges(),
-    days: Array.from(document.querySelectorAll('.day-row')).map(function(row) {
+    days: Array.from(document.querySelectorAll('.day-row')).map(function(row, idx) {
       // Collect per-day cycle changes (start-of-day + after-match entries)
       var dayCycleChanges = Array.from(row.querySelectorAll('.day-cc-row')).map(function(ccRow) {
         var timeInp  = ccRow.querySelector('.cc-time');
@@ -10456,11 +10537,21 @@ function collectDayConfig() {
         };
       }).filter(function(c) { return c.time > 0 && (c.isStart || (!isNaN(c.afterMatch) && c.afterMatch >= 1)); });
 
+      // Pull back the date stashed during the most recent
+      // applyDayConfigToUI call. v1 has no UI for dates so they'd
+      // otherwise drop on save. Indexing matches what was stashed:
+      // 'day1' = first qual day, 'day2' = second, etc.
+      var preservedDate = '';
+      if (window._frcPreservedDayDates && window._frcPreservedDayDates['day' + (idx + 1)]) {
+        preservedDate = window._frcPreservedDayDates['day' + (idx + 1)];
+      }
+
       return {
         start:        row.querySelector('.day-start').value,
         end:          row.querySelector('.day-end').value,
         earlyEnd:     getDayEarlyEnd(row),
         cycleChanges: dayCycleChanges,
+        date:         preservedDate,
         breaks: Array.from(row.querySelectorAll('.break-row')).map(function(br) {
           return {
             name:  br.querySelector('.break-name').value || 'Break',
@@ -12278,6 +12369,9 @@ function downloadFMS(scope) {
 function _fmtTime12FromMin(min) {
   if (min == null) return '';
   var h = Math.floor(min / 60), m = min % 60;
+  if (window._frcUse24h) {
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
   var period = h >= 12 ? 'PM' : 'AM';
   var h12 = ((h + 11) % 12) + 1;
   return h12 + ':' + String(m).padStart(2, '0') + ' ' + period;

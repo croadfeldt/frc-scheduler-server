@@ -1826,6 +1826,39 @@ function rerender() {
       ? matchRowsShown + ' of ' + totalMatches + ' matches'
       : totalMatches + ' matches';
 
+  // Append a date range to the Match Schedule title when the
+  // schedule's day_config carries dates. Shows "Match Schedule —
+  // Apr 3" for single-day or "— Apr 3 – Apr 4" for multi-day.
+  // Uses formatDateLabel from computeMatchTimes (defined inline
+  // there); we re-derive here from the same dc.days[].date fields.
+  (function() {
+    var titleEl = document.getElementById('tableTitle');
+    if (!titleEl) return;
+    var sched = STATE.schedule;
+    if (!sched || !sched.day_config) return;
+    var cfg = sched.day_config;
+    var dates = [];
+    if (cfg.practiceDay && cfg.practiceDay.date) dates.push(cfg.practiceDay.date);
+    (cfg.days || []).forEach(function(d) { if (d && d.date) dates.push(d.date); });
+    if (!dates.length) {
+      titleEl.textContent = 'Match Schedule';
+      return;
+    }
+    function fmt(s) {
+      var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return '';
+      var d = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+      if (isNaN(d.getTime())) return '';
+      var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return MO[d.getMonth()] + ' ' + d.getDate();
+    }
+    dates.sort();
+    var first = fmt(dates[0]);
+    var last  = fmt(dates[dates.length - 1]);
+    var range = first === last ? first : first + '\u2009\u2013\u2009' + last;
+    titleEl.textContent = 'Match Schedule \u2014 ' + range;
+  })();
+
   // Update the live strip first (it always renders, including source badge)
   updateLiveStrip();
   // Then surface a dedicated banner for local-only or modified-published —
