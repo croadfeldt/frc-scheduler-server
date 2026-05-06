@@ -4581,7 +4581,21 @@ async function initAuth() {
   }
   // Listen for postMessage from OAuth popup
   window.addEventListener('message', function(e) {
-    if (e.data && e.data.token) { setToken(e.data.token); refreshAuthUI(); }
+    if (e.data && e.data.token) {
+      setToken(e.data.token);
+      // Close the auth modal — the popup posts the token back here
+      // but the modal lingers open until we explicitly close it.
+      // closeModal is no-op if the modal isn't open, so safe to
+      // call unconditionally.
+      try { closeModal('modalAuth'); } catch(_) {}
+      refreshAuthUI();
+      // Surface a confirmation so users know the sign-in landed.
+      // The popup itself closes via window.close() in the
+      // _oauth_popup_response HTML, but on some browsers (especially
+      // Safari) that close gets blocked — the status helps when
+      // it's not obvious the flow finished.
+      try { showApiStatus('\u2713 Signed in'); } catch(_) {}
+    }
   });
   await refreshAuthUI();
 }
@@ -11990,6 +12004,18 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       end:   isObj ? timeToMin(row.end)   : timeToMin(row.querySelector('.day-end').value),
       earlyEnd: isObj ? (row.earlyEnd || null) : getDayEarlyEnd(row),
       cycleChanges: dayCycleChanges,
+      // Date round-trip: when the working day comes from a day_config
+      // object (isObj), pull date directly from it. When it comes from
+      // the v1 .day-row DOM (no date input), pull from the
+      // window._frcPreservedDayDates side-channel that v1
+      // collectDayConfig stashes. Without this, the date populated
+      // through here as undefined and the schedule output day title
+      // dropped the date for everything except practice (which uses a
+      // separate _pracCfg.date path).
+      date: isObj
+        ? (row.date || '')
+        : ((window._frcPreservedDayDates &&
+            window._frcPreservedDayDates['day' + (Array.from(document.querySelectorAll('.day-row')).indexOf(row) + 1)]) || ''),
       breaks: (isObj ? (row.breaks||[]) : Array.from(row.querySelectorAll('.break-row')).map(br => ({
         name: br.querySelector('.break-name').value || 'Break',
         start: br.querySelector('.break-start').value,

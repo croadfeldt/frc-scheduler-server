@@ -911,10 +911,17 @@ async def _build_assigned_schedule_response(assigned: AssignedSchedule, db: Asyn
     Includes lock fields so the frontend can render the locked state
     on first load without a separate fetch. Lock fields are nullable
     (None when unlocked).
+
+    Always fetches abstract_schedule explicitly via db.get() rather
+    than dereferencing assigned.abstract_schedule directly. The lazy
+    relationship raises MissingGreenlet in async context when it
+    hasn't been eagerly loaded — and after db.refresh() in the
+    lock/unlock endpoints, the relationship is unloaded. db.get()
+    uses the identity map so it's free when already loaded.
     """
-    abstract = assigned.abstract_schedule
+    abstract = await db.get(AbstractSchedule, assigned.abstract_schedule_id)
     if abstract is None:
-        abstract = await db.get(AbstractSchedule, assigned.abstract_schedule_id)
+        raise HTTPException(500, "Underlying abstract schedule missing")
     slot_map = {int(k): v for k, v in assigned.slot_map.items()}
     resolved_matches = [
         {"red": [slot_map[s] for s in m["red"]], "blue": [slot_map[s] for s in m["blue"]],
