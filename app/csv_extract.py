@@ -99,8 +99,10 @@ def parse_csv(content: bytes) -> dict[str, Any]:
     #   Flat (preferred — what we'll export going forward):
     #     Match, Time, Type, Blue 1-3, Red 1-3
     #
-    #   Report (what downloadCSV() in static/index.html currently emits):
-    #     Type, Match, Day, Time, Red 1-3, Blue 1-3, Surrogates
+    #   Report (downloadCSV() in static/index.html):
+    #     Type, Match, Day, Time, Blue 1-3, Red 1-3, Surrogates
+    #     (Older exports used Red 1-3 before Blue 1-3 — both orders
+    #     work because column lookup is by header name, not index.)
     #
     #   FMS (XLSX-equivalent layout transcribed to CSV):
     #     Time, Description (with embedded match number), Blue 1-3, Red 1-3
@@ -131,7 +133,7 @@ def parse_csv(content: bytes) -> dict[str, Any]:
         raise ValueError(
             "No recognisable header row found. Expected one of: "
             "'Match,Time,Type,Blue 1...' (flat), "
-            "'Type,Match,Day,Time,Red 1...,Surrogates' (report), or "
+            "'Type,Match,Day,Time,Blue 1...,Surrogates' (report), or "
             "'Time,Description,Blue 1...' (FMS). First few rows: "
             f"{rows[:3]!r}"
         )

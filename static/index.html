@@ -1740,7 +1740,7 @@
             <div class="modal-section-label">CSV export</div>
             <div style="margin-top:0.5rem;font-size:0.85rem;line-height:1.45;">
               Comma-separated, one row per match, with columns
-              <code>Type, Match, Day, Time, Red 1-3, Blue 1-3, Surrogates</code>.
+              <code>Type, Match, Day, Time, Blue 1-3, Red 1-3, Surrogates</code>.
               Practice and qualification matches are interleaved with
               the Type column distinguishing them. Compatible with
               spreadsheet apps and the "Restore from file" import.
@@ -3274,10 +3274,14 @@ function applyDayplanToForm() {
 
 function renderPdfImportTable(matches) {
   const tbl = document.getElementById('pdfImportTable');
+  // Column order matches FMS scoring-table convention: Blue on the
+  // left, Red on the right. Per-cell data fields (red[], blue[],
+  // red_surrogate[], blue_surrogate[]) keep their semantic names —
+  // only display order changes.
   let html = '<thead><tr>' +
     '<th>#</th><th>Time</th>' +
-    '<th class="col-red">R1</th><th class="col-red">R2</th><th class="col-red">R3</th>' +
     '<th class="col-blue">B1</th><th class="col-blue">B2</th><th class="col-blue">B3</th>' +
+    '<th class="col-red">R1</th><th class="col-red">R2</th><th class="col-red">R3</th>' +
     '</tr></thead><tbody>';
   matches.forEach(function(m, idx) {
     html += '<tr>';
@@ -3286,20 +3290,20 @@ function renderPdfImportTable(matches) {
     var red  = m.red  || []; var blue = m.blue || [];
     var rs   = m.red_surrogate  || [false, false, false];
     var bs   = m.blue_surrogate || [false, false, false];
-    for (var i = 0; i < 3; i++) {
-      html += '<td class="col-red">' +
-        '<input class="cell-input" type="number" min="1" value="' + (red[i] || '') + '" ' +
-        'onchange="updatePdfImportCell(' + idx + ',\'red\',' + i + ',this.value)">' +
-        '<span class="surrogate-toggle' + (rs[i] ? ' active' : '') + '" ' +
-        'onclick="togglePdfImportSurrogate(' + idx + ',\'red\',' + i + ')" title="Toggle surrogate">S</span>' +
-        '</td>';
-    }
     for (var j = 0; j < 3; j++) {
       html += '<td class="col-blue">' +
         '<input class="cell-input" type="number" min="1" value="' + (blue[j] || '') + '" ' +
         'onchange="updatePdfImportCell(' + idx + ',\'blue\',' + j + ',this.value)">' +
         '<span class="surrogate-toggle' + (bs[j] ? ' active' : '') + '" ' +
         'onclick="togglePdfImportSurrogate(' + idx + ',\'blue\',' + j + ')" title="Toggle surrogate">S</span>' +
+        '</td>';
+    }
+    for (var i = 0; i < 3; i++) {
+      html += '<td class="col-red">' +
+        '<input class="cell-input" type="number" min="1" value="' + (red[i] || '') + '" ' +
+        'onchange="updatePdfImportCell(' + idx + ',\'red\',' + i + ',this.value)">' +
+        '<span class="surrogate-toggle' + (rs[i] ? ' active' : '') + '" ' +
+        'onclick="togglePdfImportSurrogate(' + idx + ',\'red\',' + i + ')" title="Toggle surrogate">S</span>' +
         '</td>';
     }
     html += '</tr>';
@@ -11905,12 +11909,17 @@ function renderSchedule() {
     var redActiveClass = f.alliance === 'red' ? ' active' : '';
     var blueActiveClass = f.alliance === 'blue' ? ' active' : '';
     var thead = document.createElement('thead');
+    // Column order matches FMS scoring-table convention: Blue alliance
+    // is on the left, Red on the right (FMS Manual: red drivers sit
+    // to the right of the scorekeeper, software is configured to
+    // appear that way visually). FMS Match Maker IMPORT format is
+    // Red-first — that's a separate spec and unchanged here.
     thead.innerHTML =
       '<tr>' +
       '<th>#</th>' +
       '<th>Time</th>' +
-      '<th class="filterable' + redActiveClass + '" onclick="addFilter(&apos;alliance&apos;,&apos;red&apos;)" title="Filter to Red Alliance">Red Alliance</th>' +
       '<th class="filterable' + blueActiveClass + '" onclick="addFilter(&apos;alliance&apos;,&apos;blue&apos;)" title="Filter to Blue Alliance">Blue Alliance</th>' +
+      '<th class="filterable' + redActiveClass + '" onclick="addFilter(&apos;alliance&apos;,&apos;red&apos;)" title="Filter to Red Alliance">Red Alliance</th>' +
       '</tr>';
     table.appendChild(thead);
 
@@ -11962,8 +11971,8 @@ function renderSchedule() {
         tr.innerHTML =
           '<td><span class="match-num">' + (entry.practiceMatch ? 'P' : 'Q') + entry.num + '</span></td>' +
           '<td><span class="match-time">' + minToTime(entry.startMin) + '</span></td>' +
-          '<td>' + redTeams + '</td>' +
-          '<td>' + blueTeams + '</td>';
+          '<td>' + blueTeams + '</td>' +
+          '<td>' + redTeams + '</td>';
 
         if (filterResult === 'hide') {
           tr.classList.add('filtered-out');
@@ -11992,15 +12001,18 @@ function renderSchedule() {
 function downloadCSV() {
   var scheduled = window._frcScheduled;
   if (!scheduled) { showApiStatus('No schedule to download', true); return; }
-  var rows = [['Type','Match','Day','Time','Red 1','Red 2','Red 3','Blue 1','Blue 2','Blue 3','Surrogates']];
+  // Column order matches FMS visual convention (Blue left, Red right).
+  // The csv_extract.py reader accepts both orders for backward
+  // compat with older exported files.
+  var rows = [['Type','Match','Day','Time','Blue 1','Blue 2','Blue 3','Red 1','Red 2','Red 3','Surrogates']];
   scheduled.forEach(function(day) {
     day.entries.forEach(function(e) {
       if (e.type === 'match') {
         var surrogates = [];
-        e.red.forEach(function(t,i){ if (e.redSurrogate && e.redSurrogate[i]) surrogates.push(t); });
         e.blue.forEach(function(t,i){ if (e.blueSurrogate && e.blueSurrogate[i]) surrogates.push(t); });
+        e.red.forEach(function(t,i){  if (e.redSurrogate  && e.redSurrogate[i])  surrogates.push(t); });
         rows.push([(day.isPracticeDay ? 'Practice' : 'Qualification'), (day.isPracticeDay ? 'P' : 'Q')+e.num, 'Day '+day.dayNum, minToTime(e.startMin),
-          e.red[0], e.red[1], e.red[2], e.blue[0], e.blue[1], e.blue[2],
+          e.blue[0], e.blue[1], e.blue[2], e.red[0], e.red[1], e.red[2],
           surrogates.join(';')]);
       }
     });
