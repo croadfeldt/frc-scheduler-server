@@ -5576,6 +5576,13 @@ function fullReset() {
   clearTimeout(_autoPopulateTimeout);
   _autoPopulateTimeout = null;
 
+  // Release the UI lock state. The DB lock (if any) stays in place
+  // — releasing it requires an explicit Unlock click on the locked
+  // schedule. _releaseUiLock posts a confidence-building reminder
+  // when the current user is leaving their own DB lock so they
+  // know it wasn't silently abandoned.
+  _releaseUiLock('reset');
+
   // Clear all schedule state
   _currentAbstractScheduleId = null;
   _currentAssignedScheduleId = null;
@@ -9122,6 +9129,15 @@ function switchEvent() {
 
 // Set the active event in UI state
 async function activateEvent(ev) {
+  // Switching events — release the UI lock from the previous event,
+  // if any. The DB lock on that event's schedule stays untouched;
+  // user navigates back to release it explicitly. The switch
+  // happens BEFORE we update _currentAssignedScheduleId so
+  // _releaseUiLock can name the previous schedule in its
+  // reminder message.
+  if (_currentEventId !== ev.id) {
+    _releaseUiLock('event-switch');
+  }
   _currentEventId = ev.id;
   _currentEventInfo = { id: ev.id, key: ev.key || '', name: ev.name || '', year: ev.year || '' };
   document.getElementById('eventYear').value = ev.year;
@@ -9352,6 +9368,33 @@ function applyLockState(locked, lockerInfo) {
     clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
     clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
   }
+}
+
+// Release the UI lock state WITHOUT touching the DB. Used when the
+// user navigates away from a schedule (reset, switch event) — we
+// stop showing the lock banner and re-enable the form, but the
+// DB lock persists. If the current user IS the locker of the
+// abandoned schedule, surface a status message so they know their
+// lock is still in place and tells them how to release it. The
+// schedule ID is captured BEFORE _currentAssignedScheduleId gets
+// cleared by the calling reset/switch flow, so the message can
+// name the specific schedule.
+function _releaseUiLock(reason) {
+  var info = window._frcLockedBy;
+  var wasLocked = !!window._frcLocked;
+  var schedId = _currentAssignedScheduleId;
+  // Are we leaving a DB lock that we own? If so, post a
+  // confidence-building reminder so the user knows their lock
+  // wasn't quietly abandoned.
+  if (wasLocked && info && schedId &&
+      _authUser && info.lockedByUserId === _authUser.uid) {
+    var msg = '🔒 Your lock on schedule #' + schedId +
+              ' remains in the database. ' +
+              'Reload that schedule and click Unlock to release it.';
+    // Use a longer-lived status so the user has time to read it.
+    showApiStatus(msg);
+  }
+  applyLockState(false, null);
 }
 
 async function reloadEvent() {

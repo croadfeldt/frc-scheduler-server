@@ -242,6 +242,18 @@
     align-items: center;
     gap: 0.3rem;
   }
+  /* Per-team chip in the legend — swatch + team number, slightly
+     more visual weight than the static legend items so users see
+     "ah, that's MY team's color" at a glance. */
+  .agenda-legend-team {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-right: 0.45rem;
+    font-weight: 600;
+    color: var(--text);
+    font-size: 0.7rem;
+  }
   .agenda-legend-swatch {
     display: inline-block;
     width: 10px;
@@ -336,22 +348,33 @@
     text-shadow: none;
     font-weight: 500;
   }
-  /* Selected-team marker — vertical green strips on the match
-     segment showing where the team is competing. Positioned
-     absolutely inside the agenda-bar so they overlay all
-     underlying segments. Use my-team-bg color for consistency
-     with the table row highlighting. */
+  /* Selected-team marker — vertical strips on the match segment
+     showing where the team is competing. Positioned absolutely
+     inside the agenda-bar so they overlay all underlying segments.
+     Color is set inline per-team via _teamColor() so users with
+     multiple teams selected can distinguish their teams' matches
+     at a glance. The outline + drop-shadow combo ensures the
+     strip stands out against any background segment color
+     (qual blue, practice green, break orange, idle hatched). */
   .agenda-team-mark {
     position: absolute;
     top: 0;
     bottom: 0;
-    background: var(--my-team-bg);
-    opacity: 0.85;
     pointer-events: none;
     border-radius: 1px;
-    /* Tiny outline so the mark stands out even when overlapping
-       a same-color match segment. */
-    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);
+    /* Dark outline for contrast against any segment background.
+       The outer drop-shadow adds a subtle halo so the mark
+       reads as "above" the segments rather than blending in. */
+    box-shadow:
+      inset 0 0 0 1px rgba(0,0,0,0.55),
+      0 0 3px rgba(0,0,0,0.35);
+  }
+  /* Light theme — outline goes lighter on light background but
+     keeps the contrast against bright team colors. */
+  html[data-theme="light"] .agenda-team-mark {
+    box-shadow:
+      inset 0 0 0 1px rgba(0,0,0,0.35),
+      0 0 2px rgba(0,0,0,0.18);
   }
 
   /* Time-progress overlays. Three states per day, exclusive:
@@ -1349,6 +1372,51 @@ function syncThemeButton() {
   }
 }
 
+// ── Selected-team color palette ────────────────────────────────────
+// Six hand-picked colors for distinguishing selected teams on the
+// agenda-fit bars. Order matches selection order in STATE.myTeams,
+// which is a Set (insertion-ordered in modern JS). Beyond 6 teams
+// the palette wraps — visually noisy at that point regardless, and
+// the realistic "watch your team plus your alliance partners" use
+// case caps around 4-5.
+//
+// Color picks avoid existing UI hues:
+//   - blue   (#0969da)  qual segments
+//   - green  (#5daf78)  practice segments
+//   - orange (#ec8a3f)  break segments
+//   - red    (#d1242f)  "now" line
+// Each pair has at least 30° hue separation; all are bright enough
+// to read as a 2-4px wide strip on either light or dark theme.
+var TEAM_COLORS = [
+  '#e63ec1',  // 1: bright magenta
+  '#22c5d6',  // 2: cyan
+  '#f4c430',  // 3: yellow-gold
+  '#9aef3d',  // 4: lime green (lighter than practice)
+  '#bd92f0',  // 5: light purple
+  '#ff8b73',  // 6: coral pink
+];
+
+// Look up a color by team's selection-order position. Returns
+// the palette color for index 0..5, then wraps for 6+. Returns
+// fallback gray for unknown teams (should be unreachable in
+// normal flow but keeps the function total).
+function _teamColor(team) {
+  if (!STATE.myTeams || STATE.myTeams.size === 0) return '#888';
+  var idx = -1, i = 0;
+  // Set iteration is insertion-ordered. Walk to find this team's
+  // position; coerce both sides for cross-type safety.
+  var t = team;
+  var tn = Number(team);
+  var ts = String(team);
+  STATE.myTeams.forEach(function(v) {
+    if (idx >= 0) return;
+    if (v === t || v === tn || v === ts || String(v) === ts) idx = i;
+    i++;
+  });
+  if (idx < 0) return '#888';
+  return TEAM_COLORS[idx % TEAM_COLORS.length];
+}
+
 // ── State ──────────────────────────────────────────────────────────────
 const STATE = {
   schedule:   null,       // { id, matches, day_config, event, num_teams, ... }
@@ -2310,11 +2378,36 @@ function renderAgendaFitView() {
   }
   panel.style.display = '';
 
-  // Selected-team legend visibility — only shown when there's
-  // actually a selection to indicate.
+  // Selected-team legend — render per-team swatches with the team
+  // number inline. Each swatch uses _teamColor() so the legend
+  // matches the bar marks. When more than 6 teams are selected,
+  // colors wrap (per palette length); the swatch above 6 still
+  // renders but reuses the color of the 1st team.
   var hasTeamSel = STATE.myTeams && STATE.myTeams.size > 0;
   var legendTeam = document.getElementById('agendaLegendTeam');
-  if (legendTeam) legendTeam.style.display = hasTeamSel ? '' : 'none';
+  if (legendTeam) {
+    if (hasTeamSel) {
+      var teamSwatches = '';
+      var ti = 0;
+      STATE.myTeams.forEach(function(t) {
+        var c = _teamColor(t);
+        var wrapNote = (ti >= TEAM_COLORS.length) ? ' (color reused)' : '';
+        teamSwatches +=
+          '<span class="agenda-legend-team" title="Team ' + t + wrapNote + '">' +
+            '<span class="agenda-legend-swatch" style="background:' + c + ';"></span>' +
+            String(t) +
+          '</span>';
+        ti++;
+      });
+      legendTeam.innerHTML =
+        '<span style="margin-right:0.3rem;color:var(--text-muted);">Teams:</span>' +
+        teamSwatches;
+      legendTeam.style.display = '';
+    } else {
+      legendTeam.innerHTML = '';
+      legendTeam.style.display = 'none';
+    }
+  }
 
   // Build per-day segments. A "match run" is a contiguous block of
   // match entries with no breaks between them; once a break appears,
@@ -2523,6 +2616,11 @@ function renderAgendaFitView() {
     // team-membership check. Coerce both sides to Number before
     // comparing — match data carries numbers, but URL/cell-derived
     // selections occasionally arrive as strings on some load paths.
+    // Each strip's color comes from _teamColor() so multiple
+    // selected teams differentiate visually. When more than one
+    // selected team plays in the SAME match, the strip uses the
+    // first (lowest-selection-index) team's color and the tooltip
+    // lists all selected teams for that match.
     var teamMarksHtml = '';
     if (hasTeamSel) {
       var sel = STATE.myTeams;
@@ -2544,11 +2642,29 @@ function renderAgendaFitView() {
         var leftPct  = ((m.startMin - d.start) / dayDur) * 100;
         var widthPct = ((m.endMin - m.startMin) / dayDur) * 100;
         var which = matchTeams.filter(selHas);
+        // Pick the color of the team with the lowest selection
+        // index — gives visual priority to the first-selected
+        // team. The tooltip names all selected teams in the
+        // match so the multi-team info isn't lost.
+        var primary = which[0];
+        var primaryIdx = Infinity;
+        var seli = 0;
+        sel.forEach(function(v) {
+          which.forEach(function(t) {
+            if (v === t || String(v) === String(t)) {
+              if (seli < primaryIdx) { primaryIdx = seli; primary = t; }
+            }
+          });
+          seli++;
+        });
+        var color = _teamColor(primary);
         var tipT = (m.isPractice ? 'P' : 'Q') + m.matchNum + ' — ' +
                    fmtT(m.startMin) + '–' + fmtT(m.endMin) +
                    '\nSelected team' + (which.length > 1 ? 's' : '') + ': ' + which.join(', ');
         teamMarksHtml += '<div class="agenda-team-mark" ' +
-                        'style="left:' + leftPct.toFixed(2) + '%;width:' + Math.max(widthPct, 0.4).toFixed(2) + '%;" ' +
+                        'style="left:' + leftPct.toFixed(2) + '%;' +
+                                'width:' + Math.max(widthPct, 0.4).toFixed(2) + '%;' +
+                                'background:' + color + ';" ' +
                         'title="' + tipT.replace(/"/g, '&quot;') + '"></div>';
       });
     }
