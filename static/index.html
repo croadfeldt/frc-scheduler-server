@@ -986,10 +986,12 @@
     opacity: 0.4;
     pointer-events: none;
   }
-  /* Subtle banner so users always know the lock is on */
-  body.frc-locked::before {
-    content: "\1F512  Schedule locked \u2014 edits & saves disabled. Click \u201CUnlock\u201D in the event bar to resume editing.";
-    display: block;
+  /* Lock banner — JS owns the textContent, CSS only handles
+     visibility + styling. body.frc-locked toggles display.
+     Sticky so it stays at the top of the viewport while scrolling
+     through long match tables. */
+  #frcLockBanner {
+    display: none;
     background: var(--amber);
     color: #1a1206;
     text-align: center;
@@ -1002,6 +1004,7 @@
     top: 0;
     z-index: 100;
   }
+  body.frc-locked #frcLockBanner { display: block; }
 
   /* Modal */
   .modal-overlay {
@@ -1456,6 +1459,13 @@
 </style>
 </head>
 <body>
+<!-- Lock banner. Real DOM element rather than a CSS pseudo so we
+     can include the locker's name without fighting CSS escape
+     syntax (CSS uses \HHHH unicode escapes, not the JS \uHHHH
+     form, and JSON.stringify would produce JS-style escapes that
+     render as literal `u2014` in CSS). Hidden by default;
+     body.frc-locked unhides it. JS owns the message text. -->
+<div id="frcLockBanner" role="status" aria-live="polite"></div>
 <!-- Processing overlay — shown during multi-step auto operations -->
 <div class="processing-overlay" id="processingOverlay" onclick="if(event.target===this)_overlay.hide();">
   <div class="processing-card">
@@ -3875,6 +3885,29 @@ function renderDiversityCard(card, serverData) {
     sectionsHtml =
       '<div class="dr-section">' +
       '  <h3 style="margin-bottom:0.4rem;">Pair repeat distribution</h3>' +
+      // Inline help: not every reader knows what a "pair" is in
+      // round-robin scheduler terminology. Detailed body collapsed
+      // into <details> so it doesn't clutter the dense stat panel.
+      '  <details class="dr-help" style="margin-bottom:0.5rem;">' +
+      '    <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;">' +
+      '      What does this measure?' +
+      '    </summary>' +
+      '    <div style="font-size:0.75rem;color:var(--text-muted);line-height:1.5;margin-top:0.4rem;">' +
+      '      A <strong>pair</strong> is any two teams in the event. With <em>N</em> teams there are ' +
+      '      <em>N\u00d7(N\u22121)/2</em> distinct pairs. ' +
+      '      For a 36-team event that\'s 630 pairs.' +
+      '      <br><br>' +
+      '      <strong>Partner repeats</strong> counts, for each pair, how many times those two teams ' +
+      '      appear on the same alliance (red\u2013red or blue\u2013blue). ' +
+      '      <strong>Opponent repeats</strong> counts how many times they face each other across the field.' +
+      '      <br><br>' +
+      '      The bar shows the distribution: how many pairs partnered (or faced) 0 times, 1 time, 2 times, etc. ' +
+      '      A perfect schedule keeps every pair as close to the <em>theoretical floor</em> ' +
+      '      (the minimum possible given the math) as the constraints allow. ' +
+      '      Bars heavy on blue (at-floor) are great; amber or red segments indicate ' +
+      '      pairs that meet more often than necessary.' +
+      '    </div>' +
+      '  </details>' +
       '  <div class="dr-stacked-row">' +
       '    <span class="dr-stacked-label">Partner repeats</span>' +
            stackedBar(d.partner.histogram, d.partner.floor) +
@@ -9279,31 +9312,37 @@ function applyLockState(locked, lockerInfo) {
   window._frcLocked = !!locked;
   window._frcLockedBy = lockerInfo || null;
   // body class drives the global CSS — disabled buttons, frozen
-  // inputs, and the top-of-page banner.
+  // inputs, and the top-of-page banner visibility.
   document.body.classList.toggle('frc-locked', !!locked);
-  // Update banner text with locker name when available. The :before
-  // pseudo-element reads from --frc-lock-banner CSS variable so
-  // we can swap the message in without rewriting the CSS rule.
-  var bannerText;
-  if (locked) {
-    var who = lockerInfo && lockerInfo.lockedByName ? ' by ' + lockerInfo.lockedByName : '';
-    bannerText = '\u{1f512}  Schedule locked' + who + ' \u2014 click "Unlock" in the event bar to resume editing.';
-  } else {
-    bannerText = '';
+  // Banner text — set as textContent on the real DOM element so JS
+  // string escapes work normally and the locker's name flows through
+  // without CSS-escape gymnastics. CSS controls visibility via the
+  // body.frc-locked class; this just keeps the message current.
+  // Literal Unicode characters (lock emoji, em dash) used inline
+  // rather than \u escape sequences to be immune to any build step
+  // or string-processing path that might fail to interpret escapes.
+  var bannerEl = document.getElementById('frcLockBanner');
+  if (bannerEl) {
+    if (locked) {
+      var who = lockerInfo && lockerInfo.lockedByName ? ' by ' + lockerInfo.lockedByName : '';
+      bannerEl.textContent = '🔒  Schedule locked' + who +
+        ' — click "Unlock" in the event bar to resume editing.';
+    } else {
+      bannerEl.textContent = '';
+    }
   }
-  document.documentElement.style.setProperty('--frc-lock-banner', JSON.stringify(bannerText));
   // Button visual state
   var btn = document.getElementById('btnLockSchedule');
   if (btn) {
     if (locked) {
       btn.classList.add('is-locked');
-      btn.innerHTML = '\u{1f512} Unlock';
+      btn.innerHTML = '🔒 Unlock';
       btn.title = lockerInfo && lockerInfo.lockedByName
-        ? 'Locked by ' + lockerInfo.lockedByName + ' \u2014 click to unlock'
-        : 'Schedule is locked \u2014 click to unlock';
+        ? 'Locked by ' + lockerInfo.lockedByName + ' — click to unlock'
+        : 'Schedule is locked — click to unlock';
     } else {
       btn.classList.remove('is-locked');
-      btn.innerHTML = '\u{1f513} Lock';
+      btn.innerHTML = '🔓 Lock';
       btn.title = 'Lock schedule against any edits, generates, or saves';
     }
   }

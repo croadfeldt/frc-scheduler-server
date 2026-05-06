@@ -5,7 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>FRC Match Schedule</title>
 <style>
-  /* ── Design tokens (overridable by branding) ───────────────────────────── */
+  /* ── Design tokens ─────────────────────────────────────────────
+     Default = light theme. Manual override via the
+     [data-theme="dark"] attribute on <html>; user toggle persists in
+     localStorage. When no manual choice has been made, fall back
+     to the OS preference via prefers-color-scheme. */
   :root {
     --primary: #0969da;
     --primary-dark: #0858b8;
@@ -24,8 +28,29 @@
     --break-text: #856404;
     --shadow: 0 1px 3px rgba(0,0,0,0.06);
   }
+  /* Dark vars — applied either via manual data-theme or OS preference.
+     Sharing the same property list via a mixin would be cleanest in
+     a build pipeline; without one, we declare the dark values twice. */
+  html[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-alt: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --red-alliance: #f85149;
+    --blue-alliance: #58a6ff;
+    --primary: #58a6ff;
+    --primary-dark: #1f6feb;
+    --shadow: 0 1px 3px rgba(0,0,0,0.4);
+    --break-bg: #2d2a1a;
+    --break-text: #d4a72c;
+    --my-team-row: rgba(93,175,120,0.18);
+  }
   @media (prefers-color-scheme: dark) {
-    :root {
+    /* OS-default dark only when the user hasn't made a choice yet
+       (data-theme attribute not present). Once they toggle, the
+       data-theme attribute always wins. */
+    html:not([data-theme]) {
       --bg: #0d1117;
       --bg-alt: #161b22;
       --border: #30363d;
@@ -181,6 +206,138 @@
   @keyframes countdown-pulse {
     from { opacity: 0.85; }
     to   { opacity: 1; transform: scale(1.02); }
+  }
+
+  /* ── Agenda fit (timeline preview above the match table) ──────────── */
+  .agenda-fit-panel {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    margin-bottom: 1rem;
+    padding: 0.85rem 1.25rem;
+  }
+  .agenda-fit-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    margin-bottom: 0.6rem;
+  }
+  .agenda-fit-title {
+    font-weight: 600;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+  .agenda-fit-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.85rem;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-left: auto;
+  }
+  .agenda-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .agenda-legend-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+  }
+  .agenda-legend-idle {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        rgba(127,127,127,0.18),
+        rgba(127,127,127,0.18) 3px,
+        rgba(127,127,127,0.32) 3px,
+        rgba(127,127,127,0.32) 6px
+      );
+  }
+  .agenda-day-row { margin-bottom: 0.5rem; }
+  .agenda-day-row:last-child { margin-bottom: 0; }
+  .agenda-day-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+    font-size: 0.78rem;
+  }
+  .agenda-day-head .day-label {
+    font-weight: 600;
+    color: var(--primary);
+  }
+  .agenda-day-head .day-times,
+  .agenda-day-head .day-summary {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+  }
+  .agenda-day-head .day-summary { margin-left: auto; }
+  .agenda-bar {
+    position: relative;
+    display: flex;
+    height: 36px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .agenda-seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.45);
+    font-size: 0.68rem;
+    font-weight: 600;
+    min-width: 0;
+    overflow: hidden;
+    cursor: default;
+    transition: filter 0.15s;
+  }
+  .agenda-seg:hover { filter: brightness(1.1); }
+  .agenda-seg-matches { cursor: pointer; }
+  .agenda-seg-break {
+    color: #2a1808;
+    text-shadow: none;
+  }
+  /* Light-theme break tone — saturated orange in the editor reads
+     as too aggressive on the lighter view-page palette; soften. */
+  html[data-theme="light"] .agenda-seg-break { background: #f4b366 !important; }
+  /* Idle / unallocated time — diagonal hatch so it visually reads
+     as "empty / available" rather than a real scheduled slot. */
+  .agenda-seg-idle {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        rgba(127,127,127,0.10),
+        rgba(127,127,127,0.10) 6px,
+        rgba(127,127,127,0.20) 6px,
+        rgba(127,127,127,0.20) 12px
+      );
+    color: var(--text-muted);
+    text-shadow: none;
+    font-weight: 500;
+  }
+  /* Selected-team marker — vertical green strips on the match
+     segment showing where the team is competing. Positioned
+     absolutely inside the agenda-bar so they overlay all
+     underlying segments. Use my-team-bg color for consistency
+     with the table row highlighting. */
+  .agenda-team-mark {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: var(--my-team-bg);
+    opacity: 0.85;
+    pointer-events: none;
+    border-radius: 1px;
+    /* Tiny outline so the mark stands out even when overlapping
+       a same-color match segment. */
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);
   }
 
   /* ── Match table ──────────────────────────────────────────────────────── */
@@ -749,6 +906,29 @@
     tr.break-row td { background: #fffbe6 !important; }
   }
 </style>
+<script>
+  // Theme bootstrap — runs before <body> renders to avoid a flash
+  // of the wrong theme. Reads localStorage; falls back to OS
+  // preference only when the user hasn't made a choice. Light is
+  // the default per product spec, so no-preference + non-dark-OS
+  // means data-theme="light" gets set explicitly to override the
+  // prefers-color-scheme media query.
+  (function() {
+    try {
+      var saved = localStorage.getItem('frc_view_theme'); // 'light' | 'dark' | null
+      if (saved === 'dark' || saved === 'light') {
+        document.documentElement.setAttribute('data-theme', saved);
+      } else {
+        // No saved preference — default to light. Set the attribute
+        // explicitly so the prefers-color-scheme dark fallback
+        // doesn't apply on dark-mode-OS systems.
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    } catch(_) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  })();
+</script>
 </head>
 <body>
 
@@ -824,6 +1004,26 @@
       </div>
     </div>
 
+    <!-- Agenda fit panel — per-day timeline showing match runs,
+         breaks, and idle time. Mirrors the editor's panel. When a
+         team is selected (myTeams), the bar highlights the timeslots
+         where that team competes. Hidden when day_config has no
+         day windows (e.g. live-only events fetched fresh from TBA
+         without an editor-saved schedule). -->
+    <div class="agenda-fit-panel no-print" id="agendaFitPanel" style="display:none;">
+      <div class="agenda-fit-header">
+        <span class="agenda-fit-title">Agenda fit</span>
+        <span class="agenda-fit-legend">
+          <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:var(--blue-alliance);"></span>Matches</span>
+          <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:var(--secondary);"></span>Practice</span>
+          <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:#ec8a3f;"></span>Breaks</span>
+          <span class="agenda-legend-item"><span class="agenda-legend-swatch agenda-legend-idle"></span>Unallocated</span>
+          <span class="agenda-legend-item" id="agendaLegendTeam" style="display:none;"><span class="agenda-legend-swatch" style="background:var(--my-team-bg);"></span>Selected team</span>
+        </span>
+      </div>
+      <div id="agendaFitContainer"></div>
+    </div>
+
     <!-- Match table -->
     <div class="match-table-wrap">
       <div class="match-table-header">
@@ -833,6 +1033,17 @@
              row as the table title. Auto-hides on print via no-print
              class. flex:1 spacer pushes Share to the right edge. -->
         <span class="match-table-actions no-print">
+          <!-- Day/night theme toggle. Default light; persists per-user
+               in localStorage. Inline in the toolbar so it's discoverable
+               but unobtrusive. Icon + label flips on toggle. Initial
+               state is set by the head-of-document script that runs
+               before render to avoid a flash of wrong theme. -->
+          <button class="btn btn-secondary" id="btnThemeToggle"
+                  onclick="toggleTheme()"
+                  title="Switch between light and dark theme">
+            <span id="themeIcon">&#9728;</span>
+            <span id="themeLabel">Light</span>
+          </button>
           <button class="btn btn-secondary" onclick="openExportModal()" title="Print, save as PDF, or download as XLSX/CSV/JSON/FMS">&#x2913; Print / Export&hellip;</button>
           <button class="btn btn-secondary" onclick="openShareModal()" title="Show QR code">&#128241; QR</button>
         </span>
@@ -1054,6 +1265,39 @@
 <script>
 "use strict";
 
+// ── Theme toggle ───────────────────────────────────────────────────────
+// Manual day/night switch. Persists in localStorage as 'frc_view_theme'.
+// The bootstrap script in <head> sets the initial data-theme; this
+// function flips it on user click and syncs the button label.
+function toggleTheme() {
+  var current = document.documentElement.getAttribute('data-theme') || 'light';
+  var next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('frc_view_theme', next); } catch(_) {}
+  syncThemeButton();
+}
+
+// Update the toolbar button to reflect the current theme. The icon
+// shows what you'll switch TO when clicked — sun = "switch to light",
+// moon = "switch to dark" — same affordance as most apps. Called
+// from page init AND from toggleTheme so the label stays in sync.
+function syncThemeButton() {
+  var btn = document.getElementById('btnThemeToggle');
+  if (!btn) return;
+  var current = document.documentElement.getAttribute('data-theme') || 'light';
+  var iconEl  = document.getElementById('themeIcon');
+  var labelEl = document.getElementById('themeLabel');
+  if (current === 'dark') {
+    if (iconEl)  iconEl.innerHTML  = '\u2600';      // sun (click to go light)
+    if (labelEl) labelEl.textContent = 'Light';
+    btn.title = 'Switch to light theme';
+  } else {
+    if (iconEl)  iconEl.innerHTML  = '\u263d';      // moon (click to go dark)
+    if (labelEl) labelEl.textContent = 'Dark';
+    btn.title = 'Switch to dark theme';
+  }
+}
+
 // ── State ──────────────────────────────────────────────────────────────
 const STATE = {
   schedule:   null,       // { id, matches, day_config, event, num_teams, ... }
@@ -1081,6 +1325,10 @@ const PARAMS = new URLSearchParams(window.location.search);
 window.addEventListener('DOMContentLoaded', boot);
 
 async function boot() {
+  // Sync the theme toggle button to match the bootstrap-applied
+  // theme. (The actual theme was applied in the head script before
+  // first paint to avoid flash.)
+  syncThemeButton();
   // Apply URL-based branding overrides immediately so the page paints right
   applyUrlBranding();
 
@@ -1933,6 +2181,317 @@ function rerender() {
       const el = document.querySelector('tr.now-playing');
       if (el) el.scrollIntoView({behavior: 'smooth', block: 'center'});
     }, 100);
+  }
+
+  // Render the agenda fit panel above the table. Cheap enough to
+  // re-run on every rerender (selection changes, live data changes,
+  // etc.) so the team-marks stay in sync.
+  renderAgendaFitView();
+}
+
+// ── Agenda fit panel renderer ─────────────────────────────────────────
+// Walks STATE.computed and produces per-day timeline bars. Each bar
+// shows match runs (qual/practice colored), breaks (orange), and
+// idle gaps (hatched). When teams are selected (STATE.myTeams),
+// vertical green marks overlay the bar at each timeslot where any
+// of the selected teams competes — so users can see at a glance
+// when their team plays without scanning the whole table.
+//
+// The algorithm mirrors the editor's renderAgendaBlocks (index.html)
+// but reads from STATE.computed instead of _frcScheduled. Both end
+// up with the same shape: per-day list of segments sized by wall
+// clock duration. Idle threshold is 1 minute, same as editor.
+function renderAgendaFitView() {
+  var panel     = document.getElementById('agendaFitPanel');
+  var container = document.getElementById('agendaFitContainer');
+  if (!panel || !container) return;
+  var computed = STATE.computed || [];
+  if (!computed.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  // Group entries by day. day-divider entries delimit each day with
+  // a start/end window; matches/breaks within those bounds belong
+  // to that day. STATE.computed always emits a divider before its
+  // matches (per computeMatchTimes) so this loop is deterministic.
+  var days = [];
+  var current = null;
+  for (var i = 0; i < computed.length; i++) {
+    var e = computed[i];
+    if (e.type === 'day-divider') {
+      current = {
+        dayNum: e.dayNum,
+        label: e.label || ('Day ' + e.dayNum),
+        start: e.start,
+        end:   e.end,
+        isPractice: !!e.isPractice,
+        entries: [],
+      };
+      days.push(current);
+    } else if (current) {
+      current.entries.push(e);
+    }
+  }
+  if (!days.length || days.every(function(d) { return d.entries.length === 0; })) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = '';
+
+  // Selected-team legend visibility — only shown when there's
+  // actually a selection to indicate.
+  var hasTeamSel = STATE.myTeams && STATE.myTeams.size > 0;
+  var legendTeam = document.getElementById('agendaLegendTeam');
+  if (legendTeam) legendTeam.style.display = hasTeamSel ? '' : 'none';
+
+  // Build per-day segments. A "match run" is a contiguous block of
+  // match entries with no breaks between them; once a break appears,
+  // we flush the current run as a single 'matches' segment.
+  function buildSegments(day) {
+    var segs = [];
+    var run  = null;
+    function flushRun(slotEnd) {
+      if (!run) return;
+      var lastEnd = run.lastEnd != null ? run.lastEnd : run.start;
+      var segEnd  = slotEnd != null ? slotEnd : lastEnd;
+      segs.push({
+        kind: 'matches',
+        start: run.start, end: segEnd,
+        matchEnd: lastEnd,
+        matchCount: run.matchCount,
+        committed: run.committed,
+        firstMatchNum: run.firstMatchNum,
+        isPractice: run.isPractice,
+        // Match numbers in this segment so we can find them later
+        // when overlaying team marks. Stored sparingly — just enough
+        // to look up the entries that belong to this run.
+        entries: run.entries.slice(),
+      });
+      run = null;
+    }
+    day.entries.forEach(function(entry) {
+      if (entry.type === 'match') {
+        if (!run) {
+          run = {
+            start: entry.startMin,
+            committed: 0,
+            matchCount: 0,
+            firstMatchNum: entry.matchNum,
+            lastEnd: entry.endMin,
+            isPractice: !!entry.isPractice,
+            entries: [],
+          };
+        }
+        run.committed += (entry.endMin - entry.startMin);
+        run.matchCount++;
+        run.lastEnd = entry.endMin;
+        run.entries.push(entry);
+      } else if (entry.type === 'break') {
+        // Only flush + emit a break segment for non-trivial breaks.
+        // Threshold matches the editor's AGENDA_BREAK_THRESHOLD.
+        var bdur = entry.end - entry.start;
+        if (bdur >= 5) {
+          flushRun(entry.start);
+          segs.push({
+            kind: 'break',
+            start: entry.start, end: entry.end,
+            label: entry.name || 'Break',
+            duration: bdur,
+          });
+        }
+      }
+    });
+    flushRun(day.end);
+
+    // Insert idle segments in any gaps. Same as editor: leading,
+    // trailing, and between-segment gaps >= 1 min.
+    var IDLE_THRESHOLD = 1;
+    if (segs.length === 0) {
+      // No matches scheduled this day — show the whole window as idle.
+      if (day.end - day.start >= IDLE_THRESHOLD) {
+        segs.push({ kind: 'idle', start: day.start, end: day.end });
+      }
+      return segs;
+    }
+    segs.sort(function(a, b) { return a.start - b.start; });
+    var withIdle = [];
+    if (segs[0].start - day.start >= IDLE_THRESHOLD) {
+      withIdle.push({ kind: 'idle', start: day.start, end: segs[0].start });
+    }
+    withIdle.push(segs[0]);
+    for (var i = 1; i < segs.length; i++) {
+      if (segs[i].start - segs[i-1].end >= IDLE_THRESHOLD) {
+        withIdle.push({ kind: 'idle', start: segs[i-1].end, end: segs[i].start });
+      }
+      withIdle.push(segs[i]);
+    }
+    var last = withIdle[withIdle.length - 1];
+    if (day.end - last.end >= IDLE_THRESHOLD) {
+      withIdle.push({ kind: 'idle', start: last.end, end: day.end });
+    }
+    return withIdle;
+  }
+
+  // Format minutes-since-midnight for display. Use the page's
+  // existing minToTime12 helper for consistency with the table.
+  function fmtT(min) {
+    return (typeof minToTime12 === 'function') ? minToTime12(min) : (Math.floor(min/60) + ':' + String(Math.floor(min%60)).padStart(2,'0'));
+  }
+
+  // Render each day. Width math: every segment width = duration / dayDur.
+  // Match segments split into committed + idle tail when they don't
+  // fill their available window (e.g. early end-of-day). Team-mark
+  // overlays go on top via an absolute-positioned div per match the
+  // selected team plays in.
+  var html = '';
+  days.forEach(function(d) {
+    var dayDur = d.end - d.start;
+    if (dayDur <= 0) return;
+    var segments = buildSegments(d);
+    var totalMatches = segments.reduce(function(s, seg) {
+      return s + (seg.matchCount || 0);
+    }, 0);
+    var totalCommitted = segments.reduce(function(s, seg) {
+      return s + (seg.committed || 0);
+    }, 0);
+    var avgCt = totalMatches > 0 ? (totalCommitted / totalMatches) : 0;
+
+    var segHtml = segments.map(function(seg) {
+      var segDur = seg.end - seg.start;
+      var widthPct = (segDur / dayDur) * 100;
+      if (seg.kind === 'idle') {
+        var idur = Math.round(segDur);
+        var inline = segDur >= 25 ? (idur + ' min idle')
+                                  : (segDur >= 10 ? (idur + 'm') : '');
+        var tipI = 'Unallocated — ' + fmtT(seg.start) + '–' + fmtT(seg.end) +
+                   ' (' + idur + ' min)';
+        return '<div class="agenda-seg agenda-seg-idle" ' +
+               'style="width:' + widthPct.toFixed(2) + '%;" ' +
+               'title="' + tipI.replace(/"/g, '&quot;') + '">' +
+               inline + '</div>';
+      }
+      if (seg.kind === 'break') {
+        var inline2 = segDur >= 30 ? seg.label : (segDur >= 12 ? '\u23F8' : '');
+        var tipB = (seg.label || 'Break') + ' — ' +
+                   fmtT(seg.start) + '–' + fmtT(seg.end) +
+                   ' (' + Math.round(segDur) + ' min)';
+        return '<div class="agenda-seg agenda-seg-break" ' +
+               'style="width:' + widthPct.toFixed(2) + '%;background:#ec8a3f;" ' +
+               'title="' + tipB.replace(/"/g, '&quot;') + '">' +
+               inline2 + '</div>';
+      }
+      // matches segment
+      var segColor = seg.isPractice ? 'var(--secondary)' : 'var(--blue-alliance)';
+      var line1 = seg.matchCount + ' match' + (seg.matchCount !== 1 ? 'es' : '');
+      var idleTailMin = Math.max(0, seg.end - seg.matchEnd);
+      var tipM = (seg.isPractice ? 'Practice' : 'Qualification') +
+                 ' — ' + fmtT(seg.start) + '–' + fmtT(seg.end) +
+                 '\n' + line1 +
+                 (seg.firstMatchNum ? ' (starting ' + (seg.isPractice ? 'P' : 'Q') + seg.firstMatchNum + ')' : '') +
+                 '\n' + Math.round(seg.committed) + ' min scheduled / ' +
+                 Math.round(seg.end - seg.start) + ' min available' +
+                 (idleTailMin >= 1 ? '\nIdle tail: ' + Math.round(idleTailMin) + ' min' : '');
+      var inner;
+      if (idleTailMin >= 1 && segDur > 0) {
+        var commPct = ((seg.matchEnd - seg.start) / segDur) * 100;
+        var tailPct = 100 - commPct;
+        inner =
+          '<div style="display:flex;align-items:center;justify-content:center;height:100%;width:' + commPct.toFixed(2) + '%;background:' + segColor + ';">' +
+            (widthPct >= 8 ? line1 : '') +
+          '</div>' +
+          '<div style="height:100%;width:' + tailPct.toFixed(2) + '%;background:' +
+            (seg.isPractice ? 'rgba(93,175,120,0.25)' : 'rgba(9,105,218,0.25)') +
+            ';background-image:repeating-linear-gradient(135deg,rgba(255,255,255,0.10),rgba(255,255,255,0.10) 5px,rgba(255,255,255,0.22) 5px,rgba(255,255,255,0.22) 10px);"></div>';
+      } else {
+        inner = (widthPct >= 8 ? line1 : '');
+      }
+      var bg = (idleTailMin >= 1) ? 'transparent' : segColor;
+      var click = seg.firstMatchNum
+        ? 'onclick="agendaScrollToMatch(' + seg.firstMatchNum + (seg.isPractice ? ',true' : ',false') + ')"'
+        : '';
+      return '<div class="agenda-seg agenda-seg-matches" ' +
+             'style="width:' + widthPct.toFixed(2) + '%;background:' + bg + ';display:flex;flex-direction:row;padding:0;" ' +
+             'title="' + tipM.replace(/"/g, '&quot;') + '" ' + click + '>' +
+             inner + '</div>';
+    }).join('');
+
+    // Team marks — vertical strips overlaid on the bar at each
+    // timeslot where any selected team plays. Computed from
+    // day.entries (all match entries for this day) filtered by
+    // the team-membership check.
+    var teamMarksHtml = '';
+    if (hasTeamSel) {
+      var matches = day.entries.filter(function(e) { return e.type === 'match'; });
+      matches.forEach(function(m) {
+        var matchTeams = (m.red || []).concat(m.blue || []);
+        var hit = matchTeams.some(function(t) { return STATE.myTeams.has(t); });
+        if (!hit) return;
+        var leftPct  = ((m.startMin - d.start) / dayDur) * 100;
+        var widthPct = ((m.endMin - m.startMin) / dayDur) * 100;
+        // Tooltip says which selected team(s) are in this match.
+        var which = matchTeams.filter(function(t) { return STATE.myTeams.has(t); });
+        var tipT = (m.isPractice ? 'P' : 'Q') + m.matchNum + ' — ' +
+                   fmtT(m.startMin) + '–' + fmtT(m.endMin) +
+                   '\nSelected team' + (which.length > 1 ? 's' : '') + ': ' + which.join(', ');
+        teamMarksHtml += '<div class="agenda-team-mark" ' +
+                        'style="left:' + leftPct.toFixed(2) + '%;width:' + Math.max(widthPct, 0.4).toFixed(2) + '%;" ' +
+                        'title="' + tipT.replace(/"/g, '&quot;') + '"></div>';
+      });
+    }
+
+    var dayDateMatch = (d.label || '').match(/·\s*(.+?)$/);
+    var dayHead =
+      '<div class="agenda-day-head">' +
+        '<span class="day-label">' + escapeHtml(d.label) + '</span>' +
+        '<span class="day-times">' + fmtT(d.start) + '–' + fmtT(d.end) + '</span>' +
+        '<span class="day-summary">' +
+          '<strong>' + totalMatches + '</strong> match' + (totalMatches !== 1 ? 'es' : '') +
+          (avgCt > 0 ? ' · <strong>' + avgCt.toFixed(1) + '</strong> min avg' : '') +
+        '</span>' +
+      '</div>';
+
+    html +=
+      '<div class="agenda-day-row">' +
+        dayHead +
+        '<div class="agenda-bar">' +
+          segHtml +
+          teamMarksHtml +
+        '</div>' +
+      '</div>';
+  });
+
+  container.innerHTML = html;
+}
+
+// Click handler from agenda match segments — scrolls the table to
+// the corresponding match row. Practice matches use Pn instead of Qn
+// in the row id, hence the second arg.
+function agendaScrollToMatch(matchNum, isPractice) {
+  // The match table doesn't tag rows with explicit IDs; find by
+  // walking computed entries to the matching DOM index.
+  var rows = document.querySelectorAll('#matchesTable tbody tr');
+  var computed = STATE.computed || [];
+  // Walk DOM rows in tandem with non-divider computed entries.
+  // Day-dividers ARE rendered as separate rows, so we account for
+  // them by visiting computed entries 1:1 with rows.
+  var domIdx = 0;
+  for (var i = 0; i < computed.length; i++) {
+    var e = computed[i];
+    if (domIdx >= rows.length) break;
+    if (e.type === 'match' &&
+        e.matchNum === matchNum &&
+        !!e.isPractice === !!isPractice) {
+      var targetRow = rows[domIdx];  // capture before setTimeout closure
+      targetRow.scrollIntoView({behavior: 'smooth', block: 'center'});
+      // Brief flash to make the target row obvious.
+      targetRow.style.transition = 'background-color 0.6s';
+      var origBg = targetRow.style.backgroundColor;
+      targetRow.style.backgroundColor = 'rgba(251,133,0,0.25)';
+      setTimeout(function() { targetRow.style.backgroundColor = origBg; }, 1200);
+      return;
+    }
+    domIdx++;
   }
 }
 
