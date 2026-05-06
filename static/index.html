@@ -1521,6 +1521,16 @@
       </select>
       <button class="btn-sm" id="btnManageTeams" onclick="openModal('modalTeams')" disabled>&#9707; Teams</button>
       <button class="btn-sm" id="btnSavedSchedules" onclick="openModal('modalSchedules')" disabled>&#9776; Schedules</button>
+      <!-- Reload event: re-fetches event metadata + team roster + saved
+           schedules from the DB. Useful after a refresh that didn't
+           fully populate, or after another user adds teams remotely. -->
+      <button class="btn-sm" id="btnReloadEvent" onclick="reloadEvent()" disabled title="Re-fetch event data from the database">&#x21bb; Reload</button>
+      <!-- Save event: persists day_config / parameter changes back to
+           the active assigned schedule WITHOUT re-running team
+           assignment. Slot map and matches[] stay intact; only the
+           timing/structure metadata updates. Disabled until there's
+           an event + schedule loaded AND the user has touched a param. -->
+      <button class="btn-sm" id="btnSaveEvent" onclick="saveEventChanges()" disabled title="Save day-config / parameter changes to the active schedule (preserves team assignments)">&#x1f4be; Save</button>
       <button class="btn-sm btn-danger" id="btnDeleteEvent" onclick="deleteEvent()" disabled style="margin-left:auto;">&#x2715;</button>
     </div>
   </div>
@@ -5118,6 +5128,8 @@ async function autoRunFromUrl() {
         _currentEventId = adResp.event_id;
         document.getElementById('btnManageTeams').disabled    = false;
         document.getElementById('btnSavedSchedules').disabled = false;
+        document.getElementById('btnReloadEvent').disabled    = false;
+        document.getElementById('btnSaveEvent').disabled      = false;
         document.getElementById('btnDeleteEvent').disabled    = false;
         try {
           const evResp = await apiFetch('/api/events/' + adResp.event_id);
@@ -5138,6 +5150,21 @@ async function autoRunFromUrl() {
             [...sel.options].forEach(function(o){ if (o.value == evResp.id) o.selected = true; });
           }
         } catch(e2) { /* event fetch failed — skip UI restore */ }
+        // Populate saved-schedules list and team roster for the loaded
+        // event. Without these calls, the Saved Schedules panel shows
+        // empty after refresh — the event is technically loaded but
+        // the per-event side-data wasn't fetched. activateEvent() does
+        // these for the event-code load path; we need them for the aid
+        // path too. Fire-and-forget — failures don't block the schedule
+        // restore.
+        if (typeof loadSavedSchedules === 'function') {
+          try { await loadSavedSchedules(); }
+          catch(e3) { console.warn('loadSavedSchedules failed during aid restore:', e3); }
+        }
+        if (typeof loadRoster === 'function') {
+          try { await loadRoster(); }
+          catch(e3) { console.warn('loadRoster failed during aid restore:', e3); }
+        }
       }
       const dayConfig = adResp.day_config || collectDayConfig();
       await loadAssignedSchedule(adResp.id, dayConfig);
@@ -5376,6 +5403,8 @@ function fullReset() {
   var eventSel = document.getElementById('eventSelect');
   if (eventSel) eventSel.value = '';
   document.getElementById('btnManageTeams').disabled  = true;
+  document.getElementById('btnReloadEvent').disabled  = true;
+  document.getElementById('btnSaveEvent').disabled    = true;
   document.getElementById('btnDeleteEvent').disabled  = true;
   // Swap the event bar back to empty state — input row visible, chip hidden.
   if (typeof renderEventBarState === 'function') renderEventBarState('empty');
@@ -8510,6 +8539,8 @@ function switchEvent() {
 
   document.getElementById('btnManageTeams').disabled    = true;
   document.getElementById('btnSavedSchedules').disabled = true;
+  document.getElementById('btnReloadEvent').disabled    = true;
+  document.getElementById('btnSaveEvent').disabled      = true;
   document.getElementById('btnDeleteEvent').disabled    = true;
 
   renderEventBarState('empty');
@@ -8547,6 +8578,8 @@ async function activateEvent(ev) {
   }
   document.getElementById('btnManageTeams').disabled    = false;
   document.getElementById('btnSavedSchedules').disabled = false;
+  document.getElementById('btnReloadEvent').disabled    = false;
+  document.getElementById('btnSaveEvent').disabled      = false;
   document.getElementById('btnDeleteEvent').disabled    = false;
 
   // Swap the event bar from the empty-state input row to the loaded
@@ -8643,6 +8676,88 @@ async function createEvent() {
   } catch(e) { showApiStatus(e.message, true); }
 }
 
+// Re-fetch event data + saved schedules + roster from the DB. Used
+// when the user wants a clean refresh of side-data (e.g. teams added
+// remotely) WITHOUT losing the active schedule. Re-runs the same
+// loaders the event-code path uses on initial load.
+async function reloadEvent() {
+  if (!_currentEventId) {
+    showApiStatus('No event loaded', true);
+    return;
+  }
+  try {
+    showApiStatus('Reloading event\u2026');
+    const evResp = await apiFetch('/api/events/' + _currentEventId);
+    _currentEventInfo = { id: evResp.id, key: evResp.key || '', name: evResp.name || '', year: evResp.year || '' };
+    var codeInp = document.getElementById('eventCodeInput');
+    if (codeInp) { codeInp.value = evResp.key || ''; codeInp.className = 'valid'; }
+    var codeStat = document.getElementById('eventCodeStatus');
+    if (codeStat) codeStat.textContent = evResp.name ? evResp.name + ' (' + evResp.year + ')' : '';
+    if (typeof renderEventBarState === 'function') renderEventBarState('loaded', evResp);
+
+    // Re-pull side data — same calls activateEvent makes
+    if (typeof loadRoster === 'function') {
+      try { await loadRoster(); }
+      catch(e) { console.warn('reloadEvent: loadRoster failed:', e); }
+    }
+    if (typeof loadSavedSchedules === 'function') {
+      try { await loadSavedSchedules(); }
+      catch(e) { console.warn('reloadEvent: loadSavedSchedules failed:', e); }
+    }
+
+    showApiStatus('\u2713 Event reloaded');
+  } catch(e) {
+    showApiStatus('Reload failed: ' + e.message, true);
+  }
+}
+
+// Save day_config / parameter changes to the active assigned schedule
+// WITHOUT re-running team assignment. The slot_map and matches[] stay
+// untouched; only the day_config + breakBuffer + cycleTime metadata
+// updates. Use case: user tweaks day times, lunch break, or cycle
+// changes after teams are already assigned and just wants those
+// changes persisted to the active schedule.
+async function saveEventChanges() {
+  if (!_currentAssignedScheduleId) {
+    showApiStatus('No active schedule to save to. Generate + assign first.', true);
+    return;
+  }
+  try {
+    var dayConfig = collectDayConfig();
+    showApiStatus('Saving changes\u2026');
+    // PATCH the assigned schedule with the new day_config. Backend
+    // preserves matches[] and slot_map. If the API doesn't support
+    // PATCH (yet), fall back to gracefully telling the user.
+    const resp = await apiFetch('/api/assigned-schedules/' + _currentAssignedScheduleId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ day_config: dayConfig }),
+    });
+    // Update local state from the response
+    if (resp && resp.day_config) {
+      // Re-render the schedule with the new day_config so wall-clock
+      // times reflect the saved structure.
+      if (typeof finishGeneration === 'function' && resp.matches) {
+        var matches = resp.matches.map(function(m) {
+          return { red: m.red, blue: m.blue,
+                   redSurrogate: m.red_surrogate, blueSurrogate: m.blue_surrogate };
+        });
+        var roundBoundaries = new Map(
+          Object.entries(resp.round_boundaries || {}).map(function(e) { return [parseInt(e[0]), e[1]]; })
+        );
+        finishGeneration(matches, roundBoundaries, resp.surrogate_count,
+          0, 0, resp.day_config, resp.practice_matches || null);
+      }
+    }
+    showApiStatus('\u2713 Saved');
+  } catch(e) {
+    // Likely error: backend doesn't support PATCH yet. Surface the
+    // specific message so the user knows whether to file a backend
+    // issue vs adjust their local state.
+    showApiStatus('Save failed: ' + e.message, true);
+  }
+}
+
 async function deleteEvent() {
   if (!_currentEventId) return;
   if (!confirm('Delete this event and all its schedules? This cannot be undone.')) return;
@@ -8658,6 +8773,8 @@ async function deleteEvent() {
     document.getElementById('eventCodeStatus').textContent = '';
     document.getElementById('btnManageTeams').disabled    = true;
     document.getElementById('btnSavedSchedules').disabled = true;
+    document.getElementById('btnReloadEvent').disabled    = true;
+    document.getElementById('btnSaveEvent').disabled      = true;
     document.getElementById('btnDeleteEvent').disabled    = true;
     document.getElementById('numTeams').disabled          = false;
     // Swap event bar back to empty state.

@@ -950,6 +950,71 @@ async def get_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get
     }
 
 
+@app.patch("/api/assigned-schedules/{schedule_id}", status_code=200)
+async def patch_assigned_schedule(
+    schedule_id: int,
+    payload: dict,
+    db: AsyncSession = Depends(get_session),
+):
+    """Update day_config (and other safe metadata) on an assigned schedule
+    WITHOUT touching slot_map or matches[].
+
+    The day_config carries time/structure metadata — day start/end times,
+    breaks, cycle changes, practice day config. These can change after
+    teams are assigned (e.g. organizers adjust the lunch break, push the
+    day later, add a cycle-time change) WITHOUT invalidating the team
+    assignments themselves. The slot map is a permutation; it doesn't
+    care about wall-clock times.
+
+    Match count changes (numTeams / matchesPerTeam edits) are NOT
+    supported through this endpoint — they require regenerating the
+    abstract schedule and reassigning teams. The frontend should
+    direct the user back through the generate-then-assign flow for
+    those.
+    """
+    assigned = await db.get(AssignedSchedule, schedule_id)
+    if not assigned:
+        raise HTTPException(404, "Assigned schedule not found")
+
+    if "day_config" in payload:
+        new_dc = payload["day_config"]
+        if not isinstance(new_dc, dict):
+            raise HTTPException(400, "day_config must be an object")
+        assigned.day_config = new_dc
+        # SQLAlchemy needs an explicit flag for JSON column mutation
+        # to be picked up by the dirty-tracker.
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(assigned, "day_config")
+
+    await db.commit()
+    await db.refresh(assigned)
+
+    # Return the same shape as GET so the frontend can re-render
+    # without an extra round-trip.
+    abstract = await db.get(AbstractSchedule, assigned.abstract_schedule_id)
+    slot_map = {int(k): v for k, v in assigned.slot_map.items()}
+    resolved_matches = [
+        {"red": [slot_map[s] for s in m["red"]], "blue": [slot_map[s] for s in m["blue"]],
+         "red_surrogate": m["red_surrogate"], "blue_surrogate": m["blue_surrogate"]}
+        for m in abstract.matches
+    ]
+    resolved_practice_matches = _resolve_practice_matches(assigned.practice_matches, slot_map)
+    return {
+        "id": assigned.id, "name": assigned.name, "is_active": assigned.is_active,
+        "event_id": assigned.event_id,
+        "abstract_schedule_id": assigned.abstract_schedule_id,
+        "num_teams": abstract.num_teams, "matches_per_team": abstract.matches_per_team,
+        "cooldown": abstract.cooldown, "seed": abstract.seed,
+        "assign_seed": assigned.assign_seed, "created_by": assigned.created_by,
+        "slot_map": assigned.slot_map, "matches": resolved_matches,
+        "practice_matches": resolved_practice_matches,
+        "surrogate_count": abstract.surrogate_count,
+        "round_boundaries": abstract.round_boundaries,
+        "day_config": assigned.day_config,
+        "created_at": assigned.created_at.isoformat(),
+    }
+
+
 @app.post("/api/assigned-schedules/{schedule_id}/activate", status_code=200)
 async def activate_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get_session)):
     assigned = await db.get(AssignedSchedule, schedule_id)
