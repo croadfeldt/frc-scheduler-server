@@ -403,6 +403,7 @@
   .v2-day-head {
     display: flex; align-items: center; gap: 0.4rem;
     padding: 0.4rem 0.55rem;
+    flex-wrap: wrap;
   }
   .v2-day-tag {
     font-size: 0.72rem; font-weight: 600;
@@ -476,6 +477,7 @@
     display: flex; align-items: center;
     gap: 0.3rem;
     padding: 0.25rem 0.5rem;
+    flex-wrap: wrap;
   }
   .v2-pill {
     display: inline-flex;
@@ -502,7 +504,9 @@
   /* Higher specificity than the global `input[type="text"]` rule
      above, which sets width:100% on all text inputs. Without this
      prefix, both v2 time fields stretch to fill the row and only
-     the start input stays visible. */
+     the start input stays visible. Width is sized to comfortably
+     fit the longest 12h display ("12:30 PM" — 8 chars) so the
+     toggle between 12h and 24h doesn't squeeze things. */
   input.v2-block-time {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -511,7 +515,7 @@
     padding: 0.12rem 0.35rem;
     font-size: 0.72rem;
     font-family: inherit;
-    width: 56px;
+    width: 78px;
     min-width: 0;
     box-sizing: border-box;
     text-align: center;
@@ -2237,20 +2241,28 @@
              add-day + warnings). The v2 editor is the block-based
              form. Both read/write the same day_config JSON via
              migrateLegacyDayConfig / downgradeToV1 / collectDayConfigV2.
-             v1 is the default; users opt into v2 with the toggle.
-             User preference persists in localStorage. -->
-        <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;">
+             The v1 form was retired in favor of v2's block editor;
+             v1 markup is kept hidden in the DOM so direct readers of
+             #practiceStart / #practiceEnd / .day-start etc. continue
+             to work as a fallback (they get default values that
+             nothing relies on once collectDayConfigV2 is the active
+             source). The toggle and visible v1 wrapper are gone. -->
+        <div class="section-label">
           <span>Daily Schedule</span>
-          <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.7rem;color:var(--text-muted);cursor:pointer;text-transform:none;letter-spacing:0;font-weight:500;">
-            <input type="checkbox" id="dayConfigUseV2" onchange="toggleDayConfigEditor(this.checked)" style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
-            Block view (beta)
-          </label>
         </div>
+        <!-- v2-on flag preserved as a hidden input so the many
+             `document.getElementById('dayConfigUseV2').checked`
+             checks scattered through the codebase keep returning
+             true without a wider refactor. Always-checked, always-
+             hidden, never user-toggleable. -->
+        <input type="checkbox" id="dayConfigUseV2" checked style="display:none;">
 
-        <!-- v1 editor (default). Wraps the practice day section,
-             the days container, the add-day button, and the time-error
-             message in a container we can show/hide as one unit. -->
-        <div id="v1DaysWrapper">
+        <!-- v1 editor (RETIRED). The full markup stays in the DOM
+             but the wrapper is locked to display:none — nothing
+             user-facing renders here. We keep the markup for the
+             reasons described above (stable IDs/selectors used
+             across the codebase). -->
+        <div id="v1DaysWrapper" style="display:none;" aria-hidden="true">
         <!-- ── Practice Day ────────────────────────────────────────────── -->
         <div id="practiceDaySection" style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.6rem;background:rgba(93,175,120,0.08);border-bottom:1px solid transparent;" id="practiceDayHeader">
@@ -2307,12 +2319,12 @@
         <div id="timeErrorMsg" class="time-error-msg"></div>
         </div><!-- /v1DaysWrapper -->
 
-        <!-- v2 editor (opt-in). Mirrors v1's storage but renders day
-             content as an ordered list of typed blocks. Hidden by
-             default; toggleDayConfigEditor() flips visibility AND
-             converts the in-memory day_config between v1/v2 shape so
-             both editors see the same data when the user switches. -->
-        <div id="v2DaysWrapper" style="display:none;">
+        <!-- v2 editor — block-based, the only day-config editor
+             since v1 was retired. Always visible (no longer behind
+             a toggle). Mirrors the v1 storage shape; downgradeToV1
+             converts back when the backend or older code paths
+             need v1-shaped data. -->
+        <div id="v2DaysWrapper">
           <div class="v2-days-container" id="v2DaysContainer"></div>
           <button class="btn-add-break" id="btnAddDayV2" onclick="addDayV2()" style="margin-bottom:0.5rem;">+ Add Day</button>
           <div id="v2TimeErrorMsg" class="time-error-msg"></div>
@@ -10715,17 +10727,92 @@ var V2_DEFAULT_LUNCH = { type: 'break', start: '12:00', end: '13:00', label: 'Lu
 // HH:MM ↔ minute helpers used throughout v2 logic.
 function _v2timeStrToMin(s) {
   if (!s || typeof s !== 'string') return null;
+  // Tolerate both canonical 24h "HH:MM" and display formats like
+  // "9:00 AM" / "9pm". Quick path for the common case where the
+  // string is already canonical; slow path routes through the
+  // lenient normalizer for everything else. This makes
+  // _v2timeStrToMin safe to call on raw input.value strings even
+  // when those reflect 12h display preference.
   var bits = s.split(':');
-  if (bits.length !== 2) return null;
-  var h = parseInt(bits[0], 10), m = parseInt(bits[1], 10);
-  if (isNaN(h) || isNaN(m)) return null;
-  return h * 60 + m;
+  if (bits.length === 2 && /^\d+$/.test(bits[0]) && /^\d+$/.test(bits[1])) {
+    var h = parseInt(bits[0], 10), m = parseInt(bits[1], 10);
+    if (!isNaN(h) && !isNaN(m)) return h * 60 + m;
+  }
+  // Slow path — anything else routes through the v2 normalizer.
+  // Defensive: if normalize is somehow unavailable, give up safely.
+  if (typeof _v2normalizeTimeStr !== 'function') return null;
+  var canonical = _v2normalizeTimeStr(s);
+  if (!canonical || canonical === s) {
+    // Normalizer returned the input unchanged (couldn't parse). Try
+    // a final split — values like "21:30" passed here legitimately.
+    var bits2 = canonical.split(':');
+    if (bits2.length === 2) {
+      var h2 = parseInt(bits2[0], 10), m2 = parseInt(bits2[1], 10);
+      if (!isNaN(h2) && !isNaN(m2)) return h2 * 60 + m2;
+    }
+    return null;
+  }
+  var bits3 = canonical.split(':');
+  if (bits3.length !== 2) return null;
+  var h3 = parseInt(bits3[0], 10), m3 = parseInt(bits3[1], 10);
+  if (isNaN(h3) || isNaN(m3)) return null;
+  return h3 * 60 + m3;
 }
 function _v2minToTimeStr(m) {
   if (m == null || isNaN(m)) return '00:00';
   m = Math.max(0, Math.round(m));
   var h = Math.floor(m / 60), mm = m % 60;
   return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+}
+
+// Format a canonical "HH:MM" 24h string for DISPLAY in a v2 time
+// input, respecting the user's 12h/24h preference. The 12h variant
+// matches the format produced by `fmtTime12` so there's a single
+// visual style for time across the editor:
+//   24h: "09:00", "17:30"
+//   12h: "9:00 AM", "5:30 PM"
+// Robust against malformed input — returns the original string
+// unchanged if it can't be split into hour/minute.
+function _v2formatTimeForDisplay(hhmm24) {
+  if (!hhmm24 || typeof hhmm24 !== 'string') return hhmm24 || '';
+  var parts = hhmm24.split(':');
+  if (parts.length !== 2) return hhmm24;
+  var h = parseInt(parts[0], 10);
+  var m = parseInt(parts[1], 10);
+  if (isNaN(h) || isNaN(m)) return hhmm24;
+  if (window._frcUse24h) {
+    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+  }
+  var ampm = h >= 12 ? 'PM' : 'AM';
+  var h12 = h % 12; if (h12 === 0) h12 = 12;
+  return h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+}
+
+// Read a v2 time input as canonical "HH:MM" 24h regardless of
+// what's currently displayed. Prefers `data-value-24h` (set on
+// every render and on every normalize), falls back to running the
+// .value through the lenient normalizer. Use this helper for ALL
+// reads of v2 time inputs — never read `.value` directly.
+function _v2readTimeFromInput(inp) {
+  if (!inp) return '';
+  var canonical = inp.dataset && inp.dataset.value24h;
+  if (canonical) return canonical;
+  return _v2normalizeTimeStr(inp.value || '') || '';
+}
+
+// Set a v2 time input's display + canonical from a "HH:MM" 24h
+// string. Pairs with _v2readTimeFromInput so we have a single
+// place that knows how to write/read v2 time inputs.
+function _v2writeTimeToInput(inp, hhmm24) {
+  if (!inp) return;
+  var canonical = hhmm24 || '';
+  // If we're handed a non-canonical string (rare, but guards
+  // against callers passing display format), normalize it first.
+  if (canonical && !/^\d{1,2}:\d{2}$/.test(canonical)) {
+    canonical = _v2normalizeTimeStr(canonical) || '';
+  }
+  inp.dataset.value24h = canonical;
+  inp.value = _v2formatTimeForDisplay(canonical);
 }
 
 // Normalize freeform user input to HH:MM (24-hour). Accepts:
@@ -11027,10 +11114,13 @@ function collectDayConfigV2() {
 
 function _v2readBlockFromDom(blockEl) {
   var t = blockEl.dataset.type;
+  // Always serialize canonical "HH:MM" 24h so the day_config object
+  // (and the backend) sees consistent values regardless of whether
+  // the user is currently looking at 12h or 24h displayed values.
   var b = {
     type:  t,
-    start: blockEl.querySelector('.v2-block-start').value,
-    end:   blockEl.querySelector('.v2-block-end').value,
+    start: _v2readTimeFromInput(blockEl.querySelector('.v2-block-start')),
+    end:   _v2readTimeFromInput(blockEl.querySelector('.v2-block-end')),
   };
   var meta = V2_BLOCK_TYPES[t];
   if (meta && meta.schedulable) {
@@ -11203,14 +11293,28 @@ function buildV2Block(b, isNested) {
   var blockEl = document.createElement('div');
   blockEl.className = isNested ? 'v2-block v2-nested-break' : 'v2-block';
   blockEl.dataset.type = b.type;
+  // Time input values render in the user's preferred 12h/24h format
+  // for display but the canonical 24h string lives in data-value-24h
+  // so reads (collectDayConfigV2, _v2readBlockFromDom, etc.) always
+  // see "HH:MM" regardless of what the user is looking at. The
+  // display reformats automatically when the 12h/24h toggle flips
+  // (toggleTimeFormat re-collects + re-renders v2).
+  var _bs24 = b.start || '09:00';
+  var _be24 = b.end || '17:00';
+  var _bsDisp = _v2formatTimeForDisplay(_bs24);
+  var _beDisp = _v2formatTimeForDisplay(_be24);
   // Head
   var head = document.createElement('div');
   head.className = 'v2-block-head';
   var pillCls = 'v2-pill v2-pill-' + b.type;
+  // Placeholder reflects the active format too so the affordance
+  // matches what the user expects to type. "HH:MM" in 24h mode,
+  // "h:MM AM" in 12h.
+  var _phold = window._frcUse24h ? 'HH:MM' : 'h:MM AM';
   head.innerHTML =
     '<span class="' + pillCls + '"><span class="v2-swatch" style="background:' + meta.color + ';"></span>' + meta.shortLabel + '</span>' +
-    '<input class="v2-block-time v2-block-start" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="' + (b.start || '09:00') + '">' +
-    '<input class="v2-block-time v2-block-end" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="' + (b.end || '17:00') + '">' +
+    '<input class="v2-block-time v2-block-start" type="text" inputmode="numeric" maxlength="8" placeholder="' + _phold + '" data-value-24h="' + _bs24 + '" value="' + _bsDisp + '">' +
+    '<input class="v2-block-time v2-block-end" type="text" inputmode="numeric" maxlength="8" placeholder="' + _phold + '" data-value-24h="' + _be24 + '" value="' + _beDisp + '">' +
     '<span class="v2-block-summary"></span>' +
     '<span class="v2-block-chev" title="Expand">\u25b8</span>' +
     '<span class="v2-block-x" title="Remove">\u00d7</span>';
@@ -11224,14 +11328,20 @@ function buildV2Block(b, isNested) {
   head.querySelector('.v2-block-chev').addEventListener('click', function() { _v2toggleBlock(blockEl); });
   // Time inputs trigger summary update + boundary linking + validation.
   // The 'change' event fires on Enter or blur for text inputs; that's
-  // when we normalize the format (e.g. "9" → "09:00") and re-emit.
+  // when we normalize the format and re-emit. Normalized canonical
+  // 24h lives in data-value-24h; display reflects 12h/24h preference.
   head.querySelectorAll('input.v2-block-time').forEach(function(inp) {
-    // Track the last-known-good value so boundary linking can detect
-    // "user just changed this from X to Y" without false-positive
-    // when blur fires with no actual change.
     inp.addEventListener('change', function(ev) {
-      var normalized = _v2normalizeTimeStr(inp.value);
-      if (normalized !== inp.value) inp.value = normalized;
+      var canonical = _v2normalizeTimeStr(inp.value);
+      if (canonical && /^\d{1,2}:\d{2}$/.test(canonical)) {
+        // Padded canonical (always 5 chars "HH:MM") for storage.
+        var p = canonical.split(':');
+        var hh = String(parseInt(p[0], 10)).padStart(2, '0');
+        var mm = String(parseInt(p[1], 10)).padStart(2, '0');
+        canonical = hh + ':' + mm;
+        inp.dataset.value24h = canonical;
+        inp.value = _v2formatTimeForDisplay(canonical);
+      }
       _v2propagateBoundary(blockEl, inp);
       _v2validateAll();
       _v2updateBlockSummary(blockEl);
@@ -11424,8 +11534,11 @@ function _v2updateNearestSummary(el) {
 // to keep the link. Single-pair propagation only — does not cascade.
 var _v2lastTimes = new WeakMap();
 function _v2propagateBoundary(blockEl, changedInput) {
+  // Comparisons + writes operate on canonical 24h via the helpers
+  // so propagation works regardless of whether the user is looking
+  // at 12h or 24h displayed values.
   var prevValue = _v2lastTimes.get(changedInput);
-  var newValue  = changedInput.value;
+  var newValue  = _v2readTimeFromInput(changedInput);
   _v2lastTimes.set(changedInput, newValue);
   if (!prevValue || prevValue === newValue) return;
   // Find sibling block and matching adjacency
@@ -11439,17 +11552,16 @@ function _v2propagateBoundary(blockEl, changedInput) {
     // Look at next sibling's start
     var next = siblings[idx + 1];
     var nextStart = next.querySelector('.v2-block-start');
-    if (nextStart && nextStart.value === prevValue) {
-      nextStart.value = newValue;
+    if (nextStart && _v2readTimeFromInput(nextStart) === prevValue) {
+      _v2writeTimeToInput(nextStart, newValue);
       _v2lastTimes.set(nextStart, newValue);
-      var nextSummary = next; // update its own summary
-      _v2updateBlockSummary(nextSummary);
+      _v2updateBlockSummary(next);
     }
   } else if (isStart && idx > 0) {
     var prev = siblings[idx - 1];
     var prevEnd = prev.querySelector('.v2-block-end');
-    if (prevEnd && prevEnd.value === prevValue) {
-      prevEnd.value = newValue;
+    if (prevEnd && _v2readTimeFromInput(prevEnd) === prevValue) {
+      _v2writeTimeToInput(prevEnd, newValue);
       _v2lastTimes.set(prevEnd, newValue);
       _v2updateBlockSummary(prev);
     }
@@ -11662,18 +11774,22 @@ function toggleDayConfigEditor(useV2) {
 
 document.addEventListener('DOMContentLoaded', function() {
   try {
-    // v2 (block view) is now the DEFAULT. The user opts OUT explicitly
-    // by toggling the checkbox off (which writes '0' to localStorage).
-    // null/missing → default v2 on. The previous default was off.
-    var stored = localStorage.getItem('frcDayConfigUseV2');
-    var useV2 = (stored !== '0'); // null → on, '0' → off, '1' → on
-    if (useV2) {
-      var cb = document.getElementById('dayConfigUseV2');
-      if (cb) {
-        cb.checked = true;
-        setTimeout(function() { toggleDayConfigEditor(true); }, 100);
-      }
-    }
+    // V1 was retired; V2 (block view) is now the only editor.
+    // Force-init regardless of the legacy `frcDayConfigUseV2`
+    // localStorage flag: it might still be '0' from old sessions
+    // where the user had explicitly opted out of v2. Call
+    // toggleDayConfigEditor(true) so the v2 wrapper is populated
+    // from migrated day_config and the v1 shadow markup stays
+    // hidden. Wrapped in setTimeout so other DOMContentLoaded
+    // handlers (default fields, etc.) run first.
+    var cb = document.getElementById('dayConfigUseV2');
+    if (cb) cb.checked = true;
+    setTimeout(function() {
+      try { toggleDayConfigEditor(true); } catch(_) {}
+    }, 100);
+    // Persist '1' so downstream session reads see the same answer
+    // even if some old code path consults the localStorage flag.
+    try { localStorage.setItem('frcDayConfigUseV2', '1'); } catch(_) {}
   } catch(e) {}
 });
 

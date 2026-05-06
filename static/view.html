@@ -3468,9 +3468,11 @@ function renderSelectedTeamChips() {
 
 // ── Countdown helpers ────────────────────────────────────────────
 // Resolve a match entry's absolute Date timestamp. Uses the day's
-// `date` field (YYYY-MM-DD) when present; falls back to today's
-// local date so single-day events without dates still show a
-// countdown if viewed on the day. Returns null if startMin is missing.
+// `date` field (YYYY-MM-DD) when present, falls back to deriving
+// from the event's start_date + day offset (matches the same
+// derivation `computeMatchTimes` uses for day-divider labels), and
+// only falls back to today if neither is available. This last
+// fallback is for fresh single-day events with no dates set anywhere.
 function _resolveMatchTimestamp(matchEntry) {
   if (!matchEntry || matchEntry.startMin == null) return null;
   // Find the day this match belongs to via the schedule's day_config
@@ -3483,12 +3485,45 @@ function _resolveMatchTimestamp(matchEntry) {
   } else if (cfg.days && matchEntry.dayNum >= 1 && cfg.days[matchEntry.dayNum - 1]) {
     dayDate = cfg.days[matchEntry.dayNum - 1].date;
   }
+  // Fallback: derive from event.start_date when day_config doesn't
+  // carry per-day dates. Without this, schedules saved in the older
+  // v1 day_config shape (no per-day .date) get today's date — which
+  // breaks the countdown for any past or future event. Practice is
+  // always offset 0, qual day N is offset (N-1) when no practice
+  // exists, or offset N when practice is enabled (practice = day 0).
+  if (!dayDate || !/^\d{4}-\d{2}-\d{2}/.test(dayDate)) {
+    var ev = sch.event || {};
+    var startDate = ev.start_date || '';
+    if (startDate && /^\d{4}-\d{2}-\d{2}/.test(startDate)) {
+      // Detect whether practice is configured (so qual day 1 = offset
+      // 1 with practice, or offset 0 without). Mirrors the qualOffset
+      // computation in computeMatchTimes.
+      var practiceEnabled = !!(cfg.practiceDay && cfg.practiceDay.enabled !== false &&
+                                (sch.practice_matches || []).length > 0);
+      var offset;
+      if (matchEntry.isPractice) {
+        offset = 0;
+      } else if (practiceEnabled) {
+        offset = matchEntry.dayNum;             // practice = 0; qualN = N
+      } else {
+        offset = matchEntry.dayNum - 1;          // qualN = N-1 (no practice)
+      }
+      var sm = startDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      var sd = new Date(parseInt(sm[1]), parseInt(sm[2]) - 1, parseInt(sm[3]));
+      sd.setDate(sd.getDate() + offset);
+      var yy = sd.getFullYear();
+      var mm = String(sd.getMonth() + 1).padStart(2, '0');
+      var dd = String(sd.getDate()).padStart(2, '0');
+      dayDate = yy + '-' + mm + '-' + dd;
+    }
+  }
   var d;
   if (dayDate && /^\d{4}-\d{2}-\d{2}/.test(dayDate)) {
     var parts = dayDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
     d = new Date(parseInt(parts[1]), parseInt(parts[2]) - 1, parseInt(parts[3]));
   } else {
-    // Fallback: today's local date. Only useful for same-day viewing.
+    // Last-resort fallback: today's local date. Only useful for
+    // truly date-less single-day events being viewed on the day of.
     d = new Date();
     d.setHours(0, 0, 0, 0);
   }
@@ -3834,10 +3869,18 @@ function updateNextMatch(nowMatchNum) {
     myStatus.textContent = myMatches.length + ' match' + (myMatches.length === 1 ? '' : 'es');
   }
 
-  // Find the team's "next" match — preferring live status:
-  //   1. If a match for my team is currently playing (status === 'playing'), that one
-  //   2. First not-yet-completed match
-  //   3. First match overall
+  // Find the team's "next" match. Logic order:
+  //   1. If a match for my team is currently playing (live status =
+  //      'playing'), that one — wins regardless of time.
+  //   2. First not-yet-completed match. Live data dictates "completed"
+  //      when we have it (Nexus/TBA reports actual_time/post_result_time).
+  //      When we DON'T have live data, fall back to comparing the
+  //      planned timestamp against now: anything in the past is
+  //      treated as completed for selection purposes. Without this
+  //      fallback, viewing a past event always picks the team's
+  //      first match (Q3 in screenshot) regardless of how long ago
+  //      it actually finished.
+  //   3. All matches done? Show the last one.
   let target = null;
   let targetIsPlaying = false;
   for (const m of myMatches) {
@@ -3847,9 +3890,18 @@ function updateNextMatch(nowMatchNum) {
     }
   }
   if (!target) {
+    var _now = Date.now();
     target = myMatches.find(m => {
       const live = STATE.liveByMatch[m.matchNum];
-      return !live || live.status !== 'completed';
+      if (live && live.status === 'completed') return false;
+      if (live) return true; // live data present, not completed → candidate
+      // No live data — use planned timestamp vs. now
+      var ts = _resolveMatchTimestamp(m);
+      // If we can't resolve a timestamp, fall back to the legacy
+      // "first non-completed" behavior so single-day fresh schedules
+      // without dates still pick the first match.
+      if (ts == null) return true;
+      return ts > _now;
     }) || myMatches[myMatches.length - 1];  // all done? show the last one
   }
 
@@ -3857,9 +3909,18 @@ function updateNextMatch(nowMatchNum) {
 
   // Header line — "Now playing" / "Up next" / "Final" with match details
   const targetLive = STATE.liveByMatch[target.matchNum];
+  // "All completed" check considers live status first, then falls
+  // back to planned-time-vs-now for entries without live data. A
+  // past schedule (no Nexus, all match timestamps before now) reads
+  // as "all completed" so we surface "Last match" instead of
+  // mislabeling a stale match "Up next".
+  var _allCompletedNow = Date.now();
   const allCompleted = myMatches.every(m => {
     const l = STATE.liveByMatch[m.matchNum];
-    return l && l.status === 'completed';
+    if (l && l.status === 'completed') return true;
+    if (l) return false; // live present, not completed → not all done
+    var ts = _resolveMatchTimestamp(m);
+    return ts != null && ts <= _allCompletedNow;
   });
 
   let leadLabel;
@@ -3883,7 +3944,15 @@ function updateNextMatch(nowMatchNum) {
   // card and the last-completed display both used hard-coded "Q",
   // which produced "Q1" for what was actually "P1" during practice.
   var matchPrefix = target.isPractice ? 'P' : 'Q';
-  detail.innerHTML = leadLabel + ': <strong>' + matchPrefix + target.matchNum + '</strong> · ' + etaText + driftHtml;
+  // Replace bare "2:11 PM" with full "Sat, Apr 4 · 2:11 PM" using
+  // the absolute target formatter when we can resolve a timestamp.
+  // Falls back to time-only if the timestamp isn't resolvable
+  // (e.g. fresh schedule with no event start_date or per-day dates).
+  var _detailTs = _resolveMatchTimestamp(target);
+  var _detailWhen = (_detailTs != null && typeof _formatAbsoluteTarget === 'function')
+    ? _formatAbsoluteTarget(_detailTs)
+    : etaText;
+  detail.innerHTML = leadLabel + ': <strong>' + matchPrefix + target.matchNum + '</strong> · ' + _detailWhen + driftHtml;
 
   // ── Countdown timer ─────────────────────────────────────────────
   // When the target is upcoming (not playing/completed), show a
