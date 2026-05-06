@@ -4312,13 +4312,17 @@ function _findFieldThreeUp() {
     };
   }
 
-  // No Nexus, no TBA-playing — pure scheduled fallback. Show the next
-  // three scheduled qual matches whose planned time hasn't passed.
+  // No Nexus, no TBA-playing — pure scheduled fallback. Show the
+  // next three scheduled matches whose planned time hasn't passed.
+  // Practice matches included so the 3-up shows P1/P2/P3 during
+  // practice-day setup. Once Nexus or TBA actuals appear the upper
+  // branches above take over (qual-only, by design — TBA/Nexus
+  // don't track practice).
   var nowMs = Date.now();
   var pending = [];
   for (var i3 = 0; i3 < STATE.computed.length; i3++) {
     var e3 = STATE.computed[i3];
-    if (e3.type !== 'match' || e3.isPractice) continue;
+    if (e3.type !== 'match') continue;
     var ts = _resolveMatchTimestamp(e3);
     if (ts != null && ts <= nowMs) continue;          // past
     pending.push(e3);
@@ -4358,7 +4362,12 @@ function _renderFieldThreeUp() {
     if (!matchEl || !metaEl || !stageEl) return;
     if (s.match) {
       stageEl.classList.toggle('muted', !!muted);
-      matchEl.textContent = 'Q' + s.match.matchNum;
+      // P prefix for practice, Q for qual. The Nexus/TBA paths only
+      // populate quals (TBA tracks comp_level === 'qm'), but the
+      // scheduled-fallback path can carry practice matches when
+      // there's no live data — the prefix has to follow the entry.
+      var threeUpPrefix = s.match.isPractice ? 'P' : 'Q';
+      matchEl.textContent = threeUpPrefix + s.match.matchNum;
       // Meta line: prefer team rosters if Nexus has it; otherwise
       // show planned time-of-day (or "in N min" countdown).
       var meta = '';
@@ -4693,14 +4702,19 @@ function _renderNextOnly() {
     return { rendered: false };
   }
 
-  // Find the next not-completed qual match. "Completed" = TBA has
-  // post_result_time. If no live data, use planned time vs. now.
+  // Find the next not-completed match. Practice matches are valid
+  // candidates — during the practice day morning, "Next on schedule"
+  // should show P1, not skip ahead to Q1 a day later. "Completed"
+  // for quals = TBA has post_result_time. Practice never has live
+  // data (TBA/Nexus don't track practice and the colliding-matchNum
+  // issue would otherwise pull in qual data via STATE.liveByMatch),
+  // so practice falls through to the planned-timestamp path.
   var nowMs = Date.now();
   var nextEntry = null;
   for (var i = 0; i < STATE.computed.length; i++) {
     var e = STATE.computed[i];
-    if (e.type !== 'match' || e.isPractice) continue;
-    var live = STATE.liveByMatch ? STATE.liveByMatch[e.matchNum] : null;
+    if (e.type !== 'match') continue;
+    var live = (e.isPractice || !STATE.liveByMatch) ? null : STATE.liveByMatch[e.matchNum];
     if (live && live.post_result_time) continue;
     if (live) { nextEntry = e; break; }      // live, not completed
     var ts = _resolveMatchTimestamp(e);
@@ -4711,15 +4725,18 @@ function _renderNextOnly() {
     return { rendered: false };
   }
 
-  // ETA: when live actuals exist, use the max of (scheduled, last
-  // actual + average cycle). Same approach Phil's "Next Up" card
-  // uses. Falls back to the bare scheduled timestamp otherwise.
+  // ETA: when live actuals exist (qual side only — TBA tracks quals,
+  // not practice), use the max of (scheduled, last actual + average
+  // cycle). Same approach Phil's "Next Up" card uses. For practice
+  // matches the qual-side prediction is meaningless — last completed
+  // qual's actual_time isn't a valid predictor for the next practice
+  // match. Fall back to the bare scheduled timestamp.
   var schedTs = _resolveMatchTimestamp(nextEntry);
   var etaTs = schedTs;
   var etaSource = 'scheduled';
-  // Last actual qual match start
+  // Last actual qual match start — qual only by definition.
   var lastActualTs = null;
-  if (STATE.liveByMatch) {
+  if (!nextEntry.isPractice && STATE.liveByMatch) {
     for (var k in STATE.liveByMatch) {
       var lv = STATE.liveByMatch[k];
       if (!lv || lv.comp_level !== 'qm' || !lv.actual_time) continue;
@@ -4789,17 +4806,19 @@ function _hasNexusQueueData() {
   return false;
 }
 
-// Returns ms-until-next-match for any qual match in the schedule
-// whose planned timestamp is in the future. Used to decide when
-// to flip into the "STARTING SOON" state. Returns Infinity when
-// no future-timestamped match exists (past event, or no dates).
+// Returns ms-until-next-match for any match (practice or qual) in
+// the schedule whose planned timestamp is in the future. Used to
+// decide when to flip into the "STARTING SOON" state. Practice is
+// included so the panel correctly fires for practice matches the
+// morning of practice day, before any quals exist. Returns Infinity
+// when no future-timestamped match exists (past event, or no dates).
 function _msUntilNextScheduledMatch() {
   if (!STATE.computed) return Infinity;
   var nowMs = Date.now();
   var soonest = Infinity;
   for (var i = 0; i < STATE.computed.length; i++) {
     var e = STATE.computed[i];
-    if (e.type !== 'match' || e.isPractice) continue;
+    if (e.type !== 'match') continue;
     var ts = _resolveMatchTimestamp(e);
     if (ts == null) continue;
     var rel = ts - nowMs;
@@ -4845,12 +4864,15 @@ function _renderStartingSoon() {
   if (msUntil > 15 * 60 * 1000) return false;   // not within window
   if (msUntil === Infinity) return false;       // no upcoming match
 
-  // Find the actual entry to name it in the subtitle.
+  // Find the actual entry to name it in the subtitle. Practice
+  // matches are valid candidates here — during practice day, the
+  // "starting soon" state should fire for the next practice
+  // match, not skip past it to quals scheduled days later.
   var nowMs = Date.now();
   var entry = null;
   for (var i = 0; i < STATE.computed.length; i++) {
     var e = STATE.computed[i];
-    if (e.type !== 'match' || e.isPractice) continue;
+    if (e.type !== 'match') continue;
     var ts = _resolveMatchTimestamp(e);
     if (ts != null && ts - nowMs === msUntil) { entry = e; break; }
   }
