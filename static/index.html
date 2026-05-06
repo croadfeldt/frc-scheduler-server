@@ -2028,6 +2028,27 @@
         <div id="cycleTimePushWarning" style="display:none;background:rgba(137,180,250,0.1);border:1px solid rgba(137,180,250,0.3);border-radius:4px;padding:0.4rem 0.7rem;margin-bottom:0.3rem;font-size:0.72rem;color:var(--accent);">
           &#9432; Minutes per match updated for all days. Per-day overrides are not affected.
         </div>
+
+        <div class="days-container" id="daysContainer"></div>
+        <button class="btn-add-break" id="btnAddDay" onclick="addDay()" style="margin-bottom:0.5rem;">+ Add Day</button>
+        <div id="timeErrorMsg" class="time-error-msg"></div>
+        </div><!-- /v1DaysWrapper -->
+
+        <!-- v2 editor (opt-in). Mirrors v1's storage but renders day
+             content as an ordered list of typed blocks. Hidden by
+             default; toggleDayConfigEditor() flips visibility AND
+             converts the in-memory day_config between v1/v2 shape so
+             both editors see the same data when the user switches. -->
+        <div id="v2DaysWrapper" style="display:none;">
+          <div class="v2-days-container" id="v2DaysContainer"></div>
+          <button class="btn-add-break" id="btnAddDayV2" onclick="addDayV2()" style="margin-bottom:0.5rem;">+ Add Day</button>
+          <div id="v2TimeErrorMsg" class="time-error-msg"></div>
+        </div>
+
+        <!-- Advanced + Placement Criteria + autoAssign live OUTSIDE
+             both v1DaysWrapper and v2DaysWrapper so they remain
+             visible regardless of which day-config editor is active.
+             They configure the scheduler itself, not the day layout. -->
         <details style="margin-bottom:0.5rem;">
           <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Advanced</summary>
           <div class="field-row" style="margin-top:0.5rem;">
@@ -2072,22 +2093,6 @@
         </label>
         <div id="paramChangedWarning" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.75rem;color:var(--amber);">
           &#9888; Parameters changed — regenerate the schedule before assigning teams.
-        </div>
-
-        <div class="days-container" id="daysContainer"></div>
-        <button class="btn-add-break" id="btnAddDay" onclick="addDay()" style="margin-bottom:0.5rem;">+ Add Day</button>
-        <div id="timeErrorMsg" class="time-error-msg"></div>
-        </div><!-- /v1DaysWrapper -->
-
-        <!-- v2 editor (opt-in). Mirrors v1's storage but renders day
-             content as an ordered list of typed blocks. Hidden by
-             default; toggleDayConfigEditor() flips visibility AND
-             converts the in-memory day_config between v1/v2 shape so
-             both editors see the same data when the user switches. -->
-        <div id="v2DaysWrapper" style="display:none;">
-          <div class="v2-days-container" id="v2DaysContainer"></div>
-          <button class="btn-add-break" id="btnAddDayV2" onclick="addDayV2()" style="margin-bottom:0.5rem;">+ Add Day</button>
-          <div id="v2TimeErrorMsg" class="time-error-msg"></div>
         </div>
 
         <div class="progress-wrap" id="progressWrap">
