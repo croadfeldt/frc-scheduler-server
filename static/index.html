@@ -373,7 +373,7 @@
     color: var(--accent); flex-shrink: 0;
   }
   .v2-day[data-kind="practice"] .v2-day-tag { color: #5daf78; }
-  .v2-day-date {
+  input.v2-day-date {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
@@ -387,7 +387,8 @@
     flex-shrink: 0;
     font-variant-numeric: tabular-nums;
   }
-  .v2-day-label {
+  input.v2-day-date:focus { outline: none; box-shadow: none; border-color: var(--accent); }
+  input.v2-day-label {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
@@ -396,7 +397,9 @@
     font-size: 0.72rem;
     font-family: inherit;
     flex: 1; min-width: 60px; max-width: 120px;
+    box-sizing: border-box;
   }
+  input.v2-day-label:focus { outline: none; box-shadow: none; border-color: var(--accent); }
   .v2-day-summary {
     font-size: 0.65rem;
     color: var(--text-muted);
@@ -460,7 +463,11 @@
     border-radius: 50%;
     flex-shrink: 0;
   }
-  .v2-block-time {
+  /* Higher specificity than the global `input[type="text"]` rule
+     above, which sets width:100% on all text inputs. Without this
+     prefix, both v2 time fields stretch to fill the row and only
+     the start input stays visible. */
+  input.v2-block-time {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
@@ -475,15 +482,16 @@
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
   }
-  .v2-block-time:focus {
+  input.v2-block-time:focus {
     outline: none;
     border-color: var(--accent);
+    box-shadow: none;
   }
-  .v2-block-time::placeholder {
+  input.v2-block-time::placeholder {
     color: var(--text-muted);
     opacity: 0.5;
   }
-  .v2-block-time.v2-conflict {
+  input.v2-block-time.v2-conflict {
     border-color: var(--danger);
     background: rgba(243,139,168,0.08);
   }
@@ -530,7 +538,7 @@
     min-width: 86px;
     flex-shrink: 0;
   }
-  .v2-body-input {
+  input.v2-body-input, select.v2-body-input {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
@@ -539,8 +547,10 @@
     font-size: 0.7rem;
     font-family: inherit;
     width: 50px;
+    box-sizing: border-box;
     font-variant-numeric: tabular-nums;
   }
+  input.v2-body-input:focus, select.v2-body-input:focus { outline: none; box-shadow: none; border-color: var(--accent); }
   .v2-body-section { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.2rem; }
 
   /* Cycle change rows */
@@ -3703,9 +3713,23 @@ function renderDiversityCard(card, serverData) {
   }
 
   card.innerHTML =
-    '<h3>Schedule Quality</h3>' +
-    '<div class="dr-headline">' + tiles.join('') + '</div>' +
-    sectionsHtml;
+    '<div class="dr-header" onclick="toggleSchedulePanel()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">' +
+      '<h3 style="margin:0;">Schedule Quality</h3>' +
+      '<span id="scheduleQualityChevron" style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">&#9660;</span>' +
+    '</div>' +
+    '<div id="scheduleQualityBody">' +
+      '<div class="dr-headline">' + tiles.join('') + '</div>' +
+      sectionsHtml +
+    '</div>';
+  // Restore collapse state from previous render so toggling persists
+  // across re-renders (loadDiversityReport replaces innerHTML, which
+  // resets the body's display to default).
+  if (window._scheduleQualityCollapsed) {
+    var body = card.querySelector('#scheduleQualityBody');
+    var chev = card.querySelector('#scheduleQualityChevron');
+    if (body) body.style.display = 'none';
+    if (chev) chev.textContent = '\u25b6';
+  }
 }
 
 // Backwards-compat alias — old call sites may still reference
@@ -6386,6 +6410,19 @@ function toggleAgendaPanel() {
   var collapsed = body.style.display === 'none';
   body.style.display = collapsed ? '' : 'none';
   if (chev) chev.textContent = collapsed ? '\u25bc' : '\u25b6';
+}
+
+// Mirror of toggleAgendaPanel for the Schedule Quality card. Persists
+// the collapsed state on `window` so renderDiversityCard can re-apply
+// it after innerHTML rebuilds (which would otherwise reset display).
+function toggleSchedulePanel() {
+  var body = document.getElementById('scheduleQualityBody');
+  var chev = document.getElementById('scheduleQualityChevron');
+  if (!body) return;
+  var collapsed = body.style.display === 'none';
+  body.style.display = collapsed ? '' : 'none';
+  if (chev) chev.textContent = collapsed ? '\u25bc' : '\u25b6';
+  window._scheduleQualityCollapsed = !collapsed;
 }
 
 function resetAgendaPanel() {
@@ -10867,6 +10904,24 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
     if (sched.abstract_schedule_id && typeof loadDiversityReport === 'function') {
       loadDiversityReport(sched.abstract_schedule_id);
     }
+
+    // Re-run agenda fit. The initial page-init call to updateAgendaFit
+    // happens BEFORE autoRunFromUrl populates window._frcScheduled —
+    // so without this re-run, the agenda fit panel shows the "no
+    // schedule" fallback even after the schedule is loaded. All 6
+    // load paths into loadAssignedSchedule benefit.
+    if (typeof updateAgendaFit === 'function') {
+      try { updateAgendaFit(); }
+      catch(e) { console.warn('updateAgendaFit failed during load:', e); }
+    }
+
+    // Push aid/sid into the URL so refresh restores the same load.
+    // Without this, loadAssignedSchedule completes silently and a
+    // page refresh starts from blank. The 6 different paths that
+    // funnel into loadAssignedSchedule (aid/sid URL params, Load
+    // Saved button, post-generate auto-load, post-assign reload,
+    // checkForSavedAssignment auto, promoteSchedule) all benefit.
+    if (typeof updateUrlFromState === 'function') updateUrlFromState();
 
     showApiStatus('Schedule loaded');
   } catch(e) { showApiStatus(e.message, true); }

@@ -2706,7 +2706,7 @@ function updateNextMatch(nowMatchNum) {
   if (lastMatch && !allCompleted) {
     const drift = eventDriftMinutes() || 0;
     const finishMin = lastMatch.endMin + drift;
-    metaHtml += '<div class="finish-est">Estimated finish: <strong>' +
+    metaHtml += '<div class="finish-est">Estimated Last Qual Finish: <strong>' +
                 minToTime12(Math.round(finishMin)) + '</strong></div>';
   }
 
