@@ -258,6 +258,20 @@
         rgba(127,127,127,0.32) 6px
       );
   }
+  .agenda-legend-elapsed {
+    background: rgba(60, 60, 60, 0.55);
+  }
+  html[data-theme="light"] .agenda-legend-elapsed {
+    background: rgba(180, 180, 180, 0.7);
+  }
+  /* Live "now" indicator legend — small red bar, matching the
+     vertical line on the bar itself. */
+  .agenda-legend-now {
+    background: #d1242f;
+    width: 3px !important;
+    margin: 0 3.5px;
+    box-shadow: 0 0 3px rgba(209, 36, 47, 0.6);
+  }
   .agenda-day-row { margin-bottom: 0.5rem; }
   .agenda-day-row:last-child { margin-bottom: 0; }
   .agenda-day-head {
@@ -338,6 +352,41 @@
     /* Tiny outline so the mark stands out even when overlapping
        a same-color match segment. */
     box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);
+  }
+
+  /* Time-progress overlays. Three states per day, exclusive:
+       past    — entire day in the past, full gray wash
+       current — today, gray wash up to "now" + red vertical line
+       future  — no overlay
+     Pointer-events:none so these never block segment hover/click. */
+  .agenda-progress-past {
+    position: absolute; top: 0; bottom: 0; left: 0; right: 0;
+    background: rgba(60, 60, 60, 0.45);
+    pointer-events: none;
+  }
+  html[data-theme="light"] .agenda-progress-past {
+    background: rgba(180, 180, 180, 0.55);
+  }
+  .agenda-progress-elapsed {
+    position: absolute; top: 0; bottom: 0; left: 0;
+    background: rgba(60, 60, 60, 0.45);
+    pointer-events: none;
+  }
+  html[data-theme="light"] .agenda-progress-elapsed {
+    background: rgba(180, 180, 180, 0.55);
+  }
+  /* "Now" line — bright red vertical bar, 2px wide, centered at
+     left:X% via translateX(-50%). Lives inside the bar (which has
+     overflow:hidden) so the line is clipped to the bar bounds. */
+  .agenda-now-line {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 2px;
+    background: #d1242f;
+    transform: translateX(-50%);
+    pointer-events: none;
+    box-shadow: 0 0 4px rgba(209, 36, 47, 0.8);
+    z-index: 4;
   }
 
   /* ── Match table ──────────────────────────────────────────────────────── */
@@ -1018,6 +1067,8 @@
           <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:var(--secondary);"></span>Practice</span>
           <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:#ec8a3f;"></span>Breaks</span>
           <span class="agenda-legend-item"><span class="agenda-legend-swatch agenda-legend-idle"></span>Unallocated</span>
+          <span class="agenda-legend-item"><span class="agenda-legend-swatch agenda-legend-elapsed"></span>Elapsed</span>
+          <span class="agenda-legend-item"><span class="agenda-legend-swatch agenda-legend-now"></span>Now</span>
           <span class="agenda-legend-item" id="agendaLegendTeam" style="display:none;"><span class="agenda-legend-swatch" style="background:var(--my-team-bg);"></span>Selected team</span>
         </span>
       </div>
@@ -1329,6 +1380,18 @@ async function boot() {
   // theme. (The actual theme was applied in the head script before
   // first paint to avoid flash.)
   syncThemeButton();
+
+  // Tick the agenda-fit time-progress overlay every 30 seconds so
+  // the "now" red line walks forward without needing a manual
+  // refresh. Cheap re-render — only walks STATE.computed once per
+  // tick. Skips when the panel isn't visible (no schedule loaded).
+  setInterval(function() {
+    var panel = document.getElementById('agendaFitPanel');
+    if (panel && panel.style.display !== 'none' && typeof renderAgendaFitView === 'function') {
+      try { renderAgendaFitView(); } catch(_) {}
+    }
+  }, 30000);
+
   // Apply URL-based branding overrides immediately so the page paints right
   applyUrlBranding();
 
@@ -1657,6 +1720,10 @@ function computeMatchTimes() {
       type: 'day-divider', dayNum: 0,
       label: 'Practice Day' + (pDateLabel ? ' \u00b7 ' + pDateLabel : ''),
       start: pStart, end: pEnd, isPractice: true,
+      // Raw YYYY-MM-DD for the agenda-fit progress indicator.
+      // Renderer compares this to today's date to decide whether to
+      // shade the bar gray (past), red-line (current), or leave alone.
+      date: pday.date || '',
     });
 
     let pCursor = pStart;
@@ -1729,6 +1796,9 @@ function computeMatchTimes() {
       label: 'Day ' + (di + 1) + (day.label && day.label !== ('Day ' + (di + 1)) ? ' \u00b7 ' + day.label : '')
                     + (dateLabel ? ' \u00b7 ' + dateLabel : ''),
       start: startMin, end: endMin,
+      // Raw YYYY-MM-DD for the agenda-fit progress indicator (see
+      // matching field on the practice divider above).
+      date: day.date || '',
     });
 
     while (matchIdx < matches.length) {
@@ -2225,6 +2295,7 @@ function renderAgendaFitView() {
         label: e.label || ('Day ' + e.dayNum),
         start: e.start,
         end:   e.end,
+        date:  e.date || '',
         isPractice: !!e.isPractice,
         entries: [],
       };
@@ -2343,8 +2414,17 @@ function renderAgendaFitView() {
   // Match segments split into committed + idle tail when they don't
   // fill their available window (e.g. early end-of-day). Team-mark
   // overlays go on top via an absolute-positioned div per match the
-  // selected team plays in.
+  // selected team plays in. Time-progress overlay shades elapsed
+  // time gray and draws a vertical red "now" line on the live day.
   var html = '';
+
+  // Today/now anchors for the progress indicator.
+  var nowD = new Date();
+  var todayStr = nowD.getFullYear() + '-' +
+                 String(nowD.getMonth() + 1).padStart(2, '0') + '-' +
+                 String(nowD.getDate()).padStart(2, '0');
+  var nowMin = nowD.getHours() * 60 + nowD.getMinutes() + nowD.getSeconds() / 60;
+
   days.forEach(function(d) {
     var dayDur = d.end - d.start;
     if (dayDur <= 0) return;
@@ -2356,6 +2436,27 @@ function renderAgendaFitView() {
       return s + (seg.committed || 0);
     }, 0);
     var avgCt = totalMatches > 0 ? (totalCommitted / totalMatches) : 0;
+
+    // Day state for the progress indicator. 'past' = entire day in
+    // the past, fully greyed. 'current' = today, in-progress; gray
+    // up to nowMin, red line at nowMin. 'future' = no overlay. The
+    // hand-off between current and past happens at end-of-day.
+    // When the schedule has no dates set (fresh local schedule),
+    // dayState stays 'unknown' and the overlay is skipped — we
+    // can't tell what day we're on without anchors.
+    var dayState = 'unknown';
+    var elapsedPct = 0;
+    if (d.date) {
+      if (d.date < todayStr) {
+        dayState = 'past';
+      } else if (d.date === todayStr) {
+        if (nowMin >= d.end)        dayState = 'past';
+        else if (nowMin > d.start)  { dayState = 'current'; elapsedPct = ((nowMin - d.start) / dayDur) * 100; }
+        else                         dayState = 'future';
+      } else {
+        dayState = 'future';
+      }
+    }
 
     var segHtml = segments.map(function(seg) {
       var segDur = seg.end - seg.start;
@@ -2418,19 +2519,31 @@ function renderAgendaFitView() {
 
     // Team marks — vertical strips overlaid on the bar at each
     // timeslot where any selected team plays. Computed from
-    // day.entries (all match entries for this day) filtered by
-    // the team-membership check.
+    // d.entries (all match entries for this day) filtered by the
+    // team-membership check. Coerce both sides to Number before
+    // comparing — match data carries numbers, but URL/cell-derived
+    // selections occasionally arrive as strings on some load paths.
     var teamMarksHtml = '';
     if (hasTeamSel) {
-      var matches = day.entries.filter(function(e) { return e.type === 'match'; });
+      var sel = STATE.myTeams;
+      var selHas = function(t) {
+        // Direct check first (covers same-typed case), then numeric
+        // coercion as a safety net for cross-type comparisons.
+        if (sel.has(t)) return true;
+        var n = Number(t);
+        if (!isNaN(n) && sel.has(n)) return true;
+        var s = String(t);
+        if (sel.has(s)) return true;
+        return false;
+      };
+      var matches = d.entries.filter(function(e) { return e.type === 'match'; });
       matches.forEach(function(m) {
         var matchTeams = (m.red || []).concat(m.blue || []);
-        var hit = matchTeams.some(function(t) { return STATE.myTeams.has(t); });
+        var hit = matchTeams.some(selHas);
         if (!hit) return;
         var leftPct  = ((m.startMin - d.start) / dayDur) * 100;
         var widthPct = ((m.endMin - m.startMin) / dayDur) * 100;
-        // Tooltip says which selected team(s) are in this match.
-        var which = matchTeams.filter(function(t) { return STATE.myTeams.has(t); });
+        var which = matchTeams.filter(selHas);
         var tipT = (m.isPractice ? 'P' : 'Q') + m.matchNum + ' — ' +
                    fmtT(m.startMin) + '–' + fmtT(m.endMin) +
                    '\nSelected team' + (which.length > 1 ? 's' : '') + ': ' + which.join(', ');
@@ -2440,7 +2553,21 @@ function renderAgendaFitView() {
       });
     }
 
-    var dayDateMatch = (d.label || '').match(/·\s*(.+?)$/);
+    // Time-progress overlay — the gray "elapsed" wash and red "now"
+    // line that walk through the schedule as time passes. Past days
+    // get a full overlay; current day a partial one ending at the
+    // red line; future days get nothing.
+    var progressHtml = '';
+    if (dayState === 'past') {
+      progressHtml = '<div class="agenda-progress-past" title="Day complete"></div>';
+    } else if (dayState === 'current') {
+      progressHtml =
+        '<div class="agenda-progress-elapsed" style="width:' + Math.min(100, Math.max(0, elapsedPct)).toFixed(2) + '%;" ' +
+            'title="Elapsed: ' + fmtT(d.start) + '–' + fmtT(nowMin) + '"></div>' +
+        '<div class="agenda-now-line" style="left:' + Math.min(100, Math.max(0, elapsedPct)).toFixed(2) + '%;" ' +
+            'title="Now: ' + fmtT(nowMin) + '"></div>';
+    }
+
     var dayHead =
       '<div class="agenda-day-head">' +
         '<span class="day-label">' + escapeHtml(d.label) + '</span>' +
@@ -2452,11 +2579,12 @@ function renderAgendaFitView() {
       '</div>';
 
     html +=
-      '<div class="agenda-day-row">' +
+      '<div class="agenda-day-row" data-state="' + dayState + '">' +
         dayHead +
         '<div class="agenda-bar">' +
           segHtml +
           teamMarksHtml +
+          progressHtml +
         '</div>' +
       '</div>';
   });
