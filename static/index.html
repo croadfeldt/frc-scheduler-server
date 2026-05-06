@@ -346,6 +346,228 @@
   input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(122,164,240,0.18); }
 
   .days-container { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  /* ── Day Config v2 (block view) ─────────────────────────────────
+     Block-based editor styling. Each day is a card; each block
+     within is a row with a type pill, time inputs, and (for match
+     blocks) inline cycle-time + after-match changes. */
+  .v2-days-container { display: flex; flex-direction: column; gap: 0.6rem; }
+  .v2-day-row {
+    background: rgba(122,164,240,0.06);
+    border: 1px solid rgba(122,164,240,0.22);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 0.5rem 0.6rem 0.55rem;
+  }
+  .v2-day-row[data-is-practice="1"] {
+    background: rgba(93,175,120,0.06);
+    border-color: rgba(93,175,120,0.22);
+    border-left-color: #5daf78;
+  }
+  .v2-day-head {
+    display: flex; align-items: center; gap: 0.5rem;
+    margin-bottom: 0.45rem;
+    flex-wrap: wrap;
+  }
+  .v2-day-tag {
+    font-size: 0.78rem; font-weight: 600;
+    color: var(--accent); min-width: 50px;
+  }
+  .v2-day-row[data-is-practice="1"] .v2-day-tag { color: #5daf78; }
+  .v2-day-label {
+    flex: 1; min-width: 100px; max-width: 220px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 3px;
+    padding: 0.2rem 0.45rem;
+    font-size: 0.75rem;
+    font-family: inherit;
+  }
+  .v2-day-x {
+    margin-left: auto;
+    cursor: pointer; opacity: 0.4;
+    font-size: 1rem; padding: 0 0.4rem;
+    user-select: none;
+    color: var(--text-muted);
+  }
+  .v2-day-x:hover { opacity: 0.9; color: var(--danger); }
+
+  .v2-blocks { display: flex; flex-direction: column; gap: 0.25rem; }
+  .v2-block {
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 4px;
+    padding: 0.35rem 0.45rem;
+  }
+  .v2-block.expanded {
+    background: rgba(122,164,240,0.04);
+    border-color: rgba(122,164,240,0.25);
+    padding-bottom: 0.5rem;
+  }
+  .v2-block-head {
+    display: flex; align-items: center; gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .v2-block-handle {
+    color: rgba(127,132,156,0.5);
+    cursor: grab; user-select: none;
+    font-family: monospace; font-size: 0.75rem;
+    padding: 0 0.15rem;
+  }
+  .v2-block-pill {
+    display: inline-flex; align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: 12px;
+    font-size: 0.7rem; font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    min-width: 90px;
+  }
+  .v2-block-pill.t-practice      { background: rgba(93,175,120,0.18);  color: #5daf78; }
+  .v2-block-pill.t-qualification { background: rgba(122,164,240,0.18); color: var(--accent); }
+  .v2-block-pill.t-lunch         { background: rgba(236,138,63,0.18);  color: #ec8a3f; }
+  .v2-block-pill.t-break         { background: rgba(236,138,63,0.10);  color: #ec8a3f; }
+  .v2-block-swatch {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .v2-block-time {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 3px;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.72rem;
+    font-family: inherit;
+    width: 78px;
+    font-variant-numeric: tabular-nums;
+  }
+  .v2-block-summary {
+    flex: 1; min-width: 0;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .v2-block-summary strong { color: var(--text); }
+  .v2-block-chevron {
+    cursor: pointer; user-select: none;
+    color: var(--text-muted); font-size: 0.7rem;
+    padding: 0 0.3rem;
+  }
+  .v2-block-x {
+    cursor: pointer; opacity: 0.4;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    padding: 0 0.3rem;
+    user-select: none;
+  }
+  .v2-block-x:hover { opacity: 0.9; color: var(--danger); }
+
+  .v2-block-body {
+    margin-top: 0.45rem;
+    padding-top: 0.4rem;
+    padding-left: 1.3rem;
+    border-top: 1px dashed rgba(255,255,255,0.06);
+    display: flex; flex-direction: column;
+    gap: 0.4rem;
+  }
+  .v2-body-row {
+    display: flex; align-items: center;
+    gap: 0.5rem; flex-wrap: wrap;
+    font-size: 0.72rem;
+  }
+  .v2-body-label {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    min-width: 80px;
+  }
+  .v2-body-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 3px;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.72rem;
+    font-family: inherit;
+    width: 50px;
+    font-variant-numeric: tabular-nums;
+  }
+  .v2-body-input.wide { width: 130px; }
+  .v2-cc-list { display: flex; flex-direction: column; gap: 0.2rem; }
+  .v2-cc-row {
+    display: grid;
+    grid-template-columns: auto 56px auto 56px auto;
+    gap: 0.3rem;
+    align-items: center;
+    padding: 0.18rem 0.4rem 0.18rem 0.25rem;
+    background: rgba(255,255,255,0.03);
+    border-radius: 3px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+  }
+  .v2-cc-arrow { color: var(--text-muted); padding: 0 0.15rem; }
+  .v2-cc-x {
+    cursor: pointer; color: var(--text-muted);
+    opacity: 0.5;
+    font-size: 0.85rem;
+    padding: 0 0.2rem;
+    text-align: center;
+  }
+  .v2-cc-x:hover { opacity: 0.95; color: var(--danger); }
+
+  .v2-add-cc, .v2-add-block {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px dashed rgba(127,132,156,0.3);
+    border-radius: 3px;
+    padding: 0.18rem 0.55rem;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .v2-add-cc:hover, .v2-add-block:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .v2-add-block { margin-top: 0.35rem; }
+
+  .v2-block-picker {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.25rem 0;
+    width: 180px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    z-index: 1000;
+  }
+  .v2-block-picker .section-hdr {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.25rem 0.7rem 0.15rem;
+  }
+  .v2-block-picker .picker-item {
+    display: flex; align-items: center;
+    gap: 0.45rem;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.74rem;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .v2-block-picker .picker-item:hover { background: rgba(255,255,255,0.05); }
+  .v2-block-picker .picker-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 0.25rem 0;
+  }
   .day-row { border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem; }
   .day-row-header { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent2); margin-bottom: 0.6rem; }
   .day-label-link { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 1rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent2); cursor: pointer; transition: color 0.15s; }
@@ -1627,6 +1849,25 @@
             <input type="number" id="numDays" value="2" min="1" max="5">
           </div>
         </div>
+        <!-- Day-config editor toggle (v1 ↔ v2). The v1 form is the
+             original markup (practice day section + days container +
+             add-day + warnings). The v2 editor is the block-based
+             form. Both read/write the same day_config JSON via
+             migrateLegacyDayConfig / downgradeToV1 / collectDayConfigV2.
+             v1 is the default; users opt into v2 with the toggle.
+             User preference persists in localStorage. -->
+        <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Daily Schedule</span>
+          <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.7rem;color:var(--text-muted);cursor:pointer;text-transform:none;letter-spacing:0;font-weight:500;">
+            <input type="checkbox" id="dayConfigUseV2" onchange="toggleDayConfigEditor(this.checked)" style="accent-color:var(--accent);width:12px;height:12px;flex-shrink:0;">
+            Block view (beta)
+          </label>
+        </div>
+
+        <!-- v1 editor (default). Wraps the practice day section,
+             the days container, the add-day button, and the time-error
+             message in a container we can show/hide as one unit. -->
+        <div id="v1DaysWrapper">
         <!-- ── Practice Day ────────────────────────────────────────────── -->
         <div id="practiceDaySection" style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.6rem;background:rgba(93,175,120,0.08);border-bottom:1px solid transparent;" id="practiceDayHeader">
@@ -1723,10 +1964,21 @@
           &#9888; Parameters changed — regenerate the schedule before assigning teams.
         </div>
 
-        <div class="section-label">Daily Schedule</div>
         <div class="days-container" id="daysContainer"></div>
         <button class="btn-add-break" id="btnAddDay" onclick="addDay()" style="margin-bottom:0.5rem;">+ Add Day</button>
         <div id="timeErrorMsg" class="time-error-msg"></div>
+        </div><!-- /v1DaysWrapper -->
+
+        <!-- v2 editor (opt-in). Mirrors v1's storage but renders day
+             content as an ordered list of typed blocks. Hidden by
+             default; toggleDayConfigEditor() flips visibility AND
+             converts the in-memory day_config between v1/v2 shape so
+             both editors see the same data when the user switches. -->
+        <div id="v2DaysWrapper" style="display:none;">
+          <div class="v2-days-container" id="v2DaysContainer"></div>
+          <button class="btn-add-break" id="btnAddDayV2" onclick="addDayV2()" style="margin-bottom:0.5rem;">+ Add Day</button>
+          <div id="v2TimeErrorMsg" class="time-error-msg"></div>
+        </div>
 
         <div class="progress-wrap" id="progressWrap">
           <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill"></div></div>
@@ -4476,6 +4728,14 @@ function parseUrlParams() {
 // Mirrors applyUrlParams but reads from the day_config JSON structure directly.
 function applyDayConfigToUI(dc) {
   if (!dc) return;
+  // If v2 is the active editor, also render the block view from
+  // the same data so toggling between editors stays in sync.
+  // Migrate first since incoming dc may be v1 from older saves.
+  var v2cb = document.getElementById('dayConfigUseV2');
+  if (v2cb && v2cb.checked && typeof renderDayConfigV2 === 'function') {
+    try { renderDayConfigV2(migrateLegacyDayConfig(dc)); }
+    catch(e) { console.warn('renderDayConfigV2 failed:', e); }
+  }
   if (dc.cycleTime)   document.getElementById('cycleTime').value   = dc.cycleTime;
   if (dc.breakBuffer != null) document.getElementById('breakBuffer').value = dc.breakBuffer;
   // Restore informational timeline blocks (ceremonies, playoffs) imported
@@ -8891,13 +9151,732 @@ async function generateSchedule() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Day Config v2 — block-based representation
+//
+// The v2 model collapses three v1 concepts (practiceDay, days[i].breaks,
+// days[i].cycleChanges) into a single ordered list of typed blocks
+// per day. See ARCHITECTURE.md (and the design conversation that
+// shipped this) for rationale.
+//
+// Block shape:
+//   { type: 'practice'|'qualification'|'lunch'|'break',
+//     start: 'HH:MM', end: 'HH:MM',
+//     // match blocks only:
+//     cycleTime: number,
+//     changes: [{ afterMatch: number, cycleTime: number }, ...],
+//     // practice block only:
+//     guaranteed: number, maxFiller: number,
+//     // time blocks only:
+//     label: string }
+//
+// Day shape:
+//   { label: string,           // optional, defaults to "Day N"
+//     blocks: [...]            // ordered, contiguous (last.end == next.start)
+//                              //   when no gap intended; gaps allowed
+//                              //   for explicit empty time
+//   }
+//
+// dayConfigVersion: 2 marker tells loaders this is the new shape.
+// ─────────────────────────────────────────────────────────────────────
+
+// Block type metadata — drives the picker, color, and field set per
+// type. Single source of truth used by both the editor and the
+// agenda-fit timeline renderer.
+var V2_BLOCK_TYPES = {
+  practice:       { label: 'Practice',      color: '#5daf78', schedulable: true,  hasCycleChanges: true,  practiceFields: true  },
+  qualification:  { label: 'Qualification', color: '#7aa4f0', schedulable: true,  hasCycleChanges: true,  practiceFields: false },
+  lunch:          { label: 'Lunch',         color: '#ec8a3f', schedulable: false, hasCycleChanges: false, practiceFields: false },
+  break:          { label: 'Break',         color: '#ec8a3f', schedulable: false, hasCycleChanges: false, practiceFields: false },
+};
+
+// HH:MM ↔ minute helpers used throughout v2 logic.
+function _v2timeStrToMin(s) {
+  if (!s || typeof s !== 'string') return null;
+  var bits = s.split(':');
+  if (bits.length !== 2) return null;
+  var h = parseInt(bits[0], 10), m = parseInt(bits[1], 10);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+}
+function _v2minToTimeStr(m) {
+  if (m == null || isNaN(m)) return '00:00';
+  m = Math.max(0, Math.round(m));
+  var h = Math.floor(m / 60), mm = m % 60;
+  return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+}
+
+// Migrate a v1 day_config → v2 form. Returns the same object back if
+// already v2 (idempotent — safe to call on every load). Lossless for
+// v1 inputs; v1's three concepts (practiceDay, breaks, cycleChanges)
+// fold into v2's block list:
+//
+//   practiceDay (if enabled) → one practice block on day 0 with the
+//                               same start/end/cycleTime/guaranteed/
+//                               maxFiller. Practice-day breaks/CCs
+//                               translate the same way as qual days.
+//   days[i].breaks[]          → break/lunch blocks interleaved with
+//                               qual blocks. Heuristic: name contains
+//                               "lunch" → lunch; else break.
+//   days[i].cycleChanges[]    → split the qual block at each change,
+//                               OR attach as `changes` on the qual
+//                               block if afterMatch-based. Time-based
+//                               (isStart) changes affect the first
+//                               block's cycleTime; afterMatch-based
+//                               attach to the block containing that
+//                               match. Since v1 numbered matches
+//                               continuously across days, we attach
+//                               by position in the global qual stream.
+function migrateLegacyDayConfig(dc) {
+  if (!dc) return dc;
+  if (dc.dayConfigVersion === 2) return dc; // already v2
+  if (!dc.days) return dc; // unknown shape; pass through
+
+  var out = {
+    dayConfigVersion: 2,
+    cycleTime:   dc.cycleTime,    // top-level base ct preserved for compat
+    breakBuffer: dc.breakBuffer,
+    days: [],
+  };
+
+  // Insert practiceDay as day 0 if present and enabled. v1's UI only
+  // ever had 0 or 1 practice days; if we find a practiceDay object
+  // with start/end set, we treat it as enabled and create a block.
+  var pd = dc.practiceDay;
+  if (pd && pd.enabled && pd.start && pd.end) {
+    var pBlocks = _v2interleaveBreaksAndMatches(
+      pd.start, pd.end,
+      _v2normalizeBreaks(pd.breaks),
+      'practice',
+      pd.cycleTime || dc.cycleTime || 11,
+      pd.cycleChanges || [],
+      { guaranteed: pd.guaranteed != null ? pd.guaranteed : 3,
+        maxFiller:  pd.maxFiller  != null ? pd.maxFiller  : 99 }
+    );
+    out.days.push({ label: pd.label || 'Practice', blocks: pBlocks, isPractice: true });
+  }
+
+  // Walk qual days in order. Track running global qual match index
+  // so afterMatch cycle changes attach to the correct block.
+  var globalMatchOffset = 0;
+  (dc.days || []).forEach(function(day, i) {
+    var qBlocks = _v2interleaveBreaksAndMatches(
+      day.start, day.end,
+      _v2normalizeBreaks(day.breaks),
+      'qualification',
+      day.cycleTime || dc.cycleTime || 9,
+      day.cycleChanges || [],
+      null,                       // no practice fields
+      globalMatchOffset
+    );
+    // Crude estimate for next day's offset — sum of qual block
+    // durations / cycleTime. Won't be perfect but cycle changes
+    // attached out of range will simply be ignored at render time.
+    qBlocks.forEach(function(b) {
+      if (b.type === 'qualification') {
+        var dur = (_v2timeStrToMin(b.end) || 0) - (_v2timeStrToMin(b.start) || 0);
+        globalMatchOffset += Math.floor(dur / (b.cycleTime || 9));
+      }
+    });
+    out.days.push({ label: day.label || ('Day ' + (i + 1)), blocks: qBlocks });
+  });
+
+  return out;
+}
+
+// Normalize a v1 breaks array — strip empty entries, sort by start.
+function _v2normalizeBreaks(breaks) {
+  return (breaks || [])
+    .filter(function(b) { return b && b.start && b.end; })
+    .map(function(b) {
+      return { start: b.start, end: b.end, name: b.name || 'Break' };
+    })
+    .sort(function(a, b) { return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start); });
+}
+
+// Build a block list by interleaving match blocks (practice|qualification)
+// with break/lunch blocks across the day window [start, end].
+//   - Each break splits the surrounding match block in two, sharing
+//     cycleTime + practice fields.
+//   - cycleChanges: isStart entries set the first match block's
+//     cycleTime; afterMatch entries attach as `changes` on the
+//     match block whose match range covers afterMatch.
+//   - matchOffset is the running global match index; afterMatch is
+//     interpreted relative to that.
+function _v2interleaveBreaksAndMatches(start, end, breaks, matchType, baseCt, cycleChanges, practiceFields, matchOffset) {
+  matchOffset = matchOffset || 0;
+  var ct = baseCt;
+  // isStart cycleChange resets the base ct for the entire run.
+  (cycleChanges || []).forEach(function(cc) {
+    if (cc.isStart && cc.time) {
+      var t = parseFloat(cc.time);
+      if (!isNaN(t) && t > 0) ct = t;
+    }
+  });
+
+  // Lay out match-block ↔ break alternation in time order.
+  var blocks = [];
+  var cursor = start;
+  breaks.forEach(function(brk) {
+    // Match block from cursor to break start
+    if (_v2timeStrToMin(brk.start) > _v2timeStrToMin(cursor)) {
+      blocks.push(_v2makeMatchBlock(matchType, cursor, brk.start, ct, practiceFields));
+    }
+    // Break block — guess type from name
+    var btype = /lunch/i.test(brk.name || '') ? 'lunch' : 'break';
+    blocks.push({ type: btype, start: brk.start, end: brk.end, label: brk.name || (btype === 'lunch' ? 'Lunch' : 'Break') });
+    cursor = brk.end;
+  });
+  // Final match block to end of day
+  if (_v2timeStrToMin(end) > _v2timeStrToMin(cursor)) {
+    blocks.push(_v2makeMatchBlock(matchType, cursor, end, ct, practiceFields));
+  }
+
+  // Attach afterMatch-based cycle changes to whichever match block
+  // contains that match number. Walk match blocks, accumulate match
+  // counts using each block's cycleTime, and bin each cc accordingly.
+  var afterMatchCcs = (cycleChanges || []).filter(function(cc) {
+    return !cc.isStart && cc.afterMatch != null && !isNaN(cc.afterMatch) && cc.afterMatch >= 1;
+  }).sort(function(a, b) { return a.afterMatch - b.afterMatch; });
+  if (afterMatchCcs.length) {
+    var runningMatchIdx = matchOffset;
+    blocks.forEach(function(b) {
+      if (!V2_BLOCK_TYPES[b.type] || !V2_BLOCK_TYPES[b.type].hasCycleChanges) return;
+      var dur = (_v2timeStrToMin(b.end) || 0) - (_v2timeStrToMin(b.start) || 0);
+      var nMatches = Math.floor(dur / (b.cycleTime || baseCt));
+      var blockStartMatch = runningMatchIdx + 1;
+      var blockEndMatch   = runningMatchIdx + nMatches;
+      // Pull any cc whose afterMatch falls in [blockStartMatch, blockEndMatch)
+      var attached = afterMatchCcs.filter(function(cc) {
+        return cc.afterMatch >= blockStartMatch && cc.afterMatch < blockEndMatch;
+      });
+      if (attached.length) {
+        b.changes = attached.map(function(cc) {
+          return { afterMatch: cc.afterMatch, cycleTime: parseFloat(cc.time) || b.cycleTime };
+        });
+      }
+      runningMatchIdx = blockEndMatch;
+    });
+  }
+
+  return blocks;
+}
+
+function _v2makeMatchBlock(type, start, end, cycleTime, practiceFields) {
+  var b = { type: type, start: start, end: end, cycleTime: cycleTime };
+  if (practiceFields) {
+    b.guaranteed = practiceFields.guaranteed;
+    b.maxFiller  = practiceFields.maxFiller;
+  }
+  return b;
+}
+
+// Reverse migration: v2 → v1. Lossy for any v2-only structure (no
+// such structure today since both share the 4 block types, but the
+// shim is here for symmetry and for older v1-only code paths to
+// keep functioning without modification).
+function downgradeToV1(dc) {
+  if (!dc || dc.dayConfigVersion !== 2) return dc;
+  var v1 = {
+    cycleTime:   dc.cycleTime,
+    breakBuffer: dc.breakBuffer,
+    days: [],
+  };
+  var globalMatchOffset = 0;
+  (dc.days || []).forEach(function(day, idx) {
+    if (day.isPractice) {
+      // Collect practice blocks from this day
+      var pBlocks = day.blocks.filter(function(b) { return b.type === 'practice'; });
+      var pBreaks = day.blocks.filter(function(b) { return b.type === 'lunch' || b.type === 'break'; });
+      if (pBlocks.length) {
+        var first = pBlocks[0], last = pBlocks[pBlocks.length - 1];
+        v1.practiceDay = {
+          enabled: true,
+          start: first.start, end: last.end,
+          cycleTime:  first.cycleTime,
+          guaranteed: first.guaranteed != null ? first.guaranteed : 3,
+          maxFiller:  first.maxFiller  != null ? first.maxFiller  : 99,
+          breaks:     pBreaks.map(function(b) { return { start: b.start, end: b.end, name: b.label }; }),
+          cycleChanges: _v2collectCycleChangesAcrossBlocks(pBlocks, globalMatchOffset),
+        };
+      }
+      return; // practice day doesn't enter v1.days
+    }
+    // Qual day
+    var qBlocks = day.blocks.filter(function(b) { return b.type === 'qualification'; });
+    var qBreaks = day.blocks.filter(function(b) { return b.type === 'lunch' || b.type === 'break'; });
+    if (!qBlocks.length) return;
+    var first = qBlocks[0], last = qBlocks[qBlocks.length - 1];
+    v1.days.push({
+      start: first.start, end: last.end,
+      cycleTime: first.cycleTime,
+      breaks: qBreaks.map(function(b) { return { start: b.start, end: b.end, name: b.label }; }),
+      cycleChanges: _v2collectCycleChangesAcrossBlocks(qBlocks, globalMatchOffset),
+    });
+    qBlocks.forEach(function(b) {
+      var dur = (_v2timeStrToMin(b.end) || 0) - (_v2timeStrToMin(b.start) || 0);
+      globalMatchOffset += Math.floor(dur / (b.cycleTime || 9));
+    });
+  });
+  return v1;
+}
+
+// Helper: walk match blocks of a day and emit v1-style cycleChanges.
+// First block's cycleTime → isStart entry. Each subsequent block's
+// changes[] become afterMatch entries with the running match index.
+function _v2collectCycleChangesAcrossBlocks(blocks, startingMatchOffset) {
+  var ccs = [];
+  if (!blocks.length) return ccs;
+  ccs.push({ isStart: true, time: blocks[0].cycleTime });
+  var idx = startingMatchOffset;
+  blocks.forEach(function(b) {
+    var dur = (_v2timeStrToMin(b.end) || 0) - (_v2timeStrToMin(b.start) || 0);
+    var n = Math.floor(dur / (b.cycleTime || 9));
+    (b.changes || []).forEach(function(cc) {
+      ccs.push({ afterMatch: cc.afterMatch, time: cc.cycleTime, isStart: false });
+    });
+    idx += n;
+  });
+  return ccs;
+}
+
+// Collect the v2 form state into a day_config object. Read from the
+// v2 markup (#v2DaysContainer). If v2 isn't enabled, returns null.
+function collectDayConfigV2() {
+  var container = document.getElementById('v2DaysContainer');
+  if (!container) return null;
+  var dayEls = container.querySelectorAll('.v2-day-row');
+  var days = [];
+  dayEls.forEach(function(dayEl) {
+    var label = dayEl.querySelector('.v2-day-label').value || '';
+    var isPractice = dayEl.dataset.isPractice === '1';
+    var blocks = [];
+    dayEl.querySelectorAll('.v2-block').forEach(function(blockEl) {
+      var t = blockEl.dataset.type;
+      var b = {
+        type:  t,
+        start: blockEl.querySelector('.v2-block-start').value,
+        end:   blockEl.querySelector('.v2-block-end').value,
+      };
+      var meta = V2_BLOCK_TYPES[t];
+      if (meta && meta.schedulable) {
+        b.cycleTime = parseFloat(blockEl.querySelector('.v2-block-cycletime').value) || 9;
+        // After-match changes — read from .v2-cc-row inputs
+        var ccs = [];
+        blockEl.querySelectorAll('.v2-cc-row').forEach(function(ccEl) {
+          var afterMatch = parseInt(ccEl.querySelector('.v2-cc-after').value, 10);
+          var ct         = parseFloat(ccEl.querySelector('.v2-cc-time').value);
+          if (!isNaN(afterMatch) && afterMatch >= 1 && !isNaN(ct) && ct > 0) {
+            ccs.push({ afterMatch: afterMatch, cycleTime: ct });
+          }
+        });
+        if (ccs.length) b.changes = ccs;
+      }
+      if (meta && meta.practiceFields) {
+        b.guaranteed = parseInt(blockEl.querySelector('.v2-block-guaranteed').value, 10) || 3;
+        b.maxFiller  = parseInt(blockEl.querySelector('.v2-block-maxfiller').value,  10) || 99;
+      }
+      if (meta && !meta.schedulable) {
+        b.label = blockEl.querySelector('.v2-block-label').value || meta.label;
+      }
+      blocks.push(b);
+    });
+    var d = { label: label, blocks: blocks };
+    if (isPractice) d.isPractice = true;
+    days.push(d);
+  });
+  return {
+    dayConfigVersion: 2,
+    cycleTime:   parseFloat(document.getElementById('cycleTime').value)   || 9,
+    breakBuffer: parseFloat(document.getElementById('breakBuffer').value) || 0,
+    days: days,
+  };
+}
+
+// ─── v2 rendering ─────────────────────────────────────────────────
+// Render a v2 day_config object into the v2 editor markup. Blows
+// away whatever's in #v2DaysContainer and rebuilds. Called on
+// toggle-on, on data load, and after day/block add/remove operations.
+function renderDayConfigV2(dc) {
+  var container = document.getElementById('v2DaysContainer');
+  if (!container) return;
+  container.innerHTML = '';
+  var days = (dc && dc.days) ? dc.days : [];
+  if (!days.length) {
+    // Bootstrap a single empty Day 1 so the user has something to
+    // edit. Same default times v1 uses (9–5 with a noon lunch).
+    days = [{
+      label: 'Day 1',
+      blocks: [
+        { type: 'qualification', start: '09:00', end: '12:00', cycleTime: 9 },
+        { type: 'lunch',         start: '12:00', end: '13:00', label: 'Lunch' },
+        { type: 'qualification', start: '13:00', end: '17:00', cycleTime: 9 },
+      ],
+    }];
+  }
+  days.forEach(function(day, i) { container.appendChild(buildV2DayRow(day, i)); });
+}
+
+function buildV2DayRow(day, idx) {
+  var isP = !!day.isPractice;
+  var row = document.createElement('div');
+  row.className = 'v2-day-row';
+  row.dataset.isPractice = isP ? '1' : '0';
+  var label = day.label || (isP ? 'Practice' : 'Day ' + (idx + 1));
+  // Header: tag + label input + delete
+  var head = document.createElement('div');
+  head.className = 'v2-day-head';
+  head.innerHTML =
+    '<span class="v2-day-tag">' + (isP ? 'Practice' : 'Day ' + (idx + 1)) + '</span>' +
+    '<input class="v2-day-label" type="text" placeholder="Optional label" value="' + _v2attrEsc(label) + '">' +
+    '<span class="v2-day-x" title="Remove day">\u00d7</span>';
+  head.querySelector('.v2-day-x').addEventListener('click', function() { removeV2Day(row); });
+  row.appendChild(head);
+  // Blocks
+  var blocksWrap = document.createElement('div');
+  blocksWrap.className = 'v2-blocks';
+  (day.blocks || []).forEach(function(b) { blocksWrap.appendChild(buildV2Block(b)); });
+  row.appendChild(blocksWrap);
+  // Add-block button
+  var addBtn = document.createElement('button');
+  addBtn.className = 'v2-add-block';
+  addBtn.textContent = '+ Add block';
+  addBtn.onclick = function(ev) { ev.preventDefault(); openV2BlockPicker(addBtn, blocksWrap); };
+  row.appendChild(addBtn);
+  return row;
+}
+
+function buildV2Block(b) {
+  var meta = V2_BLOCK_TYPES[b.type] || V2_BLOCK_TYPES.qualification;
+  var block = document.createElement('div');
+  block.className = 'v2-block';
+  block.dataset.type = b.type;
+  // Header
+  var head = document.createElement('div');
+  head.className = 'v2-block-head';
+  head.innerHTML =
+    '<span class="v2-block-handle" title="Drag to reorder (not yet wired)">\u22ee\u22ee</span>' +
+    '<span class="v2-block-pill t-' + b.type + '"><span class="v2-block-swatch" style="background:' + meta.color + ';"></span>' + meta.label + ' \u25be</span>' +
+    '<input class="v2-block-time v2-block-start" type="time" value="' + (b.start || '09:00') + '">' +
+    '<span style="color:var(--text-muted);font-size:0.72rem;">\u2013</span>' +
+    '<input class="v2-block-time v2-block-end" type="time" value="' + (b.end || '17:00') + '">' +
+    '<span class="v2-block-summary"></span>' +
+    (meta.schedulable ? '<span class="v2-block-chevron" title="Show details">\u25be</span>' : '') +
+    '<span class="v2-block-x" title="Remove block">\u00d7</span>';
+
+  // Pill click → block-type picker
+  head.querySelector('.v2-block-pill').addEventListener('click', function(ev) {
+    ev.stopPropagation();
+    openV2BlockTypePicker(head.querySelector('.v2-block-pill'), block);
+  });
+  // Delete
+  head.querySelector('.v2-block-x').addEventListener('click', function() {
+    block.remove();
+    onV2BlockChange();
+  });
+  // Time inputs trigger change
+  head.querySelectorAll('input').forEach(function(inp) {
+    inp.addEventListener('change', function() { updateV2BlockSummary(block); onV2BlockChange(); });
+  });
+  block.appendChild(head);
+
+  // Body — only for schedulable blocks (cycle time + cycle changes
+  // + practice fields). Hidden by default; chevron toggles.
+  if (meta.schedulable) {
+    var body = document.createElement('div');
+    body.className = 'v2-block-body';
+    body.style.display = 'none';
+    var bodyHtml =
+      '<div class="v2-body-row">' +
+      '  <span class="v2-body-label">Cycle time</span>' +
+      '  <input class="v2-body-input v2-block-cycletime" type="number" min="0.5" step="any" value="' + (b.cycleTime || 9) + '"> min/match' +
+      '</div>';
+    if (meta.practiceFields) {
+      bodyHtml +=
+        '<div class="v2-body-row">' +
+        '  <span class="v2-body-label">Guaranteed</span>' +
+        '  <input class="v2-body-input v2-block-guaranteed" type="number" min="1" max="20" value="' + (b.guaranteed != null ? b.guaranteed : 3) + '"> matches/team' +
+        '</div>' +
+        '<div class="v2-body-row">' +
+        '  <span class="v2-body-label">Max filler</span>' +
+        '  <input class="v2-body-input v2-block-maxfiller" type="number" min="0" max="99" value="' + (b.maxFiller != null ? b.maxFiller : 99) + '"> matches/team' +
+        '</div>';
+    }
+    bodyHtml +=
+      '<div>' +
+      '  <div class="v2-body-label" style="margin-bottom:0.25rem;">Cycle changes</div>' +
+      '  <div class="v2-cc-list"></div>' +
+      '  <button class="v2-add-cc" type="button">+ Add cycle change</button>' +
+      '</div>';
+    body.innerHTML = bodyHtml;
+    // Wire cc list
+    var ccList = body.querySelector('.v2-cc-list');
+    (b.changes || []).forEach(function(cc) { ccList.appendChild(buildV2CcRow(cc)); });
+    body.querySelector('.v2-add-cc').onclick = function(ev) {
+      ev.preventDefault();
+      ccList.appendChild(buildV2CcRow({ afterMatch: 1, cycleTime: parseFloat(body.querySelector('.v2-block-cycletime').value) || 9 }));
+      onV2BlockChange();
+    };
+    // Wire body inputs
+    body.querySelectorAll('input').forEach(function(inp) {
+      inp.addEventListener('change', function() { updateV2BlockSummary(block); onV2BlockChange(); });
+    });
+    // Chevron toggle
+    var chev = head.querySelector('.v2-block-chevron');
+    if (chev) {
+      chev.addEventListener('click', function() {
+        var open = body.style.display !== 'none';
+        body.style.display = open ? 'none' : '';
+        block.classList.toggle('expanded', !open);
+        chev.textContent = open ? '\u25be' : '\u25b4';
+      });
+    }
+    block.appendChild(body);
+  } else {
+    // Time blocks — use the summary area for the optional label
+    // input. We tuck a hidden label input inside the head's summary
+    // span so collectDayConfigV2 can find it.
+    var sum = head.querySelector('.v2-block-summary');
+    sum.innerHTML = '<input class="v2-block-label" type="text" placeholder="' + meta.label + '" value="' + _v2attrEsc(b.label || '') + '" style="background:transparent;border:none;color:var(--text-muted);font-size:0.7rem;width:100%;font-family:inherit;">';
+    sum.querySelector('input').addEventListener('change', onV2BlockChange);
+  }
+
+  updateV2BlockSummary(block);
+  return block;
+}
+
+function buildV2CcRow(cc) {
+  var row = document.createElement('div');
+  row.className = 'v2-cc-row';
+  row.innerHTML =
+    '<span>After match</span>' +
+    '<input class="v2-body-input v2-cc-after" type="number" min="1" value="' + (cc.afterMatch || 1) + '">' +
+    '<span class="v2-cc-arrow">\u2192</span>' +
+    '<input class="v2-body-input v2-cc-time" type="number" min="0.5" step="any" value="' + (cc.cycleTime || 9) + '">' +
+    '<span class="v2-cc-x" title="Remove">\u00d7</span>';
+  row.querySelector('.v2-cc-x').addEventListener('click', function() {
+    row.remove();
+    onV2BlockChange();
+  });
+  row.querySelectorAll('input').forEach(function(inp) {
+    inp.addEventListener('change', onV2BlockChange);
+  });
+  return row;
+}
+
+// Update the one-line summary text shown on the block header.
+function updateV2BlockSummary(block) {
+  var meta = V2_BLOCK_TYPES[block.dataset.type];
+  if (!meta || !meta.schedulable) return; // time blocks use the input
+  var sum = block.querySelector('.v2-block-summary');
+  if (!sum) return;
+  var ct = parseFloat(block.querySelector('.v2-block-cycletime').value) || 9;
+  var ccCount = block.querySelectorAll('.v2-cc-row').length;
+  var txt = '<strong>' + ct + '</strong> min/match';
+  if (ccCount) txt += ' \u00b7 <strong>' + ccCount + '</strong> change' + (ccCount > 1 ? 's' : '');
+  sum.innerHTML = txt;
+}
+
+// Block-type picker for an EXISTING block (changes its type in place).
+function openV2BlockTypePicker(anchorEl, blockEl) {
+  _v2closePickers();
+  var picker = _v2buildPicker(function(newType) {
+    var b = _v2blockToObj(blockEl);
+    b.type = newType;
+    // Reset type-specific fields when switching kinds
+    var meta = V2_BLOCK_TYPES[newType];
+    if (meta.schedulable && b.cycleTime == null) b.cycleTime = 9;
+    if (meta.practiceFields) {
+      if (b.guaranteed == null) b.guaranteed = 3;
+      if (b.maxFiller  == null) b.maxFiller  = 99;
+    }
+    if (!meta.schedulable) { delete b.cycleTime; delete b.changes; delete b.guaranteed; delete b.maxFiller; }
+    var fresh = buildV2Block(b);
+    blockEl.parentNode.replaceChild(fresh, blockEl);
+    onV2BlockChange();
+  });
+  _v2anchorPicker(picker, anchorEl);
+}
+
+// Block picker for ADDING a new block to a day's blocks list.
+function openV2BlockPicker(anchorBtn, blocksWrap) {
+  _v2closePickers();
+  var picker = _v2buildPicker(function(newType) {
+    var meta = V2_BLOCK_TYPES[newType];
+    // Default times: continue from previous block's end
+    var prev = blocksWrap.querySelector('.v2-block:last-child');
+    var prevEnd = prev ? prev.querySelector('.v2-block-end').value : '13:00';
+    var newStart = prevEnd;
+    var newEnd   = _v2minToTimeStr((_v2timeStrToMin(newStart) || 0) + (meta.schedulable ? 60 : 30));
+    var b = { type: newType, start: newStart, end: newEnd };
+    if (meta.schedulable) b.cycleTime = newType === 'practice' ? 11 : 9;
+    if (meta.practiceFields) { b.guaranteed = 3; b.maxFiller = 99; }
+    if (!meta.schedulable) b.label = '';
+    blocksWrap.appendChild(buildV2Block(b));
+    onV2BlockChange();
+  });
+  _v2anchorPicker(picker, anchorBtn);
+}
+
+function _v2buildPicker(onSelect) {
+  var p = document.createElement('div');
+  p.className = 'v2-block-picker';
+  p.innerHTML =
+    '<div class="section-hdr">Match blocks</div>' +
+    '<div class="picker-item" data-type="practice"><span class="v2-block-swatch" style="background:#5daf78;"></span>Practice</div>' +
+    '<div class="picker-item" data-type="qualification"><span class="v2-block-swatch" style="background:#7aa4f0;"></span>Qualification</div>' +
+    '<div class="picker-divider"></div>' +
+    '<div class="section-hdr">Time blocks</div>' +
+    '<div class="picker-item" data-type="lunch"><span class="v2-block-swatch" style="background:#ec8a3f;"></span>Lunch</div>' +
+    '<div class="picker-item" data-type="break"><span class="v2-block-swatch" style="background:#ec8a3f;opacity:0.7;"></span>Break</div>';
+  p.querySelectorAll('.picker-item').forEach(function(it) {
+    it.addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      onSelect(it.dataset.type);
+      _v2closePickers();
+    });
+  });
+  return p;
+}
+function _v2anchorPicker(picker, anchorEl) {
+  document.body.appendChild(picker);
+  var rect = anchorEl.getBoundingClientRect();
+  picker.style.left = (window.scrollX + rect.left) + 'px';
+  picker.style.top  = (window.scrollY + rect.bottom + 4) + 'px';
+  // Close on outside click (deferred so the click that opened doesn't immediately close).
+  setTimeout(function() {
+    document.addEventListener('click', _v2closePickers, { once: true });
+  }, 0);
+}
+function _v2closePickers() {
+  document.querySelectorAll('.v2-block-picker').forEach(function(p) { p.remove(); });
+}
+
+function _v2blockToObj(blockEl) {
+  var b = { type: blockEl.dataset.type };
+  b.start = blockEl.querySelector('.v2-block-start').value;
+  b.end   = blockEl.querySelector('.v2-block-end').value;
+  var ctEl = blockEl.querySelector('.v2-block-cycletime');
+  if (ctEl) b.cycleTime = parseFloat(ctEl.value);
+  var gEl = blockEl.querySelector('.v2-block-guaranteed');
+  if (gEl) b.guaranteed = parseInt(gEl.value, 10);
+  var fEl = blockEl.querySelector('.v2-block-maxfiller');
+  if (fEl) b.maxFiller = parseInt(fEl.value, 10);
+  var lEl = blockEl.querySelector('.v2-block-label');
+  if (lEl) b.label = lEl.value;
+  return b;
+}
+
+function _v2attrEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Add a new day to the v2 container.
+function addDayV2() {
+  var container = document.getElementById('v2DaysContainer');
+  var idx = container.querySelectorAll('.v2-day-row').length;
+  // Default new day: 9-5 single qual block
+  var day = {
+    label: 'Day ' + (idx + 1),
+    blocks: [
+      { type: 'qualification', start: '09:00', end: '17:00', cycleTime: 9 },
+    ],
+  };
+  container.appendChild(buildV2DayRow(day, idx));
+  onV2BlockChange();
+}
+
+function removeV2Day(rowEl) {
+  rowEl.remove();
+  // Renumber day tags
+  document.querySelectorAll('#v2DaysContainer .v2-day-row').forEach(function(r, i) {
+    if (r.dataset.isPractice !== '1') {
+      var tag = r.querySelector('.v2-day-tag');
+      if (tag) tag.textContent = 'Day ' + (i + 1);
+    }
+  });
+  onV2BlockChange();
+}
+
+// Hook for any post-edit actions (agenda fit re-render, URL update).
+// Cheap to call after every change — same handlers as v1.
+function onV2BlockChange() {
+  if (typeof onScheduleParamsChanged === 'function') onScheduleParamsChanged();
+  if (typeof updateUrlFromState === 'function') updateUrlFromState();
+}
+
+// ─── Toggle wiring ────────────────────────────────────────────────
+// Swap between v1 and v2 editors. Persists choice in localStorage.
+// On switch, converts the in-memory day_config so both editors see
+// the same data.
+function toggleDayConfigEditor(useV2) {
+  var v1Wrap = document.getElementById('v1DaysWrapper');
+  var v2Wrap = document.getElementById('v2DaysWrapper');
+  if (!v1Wrap || !v2Wrap) return;
+  if (useV2) {
+    // Convert current v1 form state → v2 + render
+    var v1dc = collectDayConfig();
+    var v2dc = migrateLegacyDayConfig(v1dc);
+    renderDayConfigV2(v2dc);
+    v1Wrap.style.display = 'none';
+    v2Wrap.style.display = '';
+  } else {
+    // Convert v2 → v1 + apply to v1 form
+    var v2dc = collectDayConfigV2();
+    var v1dc = downgradeToV1(v2dc);
+    if (typeof applyDayConfigToUI === 'function' && v1dc) applyDayConfigToUI(v1dc);
+    v2Wrap.style.display = 'none';
+    v1Wrap.style.display = '';
+  }
+  try { localStorage.setItem('frcDayConfigUseV2', useV2 ? '1' : '0'); } catch(e) {}
+}
+
+// Restore toggle state on load. Called from the existing init path.
+// Wrapped in DOMContentLoaded so the toggle checkbox exists.
+document.addEventListener('DOMContentLoaded', function() {
+  try {
+    var stored = localStorage.getItem('frcDayConfigUseV2');
+    if (stored === '1') {
+      var cb = document.getElementById('dayConfigUseV2');
+      if (cb) {
+        cb.checked = true;
+        // Defer toggle until v1 is built (buildDaysUI runs in init too)
+        setTimeout(function() { toggleDayConfigEditor(true); }, 100);
+      }
+    }
+  } catch(e) {}
+});
+
 // Push current params + seed into browser URL without page reload
 function updateUrlFromState() {
   try { window.history.replaceState(null, '', buildShareUrl()); } catch(e) {}
 }
 
-// Collect day/timing config from UI
+// Collect day/timing config from UI. When the v2 (block view)
+// editor is active, we read from v2 markup and downgrade to v1
+// shape — the scheduler and backend still speak v1, so v2 lives
+// purely in the editor for now. The v2 form-state is never lost
+// because toggling back to v1 round-trips through migrate/downgrade.
 function collectDayConfig() {
+  var v2cb = document.getElementById('dayConfigUseV2');
+  if (v2cb && v2cb.checked) {
+    var v2dc = collectDayConfigV2();
+    if (v2dc) {
+      var v1 = downgradeToV1(v2dc);
+      // Splice in the auto-flags + autoAssign that the v1 path adds.
+      // Without these, downstream code that expects them would
+      // misbehave (autoPopulate, autoMaxCycles, autoAssign).
+      var elAP = document.getElementById('autoPopulate');
+      var elAM = document.getElementById('autoMaxCycles');
+      var elAS = document.getElementById('autoAssign');
+      v1.autoPopulate  = elAP ? elAP.checked : false;
+      v1.autoMaxCycles = elAM ? elAM.checked : false;
+      v1.autoAssign    = elAS ? elAS.checked : false;
+      return v1;
+    }
+  }
   var defaultCt = parseFloat(document.getElementById('cycleTime').value) || 8;
   var elAP = document.getElementById('autoPopulate');
   var elAM = document.getElementById('autoMaxCycles');
