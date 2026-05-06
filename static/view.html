@@ -2873,7 +2873,11 @@ function rerender() {
         timeCell = '<span class="playing-time">▶ ' + minToTime12(epochToMin(live.actual_time)) + '</span>';
       } else {
         timeCell = minToTime12(entry.startMin);
-        if (STATE.liveMode) {
+        // Drift requires live data, which practice matches never have
+        // (TBA/Nexus only track quals). Without this guard, the
+        // colliding-matchNum issue would let a qual's actual_time
+        // produce a "drift" badge on the practice match's row.
+        if (STATE.liveMode && !entry.isPractice) {
           const drift = matchDriftMinutes(entry.matchNum, entry.startMin);
           if (drift !== null && Math.abs(drift) >= 1) {
             const cls = drift > 0 ? 'drift-late' : 'drift-early';
@@ -5191,10 +5195,22 @@ function updateNextMatch(nowMatchNum) {
   //      first match (Q3 in screenshot) regardless of how long ago
   //      it actually finished.
   //   3. All matches done? Show the last one.
+  //
+  // Important: every STATE.liveByMatch lookup is gated by isPractice.
+  // The live-data map is keyed by match number alone (not by
+  // competition level), so P1 and Q1 collide. Without this guard a
+  // practice match would inherit the colliding qual's completed/
+  // playing status and either disappear from the candidate list or
+  // get mis-labeled. Practice matches never have live TBA/Nexus
+  // data, so forcing null pushes them through the planned-timestamp
+  // path — same pattern the schedule renderer uses at line ~2791.
+  function _liveFor(m) {
+    return m && m.isPractice ? null : STATE.liveByMatch[m.matchNum];
+  }
   let target = null;
   let targetIsPlaying = false;
   for (const m of myMatches) {
-    const live = STATE.liveByMatch[m.matchNum];
+    const live = _liveFor(m);
     if (live && live.status === 'playing') {
       target = m; targetIsPlaying = true; break;
     }
@@ -5202,7 +5218,7 @@ function updateNextMatch(nowMatchNum) {
   if (!target) {
     var _now = Date.now();
     target = myMatches.find(m => {
-      const live = STATE.liveByMatch[m.matchNum];
+      const live = _liveFor(m);
       if (live && live.status === 'completed') return false;
       if (live) return true; // live data present, not completed → candidate
       // No live data — use planned timestamp vs. now
@@ -5218,7 +5234,7 @@ function updateNextMatch(nowMatchNum) {
   card.className = 'card next-match-card' + (targetIsPlaying ? ' active' : '');
 
   // Header line — "Now playing" / "Up next" / "Final" with match details
-  const targetLive = STATE.liveByMatch[target.matchNum];
+  const targetLive = _liveFor(target);
   // "All completed" check considers live status first, then falls
   // back to planned-time-vs-now for entries without live data. A
   // past schedule (no Nexus, all match timestamps before now) reads
@@ -5226,7 +5242,7 @@ function updateNextMatch(nowMatchNum) {
   // mislabeling a stale match "Up next".
   var _allCompletedNow = Date.now();
   const allCompleted = myMatches.every(m => {
-    const l = STATE.liveByMatch[m.matchNum];
+    const l = _liveFor(m);
     if (l && l.status === 'completed') return true;
     if (l) return false; // live present, not completed → not all done
     var ts = _resolveMatchTimestamp(m);
@@ -5239,10 +5255,13 @@ function updateNextMatch(nowMatchNum) {
   else if (allCompleted) leadLabel = 'Last match';
   else leadLabel = 'Up next';
 
-  // Compute drift-adjusted ETA
+  // Compute drift-adjusted ETA. matchDriftMinutes consults the same
+  // live data map, so practice matches must skip drift computation
+  // — the colliding qual match's actual_time would produce a
+  // misleading badge for an event that hasn't even happened yet.
   let etaText = minToTime12(target.startMin);
   let driftHtml = '';
-  if (STATE.liveMode && !targetIsPlaying && (!targetLive || targetLive.status !== 'completed')) {
+  if (STATE.liveMode && !target.isPractice && !targetIsPlaying && (!targetLive || targetLive.status !== 'completed')) {
     const drift = matchDriftMinutes(target.matchNum, target.startMin);
     if (drift !== null && Math.abs(drift) >= 1) {
       const cls = drift > 0 ? 'drift-late' : 'drift-early';
@@ -5369,8 +5388,13 @@ function updateNextMatch(nowMatchNum) {
                 minToTime12(Math.round(finishMin)) + '</strong></div>';
   }
 
-  // Year-agnostic + auto-rendered breakdown for last completed match
+  // Year-agnostic + auto-rendered breakdown for last completed match.
+  // Only considers qualification matches — TBA doesn't track
+  // practice match scores, and the colliding-matchNum issue would
+  // otherwise pull in a qual's score_breakdown for a practice match
+  // that happens to share its number.
   const lastCompleted = [...myMatches].reverse().find(m => {
+    if (m.isPractice) return false;
     const l = STATE.liveByMatch[m.matchNum];
     return l && l.status === 'completed' && l.score_breakdown;
   });
@@ -6296,11 +6320,14 @@ function matchDriftMinutes(matchNum, scheduledStartMin) {
   return liveMin - scheduledStartMin;
 }
 
-// Aggregate drift across all played/playing matches: median of recent values
+// Aggregate drift across all played/playing matches: median of recent values.
+// Practice matches are excluded because they have no live data — including
+// them via the colliding-matchNum issue would pollute the median with
+// fake drift values pulled from quals that share their numbers.
 function eventDriftMinutes() {
   const drifts = [];
   (STATE.computed || []).forEach(e => {
-    if (e.type !== 'match') return;
+    if (e.type !== 'match' || e.isPractice) return;
     const d = matchDriftMinutes(e.matchNum, e.startMin);
     if (d !== null && Math.abs(d) < 600) drifts.push(d);
   });
