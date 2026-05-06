@@ -231,6 +231,10 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
       - "lunch"/"break" blocks   → days[<day_index>].breaks
       - "ceremony"/"playoff"     → timeline_blocks (informational; rendered
                                    in /view but not used by the scheduler)
+      - event_dates.start        → days[i].date (start_date + i days)
+                                   so v2 day blocks get pre-filled with
+                                   actual calendar dates the user can
+                                   review and adjust.
 
     Auto-cap rule: if a playoff block exists on the same day_index as a qual
     day, AND the qual day's end is later than (or equal to) the playoff
@@ -240,6 +244,25 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
     blocks = extracted.get("blocks") or []
     if not isinstance(blocks, list):
         blocks = []
+
+    # Parse event start date so we can stamp per-day dates. Tolerate
+    # missing/malformed input — empty string falls through to no
+    # date stamping. The date for day_index N is start_date + N days.
+    from datetime import date as _date, timedelta as _timedelta
+    event_dates = extracted.get("event_dates") or {}
+    start_date_str = event_dates.get("start") if isinstance(event_dates, dict) else None
+    event_start_date = None
+    if isinstance(start_date_str, str) and start_date_str:
+        try:
+            y, m, d = start_date_str.split("-")
+            event_start_date = _date(int(y), int(m), int(d))
+        except (ValueError, TypeError):
+            event_start_date = None
+
+    def _date_for_day_index(di: int) -> str:
+        if event_start_date is None or not isinstance(di, int) or di < 0:
+            return ""
+        return (event_start_date + _timedelta(days=di)).isoformat()
 
     # Normalize start/end fields. The LLM's schema can't enforce HH:MM
     # format (xgrammar limitation — see DAYPLAN_SCHEMA comment) so we
@@ -361,6 +384,9 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
             "breaks":         [],
             "cycleChanges":   [],
             "earlyEnd":       None,
+            "date":           _date_for_day_index(
+                practice_block.get("day_index") if isinstance(practice_block.get("day_index"), int) else 0
+            ),
         }
     else:
         practice_day = None
@@ -447,6 +473,7 @@ def to_legacy_day_config(extracted: dict[str, Any], *,
             "earlyEnd":     None,
             "cycleChanges": [],
             "breaks":       breaks_out,
+            "date":         _date_for_day_index(di),
         })
 
     if not days_out:

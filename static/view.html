@@ -125,6 +125,25 @@
   .next-match-meta { font-size: 13px; color: var(--text-muted); }
   .next-match-meta strong { color: var(--text); font-weight: 600; }
   .next-match-card.empty { color: var(--text-muted); font-style: italic; }
+  /* Countdown — sits between detail and meta. Color shifts as the
+     match approaches: muted >1h out, accent <1h, warning <10m,
+     hot when match is starting / playing. */
+  .next-match-countdown {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin: 6px 0 10px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .next-match-countdown.soon  { color: var(--next-match-accent); }
+  .next-match-countdown.close { color: var(--next-match-accent); animation: countdown-pulse 1s ease-in-out infinite alternate; }
+  .next-match-countdown.now   { color: var(--secondary); animation: countdown-pulse 0.7s ease-in-out infinite alternate; }
+  @keyframes countdown-pulse {
+    from { opacity: 0.85; }
+    to   { opacity: 1; transform: scale(1.02); }
+  }
 
   /* ── Match table ──────────────────────────────────────────────────────── */
   .match-table-wrap {
@@ -169,6 +188,54 @@
     display: inline-block; margin-left: 3px; font-size: 9px; font-weight: 700;
     background: #fff3cd; color: #856404; padding: 1px 3px; border-radius: 2px;
     vertical-align: middle;
+  }
+
+  /* ── Mobile shrink: fit all 8 columns on phone vertical ──────────
+     Phone vertical is ~360-414px wide. Default padding + font size
+     pushed Red 2/3 off-screen because match-table-wrap has
+     overflow:hidden (clipped, no scroll). Aggressive padding/font
+     reduction here keeps the row on a single line down to ~340px
+     viewport width without sacrificing legibility. */
+  @media (max-width: 600px) {
+    table.matches thead th {
+      padding: 0.45rem 0.18rem;
+      font-size: 9px;
+      letter-spacing: 0.02em;
+    }
+    table.matches td {
+      padding: 0.4rem 0.15rem;
+      font-size: 12px;
+    }
+    table.matches td.col-time {
+      font-size: 11px;
+      padding-left: 0.4rem;
+    }
+    table.matches td.col-match {
+      padding-left: 0.4rem;
+    }
+    table.matches thead th.col-time,
+    table.matches thead th.col-match {
+      padding-left: 0.4rem;
+    }
+    /* Surrogate flag tucks below the number on mobile to avoid widening cells */
+    table.matches td .surr-flag {
+      display: block; margin-left: 0; margin-top: 1px;
+      font-size: 8px; padding: 0 2px;
+      width: fit-content; margin-left: auto; margin-right: auto;
+    }
+  }
+  @media (max-width: 400px) {
+    /* Even tighter for the smallest phones */
+    table.matches thead th {
+      padding: 0.4rem 0.1rem;
+      font-size: 8.5px;
+    }
+    table.matches td {
+      padding: 0.35rem 0.1rem;
+      font-size: 11px;
+    }
+    table.matches td.col-time { font-size: 10px; padding-left: 0.3rem; }
+    table.matches td.col-match { padding-left: 0.3rem; font-size: 10.5px; }
   }
   /* Highlight rows containing my team */
   tr.my-team { background: var(--my-team-row) !important; box-shadow: inset 4px 0 0 var(--my-team-bg); }
@@ -663,6 +730,7 @@
       <div class="card next-match-card empty" id="nextMatchCard">
         <div class="card-label">Status</div>
         <div class="next-match-detail" id="nextMatchDetail">Enter your team number to find your matches</div>
+        <div class="next-match-countdown" id="nextMatchCountdown" style="display:none;"></div>
         <div class="next-match-meta" id="nextMatchMeta"></div>
       </div>
     </div>
@@ -1212,6 +1280,21 @@ function computeMatchTimes() {
   const days = (cfg.days && cfg.days.length) ? cfg.days : [{
     start: '08:30', end: '17:00', breaks: [], cycleChanges: [], earlyEnd: null,
   }];
+
+  // Format a YYYY-MM-DD date string into "Fri, Apr 3" — used to
+  // annotate day dividers when the day's `date` field is populated
+  // (v2 day_config). Returns empty string for missing/invalid input.
+  function formatDateLabel(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string') return '';
+    var m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return '';
+    var d = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+    if (isNaN(d.getTime())) return '';
+    var WK = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return WK[d.getDay()] + ', ' + MO[d.getMonth()] + ' ' + d.getDate();
+  }
+
   const matches = sch.matches || [];
   const practiceMatches = sch.practice_matches || [];
 
@@ -1232,9 +1315,10 @@ function computeMatchTimes() {
       done:  false,
     })).sort((a, b) => a.start - b.start);
 
+    var pDateLabel = pday.dateLabel || formatDateLabel(pday.date);
     computed.push({
       type: 'day-divider', dayNum: 0,
-      label: 'Practice Day' + (pday.dateLabel ? ' — ' + pday.dateLabel : ''),
+      label: 'Practice Day' + (pDateLabel ? ' — ' + pDateLabel : ''),
       start: pStart, end: pEnd, isPractice: true,
     });
 
@@ -1298,10 +1382,12 @@ function computeMatchTimes() {
     const earlyEnd = day.earlyEnd;
     let dayMatchCount = 0;
 
-    // Insert day divider
+    // Insert day divider — annotate with formatted date when present
+    var dateLabel = day.dateLabel || formatDateLabel(day.date);
     computed.push({
       type: 'day-divider', dayNum: di + 1,
-      label: 'Day ' + (di + 1) + (day.dateLabel ? ' — ' + day.dateLabel : ''),
+      label: 'Day ' + (di + 1) + (day.label && day.label !== ('Day ' + (di + 1)) ? ' · ' + day.label : '')
+                    + (dateLabel ? ' — ' + dateLabel : ''),
       start: startMin, end: endMin,
     });
 
@@ -2081,11 +2167,95 @@ function renderSelectedTeamChips() {
   wrap.innerHTML = html;
 }
 
+// ── Countdown helpers ────────────────────────────────────────────
+// Resolve a match entry's absolute Date timestamp. Uses the day's
+// `date` field (YYYY-MM-DD) when present; falls back to today's
+// local date so single-day events without dates still show a
+// countdown if viewed on the day. Returns null if startMin is missing.
+function _resolveMatchTimestamp(matchEntry) {
+  if (!matchEntry || matchEntry.startMin == null) return null;
+  // Find the day this match belongs to via the schedule's day_config
+  var sch = STATE.schedule;
+  if (!sch) return null;
+  var cfg = sch.day_config || {};
+  var dayDate = null;
+  if (matchEntry.isPractice && cfg.practiceDay && cfg.practiceDay.date) {
+    dayDate = cfg.practiceDay.date;
+  } else if (cfg.days && matchEntry.dayNum >= 1 && cfg.days[matchEntry.dayNum - 1]) {
+    dayDate = cfg.days[matchEntry.dayNum - 1].date;
+  }
+  var d;
+  if (dayDate && /^\d{4}-\d{2}-\d{2}/.test(dayDate)) {
+    var parts = dayDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    d = new Date(parseInt(parts[1]), parseInt(parts[2]) - 1, parseInt(parts[3]));
+  } else {
+    // Fallback: today's local date. Only useful for same-day viewing.
+    d = new Date();
+    d.setHours(0, 0, 0, 0);
+  }
+  d.setMinutes(matchEntry.startMin);
+  return d.getTime();
+}
+
+// Format milliseconds-until-target as a human countdown.
+//   > 1 day     → "in 2d 3h"
+//   > 1 hour    → "in 1h 23m"
+//   > 1 minute  → "in 23m 45s"
+//   > 0         → "in 45s" or "starting now"
+//   ≤ 0         → "starting now" briefly, then "—"
+function _formatCountdown(msRemaining) {
+  if (msRemaining <= 0) {
+    if (msRemaining > -90 * 1000) return 'STARTING NOW';
+    return null; // signal: stop displaying
+  }
+  var s = Math.floor(msRemaining / 1000);
+  var d = Math.floor(s / 86400);
+  var h = Math.floor((s % 86400) / 3600);
+  var m = Math.floor((s % 3600) / 60);
+  var sec = s % 60;
+  if (d >= 1) return 'in ' + d + 'd ' + h + 'h';
+  if (h >= 1) return 'in ' + h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
+  if (m >= 1) return 'in ' + m + 'm ' + (sec < 10 ? '0' : '') + sec + 's';
+  return 'in ' + sec + 's';
+}
+
+var _countdownTargetTs = null;
+var _countdownHandle   = null;
+function _startCountdown(ts) {
+  _countdownTargetTs = ts;
+  if (_countdownHandle) return; // already ticking
+  _tickCountdown();
+  _countdownHandle = setInterval(_tickCountdown, 1000);
+}
+function _stopCountdown() {
+  if (_countdownHandle) {
+    clearInterval(_countdownHandle);
+    _countdownHandle = null;
+  }
+  _countdownTargetTs = null;
+}
+function _tickCountdown() {
+  var el = document.getElementById('nextMatchCountdown');
+  if (!el || !_countdownTargetTs) return;
+  var ms = _countdownTargetTs - Date.now();
+  var text = _formatCountdown(ms);
+  if (text === null) {
+    el.style.display = 'none';
+    _stopCountdown();
+    return;
+  }
+  el.textContent = text;
+  el.classList.toggle('soon',  ms > 0 && ms <= 60 * 60 * 1000);  // <1h
+  el.classList.toggle('close', ms > 0 && ms <= 10 * 60 * 1000);  // <10m
+  el.classList.toggle('now',   ms <= 0);                          // starting
+}
+
 function updateNextMatch(nowMatchNum) {
   const card = document.getElementById('nextMatchCard');
   const detail = document.getElementById('nextMatchDetail');
   const meta = document.getElementById('nextMatchMeta');
   const myStatus = document.getElementById('myStatus');
+  const countdown = document.getElementById('nextMatchCountdown');
 
   // Render chips below the input on every refresh
   renderSelectedTeamChips();
@@ -2095,6 +2265,8 @@ function updateNextMatch(nowMatchNum) {
     detail.textContent = 'Enter team number(s) to find your matches';
     meta.textContent = '';
     myStatus.textContent = '';
+    if (countdown) { countdown.style.display = 'none'; }
+    _stopCountdown();
     return;
   }
 
@@ -2105,6 +2277,8 @@ function updateNextMatch(nowMatchNum) {
     detail.textContent = 'Team ' + primaryTeam + ' is not in this schedule';
     meta.textContent = '';
     myStatus.textContent = '';
+    if (countdown) { countdown.style.display = 'none'; }
+    _stopCountdown();
     return;
   }
 
@@ -2167,6 +2341,28 @@ function updateNextMatch(nowMatchNum) {
   // which produced "Q1" for what was actually "P1" during practice.
   var matchPrefix = target.isPractice ? 'P' : 'Q';
   detail.innerHTML = leadLabel + ': <strong>' + matchPrefix + target.matchNum + '</strong> · ' + etaText + driftHtml;
+
+  // ── Countdown timer ─────────────────────────────────────────────
+  // When the target is upcoming (not playing/completed), show a
+  // live-updating countdown. Compute the target's absolute timestamp
+  // from the day's date (when known) + startMin. If no date is
+  // available, fall back to today's date — works for single-day
+  // events being viewed on the day of.
+  if (countdown) {
+    if (targetIsPlaying || (targetLive && targetLive.status === 'completed') || allCompleted) {
+      countdown.style.display = 'none';
+      _stopCountdown();
+    } else {
+      var targetTs = _resolveMatchTimestamp(target);
+      if (targetTs) {
+        countdown.style.display = '';
+        _startCountdown(targetTs);
+      } else {
+        countdown.style.display = 'none';
+        _stopCountdown();
+      }
+    }
+  }
 
   // Determine alliance + station
   let alliance = null, station = null;

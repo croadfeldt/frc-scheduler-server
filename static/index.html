@@ -1045,6 +1045,52 @@
   .agenda-block-row:last-child { border-bottom: none; }
   .agenda-timeline-bar { height: 32px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; position: relative; }
   .agenda-timeline-fill { height: 100%; border-radius: 3px; display: flex; align-items: center; padding-left: 0.6rem; padding-right: 0.4rem; font-size: 0.71rem; font-weight: 600; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.55); white-space: nowrap; overflow: hidden; transition: width 0.3s ease; }
+
+  /* New per-day segmented bar (replaces per-section bars) */
+  .agenda-day-bar {
+    height: 38px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+  }
+  .agenda-seg {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    padding: 2px 4px;
+    color: #fff;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.45);
+    cursor: default;
+    transition: filter 0.15s;
+    overflow: hidden;
+  }
+  .agenda-seg:hover { filter: brightness(1.12); }
+  .agenda-seg-matches { cursor: pointer; }
+  .agenda-seg-break {
+    color: #2a1808;
+    text-shadow: none;
+    font-weight: 600;
+    font-size: 0.64rem;
+  }
+  .agenda-seg-line1 {
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .agenda-seg-line2 {
+    font-size: 0.58rem;
+    font-weight: 500;
+    line-height: 1.2;
+    opacity: 0.92;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    margin-top: 1px;
+  }
   .agenda-fit-ok    { color: var(--accent3); }
   .agenda-fit-tight { color: var(--amber); }
   .agenda-fit-over  { color: var(--danger); }
@@ -5954,185 +6000,189 @@ function renderScheduleBars() {
     return;
   }
 
-  // Day color palette — one distinct color per day number
-  // DAY_COLORS defined at module level — see below renderScheduleBars
-  function dayColor(n) { if (n === 0) return "#5daf78"; /* practice green */ return _DAY_COLORS[(n - 1) % _DAY_COLORS.length]; }
+  function dayColor(n) {
+    if (n === 0) return "#5daf78";
+    return _DAY_COLORS[(n - 1) % _DAY_COLORS.length];
+  }
 
-  // ── Build sections from schedule ────────────────────────────────────────────
-  // committed = sum of actual match durations (endMin - startMin), which already
-  // reflects per-match cycle time changes embedded in the schedule.
-  var allSections = [];
-
+  // ── Per-day bar model ───────────────────────────────────────────
+  // Each day = one bar. Within the bar, build segments of three
+  // kinds:
+  //   - match-run: contiguous matches (between breaks). Color =
+  //     practice green for practice day, day color otherwise.
+  //   - break: a break entry (lunch, awards, etc.) > threshold.
+  //   - gap: time between break end and next match start.
+  // Segment widths are proportional to wall-clock duration.
+  // Each match-run carries match count + minutes scheduled + total
+  // available + cycle times list. Tooltip adds average ct.
+  var perDay = [];
   window._frcScheduled.forEach(function(day) {
-    if (!day.entries || !day.entries.length) return;
+    if (!day.entries) return;
     var dayNum   = (day.dayNum != null) ? day.dayNum : 1;
     var isPractice = !!day.isPracticeDay;
     var dayLabel = isPractice ? 'Practice' : 'Day ' + dayNum;
-    var currentMatches     = [];
-    var currentShortBreaks = [];
-    var slotStart = (day.start != null) ? day.start : null;
-
-    function flushSection(slotEndOverride, hasTrailingBreak) {
-      if (!currentMatches.length) return;
-      var slotEnd = (slotEndOverride != null) ? slotEndOverride
-                  : (day.end   != null)        ? day.end
-                  : currentMatches[currentMatches.length - 1].endMin;
-      var committed = currentMatches.reduce(function(sum, m) {
-        return sum + ((m.endMin || 0) - (m.startMin || 0));
-      }, 0);
-      allSections.push({
-        dayNum, dayLabel,
-        slotStart: (slotStart != null) ? slotStart : currentMatches[0].startMin,
-        slotEnd,
-        matchCount:   currentMatches.length,
-        firstMatchNum: currentMatches.length > 0 ? currentMatches[0].num : null,
-        committed,
-        matches:     currentMatches.slice(),
-        shortBreaks: currentShortBreaks.slice(),
-        cycleChanges: currentCycleChanges.slice(),
-        hasTrailingBreak: !!hasTrailingBreak,
-      });
-      currentMatches = []; currentShortBreaks = [];
+    var dStart = (day.start != null) ? day.start : null;
+    var dEnd   = (day.end   != null) ? day.end   : null;
+    if (dStart == null || dEnd == null) {
+      // Derive from first/last entry as fallback
+      var ms = day.entries.filter(function(e) { return e.type === 'match'; });
+      if (ms.length) {
+        if (dStart == null) dStart = ms[0].startMin;
+        if (dEnd == null)   dEnd   = ms[ms.length - 1].endMin;
+      }
     }
-
-    // For days with no matches at all, still push a zero-match section
-    // so the agenda fit bar shows the available time slot
-    function flushEmptyDay() {
-      if (day.start == null || day.end == null || day.end <= day.start) return;
-      allSections.push({
-        dayNum, dayLabel,
-        slotStart: day.start,
-        slotEnd:   day.end,
-        matchCount: 0,
-        firstMatchNum: null,
-        committed: 0,
-        matches:     [],
-        shortBreaks: [],
-        cycleChanges: [],
-        hasTrailingBreak: false,
+    var segments = [];
+    var run = null;
+    var cycleProgression = [];
+    function flushRun(slotEnd) {
+      if (!run) return;
+      var slotEndUse = slotEnd != null ? slotEnd : (run.lastEnd || run.start);
+      var available = slotEndUse - run.start;
+      var committed = run.committed;
+      var avgCt = run.matchCount > 0 ? committed / run.matchCount : 0;
+      segments.push({
+        type: isPractice ? 'practice' : 'qual',
+        kind: 'matches',
+        start: run.start, end: slotEndUse,
+        matchCount: run.matchCount,
+        committed: committed,
+        available: available,
+        avgCt: avgCt,
+        cycleProgression: run.cycleProgression.slice(),
+        firstMatchNum: run.firstMatchNum,
       });
+      run = null;
     }
-
-    var currentCycleChanges = [];
-
     day.entries.forEach(function(entry) {
       if (entry.type === 'match') {
-        currentMatches.push(entry);
-      } else if (entry.type === 'break') {
-        var dur = (entry.end || 0) - (entry.start || 0);
-        if (dur > AGENDA_BREAK_THRESHOLD) {
-          flushSection(entry.start, true);  // hasTrailingBreak = true
-          slotStart = entry.end;
-          currentCycleChanges = [];
-        } else {
-          if (currentMatches.length) currentShortBreaks.push(entry);
+        if (!run) {
+          run = {
+            start: entry.startMin,
+            committed: 0,
+            matchCount: 0,
+            firstMatchNum: entry.num,
+            cycleProgression: [],
+            lastEnd: entry.endMin,
+          };
         }
+        var dur = (entry.endMin || 0) - (entry.startMin || 0);
+        run.committed += dur;
+        run.matchCount++;
+        run.lastEnd = entry.endMin;
+        // Track distinct cycle times in order of appearance
+        var roundedCt = Math.round(dur * 10) / 10;
+        if (run.cycleProgression.length === 0 || run.cycleProgression[run.cycleProgression.length - 1] !== roundedCt) {
+          run.cycleProgression.push(roundedCt);
+        }
+      } else if (entry.type === 'break') {
+        var bdur = (entry.end || 0) - (entry.start || 0);
+        if (bdur > AGENDA_BREAK_THRESHOLD) {
+          flushRun(entry.start);
+          segments.push({
+            type: 'break',
+            kind: 'break',
+            start: entry.start, end: entry.end,
+            label: entry.name || 'Break',
+            duration: bdur,
+          });
+        }
+        // small breaks: ignore (they're absorbed into the run)
       } else if (entry.type === 'cycle-change') {
-        // Collect cycle-change markers so we can show the progression
-        currentCycleChanges.push(entry);
+        // already captured in run.cycleProgression via duration tracking
       }
     });
-    flushSection(null);
-    // If no sections were added for this day (no matches), show an empty bar
-    var sectionsForDay = allSections.filter(function(s) { return s.dayNum === dayNum; });
-    if (!sectionsForDay.length) flushEmptyDay();
+    flushRun(dEnd);
+    perDay.push({
+      dayNum: dayNum,
+      dayLabel: dayLabel,
+      isPractice: isPractice,
+      start: dStart,
+      end: dEnd,
+      segments: segments,
+    });
   });
 
-  if (!allSections.length) {
+  if (!perDay.length) {
     container.innerHTML = '<div style="padding:0.5rem;font-size:0.75rem;color:var(--text-muted);">No matches scheduled yet.</div>';
     return;
   }
 
-  var bb = parseFloat(document.getElementById('breakBuffer').value) || 0;
+  // ── Render ──────────────────────────────────────────────────────
+  function fmtTime(m) {
+    var h = Math.floor(m / 60), mm = m % 60;
+    var ampm = h >= 12 ? 'p' : 'a';
+    var hh = h % 12 || 12;
+    return hh + (mm ? ':' + (mm < 10 ? '0' : '') + mm : '') + ampm;
+  }
+  function fmtCt(t) { return t % 1 === 0 ? String(t) : t.toFixed(1); }
 
-  // ── Render ──────────────────────────────────────────────────────────────────
-  // All bars span 100% of the container width — no proportional scaling.
-  // Fill = committed match time / available slot time.
-  // "Committed" caps each match at min(endMin, effectiveSlotEnd) so a match
-  // that runs into break time only counts as far as the break buffer allows.
   var html = '';
-  allSections.forEach(function(s) {
-    var slotDur      = s.slotEnd - s.slotStart;
-    // Available time = slot duration minus break buffer if this slot is followed by a large break
-    var effectiveEnd = s.slotEnd - (s.hasTrailingBreak ? bb : 0);
-    var available    = effectiveEnd - s.slotStart;
+  perDay.forEach(function(d) {
+    var dc = dayColor(d.dayNum);
+    var dayDur = (d.end || 0) - (d.start || 0);
+    if (dayDur <= 0) return;
 
-    // Re-sum committed time, capping each match at effectiveEnd
-    var committed = s.matches.reduce(function(sum, m) {
-      var end = Math.min(m.endMin || 0, effectiveEnd);
-      var dur = Math.max(0, end - (m.startMin || 0));
-      return sum + dur;
-    }, 0);
+    // Day-level summary (right-aligned in head)
+    var totalMatches = d.segments.reduce(function(s, seg) { return s + (seg.matchCount || 0); }, 0);
+    var totalCommitted = d.segments.reduce(function(s, seg) { return s + (seg.committed || 0); }, 0);
+    var totalAvail = d.segments.filter(function(seg) { return seg.kind === 'matches'; })
+                                .reduce(function(s, seg) { return s + (seg.available || 0); }, 0);
+    var globalAvgCt = totalMatches > 0 ? totalCommitted / totalMatches : 0;
 
-    var fillPct   = available > 0 ? Math.min(committed / available * 100, 100) : 0;
-    var overage   = Math.round(committed - available);
-    var dc        = dayColor(s.dayNum);
-    var fillColor = overage > 0 ? 'var(--amber)' : dc;
-
-    // Average cycle time = committed / matches (actual weighted average from schedule)
-    var avgCt = s.matchCount > 0 ? (committed / s.matchCount) : 0;
-    var avgCtStr = avgCt % 1 < 0.05 ? Math.round(avgCt) : avgCt.toFixed(1);
-
-    // Cycle time progression for tooltip on the bar: e.g. "9→8 min/match"
-    var ctProgression = (function() {
-      if (!s.cycleChanges || !s.cycleChanges.length) return avgCtStr + '\u202fmin/match';
-      var firstCt = s.matches.length > 0
-        ? ((s.matches[0].endMin || 0) - (s.matches[0].startMin || 0)) : null;
-      var seenCts = firstCt ? [firstCt] : [];
-      s.cycleChanges.forEach(function(cc) {
-        if (cc.newTime !== seenCts[seenCts.length - 1]) seenCts.push(cc.newTime);
-      });
-      return seenCts.map(function(t) { return t % 1 === 0 ? t : t.toFixed(1); }).join('\u2192') + '\u202fmin/match';
-    })();
-
-    // Fill label: match count · committed/available · cycle progression · avg ct
-    var ctInBar = s.matchCount > 0 ? (function() {
-      if (!s.cycleChanges || !s.cycleChanges.length) {
-        // No changes — just avg
-        return avgCtStr + '\u202fmin/match avg';
+    var segHtml = d.segments.map(function(seg) {
+      var segDur = seg.end - seg.start;
+      var widthPct = dayDur > 0 ? (segDur / dayDur * 100) : 0;
+      if (seg.kind === 'break') {
+        var bgColor = '#ec8a3f';
+        var inline = segDur >= 30 ? seg.label : (segDur >= 12 ? '\u23F8' : '');
+        var tip = (seg.label || 'Break') + ' \u2014 ' +
+                  fmtTime(seg.start) + '\u2013' + fmtTime(seg.end) +
+                  ' (' + Math.round(segDur) + ' min)';
+        return '<div class="agenda-seg agenda-seg-break" '
+             + 'style="width:' + widthPct.toFixed(2) + '%;background:' + bgColor + ';" '
+             + 'title="' + tip.replace(/"/g, '&quot;') + '">'
+             + inline
+             + '</div>';
       }
-      // Has changes — show progression then avg
-      var firstCt = s.matches.length > 0
-        ? ((s.matches[0].endMin || 0) - (s.matches[0].startMin || 0)) : null;
-      var seenCts = firstCt ? [firstCt] : [];
-      s.cycleChanges.forEach(function(cc) {
-        if (cc.newTime !== seenCts[seenCts.length - 1]) seenCts.push(cc.newTime);
-      });
-      var progression = seenCts.map(function(t) { return t % 1 === 0 ? t : t.toFixed(1); }).join('\u2192') + '\u202fmin/match';
-      return progression + '\u2002\u00b7\u2002' + avgCtStr + '\u202fmin/match avg';
-    })() : '';
-
-    var label = s.matchCount > 0
-      ? s.matchCount + ' match' + (s.matchCount !== 1 ? 'es' : '')
-              + '\u2002\u00b7\u2002' + Math.round(committed) + ' / ' + Math.round(available) + '\u202fmin'
-              + '\u2002\u00b7\u2002' + ctInBar
-      : 'No matches scheduled \u00b7 ' + Math.round(available) + '\u202fmin available';
-    if (overage > 0) label += '\u2002\u00b7\u2002+' + overage + '\u202fmin over';
-
-    var ticksHtml = s.shortBreaks.map(function(brk) {
-      var pos = slotDur > 0 ? ((brk.start - s.slotStart) / slotDur * 100) : 0;
-      var brkDur = Math.round((brk.end||0) - (brk.start||0));
-      return '<div title="' + (brk.name || 'Break') + ' (' + brkDur + '\u202fmin)" '
-           + 'style="position:absolute;top:0;bottom:0;left:' + pos.toFixed(1) + '%;'
-           + 'width:2px;background:rgba(255,255,255,0.4);pointer-events:auto;cursor:default;"></div>';
+      // matches segment
+      var segColor = (d.isPractice ? '#5daf78' : dc);
+      var matches = seg.matchCount;
+      var ctList = seg.cycleProgression.map(fmtCt).join('\u2192') + ' min';
+      var avgCtStr = fmtCt(seg.avgCt) + ' min avg';
+      var line1 = matches + ' match' + (matches !== 1 ? 'es' : '');
+      var line2 = Math.round(seg.committed) + '/' + Math.round(seg.available) + ' min \u00b7 ' + ctList;
+      // Tooltip: full detail including average
+      var tip = (d.isPractice ? 'Practice' : 'Qualification')
+              + ' \u2014 ' + fmtTime(seg.start) + '\u2013' + fmtTime(seg.end)
+              + '\n' + matches + ' match' + (matches !== 1 ? 'es' : '')
+              + (seg.firstMatchNum ? ' (starting ' + (d.isPractice ? 'P' : 'Q') + seg.firstMatchNum + ')' : '')
+              + '\n' + Math.round(seg.committed) + ' min scheduled / ' + Math.round(seg.available) + ' min available'
+              + '\nCycle: ' + ctList
+              + '\nAverage: ' + avgCtStr;
+      return '<div class="agenda-seg agenda-seg-matches" '
+           + 'style="width:' + widthPct.toFixed(2) + '%;background:' + segColor + ';" '
+           + 'title="' + tip.replace(/"/g, '&quot;') + '" '
+           + 'onclick="' + (seg.firstMatchNum ? 'scrollToMatch(' + seg.firstMatchNum + ')' : 'scrollToDay(' + d.dayNum + ')') + '">'
+           + '<div class="agenda-seg-line1">' + line1 + '</div>'
+           + (widthPct >= 14 ? '<div class="agenda-seg-line2">' + line2 + '</div>' : '')
+           + '</div>';
     }).join('');
 
-    html += '<div class="agenda-block-row">'
-          + '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.25rem;">'
-          +   '<span class="day-label-link" style="color:' + dc + ';" '
-          +     'onclick="' + (s.firstMatchNum ? 'scrollToMatch(' + s.firstMatchNum + ')' : 'scrollToDay(' + s.dayNum + ')') + '" '
-          +     'title="Scroll to match ' + (s.firstMatchNum || 1) + ' · ' + s.dayLabel + '">' + s.dayLabel + '</span>'
-          +   '<span style="font-size:0.68rem;color:var(--text-muted);">'
-          +     fmtTime12(s.slotStart) + '\u2013' + fmtTime12(s.slotEnd)
-          +   '</span>'
-          +   '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">' + Math.round(available) + '\u202fmin avail</span>'
-          + '</div>'
-          // Bar always fills full container width; tooltip shows ct progression if changes exist
-          + '<div class="agenda-timeline-bar" style="position:relative;border-color:' + dc + ';background:' + dc + '22;" title="' + ctProgression + '">'
-          +   '<div class="agenda-timeline-fill" style="width:' + fillPct.toFixed(1) + '%;background:' + fillColor + ';">'
-          +     label
-          +   '</div>'
-          +   ticksHtml
+    // Day head — label, window, summary
+    var headHtml =
+      '<div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.25rem;">'
+      + '<span class="day-label-link" style="color:' + dc + ';font-weight:600;font-size:0.78rem;" '
+      +     'onclick="scrollToDay(' + d.dayNum + ')" title="Scroll to ' + d.dayLabel + '">' + d.dayLabel + '</span>'
+      + '<span style="font-size:0.68rem;color:var(--text-muted);">' + fmtTime(d.start) + '\u2013' + fmtTime(d.end) + '</span>'
+      + '<span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);">'
+      +   '<strong style="color:var(--text);">' + totalMatches + '</strong> matches'
+      +   (globalAvgCt > 0 ? ' \u00b7 <strong style="color:var(--text);">' + fmtCt(globalAvgCt) + '</strong> min avg' : '')
+      + '</span>'
+      + '</div>';
+
+    html += '<div class="agenda-block-row">' + headHtml
+          + '<div class="agenda-day-bar" style="border-color:' + dc + ';background:' + dc + '22;">'
+          + segHtml
           + '</div>'
           + '</div>';
   });
@@ -6152,10 +6202,13 @@ function renderScheduleBars() {
 
   if (window._frcFinalDayOverflow && window._frcFinalDayOverflow.unscheduled > 0) {
     var ov = window._frcFinalDayOverflow;
-    // Estimate additional time: use the average cycle time from the last scheduled section
-    var lastSection = allSections[allSections.length - 1];
-    var estCt = lastSection && lastSection.matchCount > 0
-      ? (lastSection.committed / lastSection.matchCount)
+    // Estimate additional time: use the average cycle time from the last scheduled match-segment
+    var lastDay = perDay[perDay.length - 1];
+    var lastSeg = lastDay && lastDay.segments
+      ? lastDay.segments.filter(function(s) { return s.kind === 'matches'; }).pop()
+      : null;
+    var estCt = lastSeg && lastSeg.matchCount > 0
+      ? (lastSeg.committed / lastSeg.matchCount)
       : (parseFloat(document.getElementById('cycleTime').value) || 8);
     var extraMin = Math.round(ov.unscheduled * estCt);
     var extraH   = Math.floor(extraMin / 60);
@@ -9314,7 +9367,7 @@ function migrateLegacyDayConfig(dc) {
       return { afterMatch: cc.afterMatch, cycleTime: parseFloat(cc.time) || pBlock.cycleTime };
     });
     if (pAfterMatch.length) pBlock.changes = pAfterMatch;
-    out.days.push({ label: pd.label || 'Practice', blocks: [pBlock] });
+    out.days.push({ label: pd.label || 'Practice', date: pd.date || '', blocks: [pBlock] });
   }
 
   var globalMatchOffset = 0;
@@ -9402,6 +9455,7 @@ function downgradeToV1(dc) {
       v1.practiceDay = {
         enabled: true,
         label: day.label || 'Practice',
+        date:  day.date  || '',
         start: first.start,
         end:   pBlocks[pBlocks.length - 1].end,
         cycleTime:  first.cycleTime,
