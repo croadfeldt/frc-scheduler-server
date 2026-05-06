@@ -190,11 +190,35 @@
   }
   .match-table-header {
     padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: center; gap: 0.6rem;
     background: var(--bg-alt);
   }
   .match-table-header .title { font-weight: 600; font-size: 15px; }
   .match-table-header .count { font-size: 12px; color: var(--text-muted); }
+  /* Inline toolbar pushed to the right edge of the header row. The
+     buttons are slightly more compact than the standalone toolbar
+     they replaced so the title row stays visually balanced. */
+  .match-table-header .match-table-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .match-table-header .match-table-actions .btn {
+    font-size: 13px;
+    padding: 0.35rem 0.75rem;
+  }
+  @media (max-width: 600px) {
+    .match-table-header {
+      padding: 0.65rem 0.85rem; gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .match-table-header .title { font-size: 14px; }
+    .match-table-header .match-table-actions .btn {
+      font-size: 12px;
+      padding: 0.3rem 0.55rem;
+    }
+  }
 
   table.matches {
     width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
@@ -803,8 +827,15 @@
     <!-- Match table -->
     <div class="match-table-wrap">
       <div class="match-table-header">
-        <span class="title" id="tableTitle">Qualification Schedule</span>
+        <span class="title" id="tableTitle">Match Schedule</span>
         <span class="count" id="tableCount"></span>
+        <!-- Inline toolbar — Export + Share buttons live in the same
+             row as the table title. Auto-hides on print via no-print
+             class. flex:1 spacer pushes Share to the right edge. -->
+        <span class="match-table-actions no-print">
+          <button class="btn btn-secondary" onclick="openExportModal()" title="Print, save as PDF, or download as XLSX/CSV/JSON/FMS">&#x2913; Print / Export&hellip;</button>
+          <button class="btn btn-secondary" onclick="openShareModal()" title="Show QR code">&#128241; QR</button>
+        </span>
       </div>
       <table class="matches" id="matchesTable">
         <thead>
@@ -821,15 +852,6 @@
         </thead>
         <tbody id="matchesTbody"></tbody>
       </table>
-    </div>
-
-    <!-- Toolbar — single Export button opens unified modal -->
-    <div class="toolbar no-print">
-      <span class="group-label">Export</span>
-      <button class="btn btn-secondary" onclick="openExportModal()" title="Print, save as PDF, or download as XLSX/CSV/JSON/FMS">⬇ Print / Export…</button>
-      <span style="flex:1"></span>
-      <span class="group-label">Share</span>
-      <button class="btn btn-secondary" onclick="openShareModal()" title="Show QR code">📱 QR</button>
     </div>
 
     <div class="footer-meta no-print">
