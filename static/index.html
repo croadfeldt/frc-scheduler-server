@@ -5119,6 +5119,17 @@ function applyUrlParams(params) {
 async function autoRunFromUrl() {
   const params = parseUrlParams();
   if (!params.seed && !params.n && !params.days && !params.sid && !params.aid) return;
+  // Set the loading guard BEFORE applyUrlParams, which populates
+  // form fields via the same oninput-triggering path that
+  // loadAssignedSchedule uses. Without the guard, every numTeams /
+  // matchesPerTeam / cycleTime / breakBuffer field write fires
+  // onParamChanged → 2.5s autoPopulate timer → generateSchedule()
+  // that wipes the assignment we're about to load. The aid/sid
+  // branches each clear the guard in their own finally, so the
+  // user can still edit normally after the restore completes.
+  window._frcLoadingSchedule = true;
+  clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
+  clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
   applyUrlParams(params);
 
   // If we have a server-side ID, load directly from DB (faster, exact match)
@@ -5288,6 +5299,18 @@ async function autoRunFromUrl() {
     _urlAutoTeams = params.teams;
     await generateScheduleWithSeed(params.seed);
   }
+
+  // Final clear of the loading guard. Branches that called
+  // loadAssignedSchedule already cleared it via their own finally,
+  // but the sid/seed branches don't go through there. Defensive
+  // double-clear is harmless. Use setTimeout(0) so any remaining
+  // synchronous oninput handlers from form-field population still
+  // see the truthy flag and short-circuit.
+  setTimeout(function() {
+    window._frcLoadingSchedule = false;
+    clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
+    clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
+  }, 0);
 }
 
 
@@ -6556,6 +6579,11 @@ function onDayConfigChanged() {
 
 var _cycleTimeChangeTimeout = null;
 function onCycleTimeChanged() {
+  // Don't fire any of this during a schedule restore — the form-field
+  // population that happens during loadAssignedSchedule / reloadEvent
+  // would otherwise trigger calcMaxMatches or generateSchedule via
+  // the timer below. See onParamChanged for the full explanation.
+  if (window._frcLoadingSchedule) return;
   // Called when any cycle time value changes (start-of-day ct, or after-match ct).
   // 1. Update agenda fit immediately (lightweight, safe to run on every keystroke)
   onScheduleParamsChanged();
@@ -6565,6 +6593,7 @@ function onCycleTimeChanged() {
   _cycleTimeChangeTimeout = setTimeout(function() {
     if (window._agendaFetchPending) return;
     if (window._assigningTeams) return;
+    if (window._frcLoadingSchedule) return;
     var autoMax = document.getElementById('autoMaxCycles');
     if (autoMax && autoMax.checked) {
       clearTimeout(_autoPopulateTimeout);
@@ -7132,6 +7161,16 @@ function onParamChanged() {
   // Don't queue a debounced generate while the agenda chain is running —
   // the chain calls generateSchedule() directly when ready
   if (window._agendaFetchPending) return;
+  // Don't queue a debounced generate while we're in the middle of
+  // restoring a saved schedule. Loading populates day-config form
+  // fields via oninput="onCycleTimeChanged()" handlers, each of
+  // which would otherwise (re)arm the 2.5s autoPopulate timer.
+  // After the load awaits complete, the timer fires and calls
+  // generateSchedule() — wiping the team assignments we just
+  // restored. The flag is set/cleared by loadAssignedSchedule and
+  // reloadEvent. Without it, refresh on a saved schedule and the
+  // in-app Reload button both blow away assignments.
+  if (window._frcLoadingSchedule) return;
   if (_abstractParams !== null) {
     // Only mark stale and disable assign if structural params changed.
     // Time/day/break/cycle changes affect the rendered schedule but not the
@@ -8764,6 +8803,16 @@ async function reloadEvent() {
     showApiStatus('No event loaded', true);
     return;
   }
+  // Same guard pattern as loadAssignedSchedule. The roster and
+  // saved-schedules calls below don't directly touch day-config
+  // fields, but loadAssignedSchedule (called when an active schedule
+  // exists) does, and it sets its own guard. Setting the outer
+  // guard here ensures any stray oninput handlers triggered by the
+  // event-bar UI updates also short-circuit.
+  window._frcLoadingSchedule = true;
+  clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
+  clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
+
   try {
     showApiStatus('Reloading event\u2026');
     const evResp = await apiFetch('/api/events/' + _currentEventId);
@@ -8784,9 +8833,29 @@ async function reloadEvent() {
       catch(e) { console.warn('reloadEvent: loadSavedSchedules failed:', e); }
     }
 
+    // Re-load the active assigned schedule so the team assignments
+    // come back. Without this, Reload was just re-pulling metadata
+    // and the rendered schedule went stale (or was never present
+    // when the user expected it). loadAssignedSchedule sets its own
+    // load guard, so the inner re-population doesn't fire generate.
+    if (_currentAssignedScheduleId) {
+      try {
+        await loadAssignedSchedule(_currentAssignedScheduleId, null);
+      } catch(e) {
+        console.warn('reloadEvent: loadAssignedSchedule failed:', e);
+      }
+    }
+
     showApiStatus('\u2713 Event reloaded');
   } catch(e) {
     showApiStatus('Reload failed: ' + e.message, true);
+  }
+  finally {
+    setTimeout(function() {
+      window._frcLoadingSchedule = false;
+      clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
+      clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
+    }, 0);
   }
 }
 
@@ -11071,6 +11140,20 @@ function _syncCycleTimeFromDayConfig(dc) {
 }
 
 async function loadAssignedSchedule(scheduleId, dayConfig) {
+  // Set the loading guard FIRST. Form-field population during this
+  // function fires oninput → onCycleTimeChanged / onParamChanged
+  // handlers; without this guard each one arms a 2.5s autoPopulate
+  // timer that fires after we return and overwrites our restored
+  // state with a fresh generateSchedule(). The guard is checked at
+  // the top of those handlers and they short-circuit. Cleared in
+  // the finally block below.
+  window._frcLoadingSchedule = true;
+  // Defensive: cancel any timers that may have been queued by a
+  // previous user action — they'd fire with the loading flag clear
+  // and still wipe state if their callback was already in flight.
+  clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
+  clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
+
   window._frcAbstractMode  = false; // real team numbers are now available
   window._frcShowFakeTeams = false;
   var fakeBtn3 = document.getElementById('btnShowFakeTeams');
@@ -11142,6 +11225,19 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
 
     showApiStatus('Schedule loaded');
   } catch(e) { showApiStatus(e.message, true); }
+  finally {
+    // Clear the load guard so user-initiated edits resume firing
+    // autoPopulate. Defer to the next tick so any in-flight
+    // synchronous oninput handlers from the form-field population
+    // above have already short-circuited on the truthy flag.
+    setTimeout(function() {
+      window._frcLoadingSchedule = false;
+      // Cancel anything that snuck in during the brief window
+      // before this clears — defense in depth.
+      clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
+      clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
+    }, 0);
+  }
 }
 
 // Client-side fallback (original worker-based scheduler)
