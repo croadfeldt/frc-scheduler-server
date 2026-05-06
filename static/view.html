@@ -45,6 +45,13 @@
     --break-bg: #2d2a1a;
     --break-text: #d4a72c;
     --my-team-row: rgba(93,175,120,0.18);
+    /* Brand accents kept aligned to the light values — they're
+       saturated colors that work on both backgrounds. Listed here
+       explicitly for completeness so future theme tweaks don't
+       miss them. */
+    --secondary: #5daf78;
+    --my-team-bg: #5daf78;
+    --next-match-accent: #fb8500;
   }
   @media (prefers-color-scheme: dark) {
     /* OS-default dark only when the user hasn't made a choice yet
@@ -514,8 +521,16 @@
   }
   table.matches tbody tr.match-row:hover { background: var(--bg-alt); }
   table.matches tbody tr.match-row.alt { background: rgba(0,0,0,0.015); }
+  /* Alt-row stripe: in dark mode use a low-alpha LIGHT overlay so
+     the alt rows show against the dark base. Both selectors covered
+     so manual toggle and OS preference both work. */
+  html[data-theme="dark"] table.matches tbody tr.match-row.alt {
+    background: rgba(255,255,255,0.02);
+  }
   @media (prefers-color-scheme: dark) {
-    table.matches tbody tr.match-row.alt { background: rgba(255,255,255,0.02); }
+    html:not([data-theme]) table.matches tbody tr.match-row.alt {
+      background: rgba(255,255,255,0.02);
+    }
   }
   table.matches td { padding: 0.5rem; text-align: center; }
   table.matches td.col-time, table.matches td.col-match { text-align: left; padding-left: 1rem; }
@@ -527,6 +542,20 @@
     display: inline-block; margin-left: 3px; font-size: 9px; font-weight: 700;
     background: #fff3cd; color: #856404; padding: 1px 3px; border-radius: 2px;
     vertical-align: middle;
+  }
+  /* Surrogate flag dark variant — the pale yellow bg washes out
+     against dark surroundings, and the brown text barely shows on
+     dark surfaces. Lift contrast with a slightly brighter amber on
+     a low-alpha amber wash. */
+  html[data-theme="dark"] table.matches td .surr-flag {
+    background: rgba(212,167,44,0.20);
+    color: #f7d685;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) table.matches td .surr-flag {
+      background: rgba(212,167,44,0.20);
+      color: #f7d685;
+    }
   }
 
   /* ── Mobile shrink: fit all 8 columns on phone vertical ──────────
@@ -614,9 +643,14 @@
      so the user's row indicator stays visible. The cell tints still apply. */
   tr.my-team.current-match  { box-shadow: inset 4px 0 0 var(--my-team-bg); }
   tr.my-team.upcoming-match { box-shadow: inset 4px 0 0 var(--my-team-bg); }
+  /* Field-level row tints — drop the alpha in dark mode so the
+     yellow/orange hint reads against the dark base without
+     blowing out the surrounding cells. Both selectors covered. */
+  html[data-theme="dark"] tr.current-match  td { background: rgba(255,235,59,0.10) !important; }
+  html[data-theme="dark"] tr.upcoming-match td { background: rgba(255,152,0,0.10) !important; }
   @media (prefers-color-scheme: dark) {
-    tr.current-match  td { background: rgba(255,235,59,0.10) !important; }
-    tr.upcoming-match td { background: rgba(255,152,0,0.10) !important; }
+    html:not([data-theme]) tr.current-match  td { background: rgba(255,235,59,0.10) !important; }
+    html:not([data-theme]) tr.upcoming-match td { background: rgba(255,152,0,0.10) !important; }
   }
   /* Break/lunch row */
   tr.break-row td {
@@ -633,6 +667,18 @@
   tr.info-block-row[data-kind="playoff"]  td { background: rgba(229, 115, 115, 0.18); color: #b54040; }
   tr.info-block-row[data-kind="ceremony"] td { background: rgba(155, 109, 255, 0.15); color: #6b3fc7; }
   tr.info-block-row[data-kind="practice"] td { background: rgba(93, 175, 120, 0.15); color: #2c7a4a; }
+  /* Info-block-row dark variants — keep the same hue but lighten
+     the text and shift the background opacity. Same pattern as
+     other components: dual-rule for both manual toggle and OS-
+     default fallback. */
+  html[data-theme="dark"] tr.info-block-row[data-kind="playoff"]  td { background: rgba(229,115,115,0.18); color: #f5a3a3; }
+  html[data-theme="dark"] tr.info-block-row[data-kind="ceremony"] td { background: rgba(155,109,255,0.18); color: #c5b3ff; }
+  html[data-theme="dark"] tr.info-block-row[data-kind="practice"] td { background: rgba(93,175,120,0.20); color: #95d4a9; }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) tr.info-block-row[data-kind="playoff"]  td { background: rgba(229,115,115,0.18); color: #f5a3a3; }
+    html:not([data-theme]) tr.info-block-row[data-kind="ceremony"] td { background: rgba(155,109,255,0.18); color: #c5b3ff; }
+    html:not([data-theme]) tr.info-block-row[data-kind="practice"] td { background: rgba(93,175,120,0.20); color: #95d4a9; }
+  }
   /* Day divider */
   tr.day-divider td {
     background: var(--primary); color: #fff; font-weight: 700;
@@ -831,10 +877,14 @@
                     animation: pulse-dot 3s infinite; }
   .ssrc-local     { background: #fef3e7; color: #82400e; border-color: #fcb98a; font-weight: 700; }
   .ssrc-none      { background: var(--bg-alt); color: var(--text-muted); border-color: var(--border); }
+  /* Dark variants — both manual toggle and OS-default routes covered. */
+  html[data-theme="dark"] .ssrc-published { background: rgba(46,160,67,0.18); color: #56d364; border-color: #2ea043; }
+  html[data-theme="dark"] .ssrc-modified  { background: rgba(187,128,9,0.18); color: #e3b341; border-color: #bb8009; }
+  html[data-theme="dark"] .ssrc-local     { background: rgba(220,135,77,0.18); color: #fcb98a; border-color: #e07c4a; }
   @media (prefers-color-scheme: dark) {
-    .ssrc-published { background: rgba(46,160,67,0.18); color: #56d364; border-color: #2ea043; }
-    .ssrc-modified  { background: rgba(187,128,9,0.18); color: #e3b341; border-color: #bb8009; }
-    .ssrc-local     { background: rgba(220,135,77,0.18); color: #fcb98a; border-color: #e07c4a; }
+    html:not([data-theme]) .ssrc-published { background: rgba(46,160,67,0.18); color: #56d364; border-color: #2ea043; }
+    html:not([data-theme]) .ssrc-modified  { background: rgba(187,128,9,0.18); color: #e3b341; border-color: #bb8009; }
+    html:not([data-theme]) .ssrc-local     { background: rgba(220,135,77,0.18); color: #fcb98a; border-color: #e07c4a; }
   }
   .strip-fresh { color: var(--text-muted); font-size: 11px; }
   .strip-btn {
@@ -867,6 +917,19 @@
   .queue-on_deck       { background: #c8e6c9; color: #1b5e20; border: 1px solid #66bb6a; }
   .queue-on_field      { background: #5daf78; color: #fff; border: 1px solid #5daf78; animation: pulse-dot 1s infinite; }
   .queue-completed     { background: var(--bg-alt); color: var(--text-muted); border: 1px solid var(--border); }
+  /* Queue-pill dark variants — light fills with dark text wash
+     out against the dark surrounding row. Use low-alpha fills with
+     the same accent color text. on_field stays solid since it's
+     the "live now" color and benefits from the strongest visual
+     punch in either theme. */
+  html[data-theme="dark"] .queue-queueing_soon { background: rgba(212,167,44,0.20); color: #f7d685; border-color: rgba(212,167,44,0.55); }
+  html[data-theme="dark"] .queue-now_queueing  { background: rgba(253,156,67,0.22); color: #ffb774; border-color: rgba(253,156,67,0.6); }
+  html[data-theme="dark"] .queue-on_deck       { background: rgba(102,187,106,0.20); color: #8fd896; border-color: rgba(102,187,106,0.55); }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .queue-queueing_soon { background: rgba(212,167,44,0.20); color: #f7d685; border-color: rgba(212,167,44,0.55); }
+    html:not([data-theme]) .queue-now_queueing  { background: rgba(253,156,67,0.22); color: #ffb774; border-color: rgba(253,156,67,0.6); }
+    html:not([data-theme]) .queue-on_deck       { background: rgba(102,187,106,0.20); color: #8fd896; border-color: rgba(102,187,106,0.55); }
+  }
 
   /* Completed match: replace 6 team cells with two big score blocks */
   .score-block {
@@ -954,9 +1017,15 @@
   }
   .source-banner.warn { background: #fff8e1; color: #5d4037; border-left-color: #f57c00; }
   .source-banner.info { background: #fef3e7; color: #82400e; border-left-color: #fcb98a; }
+  /* Dark-mode source banner — both manual toggle and OS-default
+     routes. Without these, picking dark theme on a light OS (or
+     light theme on a dark OS) leaves the banner using the wrong
+     palette and the text washes out. */
+  html[data-theme="dark"] .source-banner.warn { background: rgba(187,128,9,0.12); color: #e3b341; }
+  html[data-theme="dark"] .source-banner.info { background: rgba(220,135,77,0.12); color: #fcb98a; }
   @media (prefers-color-scheme: dark) {
-    .source-banner.warn { background: rgba(187,128,9,0.12); color: #e3b341; }
-    .source-banner.info { background: rgba(220,135,77,0.12); color: #fcb98a; }
+    html:not([data-theme]) .source-banner.warn { background: rgba(187,128,9,0.12); color: #e3b341; }
+    html:not([data-theme]) .source-banner.info { background: rgba(220,135,77,0.12); color: #fcb98a; }
   }
   .source-banner .banner-icon { font-size: 18px; flex-shrink: 0; }
   .source-banner .banner-content strong {
@@ -987,8 +1056,10 @@
     padding: 2px 6px; border-radius: 3px;
   }
   .nexus-card .nexus-dismiss:hover { color: var(--text); background: var(--bg-alt); }
+  /* Nexus card dark-mode background — both routes covered. */
+  html[data-theme="dark"] .nexus-card { background: rgba(56,139,253,0.12); }
   @media (prefers-color-scheme: dark) {
-    .nexus-card { background: rgba(56,139,253,0.12); }
+    html:not([data-theme]) .nexus-card { background: rgba(56,139,253,0.12); }
   }
 
   /* External links — TBA / Statbotics / FRC Events deep-links in per-team panel */

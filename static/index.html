@@ -757,12 +757,16 @@
   }
   .btn-export:hover { border-color: var(--accent); color: var(--accent); background: rgba(122,164,240,0.08); }
 
-  /* Surrogate badge */
+  /* Surrogate badge. Uses var(--amber) for text + low-alpha amber
+     fill so the badge adapts to both themes. Dark mode --amber is
+     a bright pale gold (#f9e2af) — works on the low-alpha amber
+     background and dark surroundings. Light mode --amber is a
+     darker gold (#9a6c00) — also works on light bg. */
   .surrogate-badge {
     display: inline-block;
     background: rgba(200,153,42,0.18);
     border: 1px solid rgba(200,153,42,0.6);
-    color: #c8992a;
+    color: var(--amber);
     font-size: 0.6rem;
     font-family: 'Barlow Condensed', sans-serif;
     font-weight: 700;
@@ -773,7 +777,7 @@
     margin-left: 0.35rem;
     vertical-align: middle;
   }
-  .team-surrogate { color: #c8992a !important; }
+  .team-surrogate { color: var(--amber) !important; }
   .b2b-badge {
     display: inline-block; font-size: 0.52rem; font-weight: 700;
     background: rgba(111,168,232,0.18); color: var(--blue-team);
@@ -918,13 +922,29 @@
   .btn-sm.btn-accent:hover { background: #93b8f5; }
   /* Lock button — solid amber when active, hollow when off. The
      active state stands out so users can tell at a glance whether
-     the schedule is locked. */
+     the schedule is locked. Different bg + text combos per theme
+     so contrast holds: dark mode uses pale amber bg + dark text
+     (the var --amber is #f9e2af in dark); light mode uses dark
+     amber bg + white text (var --amber is #9a6c00 in light, which
+     would read as illegible dark-on-dark with the original #1a1206
+     text). */
   .btn-sm.is-locked {
     background: var(--amber);
     color: #1a1206;
     border-color: var(--amber);
   }
   .btn-sm.is-locked:hover { background: #d8b248; border-color: #d8b248; color: #1a1206; }
+  /* Light theme override — the light-mode --amber (#9a6c00) is too
+     dark for dark text, so flip the button text color. Hover bg
+     also gets a lighter amber so it remains a clear hover cue. */
+  [data-theme="light"] .btn-sm.is-locked {
+    color: #fff;
+  }
+  [data-theme="light"] .btn-sm.is-locked:hover {
+    background: #b88a1a;
+    border-color: #b88a1a;
+    color: #fff;
+  }
 
   /* Parameter-change warning. Two visual levels driven by a class:
      - .level-soft: amber, "click Save Event to apply" — for
