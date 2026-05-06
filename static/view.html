@@ -320,6 +320,143 @@
   }
   .status-link-icon { font-size: 13px; line-height: 1; }
 
+  /* Amber variant of the LIVE pill — used for State B (within
+     15 min of next scheduled match, no actuals yet). Visually
+     distinct from the red LIVE state so users can tell the
+     difference between "match imminent" and "match in progress". */
+  .status-live-pill.amber {
+    background: rgba(217,119,6,0.10);
+    color: #d97706;
+    border-color: rgba(217,119,6,0.3);
+  }
+  .status-live-pill.amber::before { background: #d97706; }
+  html[data-theme="dark"] .status-live-pill.amber {
+    background: rgba(250,179,135,0.18);
+    color: #fab387;
+    border-color: rgba(250,179,135,0.4);
+  }
+  html[data-theme="dark"] .status-live-pill.amber::before { background: #fab387; }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .status-live-pill.amber {
+      background: rgba(250,179,135,0.18);
+      color: #fab387;
+      border-color: rgba(250,179,135,0.4);
+    }
+    html:not([data-theme]) .status-live-pill.amber::before { background: #fab387; }
+  }
+
+  /* Amber "starting soon" delta-box variant — same colour family
+     as the amber pill so the two reinforce each other. Used in
+     State B only. */
+  .status-delta-box.starting { background: rgba(217,119,6,0.07); border-left-color: #d97706; }
+  .status-delta-box.starting .status-delta-headline { color: #d97706; }
+  html[data-theme="dark"] .status-delta-box.starting { background: rgba(250,179,135,0.10); border-left-color: #fab387; }
+  html[data-theme="dark"] .status-delta-box.starting .status-delta-headline { color: #fab387; }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .status-delta-box.starting { background: rgba(250,179,135,0.10); border-left-color: #fab387; }
+    html:not([data-theme]) .status-delta-box.starting .status-delta-headline { color: #fab387; }
+  }
+
+  /* Next-only panel — shown when no Nexus queue_status data is
+     available (collapses the 3-up to a single "Up next" focus).
+     Tinted accent-blue to read as the same family as the team row
+     below but with stronger emphasis on the match identity. */
+  .status-next-only {
+    padding: 0.65rem 0.85rem;
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+    background: rgba(37,99,235,0.05);
+    border: 0.5px solid rgba(37,99,235,0.20);
+  }
+  html[data-theme="dark"] .status-next-only { background: rgba(137,180,250,0.10); border-color: rgba(137,180,250,0.30); }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .status-next-only { background: rgba(137,180,250,0.10); border-color: rgba(137,180,250,0.30); }
+  }
+  .status-next-only-label {
+    font-size: 9px; letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted); font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .status-next-only-line {
+    font-size: 18px; font-weight: 700; color: var(--text);
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+  .status-next-only-meta {
+    font-size: 12px; color: var(--text-muted);
+    margin-top: 4px; line-height: 1.35;
+  }
+  .status-next-only-meta strong { color: var(--text); font-weight: 600; }
+  .status-next-only-meta em { color: var(--text-muted); font-style: italic; }
+
+  /* Cycle-time stats grid — 4 cells (Avg / Median / Min·Max /
+     Played) with σ subtitles below each value. Mirrors the layout
+     of Phil's per-event stat cards but compressed to one row.
+     On narrow screens collapses to 2×2. */
+  .status-cycle-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    padding: 0.55rem 0.7rem;
+    background: rgba(0,0,0,0.018);
+    border: 0.5px solid var(--border);
+    border-radius: 6px;
+  }
+  html[data-theme="dark"] .status-cycle-stats { background: rgba(255,255,255,0.03); }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .status-cycle-stats { background: rgba(255,255,255,0.03); }
+  }
+  .status-cycle-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .status-cycle-cell-label {
+    font-size: 9px; letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted); font-weight: 600;
+  }
+  .status-cycle-cell-value {
+    font-size: 14px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .status-cycle-cell-sub {
+    font-size: 10px; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .status-cycle-row-source {
+    grid-column: 1 / -1;
+    font-size: 10px; color: var(--text-muted);
+    margin-top: 2px; padding-top: 4px;
+    border-top: 0.5px dotted var(--border);
+    display: flex; justify-content: space-between;
+    flex-wrap: wrap; gap: 0.4rem;
+  }
+  @media (max-width: 480px) {
+    .status-cycle-stats { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* Cycle-stats placeholder — shown when the section header is
+     warranted (we acknowledge the panel exists) but we don't
+     have enough data to compute meaningful stats. Compact dashed
+     box rather than a full card. */
+  .status-cycle-empty {
+    padding: 0.5rem 0.75rem;
+    background: rgba(0,0,0,0.02);
+    border: 0.5px dashed var(--border);
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+    text-align: center;
+    font-style: italic;
+  }
+  html[data-theme="dark"] .status-cycle-empty { background: rgba(255,255,255,0.02); }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .status-cycle-empty { background: rgba(255,255,255,0.02); }
+  }
+
   /* Field-level status block — shown above the team-specific info
      when live data is available. Two states:
        playing:  "Now playing: Q42" + elapsed time
@@ -1428,6 +1565,50 @@
             <div class="status-stage-meta" id="stageQueueingMeta"></div>
           </div>
         </div>
+
+        <!-- Next-match-only fallback — used when there's no Nexus
+             queue_status data. Shows a single "Up next" panel
+             with computed ETA from last actual + scheduled cycle,
+             or pure schedule when no actuals exist. -->
+        <div class="status-next-only" id="statusNextOnly" style="display:none;">
+          <div class="status-next-only-label" id="statusNextOnlyLabel">Next on schedule</div>
+          <div class="status-next-only-line" id="statusNextOnlyLine">—</div>
+          <div class="status-next-only-meta" id="statusNextOnlyMeta"></div>
+        </div>
+
+        <!-- Cycle-time stats mini-panel — derived locally from TBA
+             match_results.actual_time using IQR outlier detection
+             per Phil Lopreiato's frc-cycle-times methodology. Not
+             pulled from Phil's tool (no public API); computed on
+             the data we already have. -->
+        <div class="status-cycle-stats" id="statusCycleStats" style="display:none;">
+          <div class="status-cycle-cell">
+            <div class="status-cycle-cell-label">Avg cycle</div>
+            <div class="status-cycle-cell-value" id="cycleAvgValue">—</div>
+            <div class="status-cycle-cell-sub"   id="cycleAvgSub"></div>
+          </div>
+          <div class="status-cycle-cell">
+            <div class="status-cycle-cell-label">Median</div>
+            <div class="status-cycle-cell-value" id="cycleMedianValue">—</div>
+            <div class="status-cycle-cell-sub"   id="cycleMedianSub"></div>
+          </div>
+          <div class="status-cycle-cell">
+            <div class="status-cycle-cell-label">Min · max</div>
+            <div class="status-cycle-cell-value" id="cycleRangeValue">—</div>
+            <div class="status-cycle-cell-sub"   id="cycleRangeSub"></div>
+          </div>
+          <div class="status-cycle-cell">
+            <div class="status-cycle-cell-label">Played</div>
+            <div class="status-cycle-cell-value" id="cyclePlayedValue">—</div>
+            <div class="status-cycle-cell-sub"   id="cyclePlayedSub"></div>
+          </div>
+          <div class="status-cycle-row-source" id="cycleSourceRow"></div>
+        </div>
+        <!-- Cycle-stats placeholder shown when match data is too thin
+             for stats but we still want to acknowledge the section.
+             Hidden by default; shown only in States A/B by the
+             render dispatcher. -->
+        <div class="status-cycle-empty" id="statusCycleEmpty" style="display:none;"></div>
 
         <!-- Legacy field-status block — kept for back-compat with code
              paths that still reference fieldStatusLine etc. The new
@@ -4209,7 +4390,499 @@ function _findFieldStatusTargets() {
   return { current: current, next: next };
 }
 
+// ── Cycle-time stats (TBA-derived) ───────────────────────────────
+//
+// Compute mean/median/min/max/σ of cycle times across played
+// qualification matches. Methodology mirrors Phil Lopreiato's
+// frc-cycle-times tool (https://github.com/phil-lopreiato/frc-cycle-times):
+//   - Cycle = actual_time(N) − actual_time(N−1) for consecutive
+//     qual matches that both have actual_time set.
+//   - Break exclusion: skip the cycle when scheduled gap between
+//     N−1 and N is > 15 min (a break boundary).
+//   - Replay/out-of-order detection: skip cycle when match N's
+//     actual_time is earlier than match N−1's (TBA records replays
+//     out of sequence).
+//   - IQR fence: drop outliers outside [Q1 − 1.5·IQR, Q3 + 1.5·IQR].
+//     Requires ≥ 4 points; below that, no fence applied.
+//
+// Returns null when fewer than 2 cycles can be computed (need at
+// least 2 completed matches with actual_time). Returns a partial
+// shape with mean only for 2-3 matches; full stats with σ when ≥ 4.
+function _computeCycleStats() {
+  if (!STATE.computed || !STATE.computed.length) return null;
+  if (!STATE.liveByMatch) return null;
+
+  // Build ordered list of qual match entries with their planned
+  // timestamps (for break-gap detection) and actual TBA times.
+  var rows = [];
+  for (var i = 0; i < STATE.computed.length; i++) {
+    var e = STATE.computed[i];
+    if (e.type !== 'match' || e.isPractice) continue;
+    var live = STATE.liveByMatch[e.matchNum];
+    if (!live || !live.actual_time) continue;
+    var schedTs = _resolveMatchTimestamp(e);
+    rows.push({
+      matchNum:    e.matchNum,
+      actualSec:   live.actual_time,                       // unix seconds
+      schedSec:    schedTs != null ? schedTs / 1000 : null, // unix seconds
+    });
+  }
+  if (rows.length < 2) return null;
+
+  // Compute per-match cycles. Break boundaries (scheduled gap > 15
+  // min) are excluded from the in-scope set; replays (out-of-order
+  // actual times) too. Both are flagged so the UI can report them.
+  var cyclesAll = [];     // every cycle we computed (for total count)
+  var cyclesInScope = []; // post-filter (break + replay excluded, pre-IQR)
+  var breakSkipped = 0, replaySkipped = 0;
+  for (var j = 1; j < rows.length; j++) {
+    var prev = rows[j - 1], cur = rows[j];
+    var dActualMin = (cur.actualSec - prev.actualSec) / 60;
+    var dSchedMin  = (prev.schedSec != null && cur.schedSec != null)
+      ? (cur.schedSec - prev.schedSec) / 60
+      : null;
+    cyclesAll.push(dActualMin);
+    // Replay/out-of-order: actual_time went backwards.
+    if (dActualMin <= 0) { replaySkipped++; continue; }
+    // Break gap: scheduled cycle exceeds 15 min.
+    if (dSchedMin != null && dSchedMin > 15) { breakSkipped++; continue; }
+    cyclesInScope.push({ actualMin: dActualMin, schedMin: dSchedMin });
+  }
+  if (!cyclesInScope.length) return null;
+
+  var actualVals = cyclesInScope.map(function(c) { return c.actualMin; });
+  var schedVals  = cyclesInScope.map(function(c) { return c.schedMin; })
+                                .filter(function(v) { return v != null; });
+
+  // IQR outlier fence — only meaningful with ≥ 4 points.
+  var inScope = actualVals.slice();
+  var outliers = 0;
+  if (inScope.length >= 4) {
+    var sorted = inScope.slice().sort(function(a, b) { return a - b; });
+    var q1 = _quantile(sorted, 0.25);
+    var q3 = _quantile(sorted, 0.75);
+    var iqr = q3 - q1;
+    var lo = q1 - 1.5 * iqr;
+    var hi = q3 + 1.5 * iqr;
+    var pre = inScope.length;
+    inScope = inScope.filter(function(v) { return v >= lo && v <= hi; });
+    outliers = pre - inScope.length;
+  }
+  if (!inScope.length) return null;
+
+  // Mean / median / σ / min / max.
+  var sum = 0;
+  for (var k = 0; k < inScope.length; k++) sum += inScope[k];
+  var mean = sum / inScope.length;
+  var sortedScope = inScope.slice().sort(function(a, b) { return a - b; });
+  var median = _quantile(sortedScope, 0.5);
+  var minV = sortedScope[0];
+  var maxV = sortedScope[sortedScope.length - 1];
+  var stddev = null;
+  if (inScope.length >= 4) {
+    var ss = 0;
+    for (var l = 0; l < inScope.length; l++) {
+      var dv = inScope[l] - mean;
+      ss += dv * dv;
+    }
+    stddev = Math.sqrt(ss / inScope.length); // population σ — same as Phil
+  }
+
+  // Avg scheduled cycle, for the "vs sched" subtitle.
+  var schedMean = null;
+  if (schedVals.length) {
+    var ss2 = 0;
+    for (var p = 0; p < schedVals.length; p++) ss2 += schedVals[p];
+    schedMean = ss2 / schedVals.length;
+  }
+  // Last cycle (most recent in-scope or replay/break excluded). Use
+  // the last cyclesInScope entry — the latest actual cycle that
+  // wasn't filtered for replay/break. May still be a statistical
+  // outlier; that's fine, the panel reports the most recent reality.
+  var lastCycleMin = cyclesInScope[cyclesInScope.length - 1].actualMin;
+
+  // Total played qual matches (for "Played 34 / 77" stat).
+  var totalQual = 0;
+  for (var q = 0; q < STATE.computed.length; q++) {
+    var qe = STATE.computed[q];
+    if (qe.type === 'match' && !qe.isPractice) totalQual++;
+  }
+
+  return {
+    mean:           mean,
+    median:         median,
+    stddev:         stddev,
+    min:            minV,
+    max:            maxV,
+    schedMean:      schedMean,
+    lastCycleMin:   lastCycleMin,
+    inScopeCount:   inScope.length,
+    outlierCount:   outliers,
+    breakSkipped:   breakSkipped,
+    replaySkipped:  replaySkipped,
+    playedCount:    rows.length,
+    totalQual:      totalQual,
+    cyclesAll:      cyclesAll.length,
+  };
+}
+
+// Quantile from a pre-sorted array. Linear-interpolation method —
+// matches what Excel/numpy default to and what Phil's tool uses.
+function _quantile(sorted, p) {
+  if (!sorted.length) return null;
+  if (sorted.length === 1) return sorted[0];
+  var idx = (sorted.length - 1) * p;
+  var lo = Math.floor(idx);
+  var hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  var frac = idx - lo;
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * frac;
+}
+
+// Render the cycle-time stats grid. Hides the panel entirely when
+// no stats are available (caller decides whether to show the
+// placeholder via _renderCycleEmpty). Mean-only mode (when 2-3
+// cycles exist and σ can't be computed) hides the σ subtitle.
+function _renderCycleStats() {
+  var grid    = document.getElementById('statusCycleStats');
+  var empty   = document.getElementById('statusCycleEmpty');
+  if (!grid || !empty) return { rendered: false };
+  var stats = _computeCycleStats();
+  if (!stats) {
+    grid.style.display = 'none';
+    return { rendered: false };
+  }
+  grid.style.display = '';
+  empty.style.display = 'none';
+
+  // Avg cell
+  document.getElementById('cycleAvgValue').textContent = stats.mean.toFixed(1) + ' min';
+  var avgSub = '';
+  if (stats.stddev != null) avgSub += 'σ ' + stats.stddev.toFixed(1);
+  if (stats.schedMean != null) {
+    avgSub += (avgSub ? ' · ' : '') + 'sched ' + stats.schedMean.toFixed(1);
+  }
+  document.getElementById('cycleAvgSub').textContent = avgSub;
+
+  // Median cell — value, last cycle as subtitle
+  document.getElementById('cycleMedianValue').textContent = stats.median.toFixed(1) + ' min';
+  document.getElementById('cycleMedianSub').textContent = 'last ' + stats.lastCycleMin.toFixed(1);
+
+  // Range cell — min / max
+  document.getElementById('cycleRangeValue').textContent =
+    stats.min.toFixed(1) + ' / ' + stats.max.toFixed(1);
+  document.getElementById('cycleRangeSub').textContent = 'in scope';
+
+  // Played cell
+  document.getElementById('cyclePlayedValue').textContent =
+    stats.playedCount + ' / ' + stats.totalQual;
+  var playedSubParts = [];
+  if (stats.outlierCount > 0)  playedSubParts.push(stats.outlierCount + ' outlier' + (stats.outlierCount === 1 ? '' : 's'));
+  if (stats.breakSkipped > 0)  playedSubParts.push(stats.breakSkipped + ' break-gap');
+  if (stats.replaySkipped > 0) playedSubParts.push(stats.replaySkipped + ' replay');
+  document.getElementById('cyclePlayedSub').textContent = playedSubParts.join(' · ') || 'all in scope';
+
+  // Source attribution row
+  var srcRow = document.getElementById('cycleSourceRow');
+  var srcLeft = 'Stats from TBA actuals' + (stats.inScopeCount >= 4 ? ' · IQR-fenced outliers' : '');
+  var nowAge = STATE.liveLastUpdate
+    ? 'updated ' + Math.max(0, Math.round((Date.now() - STATE.liveLastUpdate) / 1000)) + 's ago'
+    : '';
+  srcRow.innerHTML =
+    '<span>' + srcLeft + '</span>' +
+    (nowAge ? '<span>' + nowAge + '</span>' : '');
+  return { rendered: true };
+}
+
+// Render the "no stats yet" placeholder. Caller passes a message
+// (e.g. "first match hasn't run") so the wording matches the
+// surrounding state. Empty `msg` → hide the placeholder.
+function _renderCycleEmpty(msg) {
+  var empty = document.getElementById('statusCycleEmpty');
+  var grid  = document.getElementById('statusCycleStats');
+  if (!empty || !grid) return;
+  if (!msg) {
+    empty.style.display = 'none';
+    return;
+  }
+  empty.style.display = '';
+  grid.style.display = 'none';
+  empty.textContent = msg;
+}
+
+// Render the next-match-only fallback panel. Shown when there's
+// no Nexus queue_status data — collapses the 3-up to a single
+// "Up next" focus. ETA is computed:
+//   - Live actuals available  → max(scheduled, lastActual + cycle)
+//   - Schedule only           → just the scheduled timestamp
+// The panel reports both Q-number and absolute time.
+function _renderNextOnly() {
+  var box = document.getElementById('statusNextOnly');
+  var lab = document.getElementById('statusNextOnlyLabel');
+  var lin = document.getElementById('statusNextOnlyLine');
+  var meta = document.getElementById('statusNextOnlyMeta');
+  if (!box || !lin || !meta || !lab) return { rendered: false };
+
+  if (!STATE.computed || !STATE.computed.length) {
+    box.style.display = 'none';
+    return { rendered: false };
+  }
+
+  // Find the next not-completed qual match. "Completed" = TBA has
+  // post_result_time. If no live data, use planned time vs. now.
+  var nowMs = Date.now();
+  var nextEntry = null;
+  for (var i = 0; i < STATE.computed.length; i++) {
+    var e = STATE.computed[i];
+    if (e.type !== 'match' || e.isPractice) continue;
+    var live = STATE.liveByMatch ? STATE.liveByMatch[e.matchNum] : null;
+    if (live && live.post_result_time) continue;
+    if (live) { nextEntry = e; break; }      // live, not completed
+    var ts = _resolveMatchTimestamp(e);
+    if (ts != null && ts > nowMs) { nextEntry = e; break; }
+  }
+  if (!nextEntry) {
+    box.style.display = 'none';
+    return { rendered: false };
+  }
+
+  // ETA: when live actuals exist, use the max of (scheduled, last
+  // actual + average cycle). Same approach Phil's "Next Up" card
+  // uses. Falls back to the bare scheduled timestamp otherwise.
+  var schedTs = _resolveMatchTimestamp(nextEntry);
+  var etaTs = schedTs;
+  var etaSource = 'scheduled';
+  // Last actual qual match start
+  var lastActualTs = null;
+  if (STATE.liveByMatch) {
+    for (var k in STATE.liveByMatch) {
+      var lv = STATE.liveByMatch[k];
+      if (!lv || lv.comp_level !== 'qm' || !lv.actual_time) continue;
+      var t = lv.actual_time * 1000;
+      if (lastActualTs == null || t > lastActualTs) lastActualTs = t;
+    }
+  }
+  if (lastActualTs != null) {
+    var stats = _computeCycleStats();
+    var avgCycleMs = stats && stats.mean ? stats.mean * 60000 : 8 * 60000;  // 8 min default
+    var actualEta = lastActualTs + avgCycleMs;
+    etaTs = (schedTs == null) ? actualEta : Math.max(schedTs, actualEta);
+    etaSource = 'last actual + avg cycle ' + (stats && stats.mean ? stats.mean.toFixed(1) : '8.0') + ' min';
+  }
+
+  box.style.display = '';
+  lab.textContent = (lastActualTs != null) ? 'Next match expected' : 'Next on schedule';
+
+  var prefix = nextEntry.isPractice ? 'P' : 'Q';
+  var lineParts = [prefix + nextEntry.matchNum];
+  if (etaTs != null) lineParts.push(_formatTimeOnly(etaTs));
+  lin.textContent = lineParts.join(' · ');
+
+  // Meta line: countdown + provenance. Avoid double-formatting if
+  // ETA is in the past (should be rare given the filter above).
+  var metaHtml = '';
+  if (etaTs != null) {
+    var rel = etaTs - nowMs;
+    if (rel > 0) {
+      var cdLabel = _formatCountdown(rel) || '';
+      if (cdLabel) metaHtml += cdLabel;
+    }
+  }
+  if (etaSource === 'last actual + avg cycle') {
+    metaHtml += (metaHtml ? ' \u00b7 ' : '') + '<em>via last actual + avg cycle</em>';
+  } else if (etaSource.indexOf('last actual') === 0) {
+    metaHtml += (metaHtml ? ' \u00b7 ' : '') + '<em>' + etaSource + '</em>';
+  }
+  meta.innerHTML = metaHtml;
+  return { rendered: true };
+}
+
+// Returns true when at least one live source has data we can act
+// on (Nexus queue_status, TBA actual_time, or TBA post_result_time).
+function _hasAnyLiveData() {
+  if (!STATE.liveByMatch) return false;
+  for (var k in STATE.liveByMatch) {
+    var lv = STATE.liveByMatch[k];
+    if (!lv) continue;
+    if (lv.queue_status) return true;
+    if (lv.actual_time) return true;
+    if (lv.post_result_time) return true;
+  }
+  return false;
+}
+
+// Returns true when STATE.liveByMatch contains at least one entry
+// with a Nexus-supplied queue_status. Distinguishes "we have any
+// live data" (TBA scores have arrived) from "Nexus is reporting"
+// (queue stages are knowable).
+function _hasNexusQueueData() {
+  if (!STATE.liveByMatch) return false;
+  for (var k in STATE.liveByMatch) {
+    var lv = STATE.liveByMatch[k];
+    if (lv && lv.queue_status) return true;
+  }
+  return false;
+}
+
+// Returns ms-until-next-match for any qual match in the schedule
+// whose planned timestamp is in the future. Used to decide when
+// to flip into the "STARTING SOON" state. Returns Infinity when
+// no future-timestamped match exists (past event, or no dates).
+function _msUntilNextScheduledMatch() {
+  if (!STATE.computed) return Infinity;
+  var nowMs = Date.now();
+  var soonest = Infinity;
+  for (var i = 0; i < STATE.computed.length; i++) {
+    var e = STATE.computed[i];
+    if (e.type !== 'match' || e.isPractice) continue;
+    var ts = _resolveMatchTimestamp(e);
+    if (ts == null) continue;
+    var rel = ts - nowMs;
+    if (rel > 0 && rel < soonest) soonest = rel;
+  }
+  return soonest;
+}
+
+// Render the LIVE pill. Two modes:
+//   red   — actual live data is flowing (Nexus or TBA actuals)
+//   amber — within 15 min of next scheduled match, no actuals yet
+// Hidden otherwise.
+function _renderLivePill() {
+  var pill = document.getElementById('statusLivePill');
+  if (!pill) return;
+  pill.classList.remove('amber');
+  if (_hasAnyLiveData()) {
+    pill.style.display = '';
+    pill.textContent = 'LIVE';
+    return;
+  }
+  var msUntil = _msUntilNextScheduledMatch();
+  if (msUntil <= 15 * 60 * 1000) {
+    pill.style.display = '';
+    pill.classList.add('amber');
+    pill.textContent = 'STARTING SOON';
+    return;
+  }
+  pill.style.display = 'none';
+}
+
+// Render the "starting soon" amber delta box. Computed purely from
+// our schedule + system clock — no live data. Returns true when it
+// rendered, so the dispatcher knows to skip _renderScheduleDelta.
+function _renderStartingSoon() {
+  var box   = document.getElementById('statusDeltaBox');
+  var head  = document.getElementById('statusDeltaHeadline');
+  var sub   = document.getElementById('statusDeltaSub');
+  if (!box || !head || !sub) return false;
+
+  if (_hasAnyLiveData()) return false;          // real delta available
+  var msUntil = _msUntilNextScheduledMatch();
+  if (msUntil > 15 * 60 * 1000) return false;   // not within window
+  if (msUntil === Infinity) return false;       // no upcoming match
+
+  // Find the actual entry to name it in the subtitle.
+  var nowMs = Date.now();
+  var entry = null;
+  for (var i = 0; i < STATE.computed.length; i++) {
+    var e = STATE.computed[i];
+    if (e.type !== 'match' || e.isPractice) continue;
+    var ts = _resolveMatchTimestamp(e);
+    if (ts != null && ts - nowMs === msUntil) { entry = e; break; }
+  }
+
+  box.style.display = '';
+  box.classList.remove('behind', 'ontime', 'ahead');
+  box.classList.add('starting');
+  var minutes = Math.max(0, Math.round(msUntil / 60000));
+  head.textContent = (minutes === 0)
+    ? 'Match starting now'
+    : 'Match starts in ' + minutes + ' min';
+  if (entry) {
+    var ts2 = _resolveMatchTimestamp(entry);
+    var prefix = entry.isPractice ? 'P' : 'Q';
+    sub.innerHTML = prefix + entry.matchNum + ' scheduled <strong>' +
+                    _formatTimeOnly(ts2) + '</strong> \u00b7 awaiting first match';
+  } else {
+    sub.textContent = 'awaiting first match';
+  }
+  return true;
+}
+
+
 function updateFieldStatus() {
+  // State-aware dispatcher. Four mutually exclusive states:
+  //   D = Full live (Nexus queue + TBA actuals)
+  //   C = TBA actuals only (no Nexus)
+  //   B = Match imminent (within 15 min, no actuals)
+  //   A = Schedule view (no live data, far from start)
+  //
+  // Each render function is idempotent and defends against missing
+  // DOM nodes. Section visibility is set explicitly per state to
+  // avoid stale visibility bleed when switching events.
+  try { _renderLivePill();    } catch(_) {}
+  try { _updateStatusLinks(); } catch(_) {}
+
+  // Hide everything first, then enable per-state.
+  var threeUp     = document.getElementById('statusThreeUp');
+  var nextOnly    = document.getElementById('statusNextOnly');
+  var deltaBox    = document.getElementById('statusDeltaBox');
+  var cycleStats  = document.getElementById('statusCycleStats');
+  var cycleEmpty  = document.getElementById('statusCycleEmpty');
+  if (threeUp)    threeUp.style.display    = 'none';
+  if (nextOnly)   nextOnly.style.display   = 'none';
+  if (deltaBox)   deltaBox.style.display   = 'none';
+  if (cycleStats) cycleStats.style.display = 'none';
+  if (cycleEmpty) cycleEmpty.style.display = 'none';
+
+  var hasLive       = _hasAnyLiveData();
+  var hasNexusQueue = _hasNexusQueueData();
+  var startingSoon  = !hasLive && (_msUntilNextScheduledMatch() <= 15 * 60 * 1000);
+
+  if (hasLive) {
+    // States C / D — at least some live data.
+    try { _renderScheduleDelta(); } catch(_) {}
+    if (hasNexusQueue) {
+      // State D — Nexus queue data: show 3-up.
+      try { _renderFieldThreeUp(); } catch(_) {}
+    } else {
+      // State C — TBA only: collapse to next-only panel.
+      try { _renderNextOnly(); } catch(_) {}
+    }
+    // Cycle stats — hidden if too few data points.
+    var c = { rendered: false };
+    try { c = _renderCycleStats() || c; } catch(_) {}
+    if (!c.rendered) {
+      _renderCycleEmpty('Cycle stats accumulating \u2014 need 2+ completed matches');
+    }
+  } else if (startingSoon) {
+    // State B — match imminent. Amber delta box from clock.
+    try { _renderStartingSoon(); } catch(_) {}
+    // No 3-up, no next-only (the amber box already says "match in N min").
+    _renderCycleEmpty("No cycle stats yet \u2014 first match hasn't run");
+  } else {
+    // State A — schedule view. No delta, no 3-up. Show next-only
+    // panel as a passive "next on schedule" focus.
+    try { _renderNextOnly(); } catch(_) {}
+    // Cycle stats placeholder — only shown when there are matches
+    // in the schedule (otherwise we're on an abstract/empty
+    // schedule and the placeholder would be noise).
+    var hasQuals = (STATE.computed || []).some(function(e) {
+      return e.type === 'match' && !e.isPractice;
+    });
+    if (hasQuals) {
+      _renderCycleEmpty("No cycle stats yet \u2014 first match hasn't run");
+    }
+  }
+
+  // Hide the legacy single-line field-status block. Its DOM nodes
+  // are kept (some downstream code still queries them) but the new
+  // state-aware layout supersedes it.
+  var legacy = document.getElementById('fieldStatus');
+  if (legacy) legacy.style.display = 'none';
+  _stopFieldCountdown();
+}
+
+function _legacy_updateFieldStatus_unused_v2() {
   // The richer status panel (LIVE pill, schedule delta, 3-up Nexus
   // grid, dashboard links) is composed of independent renderers that
   // each defend against missing data internally. Run them all every

@@ -1258,6 +1258,8 @@ async def get_event_view_payload(
                 "event": {
                     "id": event.id, "key": event.key, "name": event.name,
                     "year": event.year, "location": event.location,
+                    "start_date": event.start_date,
+                    "end_date":   event.end_date,
                     "branding": event.branding or {},
                 },
                 "candidates": [
@@ -1294,6 +1296,11 @@ async def get_event_view_payload(
         event_info = {
             "id": event.id, "key": event.key, "name": event.name,
             "year": event.year, "location": event.location,
+            # See _build_assigned_payload comment — dates are required
+            # for the agenda-fit "past day" overlay. Local Event row
+            # may have these from a prior TBA event sync.
+            "start_date": event.start_date,
+            "end_date":   event.end_date,
             "branding": event.branding or {},
         }
         event_id = event.id
@@ -1308,6 +1315,12 @@ async def get_event_view_payload(
                     tba_event.get("country"),
                 ])) or None
             ),
+            # TBA payload carries start/end dates as YYYY-MM-DD when
+            # available — same shape as our local DB column. Pass
+            # through directly so the view can derive day dates
+            # without a local Event row.
+            "start_date": tba_event.get("start_date"),
+            "end_date":   tba_event.get("end_date"),
             "branding": {},
         }
         event_id = None
@@ -1479,6 +1492,15 @@ async def _build_assigned_payload(
         "event": {
             "id": event.id, "key": event.key, "name": event.name,
             "year": event.year, "location": event.location,
+            # start_date / end_date drive the agenda-fit progress
+            # overlay's "past day" greying. Without them, view.html's
+            # _deriveDayDate falls through to '' and the bar never
+            # turns gray for past events. Both fields are nullable
+            # YYYY-MM-DD strings on the Event model, so passing the
+            # raw value through is sufficient — view.html parses with
+            # a regex that defends against missing/malformed values.
+            "start_date": event.start_date,
+            "end_date":   event.end_date,
             "branding": event.branding or {},
         },
         "abstract_schedule_id": assigned.abstract_schedule_id,
