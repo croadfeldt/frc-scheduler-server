@@ -125,6 +125,44 @@
   .next-match-meta { font-size: 13px; color: var(--text-muted); }
   .next-match-meta strong { color: var(--text); font-weight: 600; }
   .next-match-card.empty { color: var(--text-muted); font-style: italic; }
+  /* Field-level status block — shown above the team-specific info
+     when live data is available. Two states:
+       playing:  "Now playing: Q42" + elapsed time
+       upcoming: "Up next: Q42" + countdown to start
+     The block tints itself with the matching row color so the user
+     can visually associate it with the schedule row. */
+  .field-status {
+    margin-bottom: 0.7rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    border-left: 3px solid #fbc02d;
+    background: rgba(255,235,59,0.10);
+  }
+  .field-status.upcoming {
+    border-left-color: #fb8c00;
+    background: rgba(255,152,0,0.10);
+  }
+  .field-status-line {
+    font-size: 13px;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .field-status-line strong {
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .field-status-countdown {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .field-status.playing .field-status-countdown { color: #c79900; }
+  .field-status.close   .field-status-countdown { color: #fb8c00; animation: countdown-pulse 1s ease-in-out infinite alternate; }
+
   /* Countdown — sits between detail and meta. Color shifts as the
      match approaches: muted >1h out, accent <1h, warning <10m,
      hot when match is starting / playing. */
@@ -248,6 +286,25 @@
   tr.now-playing { box-shadow: inset 4px 0 0 var(--next-match-accent), 0 0 0 2px var(--next-match-accent) inset; }
   tr.now-playing::before {
     content: "▶"; color: var(--next-match-accent); margin-right: 4px;
+  }
+  /* Field-level highlighting (independent of team selection)
+     - current-match: light yellow (Nexus says actively playing)
+     - upcoming-match: light orange (next match in queue)
+     The colors are intentionally light so my-team highlighting (which
+     uses box-shadow) remains visible on top. cells use !important
+     because zebra-stripe rules also target td backgrounds. */
+  tr.current-match  td { background: rgba(255,235,59,0.18) !important; }
+  tr.upcoming-match td { background: rgba(255,152,0,0.14) !important; }
+  /* Stronger left edge so the row stands out beyond just background tint */
+  tr.current-match  { box-shadow: inset 4px 0 0 #fbc02d; }
+  tr.upcoming-match { box-shadow: inset 4px 0 0 #fb8c00; }
+  /* my-team takes precedence over field highlighting for the box-shadow
+     so the user's row indicator stays visible. The cell tints still apply. */
+  tr.my-team.current-match  { box-shadow: inset 4px 0 0 var(--my-team-bg); }
+  tr.my-team.upcoming-match { box-shadow: inset 4px 0 0 var(--my-team-bg); }
+  @media (prefers-color-scheme: dark) {
+    tr.current-match  td { background: rgba(255,235,59,0.10) !important; }
+    tr.upcoming-match td { background: rgba(255,152,0,0.10) !important; }
   }
   /* Break/lunch row */
   tr.break-row td {
@@ -729,6 +786,14 @@
       <!-- Next match card -->
       <div class="card next-match-card empty" id="nextMatchCard">
         <div class="card-label">Status</div>
+        <!-- Field-level status: shows the match currently playing (or up
+             next) per Nexus, with its own countdown. Independent of the
+             team-specific info below. Hidden when no live data is
+             available. -->
+        <div class="field-status" id="fieldStatus" style="display:none;">
+          <div class="field-status-line" id="fieldStatusLine"></div>
+          <div class="field-status-countdown" id="fieldStatusCountdown"></div>
+        </div>
         <div class="next-match-detail" id="nextMatchDetail">Enter your team number to find your matches</div>
         <div class="next-match-countdown" id="nextMatchCountdown" style="display:none;"></div>
         <div class="next-match-meta" id="nextMatchMeta"></div>
@@ -1523,12 +1588,29 @@ function rerender() {
 
   // Determine "now playing" preferring live API state over clock estimation.
   // A match is "playing" when it has an actual_time but no post_result_time.
+  //
+  // Field-level current/next derivation:
+  //   currentFieldMatchNum  — Nexus says this match is actively playing
+  //                            (has actual_time, no post_result_time).
+  //                            null if nothing is actively on the field.
+  //   upcomingFieldMatchNum — First non-completed match in schedule order.
+  //                            When a match is currently playing, this is
+  //                            the match immediately after it. When nothing
+  //                            is playing, this is the next match queued
+  //                            up. null when all matches are completed or
+  //                            there's no live data.
+  // The TABLE render applies .current-match (light yellow) to the row
+  // matching currentFieldMatchNum, and .upcoming-match (light orange)
+  // to upcomingFieldMatchNum. Independent of team selection.
   let nowMatchNum = null;
   let nowFromLive = false;
+  let currentFieldMatchNum  = null;
+  let upcomingFieldMatchNum = null;
   for (const m of Object.values(STATE.liveByMatch || {})) {
     if (m.actual_time && !m.post_result_time && m.comp_level === 'qm') {
       nowMatchNum = m.match_number;
       nowFromLive = true;
+      currentFieldMatchNum = m.match_number;
       break;
     }
   }
@@ -1539,6 +1621,29 @@ function rerender() {
     const nowMin = (now.getTime() - todayStart.getTime()) / 60000;
     const cur = computed.find(e => e.type === 'match' && e.startMin <= nowMin && nowMin < e.endMin);
     if (cur) nowMatchNum = cur.matchNum;
+  }
+  // Compute upcomingFieldMatchNum: walk computed matches in order, find
+  // the first match whose live status isn't 'completed'. If currentField
+  // is set, skip past it to find the NEXT one.
+  if (STATE.liveMode || Object.keys(STATE.liveByMatch || {}).length > 0) {
+    let foundCurrent = (currentFieldMatchNum == null);
+    for (const e of computed) {
+      if (e.type !== 'match' || e.isPractice) continue;
+      const live = STATE.liveByMatch[e.matchNum];
+      const isCompleted = live && live.post_result_time;
+      if (!foundCurrent) {
+        if (e.matchNum === currentFieldMatchNum) foundCurrent = true;
+        continue;
+      }
+      if (!isCompleted) {
+        upcomingFieldMatchNum = e.matchNum;
+        break;
+      }
+    }
+    // If nothing was actively playing AND we found an upcoming match,
+    // treat the upcoming one as the "current" target for the status
+    // display purposes (countdown to its start). The row highlights
+    // still distinguish: light orange because it's not yet playing.
   }
 
   let html = '';
@@ -1599,6 +1704,11 @@ function rerender() {
       if (zebra++ % 2) cls.push('alt');
       if (matched) cls.push('my-team');
       if (isNow) cls.push('now-playing');
+      // Field-level highlighting (independent of team selection).
+      // current-match → light yellow background (Nexus says playing now)
+      // upcoming-match → light orange background (next match queued)
+      if (entry.matchNum === currentFieldMatchNum)  cls.push('current-match');
+      if (entry.matchNum === upcomingFieldMatchNum) cls.push('upcoming-match');
       // Win/loss tint when match is completed
       if (status === 'completed' && live.winning_alliance) {
         cls.push('result-' + live.winning_alliance);  // 'result-red'/'result-blue'/'result-tie'
@@ -1705,6 +1815,7 @@ function rerender() {
 
   // My team summary + next match
   updateNextMatch(nowMatchNum);
+  updateFieldStatus();
 
   // Footer meta
   const sch = STATE.schedule;
@@ -2248,6 +2359,158 @@ function _tickCountdown() {
   el.classList.toggle('soon',  ms > 0 && ms <= 60 * 60 * 1000);  // <1h
   el.classList.toggle('close', ms > 0 && ms <= 10 * 60 * 1000);  // <10m
   el.classList.toggle('now',   ms <= 0);                          // starting
+}
+
+// ── Field-level status updater ─────────────────────────────────────
+// Called from the table-render flow and from the live-poll refresh.
+// Reads STATE.liveByMatch + STATE.computed to decide whether a match
+// is currently playing OR which match is up next, then renders the
+// field-status block at the top of the status card with a live
+// countdown / elapsed-time display.
+//
+// State logic mirrors the row-highlight derivation in renderTable:
+//   - currently playing: live entry has actual_time && !post_result_time
+//   - up next: first not-completed match after the current (or the
+//              first not-completed match overall when nothing is
+//              actively playing)
+//
+// Display:
+//   - playing  → "Now playing: Q42" + elapsed time (counts UP from start)
+//   - upcoming → "Up next: Q43"     + countdown to start (counts DOWN)
+//   - neither  → block hidden
+var _fieldCountdownTargetTs = null;
+var _fieldCountdownIsPlaying = false;
+var _fieldCountdownHandle = null;
+
+function _findFieldStatusTargets() {
+  // Walk live data + computed schedule to find current + next field match.
+  // Returns { current: matchEntry|null, next: matchEntry|null } where
+  // each value is the entry from STATE.computed (so it carries the
+  // resolvable timestamp via _resolveMatchTimestamp).
+  if (!STATE.computed || !STATE.computed.length) return { current: null, next: null };
+  // Build matchNum → computed entry map for quick lookup
+  var byNum = {};
+  STATE.computed.forEach(function(e) {
+    if (e.type === 'match' && !e.isPractice) byNum[e.matchNum] = e;
+  });
+  // Find Nexus-confirmed playing match
+  var current = null;
+  for (var k in (STATE.liveByMatch || {})) {
+    var m = STATE.liveByMatch[k];
+    if (m.actual_time && !m.post_result_time && m.comp_level === 'qm') {
+      if (byNum[m.match_number]) { current = byNum[m.match_number]; break; }
+    }
+  }
+  // Find first non-completed match after current (or first overall if none playing)
+  var sawCurrent = (current == null);
+  var next = null;
+  for (var i = 0; i < STATE.computed.length; i++) {
+    var e = STATE.computed[i];
+    if (e.type !== 'match' || e.isPractice) continue;
+    if (!sawCurrent) {
+      if (current && e.matchNum === current.matchNum) sawCurrent = true;
+      continue;
+    }
+    var live = STATE.liveByMatch[e.matchNum];
+    var isCompleted = live && live.post_result_time;
+    if (!isCompleted) { next = e; break; }
+  }
+  return { current: current, next: next };
+}
+
+function updateFieldStatus() {
+  var block = document.getElementById('fieldStatus');
+  var line  = document.getElementById('fieldStatusLine');
+  var cd    = document.getElementById('fieldStatusCountdown');
+  if (!block || !line || !cd) return;
+
+  // Only show when in live mode AND there's actual live data to base
+  // the field state on. Without Nexus data, we have no way to know
+  // what's actually on the field — fall back to hiding the block.
+  var hasLive = STATE.liveMode && STATE.liveByMatch && Object.keys(STATE.liveByMatch).length > 0;
+  if (!hasLive) {
+    block.style.display = 'none';
+    _stopFieldCountdown();
+    return;
+  }
+
+  var t = _findFieldStatusTargets();
+  if (t.current) {
+    // Playing now — count UP from match start
+    var ts = _resolveMatchTimestamp(t.current);
+    block.style.display = '';
+    block.classList.remove('upcoming');
+    block.classList.add('playing');
+    line.innerHTML = 'Now playing: <strong>Q' + t.current.matchNum + '</strong>';
+    if (ts) {
+      _fieldCountdownIsPlaying = true;
+      _fieldCountdownTargetTs = ts;
+      _startFieldCountdown();
+    } else {
+      cd.textContent = 'PLAYING';
+      _stopFieldCountdown();
+    }
+    return;
+  }
+  if (t.next) {
+    // Nothing playing — count DOWN to next match start
+    var ts2 = _resolveMatchTimestamp(t.next);
+    block.style.display = '';
+    block.classList.remove('playing');
+    block.classList.add('upcoming');
+    line.innerHTML = 'Up next: <strong>Q' + t.next.matchNum + '</strong>';
+    if (ts2) {
+      _fieldCountdownIsPlaying = false;
+      _fieldCountdownTargetTs = ts2;
+      _startFieldCountdown();
+    } else {
+      cd.textContent = 'queued';
+      _stopFieldCountdown();
+    }
+    return;
+  }
+  // No current or upcoming match — all completed, or no match data
+  block.style.display = 'none';
+  _stopFieldCountdown();
+}
+
+function _startFieldCountdown() {
+  if (_fieldCountdownHandle) return;
+  _tickFieldCountdown();
+  _fieldCountdownHandle = setInterval(_tickFieldCountdown, 1000);
+}
+function _stopFieldCountdown() {
+  if (_fieldCountdownHandle) { clearInterval(_fieldCountdownHandle); _fieldCountdownHandle = null; }
+}
+function _tickFieldCountdown() {
+  var cd = document.getElementById('fieldStatusCountdown');
+  var block = document.getElementById('fieldStatus');
+  if (!cd || !block || !_fieldCountdownTargetTs) return;
+  var ms = _fieldCountdownTargetTs - Date.now();
+  if (_fieldCountdownIsPlaying) {
+    // Count UP — match started at ts, show elapsed since
+    var elapsed = -ms; // ms is negative once match has started
+    if (elapsed < 0) {
+      // Edge case: scheduled time is in the future but Nexus says playing
+      cd.textContent = 'PLAYING';
+      return;
+    }
+    var s = Math.floor(elapsed / 1000);
+    var m = Math.floor(s / 60); var sec = s % 60;
+    cd.textContent = m > 0 ? ('started ' + m + 'm ' + (sec < 10 ? '0' : '') + sec + 's ago')
+                            : ('started ' + sec + 's ago');
+    block.classList.remove('close');
+  } else {
+    // Count DOWN to start
+    var text = _formatCountdown(ms);
+    if (text === null) {
+      cd.textContent = 'STARTING NOW';
+      block.classList.remove('close');
+      return;
+    }
+    cd.textContent = text;
+    block.classList.toggle('close', ms > 0 && ms <= 5 * 60 * 1000);
+  }
 }
 
 function updateNextMatch(nowMatchNum) {
