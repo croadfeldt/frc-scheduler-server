@@ -9086,36 +9086,87 @@ async function createEvent() {
 // remotely) WITHOUT losing the active schedule. Re-runs the same
 // loaders the event-code path uses on initial load.
 // ── Lock schedule ────────────────────────────────────────────────
-// User-controlled "freeze" of the editor. Disables generate /
-// assign / save-event / regenerate-on-edit, freezes form inputs,
-// and surfaces a banner. State persists in the URL via ?locked=1
-// (NOT in the DB — it's a per-session UI safety net, not a
-// permanent property of the schedule). Refresh keeps the lock so
-// users coming back via shared link see the locked editor as the
-// owner left it.
-function toggleLockSchedule() {
-  applyLockState(!window._frcLocked);
-  if (typeof updateUrlFromState === 'function') updateUrlFromState();
-  showApiStatus(window._frcLocked
-    ? '\u{1f512} Schedule locked'
-    : '\u{1f513} Schedule unlocked');
+// Lock state is now persisted in the DB on the assigned schedule
+// (locked_at / locked_by_user_id / locked_by_name). Locking and
+// unlocking require authentication. Anyone authenticated can lock;
+// only the locker can unlock (full authorization matrix is future
+// work). The URL also gets ?locked=1 for visual continuity but
+// the DB is the authoritative source.
+async function toggleLockSchedule() {
+  // Need an authenticated user to lock anything in the DB. If they
+  // aren't logged in, prompt them to sign in.
+  if (typeof getToken === 'function' && !getToken()) {
+    showApiStatus('Sign in to lock or unlock schedules', true);
+    if (typeof openAuthModal === 'function') openAuthModal();
+    return;
+  }
+  if (!_currentAssignedScheduleId) {
+    // No persisted schedule yet — fall back to the session-only lock
+    // so users can still freeze a not-yet-saved schedule. Won't
+    // survive a refresh (no aid to look up), but matches user
+    // intent of "stop changes to what I'm currently looking at".
+    applyLockState(!window._frcLocked, null);
+    if (typeof updateUrlFromState === 'function') updateUrlFromState();
+    showApiStatus(window._frcLocked
+      ? '\u{1f512} Locked (session only \u2014 not saved to DB)'
+      : '\u{1f513} Unlocked');
+    return;
+  }
+  var endpoint = window._frcLocked ? 'unlock' : 'lock';
+  try {
+    const resp = await apiFetch(
+      '/api/assigned-schedules/' + _currentAssignedScheduleId + '/' + endpoint,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+    );
+    // Server is the source of truth. Apply whatever it returned.
+    applyLockState(!!resp.locked_at, {
+      lockedAt:    resp.locked_at,
+      lockedByName: resp.locked_by_name,
+      lockedByUserId: resp.locked_by_user_id,
+    });
+    if (typeof updateUrlFromState === 'function') updateUrlFromState();
+    showApiStatus(window._frcLocked
+      ? '\u{1f512} Schedule locked' + (resp.locked_by_name ? ' by ' + resp.locked_by_name : '')
+      : '\u{1f513} Schedule unlocked');
+  } catch(e) {
+    // 423 Locked → someone else owns the lock. 401 → token expired.
+    // Anything else is unexpected; surface the message verbatim.
+    var msg = e.message || 'Lock operation failed';
+    showApiStatus(msg, true);
+  }
 }
 
-// Idempotent setter — safe to call from URL restore + button click
-// + recovery paths. Updates body class, button label, button class,
-// and any pending timers.
-function applyLockState(locked) {
+// Idempotent setter — safe to call from URL restore + API response +
+// recovery paths. Updates body class, button label, button class,
+// banner text, and any pending timers. lockerInfo is { lockedByName,
+// lockedAt, lockedByUserId } when available (from API) or null
+// (session-only / URL-restore without DB info).
+function applyLockState(locked, lockerInfo) {
   window._frcLocked = !!locked;
+  window._frcLockedBy = lockerInfo || null;
   // body class drives the global CSS — disabled buttons, frozen
   // inputs, and the top-of-page banner.
   document.body.classList.toggle('frc-locked', !!locked);
+  // Update banner text with locker name when available. The :before
+  // pseudo-element reads from --frc-lock-banner CSS variable so
+  // we can swap the message in without rewriting the CSS rule.
+  var bannerText;
+  if (locked) {
+    var who = lockerInfo && lockerInfo.lockedByName ? ' by ' + lockerInfo.lockedByName : '';
+    bannerText = '\u{1f512}  Schedule locked' + who + ' \u2014 click "Unlock" in the event bar to resume editing.';
+  } else {
+    bannerText = '';
+  }
+  document.documentElement.style.setProperty('--frc-lock-banner', JSON.stringify(bannerText));
   // Button visual state
   var btn = document.getElementById('btnLockSchedule');
   if (btn) {
     if (locked) {
       btn.classList.add('is-locked');
       btn.innerHTML = '\u{1f512} Unlock';
-      btn.title = 'Schedule is locked \u2014 click to unlock';
+      btn.title = lockerInfo && lockerInfo.lockedByName
+        ? 'Locked by ' + lockerInfo.lockedByName + ' \u2014 click to unlock'
+        : 'Schedule is locked \u2014 click to unlock';
     } else {
       btn.classList.remove('is-locked');
       btn.innerHTML = '\u{1f513} Lock';
@@ -11606,6 +11657,19 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
     // Saved button, post-generate auto-load, post-assign reload,
     // checkForSavedAssignment auto, promoteSchedule) all benefit.
     if (typeof updateUrlFromState === 'function') updateUrlFromState();
+
+    // Apply DB-persisted lock state. The schedule may have been
+    // locked by another user; if so, the locker's name surfaces in
+    // the banner and Lock button title. applyLockState is
+    // idempotent so calling it with a false here also clears any
+    // stale session-only lock from before the load completed.
+    if (typeof applyLockState === 'function') {
+      applyLockState(!!sched.locked_at, sched.locked_at ? {
+        lockedAt:       sched.locked_at,
+        lockedByName:   sched.locked_by_name,
+        lockedByUserId: sched.locked_by_user_id,
+      } : null);
+    }
 
     showApiStatus('Schedule loaded');
   } catch(e) { showApiStatus(e.message, true); }

@@ -19,7 +19,7 @@ from typing import Any, AsyncGenerator
 import httpx
 from fastapi import Depends, FastAPI, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
@@ -900,32 +900,23 @@ async def list_assigned_schedules(event_id: int, db: AsyncSession = Depends(get_
     ]
 
 
-@app.get("/api/assigned-schedules/{schedule_id}")
-async def get_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get_session)):
-    result = await db.execute(
-        select(AssignedSchedule)
-        .options(selectinload(AssignedSchedule.abstract_schedule))
-        .where(AssignedSchedule.id == schedule_id)
-    )
-    assigned = result.scalar_one_or_none()
-    if not assigned:
-        raise HTTPException(404, "Assigned schedule not found")
+async def _build_assigned_schedule_response(assigned: AssignedSchedule, db: AsyncSession) -> dict:
+    """Shared response builder for GET / PATCH / lock / unlock endpoints.
+
+    Includes lock fields so the frontend can render the locked state
+    on first load without a separate fetch. Lock fields are nullable
+    (None when unlocked).
+    """
     abstract = assigned.abstract_schedule
+    if abstract is None:
+        abstract = await db.get(AbstractSchedule, assigned.abstract_schedule_id)
     slot_map = {int(k): v for k, v in assigned.slot_map.items()}
     resolved_matches = [
         {"red": [slot_map[s] for s in m["red"]], "blue": [slot_map[s] for s in m["blue"]],
          "red_surrogate": m["red_surrogate"], "blue_surrogate": m["blue_surrogate"]}
         for m in abstract.matches
     ]
-    # Practice matches are stored with slot indices (1..N) because they're
-    # generated client-side using the abstract scheduler. Translate them
-    # to real team numbers using the same slot_map so they render with
-    # team numbers like the qual matches. Falls through unchanged for
-    # entries that already contain team numbers (e.g. older saved schedules
-    # or external imports), since slot_map.get returns None and we keep
-    # the original value as a fallback.
     resolved_practice_matches = _resolve_practice_matches(assigned.practice_matches, slot_map)
-    # Pull event info too — saves an extra round-trip for the /view page
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
     event_info = None
     if event:
@@ -947,7 +938,23 @@ async def get_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get
         "round_boundaries": abstract.round_boundaries,
         "day_config": assigned.day_config,
         "created_at": assigned.created_at.isoformat(),
+        "locked_at":         assigned.locked_at.isoformat() if assigned.locked_at else None,
+        "locked_by_user_id": assigned.locked_by_user_id,
+        "locked_by_name":    assigned.locked_by_name,
     }
+
+
+@app.get("/api/assigned-schedules/{schedule_id}")
+async def get_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get_session)):
+    result = await db.execute(
+        select(AssignedSchedule)
+        .options(selectinload(AssignedSchedule.abstract_schedule))
+        .where(AssignedSchedule.id == schedule_id)
+    )
+    assigned = result.scalar_one_or_none()
+    if not assigned:
+        raise HTTPException(404, "Assigned schedule not found")
+    return await _build_assigned_schedule_response(assigned, db)
 
 
 @app.patch("/api/assigned-schedules/{schedule_id}", status_code=200)
@@ -955,6 +962,7 @@ async def patch_assigned_schedule(
     schedule_id: int,
     payload: dict,
     db: AsyncSession = Depends(get_session),
+    current_user: dict | None = Depends(get_current_user),
 ):
     """Update day_config (and other safe metadata) on an assigned schedule
     WITHOUT touching slot_map or matches[].
@@ -976,6 +984,19 @@ async def patch_assigned_schedule(
     if not assigned:
         raise HTTPException(404, "Assigned schedule not found")
 
+    # Lock guard — refuse PATCH on a locked schedule unless the request
+    # is coming from the locker themselves. Returns HTTP 423 Locked
+    # (RFC 4918) which the frontend handles distinctly from 401/403.
+    # The locker-bypass exists because the same user toggling Save in
+    # their own session shouldn't be blocked by their own lock —
+    # they explicitly chose to lock, so they retain edit rights.
+    if assigned.locked_at is not None:
+        if not current_user or assigned.locked_by_user_id != current_user.get("id"):
+            raise HTTPException(
+                status_code=423,
+                detail=f"Schedule is locked by {assigned.locked_by_name or 'another user'}.",
+            )
+
     if "day_config" in payload:
         new_dc = payload["day_config"]
         if not isinstance(new_dc, dict):
@@ -988,31 +1009,90 @@ async def patch_assigned_schedule(
 
     await db.commit()
     await db.refresh(assigned)
+    return await _build_assigned_schedule_response(assigned, db)
 
-    # Return the same shape as GET so the frontend can re-render
-    # without an extra round-trip.
-    abstract = await db.get(AbstractSchedule, assigned.abstract_schedule_id)
-    slot_map = {int(k): v for k, v in assigned.slot_map.items()}
-    resolved_matches = [
-        {"red": [slot_map[s] for s in m["red"]], "blue": [slot_map[s] for s in m["blue"]],
-         "red_surrogate": m["red_surrogate"], "blue_surrogate": m["blue_surrogate"]}
-        for m in abstract.matches
-    ]
-    resolved_practice_matches = _resolve_practice_matches(assigned.practice_matches, slot_map)
-    return {
-        "id": assigned.id, "name": assigned.name, "is_active": assigned.is_active,
-        "event_id": assigned.event_id,
-        "abstract_schedule_id": assigned.abstract_schedule_id,
-        "num_teams": abstract.num_teams, "matches_per_team": abstract.matches_per_team,
-        "cooldown": abstract.cooldown, "seed": abstract.seed,
-        "assign_seed": assigned.assign_seed, "created_by": assigned.created_by,
-        "slot_map": assigned.slot_map, "matches": resolved_matches,
-        "practice_matches": resolved_practice_matches,
-        "surrogate_count": abstract.surrogate_count,
-        "round_boundaries": abstract.round_boundaries,
-        "day_config": assigned.day_config,
-        "created_at": assigned.created_at.isoformat(),
-    }
+
+@app.post("/api/assigned-schedules/{schedule_id}/lock", status_code=200)
+async def lock_assigned_schedule(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
+    """Lock a schedule against further edits. Requires authentication.
+
+    Stores who locked it (user_id + display name snapshot) and when.
+    Locking a schedule that's already locked is a no-op when the
+    requester is the existing locker; returns 423 if locked by
+    someone else (keeps the original lock intact).
+
+    The authorization matrix is intentionally minimal — anyone
+    authenticated can lock, only the locker can unlock. Tighter
+    rules (event ownership, admin override, etc.) come later.
+    """
+    assigned = await db.get(AssignedSchedule, schedule_id)
+    if not assigned:
+        raise HTTPException(404, "Assigned schedule not found")
+
+    if assigned.locked_at is not None:
+        # Already locked. If by us, fine — return current state. If by
+        # someone else, refuse so users can't quietly steal locks.
+        if assigned.locked_by_user_id != user.get("id"):
+            raise HTTPException(
+                status_code=423,
+                detail=f"Schedule is already locked by {assigned.locked_by_name or 'another user'}.",
+            )
+        return await _build_assigned_schedule_response(assigned, db)
+
+    # Pull display name from the User row so the snapshot reflects
+    # what's currently in the DB rather than what's in the JWT
+    # (JWT email could be stale if the user changed providers).
+    locker = await db.get(User, user.get("id"))
+    display_name = (locker.name if locker and locker.name else None) \
+                   or (locker.email if locker else None) \
+                   or user.get("email") \
+                   or f"user#{user.get('id')}"
+
+    from datetime import datetime, timezone
+    assigned.locked_at = datetime.now(timezone.utc)
+    assigned.locked_by_user_id = user.get("id")
+    assigned.locked_by_name = display_name[:256]
+    await db.commit()
+    await db.refresh(assigned)
+    return await _build_assigned_schedule_response(assigned, db)
+
+
+@app.post("/api/assigned-schedules/{schedule_id}/unlock", status_code=200)
+async def unlock_assigned_schedule(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
+    """Unlock a schedule. Currently only the locker can unlock.
+
+    Future authorization-matrix work may relax this (event admins
+    overriding stale locks, time-based auto-expiry, etc.) — for
+    now, "only the locker can unlock" is the safest default.
+    """
+    assigned = await db.get(AssignedSchedule, schedule_id)
+    if not assigned:
+        raise HTTPException(404, "Assigned schedule not found")
+
+    if assigned.locked_at is None:
+        # Idempotent — unlock on an unlocked schedule is fine.
+        return await _build_assigned_schedule_response(assigned, db)
+
+    if assigned.locked_by_user_id != user.get("id"):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Only {assigned.locked_by_name or 'the original locker'} can unlock this schedule.",
+        )
+
+    assigned.locked_at = None
+    assigned.locked_by_user_id = None
+    assigned.locked_by_name = None
+    await db.commit()
+    await db.refresh(assigned)
+    return await _build_assigned_schedule_response(assigned, db)
 
 
 @app.post("/api/assigned-schedules/{schedule_id}/activate", status_code=200)

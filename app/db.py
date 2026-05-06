@@ -181,6 +181,19 @@ class AssignedSchedule(Base):
     assign_seed:  Mapped[str|None] = mapped_column(String(16), nullable=True)
     created_by:   Mapped[str|None] = mapped_column(String(256), nullable=True, index=True)
 
+    # ── Lock fields ──────────────────────────────────────────────
+    # When set, the schedule is locked against edits/PATCH/lock-bypass
+    # operations. Only the locking user can unlock (until the
+    # authorization matrix is implemented). All three columns are
+    # populated together when locking and cleared together on unlock.
+    # `locked_by_name` is denormalized so we can render "Locked by
+    # Alice" without a join — the user's display name at the time
+    # of locking. If the user later changes their name, the lock
+    # banner still shows the original snapshot.
+    locked_at:         Mapped[datetime|None] = mapped_column(DateTime(timezone=True), nullable=True)
+    locked_by_user_id: Mapped[int|None]      = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    locked_by_name:    Mapped[str|None]      = mapped_column(String(256), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     abstract_schedule: Mapped["AbstractSchedule"]  = relationship(back_populates="assigned_schedules")
