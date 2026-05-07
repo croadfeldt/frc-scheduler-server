@@ -1211,18 +1211,14 @@
     cursor: pointer; transition: opacity 0.15s, transform 0.1s;
   }
   .team-chip:hover { opacity: 0.85; transform: translateY(-1px); }
-  /* Primary indicator — small dot before the team number rather
-     than a focus-ring (the per-team color is already strong, so
-     adding a ring on top would compete visually). */
-  .team-chip.primary { box-shadow: inset 0 0 0 1px var(--team-color, var(--my-team-bg)); }
-  .team-chip.primary::before {
-    content: '';
-    display: inline-block;
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--team-color, var(--my-team-bg));
-    margin-right: 4px;
-  }
+  /* No visual marker for the primary team. The chip color already
+     identifies the team — adding a separate dot/ring on top of it
+     for "this is the primary one" was redundant and confusing
+     (users read it as a state difference rather than just an
+     internal pointer). The .primary class is still applied in
+     markup since renderSelectedTeamChips emits it, but it has no
+     visual effect. The primary still drives the per-team stats
+     block (rank/record/EPA) — that's the only place it matters. */
   .team-chip .chip-x { font-size: 14px; line-height: 1; opacity: 0.65; }
   .team-chip:hover .chip-x { opacity: 1; }
 
@@ -2250,13 +2246,21 @@ function syncThemeButton() {
 //   - red    (#d1242f)  "now" line
 // Each pair has at least 30° hue separation; all are bright enough
 // to read as a 2-4px wide strip on either light or dark theme.
+//
+// Muted palette (May 2026): swapped from a vibrant set to dusty
+// earth tones at ~25-45% saturation so colored chips and alliance
+// highlights feel less aggressive in the UI. Each slot keeps its
+// hue family (slot 0 stays "the pink one" etc.) so users with
+// color-position memory don't get rearranged. Slot 1 was pulled
+// from cyan to sage-mint because pure cyan reads too close to
+// alliance blue (#4a90e2) when both are saturated.
 var TEAM_COLORS = [
-  '#e63ec1',  // 1: bright magenta
-  '#22c5d6',  // 2: cyan
-  '#facc15',  // 3: vivid yellow
-  '#9aef3d',  // 4: lime green (lighter than practice)
-  '#bd92f0',  // 5: light purple
-  '#ff8b73',  // 6: coral pink
+  '#c47b9e',  // 0: dusty rose       (was hot pink   #e63ec1)
+  '#6db1a6',  // 1: sage-mint        (was cyan       #22c5d6)
+  '#c9a256',  // 2: antique gold     (was vivid      #facc15)
+  '#8aa66a',  // 3: sage green       (was lime       #9aef3d)
+  '#9d8cb8',  // 4: smoky lavender   (was purple     #bd92f0)
+  '#c88a6e',  // 5: terracotta       (was coral      #ff8b73)
 ];
 
 // Build a standardized day label using event-day numbering — the

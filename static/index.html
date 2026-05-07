@@ -4400,13 +4400,17 @@ let _authUser = null;                    // {sub, email, provider, uid} or null
 //
 // Colors avoid existing UI hues (qual blue, practice green,
 // break orange, danger red) and have at least 30° hue separation.
+//
+// Muted palette (May 2026): see view.html for rationale. Mirror
+// kept exact so a team's color is identical across editor and
+// view pages.
 var TEAM_COLORS = [
-  '#e63ec1',  // 1: bright magenta
-  '#22c5d6',  // 2: cyan
-  '#facc15',  // 3: vivid yellow
-  '#9aef3d',  // 4: lime green
-  '#bd92f0',  // 5: light purple
-  '#ff8b73',  // 6: coral pink
+  '#c47b9e',  // 0: dusty rose       (was hot pink   #e63ec1)
+  '#6db1a6',  // 1: sage-mint        (was cyan       #22c5d6)
+  '#c9a256',  // 2: antique gold     (was vivid      #facc15)
+  '#8aa66a',  // 3: sage green       (was lime       #9aef3d)
+  '#9d8cb8',  // 4: smoky lavender   (was purple     #bd92f0)
+  '#c88a6e',  // 5: terracotta       (was coral      #ff8b73)
 ];
 
 // Selected teams in readonly mode. Set so insertion order is
