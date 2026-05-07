@@ -11599,21 +11599,72 @@ async function generateSchedule() {
 // Block type metadata — color, schedulability, fields. Single source
 // of truth used by the editor, the migration shim, and the agenda-fit
 // timeline renderer.
+//
+// Tier system (May 2026):
+//   tier 1: day (implicit container, not a block type itself)
+//   tier 2: practice, qualification, playoff
+//           — competition sessions; can contain tier-3 children;
+//             cannot nest in another tier-2 (no playoff inside qual)
+//   tier 3: break, awards, alliance_selection, ceremony
+//           — time reservations; can be top-level OR nested in any
+//             tier-2 block; cannot contain children
+//
+// The `tier` field is the source of truth for legal nesting:
+// _v2allowedChildTypes(parent) returns all types whose tier is
+// strictly greater than the parent's tier. Top-level (in a day)
+// gets the full set (tier 2 and 3); inside a tier-2 block you can
+// only add tier-3.
+//
+// hasNestedBreaks is now derived (tier === 2) but kept for
+// backward-readability of existing call sites.
 var V2_BLOCK_TYPES = {
-  practice:           { label: 'Practice',          shortLabel: 'Practice',  color: '#5daf78', schedulable: true,  practiceFields: true,  hasNestedBreaks: true,  isPlayoff: false, timeOnly: false },
-  qualification:      { label: 'Qual',              shortLabel: 'Qual',      color: '#7aa4f0', schedulable: true,  practiceFields: false, hasNestedBreaks: true,  isPlayoff: false, timeOnly: false },
-  playoff:            { label: 'Playoff',           shortLabel: 'Playoff',   color: '#bd92f0', schedulable: false, practiceFields: false, hasNestedBreaks: true,  isPlayoff: true,  timeOnly: false },
-  break:              { label: 'Break',             shortLabel: 'Break',     color: '#ec8a3f', schedulable: false, practiceFields: false, hasNestedBreaks: false, isPlayoff: false, timeOnly: false },
+  practice:           { tier: 2, label: 'Practice',           shortLabel: 'Practice',  color: '#5daf78', schedulable: true,  practiceFields: true,  hasNestedBreaks: true,  isPlayoff: false, timeOnly: false },
+  qualification:      { tier: 2, label: 'Qual',               shortLabel: 'Qual',      color: '#7aa4f0', schedulable: true,  practiceFields: false, hasNestedBreaks: true,  isPlayoff: false, timeOnly: false },
+  playoff:            { tier: 2, label: 'Playoff',            shortLabel: 'Playoff',   color: '#bd92f0', schedulable: false, practiceFields: false, hasNestedBreaks: true,  isPlayoff: true,  timeOnly: false },
+  break:              { tier: 3, label: 'Break',              shortLabel: 'Break',     color: '#ec8a3f', schedulable: false, practiceFields: false, hasNestedBreaks: false, isPlayoff: false, timeOnly: false },
   // Alliance selection — fixed-time event between qualification
   // and playoffs. Captains pick partners, no matches scheduled.
   // Only start/end times needed; no body content beyond a label.
   // timeOnly: true signals the renderer to skip the expanded body
   // (no format/teams/break-type fields apply).
-  alliance_selection: { label: 'Alliance selection', shortLabel: 'Alliance',  color: '#a17ed1', schedulable: false, practiceFields: false, hasNestedBreaks: false, isPlayoff: false, timeOnly: true  },
+  alliance_selection: { tier: 3, label: 'Alliance selection', shortLabel: 'Alliance',  color: '#a17ed1', schedulable: false, practiceFields: false, hasNestedBreaks: false, isPlayoff: false, timeOnly: true  },
   // Awards — closing ceremony, recognition, etc. Fixed time block,
   // no matches. Same minimal shape as alliance_selection.
-  awards:             { label: 'Awards',            shortLabel: 'Awards',    color: '#d9a13e', schedulable: false, practiceFields: false, hasNestedBreaks: false, isPlayoff: false, timeOnly: true  },
+  awards:             { tier: 3, label: 'Awards',             shortLabel: 'Awards',    color: '#d9a13e', schedulable: false, practiceFields: false, hasNestedBreaks: false, isPlayoff: false, timeOnly: true  },
+  // Ceremony — opening / closing ceremony block. One type with a
+  // ceremonyKind selector ('opening' | 'closing') so the picker
+  // stays a manageable size. Body has the kind selector + an
+  // optional label override; default label follows the kind.
+  ceremony:           { tier: 3, label: 'Ceremony',            shortLabel: 'Ceremony',  color: '#dd7858', schedulable: false, practiceFields: false, hasNestedBreaks: false, isPlayoff: false, timeOnly: false },
 };
+
+// Helpers driving the picker. Both consult V2_BLOCK_TYPES.tier
+// so adding a new type only requires entering it in the table
+// above.
+function _v2allowedTopLevelTypes() {
+  // Top-level (in a day, conceptually tier 1) accepts tier 2 and 3.
+  // Order is the chronological sequence at a typical event:
+  // ceremony (opening) → practice → qual → alliance selection →
+  // playoff → awards → ceremony (closing). Break sits at the end
+  // because it's the generic catch-all.
+  return [
+    'ceremony', 'practice', 'qualification', 'alliance_selection',
+    'playoff', 'awards', 'break',
+  ];
+}
+function _v2allowedChildTypes(parentType) {
+  var parent = V2_BLOCK_TYPES[parentType];
+  if (!parent) return [];
+  // Tier rule: children must be strictly higher tier number than
+  // parent. Tier 2 parent → tier 3 children only.
+  var parentTier = parent.tier || 1;
+  return Object.keys(V2_BLOCK_TYPES).filter(function(k) {
+    var t = V2_BLOCK_TYPES[k];
+    return (t.tier || 1) > parentTier;
+  });
+}
+
+var V2_CEREMONY_KINDS = ['opening', 'closing'];
 // Whether a block consumes scheduling math (qual/practice fill
 // match slots) vs blocks that just reserve time on the agenda
 // without producing scheduled matches (break, playoff, alliance_
@@ -11943,16 +11994,17 @@ function downgradeToV1(dc) {
     var poBlocks = (day.blocks || []).filter(function(b) { return b.type === 'playoff'; });
     // Sibling-breaks captures any non-schedulable, non-playoff block:
     // generic breaks plus the time-only ceremony blocks (alliance
-    // selection, awards). For V1 wire-format purposes they're all
-    // just time reservations on the agenda — V1 has no native
-    // concept of them, so they collapse to break entries with the
-    // block type's label as the break name. The V2-aware renderer
-    // and agenda fit consult day_config directly and preserve the
-    // distinction.
+    // selection, awards, ceremony). For V1 wire-format purposes
+    // they're all just time reservations on the agenda — V1 has no
+    // native concept of them, so they collapse to break entries
+    // with the block type's label as the break name. The V2-aware
+    // renderer and agenda fit consult day_config directly and
+    // preserve the distinction.
     var siblingBreaks = (day.blocks || []).filter(function(b) {
       return b.type === 'break'
           || b.type === 'alliance_selection'
-          || b.type === 'awards';
+          || b.type === 'awards'
+          || b.type === 'ceremony';
     });
 
     // Capture playoff blocks per day. dayIndex is the V2 array index
@@ -12129,12 +12181,21 @@ function _v2readBlockFromDom(blockEl) {
     b.label = labelEl0 ? labelEl0.value : '';
     if (!b.label) b.label = meta.label;
   } else {
-    // Break block
-    var labelEl = blockEl.querySelector('.v2-block-label');
-    var kindEl  = blockEl.querySelector('.v2-break-kind');
-    b.label     = labelEl ? labelEl.value : '';
-    b.breakKind = kindEl  ? kindEl.value  : 'break';
-    if (!b.label) b.label = b.breakKind === 'lunch' ? 'Lunch' : (b.breakKind === 'break' ? 'Break' : 'Other');
+    // Break or ceremony block.
+    if (blockEl.dataset.type === 'ceremony') {
+      var labelElC = blockEl.querySelector('.v2-block-label');
+      var kindElC  = blockEl.querySelector('.v2-ceremony-kind');
+      b.ceremonyKind = kindElC ? kindElC.value : 'opening';
+      b.label = labelElC ? labelElC.value : '';
+      if (!b.label) b.label = (b.ceremonyKind === 'opening') ? 'Opening ceremony' : 'Closing ceremony';
+    } else {
+      // Break block
+      var labelEl = blockEl.querySelector('.v2-block-label');
+      var kindEl  = blockEl.querySelector('.v2-break-kind');
+      b.label     = labelEl ? labelEl.value : '';
+      b.breakKind = kindEl  ? kindEl.value  : 'break';
+      if (!b.label) b.label = b.breakKind === 'lunch' ? 'Lunch' : (b.breakKind === 'break' ? 'Break' : 'Other');
+    }
   }
   return b;
 }
@@ -12361,9 +12422,9 @@ function buildV2Block(b, isNested) {
     if (meta.hasNestedBreaks && !isNested) {
       bodyHtml +=
         '<div class="v2-body-section">' +
-        '  <div class="v2-body-label">Breaks inside</div>' +
+        '  <div class="v2-body-label">Embedded</div>' +
         '  <div class="v2-nested-list"></div>' +
-        '  <button type="button" class="v2-add-nested-break">+ break</button>' +
+        '  <button type="button" class="v2-add-nested-break">+ embed</button>' +
         '</div>';
     }
     body.innerHTML = bodyHtml;
@@ -12381,11 +12442,19 @@ function buildV2Block(b, isNested) {
       (b.breaks || []).forEach(function(nb) { nestedList.appendChild(buildV2Block(nb, true)); });
       body.querySelector('.v2-add-nested-break').addEventListener('click', function(ev) {
         ev.preventDefault();
-        var nb = _v2defaultNestedBreak(blockEl);
-        nestedList.appendChild(buildV2Block(nb, true));
-        _v2updateBlockSummary(blockEl);
-        _v2validateAll();
-        onV2Change();
+        ev.stopPropagation();
+        // Open a picker offering all tier-3 child types. The tier
+        // rule blocks tier-2 children (no playoff inside qual etc.).
+        // Each pick instantiates the appropriate default seed.
+        var allowedChildTypes = _v2allowedChildTypes(blockEl.dataset.type);
+        var picker = _v2buildPicker(allowedChildTypes, function(childType) {
+          var nb = _v2defaultNestedChild(blockEl, childType);
+          nestedList.appendChild(buildV2Block(nb, true));
+          _v2updateBlockSummary(blockEl);
+          _v2validateAll();
+          onV2Change();
+        });
+        _v2anchorPicker(picker, ev.currentTarget);
       });
     }
     // Wire body inputs
@@ -12397,12 +12466,18 @@ function buildV2Block(b, isNested) {
     });
   } else if (meta.isPlayoff) {
     // Playoff block — start/end already set in the head; body
-    // adds format + alliance count. Match generation is intentionally
-    // deferred (per user's "not yet" guidance), so this block
-    // reserves a time window on the agenda but doesn't produce
-    // scheduled match entries. The format + alliance count travel
-    // through the wire format so a future scheduler revision can
-    // expand them into bracket matches without an editor migration.
+    // adds format + alliance count + the nested-children list.
+    // Match generation is intentionally deferred (per user's "not
+    // yet" guidance), so this block reserves a time window on the
+    // agenda but doesn't produce scheduled match entries. The
+    // format + alliance count travel through the wire format so a
+    // future scheduler revision can expand them into bracket
+    // matches without an editor migration.
+    //
+    // Nested children: any tier-3 type can be embedded — break
+    // (lunch between rounds), awards (winner award between
+    // semifinals and finals), ceremony (closing). Same picker as
+    // qual/practice nested children.
     //
     // Field name: playoffAlliances (was playoffTeams). Old data
     // that wrote playoffTeams is still accepted for back-compat —
@@ -12416,7 +12491,7 @@ function buildV2Block(b, isNested) {
     var formatOpts = V2_PLAYOFF_FORMATS.map(function(f) {
       return '<option value="' + f.value + '"' + (f.value === pf ? ' selected' : '') + '>' + f.label + '</option>';
     }).join('');
-    body.innerHTML =
+    var playoffBodyHtml =
       '<div class="v2-body-row">' +
       '  <span class="v2-body-label">Format</span>' +
       '  <select class="v2-body-input v2-playoff-format">' + formatOpts + '</select>' +
@@ -12432,6 +12507,32 @@ function buildV2Block(b, isNested) {
       '    Reserves time on the agenda. Bracket matches not yet generated.' +
       '  </span>' +
       '</div>';
+    if (!isNested) {
+      playoffBodyHtml +=
+        '<div class="v2-body-section">' +
+        '  <div class="v2-body-label">Embedded</div>' +
+        '  <div class="v2-nested-list"></div>' +
+        '  <button type="button" class="v2-add-nested-break">+ embed</button>' +
+        '</div>';
+    }
+    body.innerHTML = playoffBodyHtml;
+    if (!isNested) {
+      var pNestedList = body.querySelector('.v2-nested-list');
+      (b.breaks || []).forEach(function(nb) { pNestedList.appendChild(buildV2Block(nb, true)); });
+      body.querySelector('.v2-add-nested-break').addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var allowedChildTypes = _v2allowedChildTypes('playoff');
+        var picker = _v2buildPicker(allowedChildTypes, function(childType) {
+          var nb = _v2defaultNestedChild(blockEl, childType);
+          pNestedList.appendChild(buildV2Block(nb, true));
+          _v2updateBlockSummary(blockEl);
+          _v2validateAll();
+          onV2Change();
+        });
+        _v2anchorPicker(picker, ev.currentTarget);
+      });
+    }
     body.querySelectorAll('input, select').forEach(function(inp) {
       inp.addEventListener('input',  function() { _v2updateBlockSummary(blockEl); onV2Change(); });
       inp.addEventListener('change', function() { _v2updateBlockSummary(blockEl); onV2Change(); });
@@ -12460,23 +12561,79 @@ function buildV2Block(b, isNested) {
       inp.addEventListener('change', function() { _v2updateBlockSummary(blockEl); onV2Change(); });
     });
   } else {
-    // Break block expanded body — type selector + label
-    var bk = b.breakKind || _v2detectBreakKind(b.label || '');
-    body.innerHTML =
-      '<div class="v2-body-row">' +
-      '  <span class="v2-body-label">Type</span>' +
-      '  <select class="v2-body-input v2-break-kind">' +
-      V2_BREAK_KINDS.map(function(k) {
-        var sel = (k === bk) ? ' selected' : '';
+    // Break or ceremony block. Both use a kind selector + an
+    // optional label override; the label defaults to the kind's
+    // canonical name when blank.
+    if (b.type === 'ceremony') {
+      var ck = b.ceremonyKind || 'opening';
+      var ckOpts = V2_CEREMONY_KINDS.map(function(k) {
+        var sel = (k === ck) ? ' selected' : '';
         var lab = k.charAt(0).toUpperCase() + k.slice(1);
         return '<option value="' + k + '"' + sel + '>' + lab + '</option>';
-      }).join('') +
-      '  </select>' +
-      '</div>' +
-      '<div class="v2-body-row">' +
-      '  <span class="v2-body-label">Label</span>' +
-      '  <input class="v2-body-input v2-block-label" type="text" value="' + _v2attrEsc(b.label || '') + '" style="width:140px;">' +
-      '</div>';
+      }).join('');
+      body.innerHTML =
+        '<div class="v2-body-row">' +
+        '  <span class="v2-body-label">Kind</span>' +
+        '  <select class="v2-body-input v2-ceremony-kind">' + ckOpts + '</select>' +
+        '</div>' +
+        '<div class="v2-body-row">' +
+        '  <span class="v2-body-label">Label</span>' +
+        '  <input class="v2-body-input v2-block-label" type="text" value="' + _v2attrEsc(b.label || '') + '" ' +
+        '         placeholder="' + (ck === 'opening' ? 'Opening ceremony' : 'Closing ceremony') + '" style="width:200px;">' +
+        '</div>' +
+        '<div class="v2-body-row">' +
+        '  <span class="v2-body-label">Note</span>' +
+        '  <span style="color:var(--text-muted);font-size:0.66rem;font-style:italic;">' +
+        '    Fixed time window. No matches scheduled.' +
+        '  </span>' +
+        '</div>';
+      // Update label placeholder when kind toggles, so the user
+      // sees what the canonical default would be without retyping.
+      body.querySelector('.v2-ceremony-kind').addEventListener('change', function(ev) {
+        var labelInp = body.querySelector('.v2-block-label');
+        if (labelInp) {
+          labelInp.placeholder = (ev.target.value === 'opening') ? 'Opening ceremony' : 'Closing ceremony';
+        }
+      });
+    } else {
+      // Break block expanded body — type selector + label.
+      // When kind is "other", the label field is highlighted
+      // (placeholder changes to encourage entry) so the user
+      // remembers to give it a meaningful name. Falls back to
+      // literal "Other" if left empty.
+      var bk = b.breakKind || _v2detectBreakKind(b.label || '');
+      var labelPlaceholder = (bk === 'other') ? 'Name this block (e.g. Volunteer briefing)' : '';
+      body.innerHTML =
+        '<div class="v2-body-row">' +
+        '  <span class="v2-body-label">Type</span>' +
+        '  <select class="v2-body-input v2-break-kind">' +
+        V2_BREAK_KINDS.map(function(k) {
+          var sel = (k === bk) ? ' selected' : '';
+          var lab = k.charAt(0).toUpperCase() + k.slice(1);
+          return '<option value="' + k + '"' + sel + '>' + lab + '</option>';
+        }).join('') +
+        '  </select>' +
+        '</div>' +
+        '<div class="v2-body-row">' +
+        '  <span class="v2-body-label">Label</span>' +
+        '  <input class="v2-body-input v2-block-label" type="text" value="' + _v2attrEsc(b.label || '') + '" ' +
+        '         placeholder="' + labelPlaceholder + '" style="width:200px;' + (bk === 'other' ? 'border-color:var(--accent);' : '') + '">' +
+        '</div>';
+      // When the user switches to "other", emphasize the label
+      // field so they know to fill it in.
+      body.querySelector('.v2-break-kind').addEventListener('change', function(ev) {
+        var labelInp = body.querySelector('.v2-block-label');
+        if (!labelInp) return;
+        if (ev.target.value === 'other') {
+          labelInp.placeholder = 'Name this block (e.g. Volunteer briefing)';
+          labelInp.style.borderColor = 'var(--accent)';
+          if (!labelInp.value) labelInp.focus();
+        } else {
+          labelInp.placeholder = '';
+          labelInp.style.borderColor = '';
+        }
+      });
+    }
     body.querySelectorAll('input, select').forEach(function(inp) {
       inp.addEventListener('input',  function() { _v2updateBlockSummary(blockEl); onV2Change(); });
       inp.addEventListener('change', function() { _v2updateBlockSummary(blockEl); onV2Change(); });
@@ -12487,13 +12644,35 @@ function buildV2Block(b, isNested) {
   return blockEl;
 }
 
-function _v2defaultNestedBreak(parentBlockEl) {
-  // Default 30-min break starting at parent midpoint, or after the
-  // last existing nested break.
+function _v2defaultNestedChild(parentBlockEl, childType) {
+  // Default child time window: 30 min starting at parent midpoint,
+  // or right after the last existing nested child if any. Clamps
+  // to the parent's window.
+  //
+  // Type-specific defaults:
+  //   break:              30 min, kind=break, label "Break"
+  //   awards:             30 min, label "Awards"
+  //   alliance_selection: 30 min, label "Alliance selection"
+  //   ceremony:           30 min, kind=opening, label "Opening ceremony"
+  // Awards inside a playoff block (e.g. "Winner award between
+  // semifinals and finals") is the canonical use case for nested
+  // tier-3 children; the others are less common but allowed by
+  // the tier rule, so the picker exposes them.
+  childType = childType || 'break';
   var ps = _v2timeStrToMin(parentBlockEl.querySelector('.v2-block-start').value);
   var pe = _v2timeStrToMin(parentBlockEl.querySelector('.v2-block-end').value);
+  var fallbackStart = '12:00', fallbackEnd = '12:30';
+  function _seedFor(type) {
+    if (type === 'break')              return { type: 'break',              breakKind: 'break',     label: 'Break' };
+    if (type === 'awards')             return { type: 'awards',             label: 'Awards' };
+    if (type === 'alliance_selection') return { type: 'alliance_selection', label: 'Alliance selection' };
+    if (type === 'ceremony')           return { type: 'ceremony',           ceremonyKind: 'opening', label: 'Opening ceremony' };
+    return { type: 'break', breakKind: 'break', label: 'Break' };
+  }
   if (ps == null || pe == null || pe <= ps) {
-    return { type: 'break', start: '12:00', end: '12:30', label: 'Break', breakKind: 'break' };
+    var seedF = _seedFor(childType);
+    seedF.start = fallbackStart; seedF.end = fallbackEnd;
+    return seedF;
   }
   var existing = parentBlockEl.querySelectorAll(':scope > .v2-block-body .v2-nested-list > .v2-block');
   var startMin;
@@ -12504,7 +12683,16 @@ function _v2defaultNestedBreak(parentBlockEl) {
     startMin = ps + Math.floor((pe - ps) / 2);
   }
   var endMin = Math.min(startMin + 30, pe);
-  return { type: 'break', start: _v2minToTimeStr(startMin), end: _v2minToTimeStr(endMin), label: 'Break', breakKind: 'break' };
+  var seed = _seedFor(childType);
+  seed.start = _v2minToTimeStr(startMin);
+  seed.end   = _v2minToTimeStr(endMin);
+  return seed;
+}
+
+// Back-compat shim: existing call sites for _v2defaultNestedBreak
+// still work; new picker-driven sites pass the chosen childType.
+function _v2defaultNestedBreak(parentBlockEl) {
+  return _v2defaultNestedChild(parentBlockEl, 'break');
 }
 
 function buildV2CcRow(cc) {
@@ -12559,7 +12747,7 @@ function _v2updateBlockSummary(blockEl) {
       '<strong>' + (V2_PLAYOFF_FORMAT_LABEL[pf] || pf) + '</strong>',
       '<strong>' + pn + '</strong> alliance' + (pn === 1 ? '' : 's'),
     ];
-    if (pNested) parts2.push('<strong>' + pNested + '</strong> break' + (pNested > 1 ? 's' : ''));
+    if (pNested) parts2.push('<strong>' + pNested + '</strong> embed' + (pNested > 1 ? 's' : ''));
     sum.innerHTML = parts2.join(' \u00b7 ');
     return;
   }
@@ -12579,7 +12767,7 @@ function _v2updateBlockSummary(blockEl) {
     if (gEl) parts.push('guaranteed <strong>' + gEl.value + '</strong>');
   }
   if (ccCount)     parts.push('<strong>' + ccCount + '</strong> change' + (ccCount > 1 ? 's' : ''));
-  if (nestedCount) parts.push('<strong>' + nestedCount + '</strong> break' + (nestedCount > 1 ? 's' : ''));
+  if (nestedCount) parts.push('<strong>' + nestedCount + '</strong> embed' + (nestedCount > 1 ? 's' : ''));
   sum.innerHTML = parts.join(' \u00b7 ');
 }
 
@@ -12700,14 +12888,10 @@ function _v2markConflict(blockEl, msg) {
 // ── Block-type pickers ───────────────────────────────────────────
 function openV2BlockPicker(anchorBtn, dayBody) {
   _v2closePickers();
-  // All six block types available when adding a new top-level
-  // block. Practice / qualification feed scheduling math; playoff
-  // reserves time for bracket; alliance_selection and awards are
-  // ceremonial fixed-time windows; break is a generic gap.
-  var picker = _v2buildPicker(
-    ['practice', 'qualification', 'playoff',
-     'alliance_selection', 'awards', 'break'],
-    function(newType) {
+  // Top-level (in a day) accepts all tier-2 and tier-3 block types.
+  // _v2allowedTopLevelTypes returns them in a chronological order
+  // that matches the typical event flow.
+  var picker = _v2buildPicker(_v2allowedTopLevelTypes(), function(newType) {
     var meta = V2_BLOCK_TYPES[newType];
     var lastBlock = dayBody.querySelector(':scope > .v2-block:last-of-type');
     var startTime = lastBlock ? lastBlock.querySelector('.v2-block-end').value : '09:00';
@@ -12717,13 +12901,15 @@ function openV2BlockPicker(anchorBtn, dayBody) {
     //   playoff:                     3 hours (180 min) — typical bracket window
     //   alliance_selection:          30 min
     //   awards:                      45 min
+    //   ceremony:                    30 min
     //   break:                       30 min
     var defaultDuration;
     if (meta.isPlayoff)                          defaultDuration = 180;
     else if (meta.schedulable)                   defaultDuration = 240;
     else if (newType === 'alliance_selection')   defaultDuration = 30;
     else if (newType === 'awards')               defaultDuration = 45;
-    else                                          defaultDuration = 30;
+    else if (newType === 'ceremony')             defaultDuration = 30;
+    else                                         defaultDuration = 30;
     var endMin    = startMin + defaultDuration;
     var b = { type: newType, start: _v2minToTimeStr(startMin), end: _v2minToTimeStr(endMin) };
     if (meta.schedulable) { b.cycleTime = newType === 'practice' ? 11 : 9; b.changes = []; b.breaks = []; }
@@ -12733,7 +12919,19 @@ function openV2BlockPicker(anchorBtn, dayBody) {
       b.playoffAlliances = 8;
       b.breaks           = [];
     }
-    if (!meta.schedulable && !meta.isPlayoff) { b.label = ''; b.breakKind = 'break'; }
+    if (newType === 'ceremony') {
+      // First top-level ceremony of the day is opening; if there's
+      // already an opening one, default this one to closing. Lets
+      // the user start with the right kind without thinking.
+      var hasOpening = dayBody.querySelectorAll(':scope > .v2-block[data-type="ceremony"]').length > 0;
+      b.ceremonyKind = hasOpening ? 'closing' : 'opening';
+      b.label        = b.ceremonyKind === 'opening' ? 'Opening ceremony' : 'Closing ceremony';
+    } else if (newType === 'break') {
+      b.label = ''; b.breakKind = 'break';
+    } else if (!meta.schedulable && !meta.isPlayoff) {
+      // awards / alliance_selection — timeOnly, label only
+      b.label = '';
+    }
     var blockEl = buildV2Block(b);
     dayBody.insertBefore(blockEl, dayBody.querySelector('.v2-add-block'));
     _v2renumberDays(); onV2Change();
@@ -12743,14 +12941,20 @@ function openV2BlockPicker(anchorBtn, dayBody) {
 }
 function openV2TypeChangePicker(anchorEl, blockEl, isNested) {
   _v2closePickers();
-  // Nested breaks can only be break type. Top-level can be any of
-  // the six block kinds — qualification → playoff is common when
-  // adding a bracket window; alliance selection and awards can be
-  // added either standalone (top-level) or nested inside a playoff
-  // (deferred — not yet implemented). For now top-level only.
-  var allowed = isNested ? ['break']
-                         : ['practice', 'qualification', 'playoff',
-                            'alliance_selection', 'awards', 'break'];
+  // Nested children (inside a tier-2 parent) get tier-3 only.
+  // Top-level (in a day) gets tier 2 + tier 3.
+  // Tier comes from V2_BLOCK_TYPES so a new type only needs an
+  // entry there to flow through the picker logic.
+  var allowed;
+  if (isNested) {
+    var parentType = blockEl.parentNode && blockEl.parentNode.closest
+      ? (blockEl.parentNode.closest('.v2-block') || {}).dataset
+      : null;
+    var pType = (parentType && parentType.type) || null;
+    allowed = pType ? _v2allowedChildTypes(pType) : ['break'];
+  } else {
+    allowed = _v2allowedTopLevelTypes();
+  }
   var picker = _v2buildPicker(allowed, function(newType) {
     var b = _v2readBlockFromDom(blockEl);
     b.type = newType;
@@ -12758,7 +12962,7 @@ function openV2TypeChangePicker(anchorEl, blockEl, isNested) {
     if (meta.isPlayoff) {
       // Playoff: drop schedulable fields, set defaults for the
       // playoff-specific ones if missing. Keep nested breaks since
-      // a playoff window can also have lunch/dinner.
+      // a playoff window can also have lunch/dinner / awards / etc.
       delete b.cycleTime; delete b.changes; delete b.guaranteed; delete b.maxFiller;
       if (b.playoffFormat    == null) b.playoffFormat    = 'double_elim';
       if (b.playoffAlliances == null) {
@@ -12767,6 +12971,8 @@ function openV2TypeChangePicker(anchorEl, blockEl, isNested) {
       }
       delete b.playoffTeams;
       if (!b.breaks) b.breaks = [];
+      // Ceremony-specific fields don't apply
+      delete b.ceremonyKind;
     } else if (meta.schedulable) {
       if (b.cycleTime == null) b.cycleTime = 9;
       if (!b.changes) b.changes = [];
@@ -12775,13 +12981,27 @@ function openV2TypeChangePicker(anchorEl, blockEl, isNested) {
         if (b.guaranteed == null) b.guaranteed = 3;
         if (b.maxFiller  == null) b.maxFiller  = 99;
       } else { delete b.guaranteed; delete b.maxFiller; }
-      // Drop playoff fields when leaving playoff for a schedulable type
       delete b.playoffFormat; delete b.playoffAlliances; delete b.playoffTeams;
-    } else {
+      delete b.ceremonyKind;
+    } else if (newType === 'ceremony') {
       delete b.cycleTime; delete b.changes; delete b.breaks; delete b.guaranteed; delete b.maxFiller;
       delete b.playoffFormat; delete b.playoffAlliances; delete b.playoffTeams;
-      if (!b.label) b.label = '';
-      if (!b.breakKind) b.breakKind = 'break';
+      delete b.breakKind;
+      if (!b.ceremonyKind) b.ceremonyKind = 'opening';
+      if (!b.label) b.label = (b.ceremonyKind === 'opening') ? 'Opening ceremony' : 'Closing ceremony';
+    } else {
+      // Tier-3 non-ceremony: break / awards / alliance_selection.
+      delete b.cycleTime; delete b.changes; delete b.breaks; delete b.guaranteed; delete b.maxFiller;
+      delete b.playoffFormat; delete b.playoffAlliances; delete b.playoffTeams;
+      delete b.ceremonyKind;
+      if (newType === 'break') {
+        if (!b.label) b.label = '';
+        if (!b.breakKind) b.breakKind = 'break';
+      } else {
+        // awards / alliance_selection — timeOnly
+        delete b.breakKind;
+        if (!b.label) b.label = meta.label;
+      }
     }
     var fresh = buildV2Block(b, isNested);
     blockEl.parentNode.replaceChild(fresh, blockEl);
@@ -12799,6 +13019,7 @@ function _v2buildPicker(allowedTypes, onSelect) {
   if (allowedTypes.indexOf('alliance_selection') !== -1) rows.push('<div class="picker-item" data-type="alliance_selection"><span class="v2-swatch" style="background:#a17ed1;"></span>Alliance selection</div>');
   if (allowedTypes.indexOf('playoff')            !== -1) rows.push('<div class="picker-item" data-type="playoff"><span class="v2-swatch" style="background:#bd92f0;"></span>Playoff</div>');
   if (allowedTypes.indexOf('awards')             !== -1) rows.push('<div class="picker-item" data-type="awards"><span class="v2-swatch" style="background:#d9a13e;"></span>Awards</div>');
+  if (allowedTypes.indexOf('ceremony')           !== -1) rows.push('<div class="picker-item" data-type="ceremony"><span class="v2-swatch" style="background:#dd7858;"></span>Ceremony</div>');
   if (allowedTypes.indexOf('break')              !== -1) rows.push('<div class="picker-item" data-type="break"><span class="v2-swatch" style="background:#ec8a3f;"></span>Break</div>');
   p.innerHTML = rows.join('');
   p.querySelectorAll('.picker-item').forEach(function(it) {
