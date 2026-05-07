@@ -1197,9 +1197,14 @@
   body.frc-locked #frcLockBanner { display: block; }
   /* Mode-specific banner colors. The body class is set by
      applyLockState/applyOfficialState/applyEventFreezeState — the
-     strongest mode wins (event freeze > official > schedule lock). */
+     strongest mode wins (event freeze > official > schedule lock).
+     frc-sandbox is a special variant: event IS frozen but the
+     loaded schedule is a post-freeze copy, so editing is allowed.
+     Cyan banner signals "you're in an experimental space, not the
+     full-freeze restriction." */
   body.frc-event-frozen   #frcLockBanner { background: #cc5555; color: #fff; }
   body.frc-schedule-official #frcLockBanner { background: #bd92f0; color: #1a0e2e; }
+  body.frc-sandbox        #frcLockBanner { display: block; background: #22c5d6; color: #062f33; }
 
   /* Modal */
   .modal-overlay {
@@ -10280,10 +10285,25 @@ function applyOfficialState(official, info) {
 // Set the "event is frozen" mode. Strongest of the three —
 // overrides locked + official banners. Renders a red banner and
 // disables every editing affordance. Cleared on event switch.
-function applyEventFreezeState(frozen, info) {
+//
+// `sandboxMode` (third arg, default false): when true, indicates
+// the currently-loaded schedule was created AFTER the event was
+// frozen (a Copy-of-frozen-schedule). The freeze still applies to
+// the event globally — banner mentions it — but the editing
+// restrictions DON'T apply to this schedule (the body class
+// frc-event-frozen is intentionally NOT added in sandbox mode).
+// The Freeze button title changes too: it explains the user is
+// looking at a sandbox copy, not the canonical pre-freeze state.
+function applyEventFreezeState(frozen, info, sandboxMode) {
   window._frcEventFrozen = !!frozen;
   window._frcEventFrozenBy = info || null;
-  document.body.classList.toggle('frc-event-frozen', !!frozen);
+  window._frcSandboxMode = !!sandboxMode;
+  // The body class drives the disabled-controls CSS. In sandbox
+  // mode, the schedule under view is exempt from the freeze, so
+  // the class shouldn't apply — even though _frcEventFrozen=true
+  // for the banner copy and freezer-info accounting.
+  document.body.classList.toggle('frc-event-frozen', !!frozen && !sandboxMode);
+  document.body.classList.toggle('frc-sandbox', !!frozen && !!sandboxMode);
   _refreshLockBanner();
   // Update freeze button label
   var btn = document.getElementById('btnFreezeEvent');
@@ -10307,6 +10327,16 @@ function applyEventFreezeState(frozen, info) {
 function _refreshLockBanner() {
   var bannerEl = document.getElementById('frcLockBanner');
   if (!bannerEl) return;
+  // Sandbox mode: event IS frozen, but the loaded schedule is a
+  // post-freeze copy and remains editable. Show a distinct banner
+  // so the user understands the asymmetry.
+  if (window._frcEventFrozen && window._frcSandboxMode) {
+    var freezerN = (window._frcEventFrozenBy && window._frcEventFrozenBy.lockedByName) || '';
+    bannerEl.textContent = '🧪  Sandbox copy' +
+      (freezerN ? ' — event frozen by ' + freezerN : ' — event frozen') +
+      '. Edits to this copy don\u2019t affect the frozen canonical version.';
+    return;
+  }
   if (window._frcEventFrozen) {
     var freezerName = (window._frcEventFrozenBy && window._frcEventFrozenBy.lockedByName) || '';
     bannerEl.textContent = '🛑  Event frozen' +
@@ -13528,11 +13558,25 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
       } : null);
     }
     if (typeof applyEventFreezeState === 'function' && sched.event) {
+      // Sandbox mode: schedule was created AFTER the event was
+      // frozen. These are post-freeze copies — explicitly exempt
+      // from the freeze (created via /duplicate after freeze
+      // landed). The banner mentions the freeze but the editing
+      // restrictions don't apply, since the user is working on
+      // an experimental copy that can't affect the canonical state.
+      var inSandbox = false;
+      if (sched.event.locked_at && sched.created_at) {
+        try {
+          var freezeMs   = new Date(sched.event.locked_at).getTime();
+          var createdMs  = new Date(sched.created_at).getTime();
+          inSandbox = createdMs > freezeMs;
+        } catch(_) { inSandbox = false; }
+      }
       applyEventFreezeState(!!sched.event.locked_at, sched.event.locked_at ? {
         lockedAt:       sched.event.locked_at,
         lockedByName:   sched.event.locked_by_name,
         lockedByUserId: sched.event.locked_by_user_id,
-      } : null);
+      } : null, inSandbox);
     }
 
     // Status hint surfaces any persisted edit history — a small

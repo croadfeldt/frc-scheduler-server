@@ -1078,9 +1078,45 @@ async def _record_lock_event(
 
 def _is_event_frozen(event: Event | None) -> bool:
     """Convenience for guard checks. Returns True when the event
-    carries a non-NULL locked_at — signaling "event frozen" mode
-    where all child mutations are refused."""
+    carries a non-NULL locked_at — signaling "event frozen" mode.
+
+    Use this for endpoints that operate on the event itself (event
+    metadata edits, mark-official / unmark-official, schedule
+    create paths like Generate/Assign/PDF-import, event delete).
+    Those operations affect the canonical state of the event and
+    must respect the freeze.
+
+    For per-schedule mutations (PATCH / DELETE / lock / unlock /
+    restore), use _schedule_protected_by_event_freeze instead —
+    that helper applies snapshot-in-time semantics: schedules
+    created AFTER the freeze are sandbox copies, exempt.
+    """
     return bool(event and event.locked_at is not None)
+
+
+def _schedule_protected_by_event_freeze(
+    event: Event | None, assigned: AssignedSchedule
+) -> bool:
+    """Returns True if the schedule should be blocked by the event freeze.
+
+    Snapshot-in-time semantics: a schedule is protected when (a) the
+    event is frozen AND (b) the schedule existed at freeze time
+    (created_at < locked_at). Schedules created after the freeze
+    are sandbox copies — created via /duplicate, which intentionally
+    bypasses the freeze guard so users can iterate without affecting
+    the canonical state.
+
+    Why this rule: a "copy to experiment" workflow doesn't make
+    sense if the copy is itself frozen. Pre-freeze schedules
+    represent the canonical state at the moment the user said
+    "this is set, don't touch it." Post-freeze copies are
+    derivative and explicitly outside that scope.
+    """
+    if not event or event.locked_at is None:
+        return False
+    # Both columns are timezone-aware (DateTime(timezone=True)) so
+    # comparison is well-defined.
+    return assigned.created_at < event.locked_at
 
 
 @app.get("/api/assigned-schedules/{schedule_id}")
@@ -1124,15 +1160,19 @@ async def patch_assigned_schedule(
         raise HTTPException(404, "Assigned schedule not found")
 
     # ── Guards (in order of severity) ──────────────────────────
-    # 1. Event-frozen → no mutations to anything under the event.
-    #    Must be checked first because freeze overrides everything,
-    #    including locker bypass.
+    # 1. Event-frozen + pre-freeze schedule → no mutations.
+    #    Snapshot-in-time semantics: schedules created BEFORE the
+    #    event was frozen are protected; schedules created after
+    #    (only possible via /duplicate) are sandbox copies and
+    #    remain editable. Must be checked first because freeze
+    #    overrides everything, including locker bypass.
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _is_event_frozen(event):
+    if _schedule_protected_by_event_freeze(event, assigned):
         raise HTTPException(
             status_code=423,
             detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
-                   "— unfreeze the event before editing any schedules.",
+                   "— this schedule was frozen at that point. "
+                   "Unfreeze the event, or duplicate this schedule to edit a sandbox copy.",
         )
     # 2. Official → permanent commitment. PATCH refused while
     #    is_official=True even by the official-marker; the user
@@ -1208,13 +1248,14 @@ async def lock_assigned_schedule(
     if not assigned:
         raise HTTPException(404, "Assigned schedule not found")
 
-    # Event-freeze guard. When the event itself is frozen, granular
-    # per-schedule locks become meaningless — the user is supposed
-    # to be locked out of all schedules under the event. Refuse
-    # rather than silently accept and let the user think they
-    # added protection that's actually redundant.
+    # Event-freeze guard. Pre-freeze schedules can't be locked
+    # (event freeze already locks them implicitly; an extra
+    # per-schedule lock would be misleading). Sandbox copies
+    # (created after the freeze) remain lockable so users can
+    # protect their experimental work-in-progress within the
+    # frozen event.
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _is_event_frozen(event):
+    if _schedule_protected_by_event_freeze(event, assigned):
         raise HTTPException(
             status_code=423,
             detail=f"Event is frozen — schedule lock not needed (and not added).",
@@ -1275,7 +1316,7 @@ async def unlock_assigned_schedule(
         raise HTTPException(404, "Assigned schedule not found")
 
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _is_event_frozen(event):
+    if _schedule_protected_by_event_freeze(event, assigned):
         raise HTTPException(
             status_code=423,
             detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
@@ -1398,7 +1439,7 @@ async def restore_schedule_from_history(
         raise HTTPException(404, "Assigned schedule not found")
 
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _is_event_frozen(event):
+    if _schedule_protected_by_event_freeze(event, assigned):
         raise HTTPException(423, f"Event is frozen by {event.locked_by_name or 'another user'}.")
     if assigned.is_official:
         raise HTTPException(423, "Schedule is marked official — unmark first.")
@@ -1688,9 +1729,11 @@ async def delete_assigned_schedule(
     assigned = await db.get(AssignedSchedule, schedule_id)
     if not assigned:
         raise HTTPException(404, "Assigned schedule not found")
-    # Event-freeze takes precedence — strongest signal.
+    # Event-freeze takes precedence for pre-freeze schedules.
+    # Sandbox copies (post-freeze) can be deleted freely — they
+    # don't represent canonical state.
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _is_event_frozen(event):
+    if _schedule_protected_by_event_freeze(event, assigned):
         raise HTTPException(
             status_code=423,
             detail=f"Event is frozen by {event.locked_by_name or 'another user'}.",
@@ -1731,12 +1774,17 @@ async def duplicate_assigned_schedule(
     src = result.scalar_one_or_none()
     if not src:
         raise HTTPException(404, "Schedule not found")
-    # Event-freeze guard — duplication creates a new schedule under
-    # the event, which the freeze should block.
+    # NOTE: /duplicate intentionally bypasses the event-freeze guard.
+    # The whole purpose of Copy is to give users a sandbox where
+    # they can iterate without affecting the canonical state — that
+    # workflow is most valuable precisely when the event IS frozen
+    # (the user has committed to a canonical version and now wants
+    # to explore alternatives risk-free). The new copy is created
+    # AFTER event.locked_at, so _schedule_protected_by_event_freeze
+    # will correctly classify it as a sandbox in subsequent PATCH /
+    # DELETE / lock / restore calls — those operations remain
+    # available on the copy even while the source remains frozen.
     src_event = await db.get(Event, src.event_id) if src.event_id else None
-    if _is_event_frozen(src_event):
-        raise HTTPException(423,
-            f"Event is frozen by {src_event.locked_by_name or 'another user'} — cannot duplicate.")
     abs_src = src.abstract_schedule
     new_abs = AbstractSchedule(
         event_id=abs_src.event_id, name=f"{abs_src.name} (copy)",
