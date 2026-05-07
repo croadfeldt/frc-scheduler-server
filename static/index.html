@@ -2401,8 +2401,20 @@
             <input type="number" id="numTeams" value="24" min="6" max="120" title="Set manually, or auto-populated from event roster">
           </div>
           <div class="field">
-            <label>Matches per Team</label>
+            <label style="display:flex;align-items:center;gap:0.4rem;">
+              Matches per Team
+              <span style="font-size:0.7rem;font-weight:normal;color:var(--text-muted);
+                           display:inline-flex;align-items:center;gap:0.25rem;
+                           cursor:pointer;user-select:none;"
+                    title="When locked, the calculator stops auto-overwriting this value. An inline warning appears if your qualification blocks can't fit the locked count.">
+                <input type="checkbox" id="matchesPerTeamLocked"
+                       style="margin:0;cursor:pointer;"
+                       onchange="onMatchesPerTeamLockChange()">
+                <span>lock</span>
+              </span>
+            </label>
             <input type="number" id="matchesPerTeam" value="8" min="1" max="50">
+            <div id="matchesPerTeamWarning" style="display:none;font-size:0.7rem;color:var(--amber);margin-top:0.2rem;line-height:1.25;"></div>
           </div>
         </div>
         <div class="field-row">
@@ -7128,9 +7140,23 @@ function renderScheduleBars() {
     if (!day.entries) return;
     var dayNum   = (day.dayNum != null) ? day.dayNum : 1;
     var isPractice = !!day.isPracticeDay;
-    // Event-day numbering keeps practice + qual days on the same
-    // numbered scale: Day 1, Day 2, Day 3 ... regardless of kind.
-    var dayLabel = eventDayLabel(dayNum, isPractice, _practiceEnabled);
+    // Day header label — three-tier priority:
+    //   1. day.labelOverride (free-text from V2 day card)
+    //   2. day.classifier (computed from V2 blocks; e.g. "Practice
+    //      / Qualification / Playoff" when all three present, or
+    //      "Event day" if no schedulable blocks at all)
+    //   3. eventDayLabel(...) legacy fallback for V1-only schedules
+    // Always prefixed with "Day N · " so the user can scan days
+    // by number regardless of which classifier source won out.
+    var eventNum = _practiceEnabled ? (dayNum + 1) : dayNum;
+    if (eventNum < 1) eventNum = 1;
+    var classifier = day.labelOverride || day.classifier || null;
+    var dayLabel;
+    if (classifier) {
+      dayLabel = 'Day ' + eventNum + ' \u00b7 ' + classifier;
+    } else {
+      dayLabel = eventDayLabel(dayNum, isPractice, _practiceEnabled);
+    }
     var dStart = (day.start != null) ? day.start : null;
     var dEnd   = (day.end   != null) ? day.end   : null;
     if (dStart == null || dEnd == null) {
@@ -7198,8 +7224,17 @@ function renderScheduleBars() {
             type: 'break',
             kind: 'break',
             start: entry.start, end: entry.end,
-            label: entry.name || 'Break',
-            duration: bdur,
+            label:        entry.name         || 'Break',
+            // Type-aware fields that flow through to the segment
+            // renderer for color + label initials. The schedule
+            // materialization pushed these onto each entry; we
+            // just forward them here. Without this propagation
+            // a closing-ceremony entry would render as a generic
+            // orange "Break" segment instead of a coral "CC" one.
+            subtype:      entry.subtype      || 'break',
+            breakKind:    entry.breakKind    || null,
+            ceremonyKind: entry.ceremonyKind || null,
+            duration:     bdur,
           });
         }
         // small breaks: ignore (they're absorbed into the run)
@@ -7297,6 +7332,21 @@ function renderScheduleBars() {
         start:  s, end: e,
         format: pb.format || 'double_elim',
         teams:  pb.teams != null ? pb.teams : 8,
+        // Embedded tier-3 children (awards, breaks, ceremonies that
+        // were nested inside the playoff block in V2). Renderer
+        // overlays these as inset mini-segments inside the playoff
+        // band so the user sees e.g. "Awards" between semifinals
+        // and finals.
+        playoffBreaks: (pb.breaks || []).map(function(eb) {
+          return {
+            start: _v2timeStrToMin(eb.start),
+            end:   _v2timeStrToMin(eb.end),
+            name:        eb.name        || 'Break',
+            subtype:     eb.subtype     || 'break',
+            breakKind:   eb.breakKind   || null,
+            ceremonyKind: eb.ceremonyKind || null,
+          };
+        }).filter(function(eb) { return eb.start != null && eb.end != null && eb.end > eb.start; }),
         label:  'Playoff',
       });
       d.segments.sort(function(a, b) { return (a.start || 0) - (b.start || 0); });
@@ -7347,9 +7397,27 @@ function renderScheduleBars() {
              + '</div>';
       }
       if (seg.kind === 'break') {
+        // Type-aware rendering for tier-3 segments. Subtype +
+        // kinds were carried through downgradeToV1 + the
+        // schedule materialization, so the renderer can pick
+        // a color and label tailored to opening / closing /
+        // awards / alliance selection / lunch / break / other.
+        // Width fallback ladder:
+        //   ≥ 30 min → full label
+        //   12-30 min → initials
+        //   < 12 min  → blank, title only
+        var labels = (typeof _v2segLabels === 'function')
+                   ? _v2segLabels(seg.subtype, seg.breakKind, seg.ceremonyKind, seg.label)
+                   : { full: seg.label || 'Break', initials: 'B' };
+        var inline = segDur >= 30 ? labels.full
+                   : segDur >= 12 ? labels.initials
+                                  : '';
+        // Color per subtype — falls back to break orange.
         var bgColor = '#ec8a3f';
-        var inline = segDur >= 30 ? seg.label : (segDur >= 12 ? '\u23F8' : '');
-        var tip = (seg.label || 'Break') + ' \u2014 ' +
+        if (seg.subtype === 'awards')             bgColor = '#d9a13e';
+        else if (seg.subtype === 'alliance_selection') bgColor = '#a17ed1';
+        else if (seg.subtype === 'ceremony')      bgColor = '#dd7858';
+        var tip = labels.full + ' \u2014 ' +
                   fmtTime(seg.start) + '\u2013' + fmtTime(seg.end) +
                   ' (' + Math.round(segDur) + ' min)';
         return '<div class="agenda-seg agenda-seg-break" '
@@ -7359,21 +7427,80 @@ function renderScheduleBars() {
              + '</div>';
       }
       if (seg.kind === 'playoff') {
-        // Playoff window — purple band. Doesn't carry committed/
-        // available match math because match generation is
-        // deferred (per user direction). Tooltip shows format +
-        // team count. Inline label scales with width.
+        // Playoff window — purple band. Match generation is
+        // deferred so this segment carries no committed/available
+        // math. Width-tiered label per the same ladder used for
+        // tier-3 segments:
+        //   ≥ 60 min → "Playoff · N Alliances"
+        //   30-60 min → "Playoff" + "N A" small
+        //   12-30 min → "PO" initials
+        //   < 12 min  → blank, title only
+        // Embedded children (awards / breaks / ceremonies that
+        // were nested inside the playoff block in V2) overlay as
+        // inset mini-bars positioned absolutely within the playoff
+        // band, scaled to the playoff segment's duration.
         var pfLabel = (V2_PLAYOFF_FORMAT_LABEL && V2_PLAYOFF_FORMAT_LABEL[seg.format]) || seg.format || 'Playoff';
-        var pInline = segDur >= 60 ? ('Playoff \u00b7 ' + (seg.teams || 8) + 'T')
-                    : segDur >= 25 ? 'Playoff'
-                    :                '';
-        var pTip = 'Playoff: ' + pfLabel + ' \u00b7 ' + (seg.teams || 8) + ' teams \u2014 '
+        var nAll    = seg.teams || 8;
+        var pInline = '';
+        if (segDur >= 60) {
+          pInline = 'Playoff \u00b7 ' + nAll + ' Alliance' + (nAll === 1 ? '' : 's');
+        } else if (segDur >= 30) {
+          pInline = 'Playoff';
+        } else if (segDur >= 12) {
+          pInline = 'PO';
+        }
+        var pTip = 'Playoff: ' + pfLabel + ' \u00b7 ' + nAll + ' alliance' + (nAll === 1 ? '' : 's') + ' \u2014 '
                  + fmtTime(seg.start) + '\u2013' + fmtTime(seg.end)
                  + ' (' + Math.round(segDur) + ' min)';
+
+        // Inset mini-segments for embedded children. Position +
+        // width are computed against the playoff segment's own
+        // duration (not the day duration), so they're absolutely
+        // placed inside the playoff band. Each carries a title +
+        // its own type-aware short label / initials when room
+        // permits inside the mini-bar.
+        var insetHtml = '';
+        var pStart = seg.start, pEnd = seg.end, pDur = pEnd - pStart;
+        (seg.playoffBreaks || []).forEach(function(eb) {
+          var ebStart = Math.max(eb.start, pStart);
+          var ebEnd   = Math.min(eb.end,   pEnd);
+          if (ebEnd <= ebStart) return;
+          var leftPct  = ((ebStart - pStart) / pDur) * 100;
+          var widthPctIn = ((ebEnd - ebStart) / pDur) * 100;
+          var ebDur = ebEnd - ebStart;
+          var ebLabels = (typeof _v2segLabels === 'function')
+                       ? _v2segLabels(eb.subtype, eb.breakKind, eb.ceremonyKind, eb.name)
+                       : { full: eb.name || 'Break', initials: 'B' };
+          var ebInline = ebDur >= 30 ? ebLabels.full
+                       : ebDur >= 12 ? ebLabels.initials
+                                     : '';
+          var ebColor = '#ec8a3f';
+          if (eb.subtype === 'awards')             ebColor = '#d9a13e';
+          else if (eb.subtype === 'alliance_selection') ebColor = '#a17ed1';
+          else if (eb.subtype === 'ceremony')      ebColor = '#dd7858';
+          var ebTip = ebLabels.full + ' \u2014 ' +
+                      fmtTime(ebStart) + '\u2013' + fmtTime(ebEnd) +
+                      ' (' + Math.round(ebDur) + ' min, embedded in playoff)';
+          insetHtml +=
+            '<div class="agenda-seg-embed" '
+            + 'style="position:absolute;top:0;bottom:0;'
+            + 'left:' + leftPct.toFixed(2) + '%;'
+            + 'width:' + widthPctIn.toFixed(2) + '%;'
+            + 'background:' + ebColor + ';'
+            + 'box-shadow:inset 0 0 0 1px rgba(255,255,255,0.35);'
+            + 'display:flex;align-items:center;justify-content:center;'
+            + 'font-size:0.62rem;font-weight:600;color:#fff;'
+            + 'overflow:hidden;white-space:nowrap;z-index:2;" '
+            + 'title="' + ebTip.replace(/"/g, '&quot;') + '">'
+            + (ebInline ? '<span>' + ebInline + '</span>' : '')
+            + '</div>';
+        });
+
         return '<div class="agenda-seg agenda-seg-playoff" '
-             + 'style="width:' + widthPct.toFixed(2) + '%;" '
+             + 'style="width:' + widthPct.toFixed(2) + '%;position:relative;" '
              + 'title="' + pTip.replace(/"/g, '&quot;') + '">'
              + (pInline ? '<span class="agenda-seg-label">' + pInline + '</span>' : '')
+             + insetHtml
              + '</div>';
       }
       // matches segment
@@ -7605,7 +7732,48 @@ function updateAgendaFit() {
 
   // Available always comes from day-config (agenda): what was allocated on the schedule.
   // This is the authoritative source — same data that fed day start/end/breaks.
+  //
+  // V2 mode (the common case post-tier-system): walk V2 day_config
+  // and sum ONLY qualification block durations, subtracting embedded
+  // children. Practice / playoff / ceremony / awards / alliance
+  // selection don't contribute — the matches-per-team math is
+  // qualification-time-only, and the agenda-fit % should reflect the
+  // same scope so a comfortable badge actually means qual fit.
+  //
+  // V1 fallback: walk .day-row elements as before. The V1 day window
+  // now spans all V2 blocks (post-downgrade fix), so V1 path subtracts
+  // the heterogeneous breaks list (which includes ceremonies + awards
+  // + alliance selection) but cannot subtract playoff windows because
+  // those live in v1.playoffBlocks. Imperfect but legacy.
   function _availFromDayConfig() {
+    var v2Container = document.getElementById('v2DaysContainer');
+    var useV2 = v2Container && v2Container.querySelector('.v2-day');
+    if (useV2) {
+      var dc = (typeof collectDayConfigV2 === 'function') ? collectDayConfigV2() : null;
+      if (dc && dc.days && dc.days.length) {
+        var totalQual = 0;
+        dc.days.forEach(function(day) {
+          (day.blocks || []).filter(function(b) { return b.type === 'qualification'; })
+                            .forEach(function(qb) {
+            var qs = _v2timeStrToMin(qb.start);
+            var qe = _v2timeStrToMin(qb.end);
+            if (qs == null || qe == null || qe <= qs) return;
+            var qMinutes = qe - qs;
+            (qb.breaks || []).forEach(function(eb) {
+              var es = _v2timeStrToMin(eb.start);
+              var ee = _v2timeStrToMin(eb.end);
+              if (es == null || ee == null || ee <= es) return;
+              var ovStart = Math.max(qs, es);
+              var ovEnd   = Math.min(qe, ee);
+              if (ovEnd > ovStart) qMinutes -= (ovEnd - ovStart);
+            });
+            totalQual += Math.max(0, qMinutes);
+          });
+        });
+        return totalQual;
+      }
+    }
+    // V1 fallback
     var avail = 0;
     document.querySelectorAll('.day-row').forEach(function(row) {
       var s = timeStrToMin(row.querySelector('.day-start').value);
@@ -8189,6 +8357,119 @@ function searchTbaIndex(query) {
     .slice(0, 20);
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Matches-per-team lock helpers.
+//
+// When the user checks the "lock" box next to the Matches per Team
+// field, the auto-calculator stops overwriting the value. Instead,
+// an inline warning shows whether the locked count is achievable
+// given the current qualification block durations. The lock state
+// persists alongside other day-config-level fields in localStorage.
+
+function onMatchesPerTeamLockChange() {
+  // Persist the lock state and update warning. The actual value
+  // stays in matchesPerTeam input; lock just freezes it.
+  try {
+    var cb = document.getElementById('matchesPerTeamLocked');
+    localStorage.setItem('frcMatchesPerTeamLocked', cb && cb.checked ? '1' : '0');
+  } catch(e) {}
+  _refreshMatchesPerTeamWarning();
+}
+
+// Compute how many matches per team the current V2 qual blocks
+// can fit, mirroring calcMaxMatches's V2 path. Used by the warning
+// to compare against the locked value.
+function _computeAchievableMatchesPerTeam() {
+  var numTeams = parseInt(document.getElementById('numTeams').value) || 0;
+  if (numTeams < 6) return null;
+  var v2Container = document.getElementById('v2DaysContainer');
+  var dc = (v2Container && typeof collectDayConfigV2 === 'function') ? collectDayConfigV2() : null;
+  if (!dc || !dc.days || !dc.days.length) return null;
+  var totalSlotMatches = 0;
+  dc.days.forEach(function(day) {
+    (day.blocks || []).filter(function(b) { return b.type === 'qualification'; })
+                      .forEach(function(qb) {
+      var qs = _v2timeStrToMin(qb.start);
+      var qe = _v2timeStrToMin(qb.end);
+      if (qs == null || qe == null || qe <= qs) return;
+      var qMinutes = qe - qs;
+      (qb.breaks || []).forEach(function(eb) {
+        var es = _v2timeStrToMin(eb.start);
+        var ee = _v2timeStrToMin(eb.end);
+        if (es == null || ee == null || ee <= es) return;
+        var ovStart = Math.max(qs, es);
+        var ovEnd   = Math.min(qe, ee);
+        if (ovEnd > ovStart) qMinutes -= (ovEnd - ovStart);
+      });
+      var ct = parseFloat(qb.cycleTime) || 9;
+      totalSlotMatches += Math.max(0, Math.floor(qMinutes / ct));
+    });
+  });
+  if (totalSlotMatches === 0) return 0;
+  var mpt = Math.floor(totalSlotMatches * 6 / numTeams);
+  if (mpt < 1) mpt = 1;
+  if (Math.ceil(numTeams * mpt / 6) > totalSlotMatches) mpt = Math.max(1, mpt - 1);
+  return mpt;
+}
+
+function _refreshMatchesPerTeamWarning() {
+  var warnEl = document.getElementById('matchesPerTeamWarning');
+  if (!warnEl) return;
+  var cb = document.getElementById('matchesPerTeamLocked');
+  if (!cb || !cb.checked) {
+    warnEl.style.display = 'none';
+    warnEl.textContent = '';
+    return;
+  }
+  var locked = parseInt(document.getElementById('matchesPerTeam').value) || 0;
+  var achievable = _computeAchievableMatchesPerTeam();
+  if (achievable == null) {
+    warnEl.style.display = 'none';
+    warnEl.textContent = '';
+    return;
+  }
+  if (locked > achievable) {
+    warnEl.style.display = '';
+    warnEl.textContent = 'Locked at ' + locked + ' matches/team but qual blocks fit only ' + achievable + '. Add more qual time or reduce locked count.';
+  } else {
+    warnEl.style.display = '';
+    warnEl.style.color = 'var(--text-muted)';
+    warnEl.textContent = 'Locked at ' + locked + ' matches/team (qual blocks could fit ' + achievable + ').';
+    // Reset color after a moment in case warning fires later
+    setTimeout(function() { if (warnEl) warnEl.style.color = ''; }, 1500);
+  }
+}
+
+// Restore lock state on load and wire change-event listeners on
+// inputs that affect the warning calculation. Idempotent — safe
+// to call multiple times.
+function _initMatchesPerTeamLock() {
+  try {
+    var saved = localStorage.getItem('frcMatchesPerTeamLocked');
+    var cb = document.getElementById('matchesPerTeamLocked');
+    if (cb && saved === '1') cb.checked = true;
+  } catch(e) {}
+  // Watch for changes that affect the achievable count.
+  var inputs = ['matchesPerTeam', 'numTeams'];
+  inputs.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el && !el.dataset._mptLockBound) {
+      el.addEventListener('change', _refreshMatchesPerTeamWarning);
+      el.addEventListener('input',  _refreshMatchesPerTeamWarning);
+      el.dataset._mptLockBound = '1';
+    }
+  });
+  _refreshMatchesPerTeamWarning();
+}
+// Initial bind on DOMContentLoaded if the form is already present;
+// otherwise the wire-up happens lazily on first user interaction.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _initMatchesPerTeamLock);
+} else {
+  // Defer to next tick so the rest of the file finishes loading first.
+  setTimeout(_initMatchesPerTeamLock, 0);
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 function calcMaxMatches() {
   var numTeams    = parseInt(document.getElementById('numTeams').value) || 0;
@@ -8208,71 +8489,103 @@ function calcMaxMatches() {
     _overlay.done('maxcycles'); _overlay.hide();
     return;
   }
-  showApiStatus('⏳ Calculating max matches…');
+  // Lock guard — when matches-per-team is locked, the user has
+  // committed to a specific count. The calculator instead just
+  // surfaces a warning if the locked count can't fit.
+  var lockedCb = document.getElementById('matchesPerTeamLocked');
+  if (lockedCb && lockedCb.checked) {
+    showApiStatus('Matches per team is locked \u2014 unlock to recalculate');
+    _refreshMatchesPerTeamWarning();
+    _overlay.done('maxcycles'); _overlay.hide();
+    return;
+  }
+  showApiStatus('\u23F3 Calculating max matches\u2026');
 
-  var dayRows = document.querySelectorAll('.day-row');
+  // V2-aware path: compute total qual minutes from V2 day_config
+  // directly. Practice / playoff / ceremony / awards / alliance
+  // selection don't contribute. Embedded children inside a qual
+  // block subtract from that block's effective minutes.
+  var v2Container = document.getElementById('v2DaysContainer');
+  var useV2 = v2Container && v2Container.querySelector('.v2-day');
   var totalSlotMatches = 0;
 
-  dayRows.forEach(function(row) {
-    var cursor = timeStrToMin(row.querySelector('.day-start').value);
-    var dayEnd = timeStrToMin(row.querySelector('.day-end').value);
-    var breaks = Array.from(row.querySelectorAll('.break-row')).map(function(br) {
-      return { start: timeStrToMin(br.querySelector('.break-start').value),
-               end:   timeStrToMin(br.querySelector('.break-end').value), done: false };
-    }).filter(function(b) { return b.end > b.start && b.start < dayEnd; }).sort(function(a,b){return a.start-b.start;});
-
-    // Build per-day cycle change list (same as _finishGenerationInner)
-    var dayEarlyEnd = getDayEarlyEnd(row);
-    var dayCycleChanges = Array.from(row.querySelectorAll('.day-cc-row')).map(function(ccRow) {
-      var t = parseFloat(ccRow.querySelector('.cc-time').value);
-      var afterInp = ccRow.querySelector('.cc-after');
-      return { isStart: ccRow.dataset.isStart === '1',
-               afterMatch: afterInp ? parseInt(afterInp.value) : null, time: t };
-    }).filter(function(c) { return c.time > 0; });
-
-    // Local match counter for this day (for cycle time lookup)
-    var dayMatchCount = 0;
-
-    var _safetyLimit = 2000; // max matches per day — prevents infinite loop on bad ct values
-    var _safetyCount = 0;
-    while (_safetyCount++ < _safetyLimit) {
-      // Flush breaks at or before cursor
-      var flushed = true;
-      while (flushed) {
-        flushed = false;
-        breaks.forEach(function(b) {
-          if (!b.done && b.start <= cursor) { cursor = Math.max(cursor, b.end); b.done = true; flushed = true; }
+  if (useV2) {
+    var dc = (typeof collectDayConfigV2 === 'function') ? collectDayConfigV2() : null;
+    if (dc && dc.days) {
+      dc.days.forEach(function(day) {
+        (day.blocks || []).filter(function(b) { return b.type === 'qualification'; })
+                          .forEach(function(qb) {
+          var qs = _v2timeStrToMin(qb.start);
+          var qe = _v2timeStrToMin(qb.end);
+          if (qs == null || qe == null || qe <= qs) return;
+          var qMinutes = qe - qs;
+          // Subtract embedded children (breaks, awards, ceremonies
+          // inside the qual block).
+          (qb.breaks || []).forEach(function(eb) {
+            var es = _v2timeStrToMin(eb.start);
+            var ee = _v2timeStrToMin(eb.end);
+            if (es == null || ee == null || ee <= es) return;
+            var ovStart = Math.max(qs, es);
+            var ovEnd   = Math.min(qe, ee);
+            if (ovEnd > ovStart) qMinutes -= (ovEnd - ovStart);
+          });
+          var ct = parseFloat(qb.cycleTime) || 9;
+          // Apply cycle changes if present — sum durations per
+          // segment with their effective ct.
+          var changes = qb.changes || [];
+          if (!changes.length) {
+            totalSlotMatches += Math.max(0, Math.floor(qMinutes / ct));
+          } else {
+            // Compute progressive matches across changes. Each
+            // entry says "after N matches, switch to ct". Apply
+            // sequentially, consuming time. Embedded-children
+            // subtraction is approximated as a flat reduction.
+            var remaining = qMinutes;
+            var curCt = ct;
+            var changesAhead = changes.slice().sort(function(a, b) {
+              return (a.afterMatch || 0) - (b.afterMatch || 0);
+            });
+            var matchCount = 0;
+            while (remaining >= curCt) {
+              remaining -= curCt;
+              matchCount += 1;
+              while (changesAhead.length && changesAhead[0].afterMatch <= matchCount) {
+                curCt = changesAhead.shift().cycleTime || curCt;
+              }
+            }
+            totalSlotMatches += matchCount;
+          }
         });
-      }
-      // Break buffer: schedule if breakStart - cursor >= breakBuffer (start-based)
-      var nextBreak = breaks.find(function(b) { return !b.done && b.start > cursor; });
-      if (nextBreak && breakBuffer > 0 && nextBreak.start - cursor < breakBuffer) {
-        cursor = Math.max(cursor, nextBreak.end); nextBreak.done = true; continue;
-      }
-      // Get effective cycle time — use GLOBAL totalSlotMatches so cross-day
-      // cycle changes (e.g. after match 65) fire correctly on Day 2+
-      var ct = (function() {
-        var t = dayCycleChanges.length > 0 ? dayCycleChanges[0].time : (parseFloat(document.getElementById('cycleTime').value) || 8);
-        dayCycleChanges.forEach(function(cc) {
-          if (cc.isStart) { t = cc.time; }
-          else if (!isNaN(cc.afterMatch) && totalSlotMatches + 1 > cc.afterMatch) { t = cc.time; }
-        });
-        return t;
-      })();
-      if (!ct || ct < 0.5) break; // guard: invalid cycle time — stop rather than loop forever
-      if (cursor + ct > dayEnd) break;
-      // Interrupt suppression: if match start already cleared the buffer, don't
-      // interrupt it even if the cycle time overlaps the break start
-      var alreadyCleared = nextBreak && breakBuffer > 0 && nextBreak.start - cursor >= breakBuffer;
-      if (!alreadyCleared && nextBreak && nextBreak.start > cursor && nextBreak.start < cursor + ct) {
-        cursor = Math.max(cursor, nextBreak.end); nextBreak.done = true; continue;
-      }
-      cursor += ct;
-      dayMatchCount++;
-      totalSlotMatches++;
-      if (dayEarlyEnd !== null && dayMatchCount >= dayEarlyEnd) break;
+      });
     }
-  });
+  } else {
+    // V1 fallback: walk .day-row elements as before.
+    var dayRows = document.querySelectorAll('.day-row');
+    dayRows.forEach(function(row) {
+      var cursor = timeStrToMin(row.querySelector('.day-start').value);
+      var dayEnd = timeStrToMin(row.querySelector('.day-end').value);
+      var breaks = Array.from(row.querySelectorAll('.break-row')).map(function(br) {
+        return { start: timeStrToMin(br.querySelector('.break-start').value),
+                 end:   timeStrToMin(br.querySelector('.break-end').value), done: false };
+      }).filter(function(b) { return b.end > b.start && b.start < dayEnd; }).sort(function(a,b){return a.start-b.start;});
+      // Use the existing per-day v1 cycle math (kept verbatim for
+      // back-compat with edge cases the V2-aware path doesn't see).
+      var globalCt = parseFloat(document.getElementById('cycleTime').value) || 9;
+      var t = cursor;
+      while (t + globalCt <= dayEnd) {
+        var hitBreak = breaks.find(function(b) {
+          return !b.done && b.start >= t && b.start < t + globalCt;
+        });
+        if (hitBreak) {
+          t = Math.max(t, hitBreak.end);
+          hitBreak.done = true;
+          continue;
+        }
+        t += globalCt;
+        totalSlotMatches++;
+      }
+    });
+  }
 
   if (totalSlotMatches === 0) {
     showApiStatus('No matches fit in the current schedule', true);
@@ -12023,7 +12336,14 @@ function downgradeToV1(dc) {
                 : (pb.playoffTeams     != null) ? pb.playoffTeams
                 : 8,
         breaks:   (pb.breaks || []).map(function(b) {
-          return { start: b.start, end: b.end, name: b.label || 'Break' };
+          var subtype = b.type || 'break';
+          return {
+            start: b.start, end: b.end,
+            name: b.label || _v2subtypeDefaultName(subtype, b.breakKind, b.ceremonyKind),
+            subtype: subtype,
+            breakKind:    b.breakKind    || null,
+            ceremonyKind: b.ceremonyKind || null,
+          };
         }).sort(function(a, b) { return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start); }),
       };
       v1.playoffBlocks.push(entry);
@@ -12060,22 +12380,68 @@ function downgradeToV1(dc) {
     // skipped here (no qual matches generated) but their playoff
     // window IS still on v1.playoffBlocks above so the agenda has it.
     if (!qBlocks.length && !pBlocks.length) return;
+    // Day boundaries span the entire agenda — including any
+    // ceremonies, awards, alliance selection, or breaks that
+    // bracket the qual/practice blocks. Earlier this only
+    // looked at practice + qual, so an opening or closing
+    // ceremony before/after qual was outside the day window
+    // and got clipped from the agenda bar visually.
+    var allDayBlocks = (day.blocks || []);
+    var dayStartMin = null, dayEndMin = null;
+    allDayBlocks.forEach(function(b) {
+      var s = _v2timeStrToMin(b.start);
+      var e = _v2timeStrToMin(b.end);
+      if (s != null && (dayStartMin == null || s < dayStartMin)) dayStartMin = s;
+      if (e != null && (dayEndMin   == null || e > dayEndMin))   dayEndMin   = e;
+    });
     var firstM = (pBlocks.concat(qBlocks))[0];
-    var dayStart = firstM ? firstM.start : (day.blocks[0] && day.blocks[0].start) || '09:00';
-    var dayEnd   = (qBlocks.concat(pBlocks)).reduce(function(latest, b) {
-      return (_v2timeStrToMin(b.end) || 0) > (_v2timeStrToMin(latest) || 0) ? b.end : latest;
-    }, '09:00');
+    var dayStart = dayStartMin != null ? _v2minToTimeStr(dayStartMin)
+                                       : (firstM ? firstM.start : (allDayBlocks[0] && allDayBlocks[0].start) || '09:00');
+    var dayEnd   = dayEndMin   != null ? _v2minToTimeStr(dayEndMin)
+                                       : '09:00';
     var allBreaks = siblingBreaks.slice();
     qBlocks.forEach(function(qb) { (qb.breaks || []).forEach(function(b) { allBreaks.push(b); }); });
     pBlocks.forEach(function(pb) { (pb.breaks || []).forEach(function(b) { allBreaks.push(b); }); });
     var qFirst = qBlocks[0] || pBlocks[0];
     v1.days.push({
       start: dayStart, end: dayEnd,
-      cycleTime: qFirst.cycleTime,
+      cycleTime: qFirst ? qFirst.cycleTime : 9,
       label: day.label || ('Day ' + (idx + 1)),
+      // labelOverride: the user's free-text from the V2 day card's
+      // "Override label (optional)" input. Distinct from `label`
+      // because that field always carries something for V1
+      // compatibility (synthesized "Day N" when the user left the
+      // override blank). The renderer needs to know the difference
+      // so it can show:
+      //   override present → use it verbatim
+      //   override absent  → fall back to classifier
+      //                      (or "Event day" if classifier is empty)
+      // Stored as a string when set, null otherwise — strict null
+      // check in the renderer means "user typed something."
+      labelOverride: (day.label && day.label.trim()) ? day.label.trim() : null,
       date:  day.date  || '',
-      breaks: allBreaks.map(function(b) { return { start: b.start, end: b.end, name: b.label || 'Break' }; })
-                       .sort(function(a, b) { return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start); }),
+      // Day classifier — computed from block types present so the
+      // agenda fit header can show "Practice / Qualification /
+      // Playoff" when all three are on the same day. Computed at
+      // downgrade time so the V1 wire format carries it; renderer
+      // doesn't need direct access to V2 day_config. Override is
+      // the user's day.label field if non-empty (already in
+      // v1.days[].label above).
+      classifier: _v2dayClassifierFromBlocks(allDayBlocks),
+      // breaks[] is now heterogeneous post-tier-3 expansion: it
+      // carries break / awards / alliance_selection / ceremony
+      // entries. The renderer reads `subtype` to pick a label
+      // and color; original block label flows through `name`.
+      breaks: allBreaks.map(function(b) {
+        var subtype = b.type || 'break';  // type field present on V2 block
+        return {
+          start: b.start, end: b.end,
+          name: b.label || _v2subtypeDefaultName(subtype, b.breakKind, b.ceremonyKind),
+          subtype: subtype,
+          breakKind:    b.breakKind    || null,    // for break: lunch/break/other
+          ceremonyKind: b.ceremonyKind || null,    // for ceremony: opening/closing
+        };
+      }).sort(function(a, b) { return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start); }),
       cycleChanges: _v2blockChangesToV1(qFirst, globalMatchOffset),
     });
 
@@ -12086,6 +12452,108 @@ function downgradeToV1(dc) {
     });
   });
   return v1;
+}
+
+// Default display name for a tier-3 subtype when the user hasn't
+// supplied a custom label. Used by downgradeToV1 when collapsing
+// V2 ceremonies/awards/alliance_selection/break entries to V1
+// breaks. Mirrors the labels the editor shows.
+function _v2subtypeDefaultName(subtype, breakKind, ceremonyKind) {
+  if (subtype === 'awards')             return 'Awards';
+  if (subtype === 'alliance_selection') return 'Alliance selection';
+  if (subtype === 'ceremony') {
+    return (ceremonyKind === 'closing') ? 'Closing ceremony' : 'Opening ceremony';
+  }
+  if (subtype === 'break') {
+    if (breakKind === 'lunch') return 'Lunch';
+    if (breakKind === 'other') return 'Other';
+    return 'Break';
+  }
+  return 'Break';
+}
+
+// Compute a human-readable classifier for a day given its V2 blocks.
+// The classifier surfaces which session types are present —
+// "Practice / Qualification / Playoff" for a day spanning all
+// three. Tier-3-only days fall back to "Event day". The user's
+// optional day.label overrides the classifier when set; this
+// helper just produces the auto-computed default.
+function _v2dayClassifierFromBlocks(blocks) {
+  if (!blocks || !blocks.length) return 'Event day';
+  // Order in the result follows event chronology (practice →
+  // qualification → playoff), not block order. So a day with
+  // qual then practice (rare but possible) still reads
+  // "Practice / Qualification".
+  var hasPractice = blocks.some(function(b) { return b.type === 'practice'; });
+  var hasQual     = blocks.some(function(b) { return b.type === 'qualification'; });
+  var hasPlayoff  = blocks.some(function(b) { return b.type === 'playoff'; });
+  var parts = [];
+  if (hasPractice) parts.push('Practice');
+  if (hasQual)     parts.push('Qualification');
+  if (hasPlayoff)  parts.push('Playoff');
+  if (!parts.length) return 'Event day';
+  return parts.join(' / ');
+}
+
+// Short labels and initials for an agenda-fit segment, given the
+// segment's subtype + kind. Returned as { full, initials } so the
+// renderer can pick based on available width:
+//   ≥ 60px (or duration ≥ 30 min): full
+//   30-60px (or duration 12-30 min): initials
+//   < 30px (or duration < 12 min): blank, title attr only
+// Width is approximated through duration in the current renderer
+// (segments are proportional to wall-clock minutes); thresholds
+// chosen so a 30-min block at typical zoom can fit the full word.
+function _v2segLabels(subtype, breakKind, ceremonyKind, fallbackName) {
+  if (subtype === 'awards')             return { full: 'Awards',             initials: 'AW' };
+  if (subtype === 'alliance_selection') return { full: 'Alliance selection', initials: 'AS' };
+  if (subtype === 'ceremony') {
+    if (ceremonyKind === 'closing')     return { full: 'Closing ceremony',   initials: 'CC' };
+    return                                       { full: 'Opening ceremony',   initials: 'OC' };
+  }
+  if (subtype === 'break') {
+    if (breakKind === 'lunch') return { full: 'Lunch', initials: 'L' };
+    if (breakKind === 'other') {
+      // Custom-named breaks: full label + first-letters fallback
+      var name = (fallbackName || '').trim() || 'Other';
+      var inits = name.split(/\s+/).slice(0, 2).map(function(w) { return w[0] || ''; }).join('').toUpperCase();
+      return { full: name, initials: inits || 'O' };
+    }
+    return { full: 'Break', initials: 'B' };
+  }
+  return { full: fallbackName || 'Break', initials: 'B' };
+}
+
+// Reorder a block's siblings within their parent container by
+// start time. Called on time-input commit (change event) so the
+// block jumps to its correct logical slot. Stable sort — equal
+// start times preserve DOM order. The function reads time values
+// directly from each sibling's .v2-block-start input rather than
+// from a model, so it works on the live DOM regardless of any
+// pending state. The "+ block" / "+ embed" trailing button is
+// left in place after the sort by re-appending it (it always
+// belongs at the end of the list).
+function _v2reorderSiblingsByTime(blockEl) {
+  if (!blockEl || !blockEl.parentElement) return;
+  var parent = blockEl.parentElement;
+  var siblings = Array.from(parent.querySelectorAll(':scope > .v2-block'));
+  if (siblings.length < 2) return;
+  // Annotate each sibling with its current start time and DOM
+  // index for stable sort.
+  var withKey = siblings.map(function(el, i) {
+    var s = _v2timeStrToMin((el.querySelector('.v2-block-start') || {}).value || '');
+    return { el: el, key: (s == null ? Infinity : s), i: i };
+  });
+  withKey.sort(function(a, b) {
+    if (a.key !== b.key) return a.key - b.key;
+    return a.i - b.i;
+  });
+  // Detach the trailing "add" button (if any) so we can re-append
+  // it after the sorted blocks.
+  var addBtn = parent.querySelector(':scope > .v2-add-block') ||
+               parent.querySelector(':scope > .v2-add-nested-break');
+  withKey.forEach(function(w) { parent.appendChild(w.el); });
+  if (addBtn) parent.appendChild(addBtn);
 }
 
 function _v2blockChangesToV1(matchBlock, matchOffset) {
@@ -12228,9 +12696,25 @@ function _v2defaultDay(idx) {
 }
 
 function buildV2Day(day, idx) {
-  var hasPractice = (day.blocks || []).some(function(b) { return b.type === 'practice'; });
-  var hasQual     = (day.blocks || []).some(function(b) { return b.type === 'qualification'; });
-  var dayKind = hasPractice && !hasQual ? 'practice' : 'qual';
+  // dayKind drives the tag chip + the .v2-day[data-kind] CSS hook.
+  // Computed from the block-type set so multi-type days get a
+  // proper classifier tag (e.g. "Qual / Playoff") instead of just
+  // the first type.
+  var dayKind = (function() {
+    var hasPractice = (day.blocks || []).some(function(b) { return b.type === 'practice'; });
+    var hasQual     = (day.blocks || []).some(function(b) { return b.type === 'qualification'; });
+    var hasPlayoff  = (day.blocks || []).some(function(b) { return b.type === 'playoff'; });
+    if (hasPlayoff && !hasQual && !hasPractice) return 'playoff';
+    if (hasPractice && !hasQual && !hasPlayoff) return 'practice';
+    if (hasQual    && !hasPractice && !hasPlayoff) return 'qual';
+    if (hasPractice || hasQual || hasPlayoff)   return 'mixed';
+    return 'event';
+  })();
+  // Classifier string for the chip — same logic as the renderer
+  // uses, so the editor and the agenda bar stay consistent.
+  var _classifier = (typeof _v2dayClassifierFromBlocks === 'function')
+                  ? _v2dayClassifierFromBlocks(day.blocks || [])
+                  : 'Event day';
   var dayEl = document.createElement('div');
   dayEl.className = 'v2-day';
   dayEl.dataset.kind = dayKind;
@@ -12238,15 +12722,16 @@ function buildV2Day(day, idx) {
   var head = document.createElement('div');
   head.className = 'v2-day-head';
   // Event-day numbering: v2 enumerates ALL day blocks in one list
-  // (practice and qual mixed), so idx+1 IS the event day. Append
-  // the kind so users see "Day 1 · Practice" / "Day 2 · Qual" at
-  // a glance — same convention as the schedule output and agenda
-  // fit. "Qual" is abbreviated here only because the chip is small.
-  var _kindTag = (dayKind === 'practice' ? 'Practice' : 'Qual');
+  // (practice + qual + playoff mixed), so idx+1 IS the event day.
+  // The chip shows the computed classifier so multi-type days
+  // (e.g. "Qualification / Playoff") read correctly. Long
+  // classifiers wrap; the chip CSS handles overflow.
+  var _kindTag = _classifier;
   head.innerHTML =
     '<span class="v2-day-tag">Day ' + (idx + 1) + ' \u00b7 ' + _kindTag + '</span>' +
     '<input class="v2-day-date" type="date" value="' + _v2attrEsc(day.date || '') + '" title="Date">' +
-    '<input class="v2-day-label" type="text" placeholder="Label" value="' + _v2attrEsc(day.label || '') + '">' +
+    '<input class="v2-day-label" type="text" placeholder="Override label (optional)" ' +
+    '       value="' + _v2attrEsc(day.label || '') + '" title="Leave blank to use the auto classifier">' +
     '<span class="v2-day-summary"></span>' +
     '<span class="v2-day-chev" title="Expand">\u25b8</span>' +
     '<span class="v2-day-x" title="Remove day">\u00d7</span>';
@@ -12304,12 +12789,26 @@ function _v2renumberDays() {
 function _v2updateDaySummary(dayEl) {
   var blocks = dayEl.querySelectorAll(':scope > .v2-day-body > .v2-block');
   var times = []; var blockCount = blocks.length;
+  // Collect block types so we can recompute the day chip
+  // classifier when blocks change. Uses each block's data-type
+  // attribute (set when the block element was built).
+  var blockTypeSet = [];
   blocks.forEach(function(b) {
     var s = b.querySelector('.v2-block-start').value;
     var e = b.querySelector('.v2-block-end').value;
     if (s) times.push(_v2timeStrToMin(s));
     if (e) times.push(_v2timeStrToMin(e));
+    if (b.dataset && b.dataset.type) blockTypeSet.push({ type: b.dataset.type });
   });
+  // Refresh the head chip classifier in place — same _v2dayClassifierFromBlocks
+  // helper that buildV2Day used. Keeps editor + agenda bar consistent
+  // when the user adds or removes blocks.
+  var tagEl = dayEl.querySelector('.v2-day-tag');
+  if (tagEl && typeof _v2dayClassifierFromBlocks === 'function') {
+    var classifier = _v2dayClassifierFromBlocks(blockTypeSet);
+    var idxText = tagEl.textContent.split('\u00b7')[0].trim();
+    tagEl.textContent = idxText + ' \u00b7 ' + classifier;
+  }
   var sum = dayEl.querySelector('.v2-day-summary');
   if (!sum) return;
   if (!blockCount) { sum.innerHTML = '<em>empty</em>'; return; }
@@ -12388,6 +12887,14 @@ function buildV2Block(b, isNested) {
       _v2validateAll();
       _v2updateBlockSummary(blockEl);
       _v2updateNearestSummary(blockEl);
+      // Reorder siblings by start time on commit (change event,
+      // not input). Keystrokes don't trigger reorder — that would
+      // be jarring while typing. Cascading overlaps are surfaced
+      // by _v2validateAll above; the reorder is purely cosmetic
+      // DOM placement. Applied at the parent container — works
+      // both for top-level blocks (in .v2-day-body) and nested
+      // blocks (in .v2-nested-list).
+      _v2reorderSiblingsByTime(blockEl);
       onV2Change();
     });
   });
@@ -13077,6 +13584,10 @@ function onV2Change() {
   // had to manually click Generate. onParamChanged respects the
   // _frcLoadingSchedule guard, so loads still don't auto-regen.
   if (typeof onParamChanged === 'function') onParamChanged();
+  // Refresh the matches-per-team lock warning whenever V2 state
+  // changes — adding/removing qual blocks or embedded children
+  // changes how many matches the qual time can fit.
+  if (typeof _refreshMatchesPerTeamWarning === 'function') _refreshMatchesPerTeamWarning();
 }
 
 // ─── Toggle wiring ────────────────────────────────────────────────
@@ -14095,6 +14606,14 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         end:   br.querySelector('.break-end').value,
       }))).map(b => ({
         name: b.name || 'Break',
+        // Carry tier-3 subtype + kind through so the agenda bar
+        // can render type-aware labels/initials. When the break
+        // came from a v1 row (no V2 origin) these fields are
+        // null and the renderer falls back to the generic break
+        // treatment.
+        subtype:      b.subtype      || 'break',
+        breakKind:    b.breakKind    || null,
+        ceremonyKind: b.ceremonyKind || null,
         start: timeToMin(b.start), end: timeToMin(b.end), done: false,
       })).filter(b => b.end > b.start).sort((a,b) => a.start - b.start),
     };
@@ -14149,7 +14668,13 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       });
 
       var _pracBreaksRun = (_pracCfg.breaks || []).map(function(b) {
-        return { name: b.name, start: b.start, end: b.end, done: false };
+        return {
+          name: b.name,
+          subtype:      b.subtype      || 'break',
+          breakKind:    b.breakKind    || null,
+          ceremonyKind: b.ceremonyKind || null,
+          start: b.start, end: b.end, done: false,
+        };
       });
       var _pracEntries = [];
       var _pracCursor  = _pracCfg.startMin;
@@ -14174,7 +14699,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
           for (var _pbi = 0; _pbi < _pracBreaksRun.length; _pbi++) {
             var _pbk = _pracBreaksRun[_pbi];
             if (!_pbk.done && _pbk.start <= _pracCursor) {
-              _pracEntries.push({type:'break', name:_pbk.name, start:_pbk.start, end:_pbk.end});
+              _pracEntries.push({type:'break', name:_pbk.name, start:_pbk.start, end:_pbk.end, subtype:_pbk.subtype||'break', breakKind:_pbk.breakKind||null, ceremonyKind:_pbk.ceremonyKind||null});
               _pracCursor = Math.max(_pracCursor, _pbk.end);
               _pbk.done = true; _pracFlushed = true;
             }
@@ -14183,7 +14708,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         // Break-buffer check
         var _pracNext = _pracBreaksRun.find(function(b) { return !b.done && b.start > _pracCursor; });
         if (_pracNext && breakBuffer > 0 && _pracNext.start - _pracCursor < breakBuffer) {
-          _pracEntries.push({type:'break', name:_pracNext.name, start:_pracNext.start, end:_pracNext.end});
+          _pracEntries.push({type:'break', name:_pracNext.name, start:_pracNext.start, end:_pracNext.end, subtype:_pracNext.subtype||'break', breakKind:_pracNext.breakKind||null, ceremonyKind:_pracNext.ceremonyKind||null});
           _pracCursor = Math.max(_pracCursor, _pracNext.end);
           _pracNext.done = true;
           continue;
@@ -14195,7 +14720,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
           ? _pracBreaksRun.find(function(b) { return !b.done && b.start > _pracCursor && b.start < _pracEnd; })
           : null;
         if (_pracInterrupt) {
-          _pracEntries.push({type:'break', name:_pracInterrupt.name, start:_pracInterrupt.start, end:_pracInterrupt.end});
+          _pracEntries.push({type:'break', name:_pracInterrupt.name, start:_pracInterrupt.start, end:_pracInterrupt.end, subtype:_pracInterrupt.subtype||'break', breakKind:_pracInterrupt.breakKind||null, ceremonyKind:_pracInterrupt.ceremonyKind||null});
           _pracCursor = Math.max(_pracCursor, _pracInterrupt.end);
           _pracInterrupt.done = true;
           continue;
@@ -14234,12 +14759,17 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       }
       // Emit any remaining (unused) breaks for visual consistency
       _pracBreaksRun.filter(function(b) { return !b.done; }).forEach(function(b) {
-        _pracEntries.push({type:'break', name:b.name, start:b.start, end:b.end});
+        _pracEntries.push({type:'break', name:b.name, start:b.start, end:b.end, subtype:b.subtype||'break', breakKind:b.breakKind||null, ceremonyKind:b.ceremonyKind||null});
       });
 
       scheduled.push({ dayNum: 0, isPracticeDay: true,
         start: _pracCfg.startMin, end: _pracCfg.endMin,
         date: (_pracCfg && _pracCfg.date) || '',
+        // Practice-only days carry a synthesized classifier; the
+        // editor's day-level label override (if set) takes
+        // precedence in the renderer.
+        classifier: 'Practice',
+        labelOverride: (_pracCfg && _pracCfg.label && _pracCfg.label !== 'Practice') ? _pracCfg.label : null,
         entries: _pracEntries });
 
       // Status line in the panel
@@ -14302,7 +14832,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         flushed = false;
         for (const brk of breaks) {
           if (!brk.done && brk.start <= cursor) {
-            entries.push({type:'break', name:brk.name, start:brk.start, end:brk.end});
+            entries.push({type:'break', name:brk.name, start:brk.start, end:brk.end, subtype:brk.subtype||'break', breakKind:brk.breakKind||null, ceremonyKind:brk.ceremonyKind||null});
             cursor = Math.max(cursor, brk.end);
             brk.done = true;
             flushed = true;
@@ -14315,7 +14845,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       const nextBreak = breaks.find(b => !b.done && b.start > cursor);
       if (nextBreak && breakBuffer > 0 && nextBreak.start - cursor < breakBuffer) {
         // Not enough lead time before the break — take the break now
-        entries.push({type:'break', name:nextBreak.name, start:nextBreak.start, end:nextBreak.end});
+        entries.push({type:'break', name:nextBreak.name, start:nextBreak.start, end:nextBreak.end, subtype:nextBreak.subtype||'break', breakKind:nextBreak.breakKind||null, ceremonyKind:nextBreak.ceremonyKind||null});
         cursor = Math.max(cursor, nextBreak.end);
         nextBreak.done = true;
         continue;
@@ -14340,7 +14870,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         ? breaks.find(b => !b.done && b.start > cursor && b.start < matchEnd)
         : null;
       if (interruptBreak) {
-        entries.push({type:'break', name:interruptBreak.name, start:interruptBreak.start, end:interruptBreak.end});
+        entries.push({type:'break', name:interruptBreak.name, start:interruptBreak.start, end:interruptBreak.end, subtype:interruptBreak.subtype||'break', breakKind:interruptBreak.breakKind||null, ceremonyKind:interruptBreak.ceremonyKind||null});
         cursor = Math.max(cursor, interruptBreak.end);
         interruptBreak.done = true;
         continue;
@@ -14407,10 +14937,26 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
 
     // Add any remaining breaks
     breaks.filter(b => !b.done).forEach(b => {
-      entries.push({type:'break', name:b.name, start:b.start, end:b.end});
+      entries.push({type:'break', name:b.name, start:b.start, end:b.end, subtype:b.subtype||'break', breakKind:b.breakKind||null, ceremonyKind:b.ceremonyKind||null});
     });
 
-    scheduled.push({dayNum: d+1, start: day.start, end: day.end, date: day.date || '', entries});
+    scheduled.push({
+      dayNum: d+1,
+      start: day.start, end: day.end,
+      date: day.date || '',
+      // V2 classifier + user label override come straight from the
+      // V1 day_config (downgradeToV1 emits them from V2 blocks /
+      // V2 day-card override input). The renderer uses them in this
+      // order:
+      //   1. labelOverride (user typed something)
+      //   2. classifier    (auto from blocks present)
+      //   3. eventDayLabel (legacy V1 fallback)
+      // Both fields are null when not set, so the falsy short-circuit
+      // chain in the renderer works.
+      classifier:    day.classifier    || null,
+      labelOverride: day.labelOverride || null,
+      entries,
+    });
   }
 
   // Update stats. The meta line (#scheduleMeta) holds basic facts;
