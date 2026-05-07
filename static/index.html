@@ -5490,12 +5490,49 @@ function buildShareUrl() {
   });
 
   // Encode cycle time changes: cc=Day:AfterMatch:Time,...
-  var cycleChanges = getCycleTimeChanges();
-  if (cycleChanges.length > 0) {
-    params.set('cc', cycleChanges.map(function(c) {
-      return (c.day || 1) + ':' + c.after + ':' + c.time;
-    }).join(','));
-  }
+  //
+  // _urlDc carries per-day cycleChanges arrays from downgradeToV1
+  // (V2-aware via collectDayConfig). afterMatch in those arrays is
+  // GLOBAL (post-offset, set by _v2blockChangesToV1). We store back
+  // to URL in per-day local form so the parser can route by day
+  // and addDayCycleChange's input matches what the user typed.
+  // Subtracting the day's match-offset turns global → local.
+  //
+  // Reading from getCycleTimeChanges() (V1 form fields) like
+  // before would miss V2 cc edits because those V1 rows are
+  // hidden when V2 is the active editor and don't auto-sync.
+  var _urlCcParts = [];
+  var _ccOffset = 0;
+  (_urlDays).forEach(function(day, i) {
+    var dayNum = i + 1;
+    (day.cycleChanges || []).forEach(function(cc) {
+      if (cc.isStart) return;          // start-of-day ct lives in d{N} window, not cc
+      var localAfter = (cc.afterMatch || 0) - _ccOffset;
+      if (localAfter < 1) return;
+      _urlCcParts.push(dayNum + ':' + localAfter + ':' + cc.time);
+    });
+    // Estimate this day's match count for the next day's offset.
+    // Mirrors downgradeToV1's globalMatchOffset accumulation —
+    // floor((day window minus break overlap) / start-of-day ct).
+    // Approximate: take the start-of-day ct from cycleChanges or
+    // fall back to the day's cycleTime field.
+    var startCt = day.cycleTime || 9;
+    (day.cycleChanges || []).forEach(function(cc) {
+      if (cc.isStart) startCt = cc.time;
+    });
+    var dStart = timeStrToMin ? timeStrToMin(day.start) : null;
+    var dEnd   = timeStrToMin ? timeStrToMin(day.end)   : null;
+    if (dStart != null && dEnd != null && dEnd > dStart && startCt > 0) {
+      var brkMin = (day.breaks || []).reduce(function(s, b) {
+        var bs = timeStrToMin(b.start), be = timeStrToMin(b.end);
+        if (bs == null || be == null) return s;
+        var ovS = Math.max(dStart, bs), ovE = Math.min(dEnd, be);
+        return s + Math.max(0, ovE - ovS);
+      }, 0);
+      _ccOffset += Math.max(0, Math.floor((dEnd - dStart - brkMin) / startCt));
+    }
+  });
+  if (_urlCcParts.length) params.set('cc', _urlCcParts.join(','));
 
   // Encode team numbers from slot_map if we have an assigned schedule
   if (_currentSlotMap && Object.keys(_currentSlotMap).length > 0) {
@@ -7093,12 +7130,18 @@ function renderAgendaBlocks() {
       var labels = (typeof _v2segLabels === 'function')
                  ? _v2segLabels(b.subtype, b.breakKind, b.ceremonyKind, b.name)
                  : { full: b.name || 'Break', initials: 'B' };
-      var inline = bDur >= 30 ? labels.full
-                 : bDur >= 12 ? labels.initials
-                              : '';
+      // Width-percentage tiers (not duration). A 30-min block is
+      // visually huge in a 4-hour day but cramped in a 13-hour day,
+      // so threshold by what the user actually sees: ≥10% full,
+      // ≥3% initials, below that blank with title-attr. Initials
+      // need maybe 30-40px to fit "OC"/"AS" — at a 700px-wide bar
+      // that's ~5%, so 3% errs on the side of always trying.
+      var inline = widthPct >= 10 ? labels.full
+                 : widthPct >= 3  ? labels.initials
+                                  : '';
       var bgColor = '#ec8a3f';
       if      (b.subtype === 'awards')             bgColor = '#d9a13e';
-      else if (b.subtype === 'alliance_selection') bgColor = '#a17ed1';
+      else if (b.subtype === 'alliance_selection') bgColor = '#3fa6a0';
       else if (b.subtype === 'ceremony')           bgColor = '#dd7858';
       var tip = labels.full + ' \u2014 ' + fmtTime12(b.start) + '\u2013' + fmtTime12(b.end) + ' (' + bDur + ' min)';
       return '<div class="agenda-seg agenda-seg-break" '
@@ -7310,50 +7353,14 @@ function renderScheduleBars() {
     });
     flushRun(dEnd);
 
-    // Post-process: insert explicit `idle` segments anywhere there's
-    // a time gap inside the day window. Without this, gaps between
-    // matches & breaks show as blank space in the bar with no label,
-    // and trailing idle inside a match block is invisible (just
-    // counted in the committed/available text).
-    //
-    // Idle segments to insert:
-    //   - Before the first segment if its start > day start
-    //   - Between consecutive segments where prev.end < next.start
-    //   - After the last segment if its end < day end
-    //   - Inside a match segment for the matchEnd → end tail
-    //
-    // The within-match tail is rendered as a sub-region of the match
-    // segment in the render phase rather than a separate segment, so
-    // the segment-level idle insertion below only handles between-block
-    // gaps. Threshold of 1 minute filters out floating-point dust.
-    var IDLE_THRESHOLD = 1;
-    if (dStart != null && dEnd != null && segments.length > 0) {
-      // Sort segments by start to be safe (they should already be ordered)
-      segments.sort(function(a, b) { return a.start - b.start; });
-      var withIdle = [];
-      // Leading idle (day start → first segment start)
-      var first = segments[0];
-      if (first.start - dStart >= IDLE_THRESHOLD) {
-        withIdle.push({ kind: 'idle', start: dStart, end: first.start });
-      }
-      withIdle.push(first);
-      // Between-segment idle
-      for (var i = 1; i < segments.length; i++) {
-        var prev = segments[i - 1];
-        var cur  = segments[i];
-        if (cur.start - prev.end >= IDLE_THRESHOLD) {
-          withIdle.push({ kind: 'idle', start: prev.end, end: cur.start });
-        }
-        withIdle.push(cur);
-      }
-      // Trailing idle (last segment end → day end)
-      var last = withIdle[withIdle.length - 1];
-      if (dEnd - last.end >= IDLE_THRESHOLD) {
-        withIdle.push({ kind: 'idle', start: last.end, end: dEnd });
-      }
-      segments = withIdle;
-    }
-
+    // Push the day with raw segments. Idle gap insertion is
+    // deferred until AFTER all side-channel injections (playoff
+    // windows + top-level tier-3 from V2 day_config) so the idle
+    // calculator sees the complete segment list. Otherwise a
+    // playoff inserted at e.g. 17:30-20:30 would be covered by
+    // an earlier-computed trailing idle 17:00-21:30, producing
+    // a visible "playoff and equal-duration unallocated" duplicate
+    // — exactly the symptom the user reported.
     perDay.push({
       dayNum: dayNum,
       dayLabel: dayLabel,
@@ -7478,8 +7485,151 @@ function renderScheduleBars() {
         d.start = dayMinStart;
         d.end   = dayMaxEnd;
       });
+
+      // Append ghost perDay entries for V2 days that the last
+      // generation didn't produce. Newly-added V2 days have no
+      // match runs in _frcScheduled until the user regenerates,
+      // but the agenda-fit bar should still show them so structural
+      // edits don't appear silently lost. The ghost day carries
+      // V2 boundaries; any tier-2 segments (qual/practice match
+      // windows) and tier-3 / playoff blocks inside it land via
+      // the side-channels above on subsequent calls. dayNum is
+      // continued sequentially from the last existing perDay
+      // entry to keep day-color cycling consistent.
+      var lastDayNum = perDay.length ? (perDay[perDay.length - 1].dayNum || 0) : 0;
+      while (perDay.length < _dcLive.days.length) {
+        var ghostIdx = perDay.length;
+        var ghostV2  = _dcLive.days[ghostIdx];
+        var ghostBlocks = (ghostV2.blocks || []).map(function(b) {
+          return { s: _v2timeStrToMin(b.start), e: _v2timeStrToMin(b.end), b: b };
+        }).filter(function(t) { return t.s != null && t.e != null && t.e > t.s; });
+        if (!ghostBlocks.length) {
+          // Truly empty day — no rendering anchor. Skip.
+          break;
+        }
+        var ghostStart = ghostBlocks.reduce(function(m, t) { return m == null || t.s < m ? t.s : m; }, null);
+        var ghostEnd   = ghostBlocks.reduce(function(m, t) { return m == null || t.e > m ? t.e : m; }, null);
+        // Each tier-2 block (qual/practice) becomes a placeholder
+        // 'matches' segment with no committed/run data; the renderer
+        // shows it as the day-colored band with "(not yet scheduled)"
+        // hover. Tier-3 + playoff blocks are added via the
+        // dedicated branches below so we don't duplicate them here.
+        var ghostSegs = [];
+        ghostBlocks.forEach(function(t) {
+          var bt = t.b.type;
+          if (bt === 'qualification' || bt === 'practice') {
+            ghostSegs.push({
+              type:    bt === 'practice' ? 'practice' : 'qual',
+              kind:    'matches',
+              start:   t.s, end: t.e,
+              matchEnd: t.s,
+              matchCount: 0,
+              committed: 0,
+              available: t.e - t.s,
+              avgCt: 0,
+              cycleProgression: [],
+              firstMatchNum: null,
+              isGhost: true,
+            });
+          }
+        });
+        lastDayNum += 1;
+        var ghost = {
+          dayNum: lastDayNum,
+          dayLabel: 'Day ' + lastDayNum + ' \u00b7 ' +
+                    (typeof _v2dayClassifierFromBlocks === 'function'
+                      ? _v2dayClassifierFromBlocks(ghostV2.blocks || [])
+                      : 'Event day'),
+          dayDate: ghostV2.date || '',
+          isPractice: false,
+          start: ghostStart,
+          end:   ghostEnd,
+          segments: ghostSegs,
+        };
+        perDay.push(ghost);
+        // Run the playoff + tier-3 inject again for this fresh
+        // ghost day. The earlier loops only saw days that already
+        // existed in perDay; ghosts come into being here.
+        (ghostV2.blocks || []).forEach(function(b) {
+          var s = _v2timeStrToMin(b.start);
+          var e = _v2timeStrToMin(b.end);
+          if (s == null || e == null || e <= s) return;
+          if (b.type === 'playoff') {
+            ghost.segments.push({
+              kind:   'playoff',
+              start:  s, end: e,
+              format: b.playoffFormat || 'double_elim',
+              teams:  (b.playoffAlliances != null) ? b.playoffAlliances
+                    : (b.playoffTeams     != null) ? b.playoffTeams
+                    : 8,
+              playoffBreaks: (b.breaks || []).map(function(eb) {
+                return {
+                  start: _v2timeStrToMin(eb.start),
+                  end:   _v2timeStrToMin(eb.end),
+                  name:        eb.label       || _v2subtypeDefaultName(eb.type, eb.breakKind, eb.ceremonyKind),
+                  subtype:     eb.type        || 'break',
+                  breakKind:   eb.breakKind   || null,
+                  ceremonyKind: eb.ceremonyKind || null,
+                };
+              }).filter(function(eb) { return eb.start != null && eb.end != null && eb.end > eb.start; }),
+              label: 'Playoff',
+            });
+          } else if (b.type === 'break' || b.type === 'awards' ||
+                     b.type === 'alliance_selection' || b.type === 'ceremony') {
+            ghost.segments.push({
+              kind:    'break',
+              type:    'break',
+              start:   s, end: e,
+              label:        b.label || _v2subtypeDefaultName(b.type, b.breakKind, b.ceremonyKind),
+              subtype:      b.type,
+              breakKind:    b.breakKind    || null,
+              ceremonyKind: b.ceremonyKind || null,
+              duration:     e - s,
+            });
+          }
+        });
+        ghost.segments.sort(function(a, b) { return (a.start || 0) - (b.start || 0); });
+      }
     }
   } catch(_) {}
+
+  // ── Idle gap insertion ─────────────────────────────────────────
+  // Run AFTER all side-channels. Earlier this lived inside the
+  // _frcScheduled forEach loop and ran before playoff/tier-3 were
+  // injected — which produced the user-reported "playoff displayed
+  // alongside an equal-duration unallocated band" bug, because the
+  // trailing-idle was computed against the day's original end and
+  // the playoff was added on top of it. Now both sources contribute
+  // to segments before idle gets to fill any actual gaps.
+  var IDLE_THRESHOLD = 1;
+  perDay.forEach(function(d) {
+    if (d.start == null || d.end == null) return;
+    if (!d.segments || !d.segments.length) {
+      // Whole-day idle for a ghost with no blocks resolved
+      d.segments = [{ kind: 'idle', start: d.start, end: d.end }];
+      return;
+    }
+    d.segments.sort(function(a, b) { return a.start - b.start; });
+    var withIdle = [];
+    var first = d.segments[0];
+    if (first.start - d.start >= IDLE_THRESHOLD) {
+      withIdle.push({ kind: 'idle', start: d.start, end: first.start });
+    }
+    withIdle.push(first);
+    for (var i = 1; i < d.segments.length; i++) {
+      var prev = d.segments[i - 1];
+      var cur  = d.segments[i];
+      if (cur.start - prev.end >= IDLE_THRESHOLD) {
+        withIdle.push({ kind: 'idle', start: prev.end, end: cur.start });
+      }
+      withIdle.push(cur);
+    }
+    var last = withIdle[withIdle.length - 1];
+    if (d.end - last.end >= IDLE_THRESHOLD) {
+      withIdle.push({ kind: 'idle', start: last.end, end: d.end });
+    }
+    d.segments = withIdle;
+  });
 
   // ── Render ──────────────────────────────────────────────────────
   function fmtTime(m) {
@@ -7528,20 +7678,24 @@ function renderScheduleBars() {
         // schedule materialization, so the renderer can pick
         // a color and label tailored to opening / closing /
         // awards / alliance selection / lunch / break / other.
-        // Width fallback ladder:
-        //   ≥ 30 min → full label
-        //   12-30 min → initials
-        //   < 12 min  → blank, title only
+        //
+        // Width-percentage tiers (not duration): a 30-min block
+        // is huge in a 4-hour day but cramped in a 13-hour event
+        // day. Going by % of bar width keeps initials triggering
+        // when needed regardless of the day length.
+        //   widthPct ≥ 10% → full label
+        //   3% – 10%       → initials
+        //   < 3%           → blank, title-only
         var labels = (typeof _v2segLabels === 'function')
                    ? _v2segLabels(seg.subtype, seg.breakKind, seg.ceremonyKind, seg.label)
                    : { full: seg.label || 'Break', initials: 'B' };
-        var inline = segDur >= 30 ? labels.full
-                   : segDur >= 12 ? labels.initials
-                                  : '';
+        var inline = widthPct >= 10 ? labels.full
+                   : widthPct >= 3  ? labels.initials
+                                    : '';
         // Color per subtype — falls back to break orange.
         var bgColor = '#ec8a3f';
         if (seg.subtype === 'awards')             bgColor = '#d9a13e';
-        else if (seg.subtype === 'alliance_selection') bgColor = '#a17ed1';
+        else if (seg.subtype === 'alliance_selection') bgColor = '#3fa6a0';
         else if (seg.subtype === 'ceremony')      bgColor = '#dd7858';
         var tip = labels.full + ' \u2014 ' +
                   fmtTime(seg.start) + '\u2013' + fmtTime(seg.end) +
@@ -7555,12 +7709,14 @@ function renderScheduleBars() {
       if (seg.kind === 'playoff') {
         // Playoff window — purple band. Match generation is
         // deferred so this segment carries no committed/available
-        // math. Width-tiered label per the same ladder used for
-        // tier-3 segments:
-        //   ≥ 60 min → "Playoff · N Alliances"
-        //   30-60 min → "Playoff" + "N A" small
-        //   12-30 min → "PO" initials
-        //   < 12 min  → blank, title only
+        // math. Width-percentage tiered label so a 3-hour playoff
+        // in a 13-hour event day (~23%) gets the full alliance
+        // count, but the same playoff in a 24-hour viewport read
+        // (~12%) collapses to "Playoff", and tiny ones to "PO":
+        //   widthPct ≥ 18% → "Playoff · N Alliances"
+        //   widthPct ≥ 8%  → "Playoff"
+        //   widthPct ≥ 3%  → "PO"
+        //   below          → blank, title-only
         // Embedded children (awards / breaks / ceremonies that
         // were nested inside the playoff block in V2) overlay as
         // inset mini-bars positioned absolutely within the playoff
@@ -7568,11 +7724,11 @@ function renderScheduleBars() {
         var pfLabel = (V2_PLAYOFF_FORMAT_LABEL && V2_PLAYOFF_FORMAT_LABEL[seg.format]) || seg.format || 'Playoff';
         var nAll    = seg.teams || 8;
         var pInline = '';
-        if (segDur >= 60) {
+        if (widthPct >= 18) {
           pInline = 'Playoff \u00b7 ' + nAll + ' Alliance' + (nAll === 1 ? '' : 's');
-        } else if (segDur >= 30) {
+        } else if (widthPct >= 8) {
           pInline = 'Playoff';
-        } else if (segDur >= 12) {
+        } else if (widthPct >= 3) {
           pInline = 'PO';
         }
         var pTip = 'Playoff: ' + pfLabel + ' \u00b7 ' + nAll + ' alliance' + (nAll === 1 ? '' : 's') + ' \u2014 '
@@ -7597,12 +7753,17 @@ function renderScheduleBars() {
           var ebLabels = (typeof _v2segLabels === 'function')
                        ? _v2segLabels(eb.subtype, eb.breakKind, eb.ceremonyKind, eb.name)
                        : { full: eb.name || 'Break', initials: 'B' };
-          var ebInline = ebDur >= 30 ? ebLabels.full
-                       : ebDur >= 12 ? ebLabels.initials
-                                     : '';
+          // widthPctIn is % of the parent playoff segment (not of
+          // the day), so the thresholds are tighter — even a small
+          // inset is visible against a wide playoff band. Same
+          // ladder shape as elsewhere though, so all renders
+          // converge at high zoom.
+          var ebInline = widthPctIn >= 20 ? ebLabels.full
+                       : widthPctIn >= 8  ? ebLabels.initials
+                                          : '';
           var ebColor = '#ec8a3f';
           if (eb.subtype === 'awards')             ebColor = '#d9a13e';
-          else if (eb.subtype === 'alliance_selection') ebColor = '#a17ed1';
+          else if (eb.subtype === 'alliance_selection') ebColor = '#3fa6a0';
           else if (eb.subtype === 'ceremony')      ebColor = '#dd7858';
           var ebTip = ebLabels.full + ' \u2014 ' +
                       fmtTime(ebStart) + '\u2013' + fmtTime(ebEnd) +
@@ -12066,7 +12227,7 @@ var V2_BLOCK_TYPES = {
   // Only start/end times needed; no body content beyond a label.
   // timeOnly: true signals the renderer to skip the expanded body
   // (no format/teams/break-type fields apply).
-  alliance_selection: { tier: 3, label: 'Alliance selection', shortLabel: 'Alliance',  color: '#a17ed1', schedulable: false, practiceFields: false, hasNestedBreaks: false, isPlayoff: false, timeOnly: true  },
+  alliance_selection: { tier: 3, label: 'Alliance selection', shortLabel: 'Alliance',  color: '#3fa6a0', schedulable: false, practiceFields: false, hasNestedBreaks: false, isPlayoff: false, timeOnly: true  },
   // Awards — closing ceremony, recognition, etc. Fixed time block,
   // no matches. Same minimal shape as alliance_selection.
   awards:             { tier: 3, label: 'Awards',             shortLabel: 'Awards',    color: '#d9a13e', schedulable: false, practiceFields: false, hasNestedBreaks: false, isPlayoff: false, timeOnly: true  },
@@ -12684,9 +12845,22 @@ function _v2reorderSiblingsByTime(blockEl) {
 
 function _v2blockChangesToV1(matchBlock, matchOffset) {
   if (!matchBlock) return [];
+  // afterMatch in V2 is local to the block (1-based within this
+  // qual/practice block). The V1 scheduler uses a global matchIdx
+  // counter that doesn't reset across days. So when downgrading,
+  // shift each non-start cycle change by matchOffset (= the count
+  // of matches scheduled before this block) so the cc fires at
+  // the right global match number. Without this, a multi-day
+  // event with "after match 5" on day 2 would trigger immediately
+  // on day 2's first match (because matchIdx is already past 5).
+  var offset = matchOffset || 0;
   var ccs = [{ isStart: true, time: matchBlock.cycleTime }];
   (matchBlock.changes || []).forEach(function(cc) {
-    ccs.push({ afterMatch: cc.afterMatch, time: cc.cycleTime, isStart: false });
+    ccs.push({
+      afterMatch: (cc.afterMatch || 0) + offset,
+      time:       cc.cycleTime,
+      isStart:    false,
+    });
   });
   return ccs;
 }
@@ -13649,7 +13823,7 @@ function _v2buildPicker(allowedTypes, onSelect) {
   var rows = [];
   if (allowedTypes.indexOf('practice')           !== -1) rows.push('<div class="picker-item" data-type="practice"><span class="v2-swatch" style="background:#5daf78;"></span>Practice</div>');
   if (allowedTypes.indexOf('qualification')      !== -1) rows.push('<div class="picker-item" data-type="qualification"><span class="v2-swatch" style="background:#7aa4f0;"></span>Qualification</div>');
-  if (allowedTypes.indexOf('alliance_selection') !== -1) rows.push('<div class="picker-item" data-type="alliance_selection"><span class="v2-swatch" style="background:#a17ed1;"></span>Alliance selection</div>');
+  if (allowedTypes.indexOf('alliance_selection') !== -1) rows.push('<div class="picker-item" data-type="alliance_selection"><span class="v2-swatch" style="background:#3fa6a0;"></span>Alliance selection</div>');
   if (allowedTypes.indexOf('playoff')            !== -1) rows.push('<div class="picker-item" data-type="playoff"><span class="v2-swatch" style="background:#bd92f0;"></span>Playoff</div>');
   if (allowedTypes.indexOf('awards')             !== -1) rows.push('<div class="picker-item" data-type="awards"><span class="v2-swatch" style="background:#d9a13e;"></span>Awards</div>');
   if (allowedTypes.indexOf('ceremony')           !== -1) rows.push('<div class="picker-item" data-type="ceremony"><span class="v2-swatch" style="background:#dd7858;"></span>Ceremony</div>');
@@ -15350,7 +15524,28 @@ function renderSchedule() {
   var f = window._frcFilters;
   // Read cycle time info from UI for day title display (fixes scope error)
   var defaultCycleTime = parseFloat(document.getElementById('cycleTime').value) || 8;
-  var cycleChanges = getCycleTimeChanges();
+  // Pull cycleChanges from collectDayConfig (V2-aware) so day-title
+  // labels in the schedule output reflect V2 edits. getCycleTimeChanges
+  // alone walks V1 .day-cc-row markup, which is hidden + stale when
+  // V2 is the active editor — same staleness pattern that was making
+  // V2 cc edits invisible in the URL. Flatten per-day cc lists into
+  // a single global-afterMatch list since renderSchedule's downstream
+  // helpers (getCycleTime, day-title formatter) treat afterMatch as
+  // global. _v2blockChangesToV1 already shifts to global on emit.
+  var cycleChanges = (function() {
+    try {
+      var dc = (typeof collectDayConfig === 'function') ? collectDayConfig() : null;
+      if (!dc || !dc.days) return getCycleTimeChanges();
+      var flat = [];
+      dc.days.forEach(function(day, i) {
+        (day.cycleChanges || []).forEach(function(cc) {
+          if (cc.isStart) return;
+          flat.push({ after: cc.afterMatch, time: cc.time, day: i + 1 });
+        });
+      });
+      return flat.sort(function(a, b) { return a.after - b.after; });
+    } catch(_) { return getCycleTimeChanges(); }
+  })();
   var rb = window._frcRoundBoundaries || new Map();
   // Build a reverse map: matchNum (1-based) -> round number
   var matchNumToRound = new Map();
