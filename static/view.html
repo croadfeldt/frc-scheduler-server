@@ -1240,9 +1240,21 @@
 
   /* Make table cells visibly clickable as toggles */
   .team-cell-clickable { cursor: pointer; user-select: none; }
-  .team-cell-clickable:hover {
-    outline: 2px solid var(--primary); outline-offset: -2px;
-    border-radius: 3px;
+  /* Hover outline gated to mouse-capable devices. On touch
+     devices, :hover styles persist after the finger lifts (a
+     long-standing browser quirk — the touch is treated as a
+     "hover" until the next tap somewhere else), leaving a
+     sticky outline on the last-tapped cell. @media (hover:
+     hover) matches only devices with a real hover pointer
+     (mouse, trackpad), so touch devices skip this rule entirely
+     and never get the stuck-outline effect. The cursor change
+     to pointer is preserved for mouse users; touch users get
+     direct tap-to-select feedback via the cell's color change. */
+  @media (hover: hover) {
+    .team-cell-clickable:hover {
+      outline: 2px solid var(--primary); outline-offset: -2px;
+      border-radius: 3px;
+    }
   }
   /* No special treatment for the primary team in the schedule.
      The primary still drives the per-team stats block, but the
