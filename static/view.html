@@ -2270,13 +2270,22 @@ function syncThemeButton() {
 // color-position memory don't get rearranged. Slot 1 was pulled
 // from cyan to sage-mint because pure cyan reads too close to
 // alliance blue (#4a90e2) when both are saturated.
+//
+// V3 (May 2026 follow-up): bumped saturation to ~40-60% range
+// and pushed greens further from practice-day green (#5daf78
+// at HSL 138°). Slot 1 mint → cyan-blue at 192° (clearly cyan,
+// not green-leaning). Slot 3 sage → chartreuse at 75° (yellow-
+// lime, distinctly different from practice's grassy 138°).
+// Adjacent-slot distinguishability also improved with the
+// saturation bump — earlier muted set had slots that blurred
+// together, especially the two greens.
 var TEAM_COLORS = [
-  '#c47b9e',  // 0: dusty rose       (was hot pink   #e63ec1)
-  '#6db1a6',  // 1: sage-mint        (was cyan       #22c5d6)
-  '#c9a256',  // 2: antique gold     (was vivid      #facc15)
-  '#8aa66a',  // 3: sage green       (was lime       #9aef3d)
-  '#9d8cb8',  // 4: smoky lavender   (was purple     #bd92f0)
-  '#c88a6e',  // 5: terracotta       (was coral      #ff8b73)
+  '#d56e9e',  // 0: rose pink        (HSL 333°, 55%, 64%)
+  '#39a5c4',  // 1: cyan-blue        (HSL 192°, 56%, 49%)
+  '#d9a13e',  // 2: amber/gold       (HSL  39°, 67%, 55%)
+  '#9bbc3f',  // 3: chartreuse-lime  (HSL  75°, 51%, 49%)
+  '#a17ed1',  // 4: lavender         (HSL 263°, 47%, 66%)
+  '#dd7858',  // 5: coral-orange     (HSL  12°, 67%, 61%)
 ];
 
 // Build a standardized day label using event-day numbering — the
@@ -5351,16 +5360,26 @@ function _buildAllianceLineHtml(entry, opts) {
     var inMine = STATE.myTeams && (
       STATE.myTeams.has(teamN) || STATE.myTeams.has(String(t)) || STATE.myTeams.has(t)
     );
-    var cls = 'team-cell ' + (alliance === 'Blue' ? 'blue' : 'red');
-    var titleAttr = ' title="' + alliance + ' ' + stationNum + '"';
+    // The team-cell-clickable class makes the cell respond to a
+    // click anywhere on the chip. Same hover treatment as
+    // schedule cells (gated to mouse-capable devices via
+    // @media (hover: hover) so mobile doesn't get sticky outlines).
+    // Tapping a team here toggles their selection — convenient
+    // when watching the next-match card or 3-up Nexus stages and
+    // wanting to add a team you didn't have before.
+    var cls = 'team-cell team-cell-clickable ' + (alliance === 'Blue' ? 'blue' : 'red');
+    var titleAttr = ' title="' + alliance + ' ' + stationNum +
+                    ' \u2014 click to ' + (inMine ? 'remove from' : 'add to') + ' your selection"';
+    var onclickAttr = ' onclick="toggleTeamSelection(' + teamN + ')"';
     if (inMine) {
       var c = _teamColor(teamN);
-      return '<span class="' + cls + ' my-team" style="--team-color:' + c + ';"' + titleAttr + '>' +
+      return '<span class="' + cls + ' my-team" style="--team-color:' + c + ';"' +
+             titleAttr + onclickAttr + '>' +
              '<span class="station">' + stationNum + '</span>' +
              '<span class="num">' + teamN + '</span>' +
              '</span>';
     }
-    return '<span class="' + cls + '"' + titleAttr + '>' +
+    return '<span class="' + cls + '"' + titleAttr + onclickAttr + '>' +
            '<span class="station">' + stationNum + '</span>' +
            '<span class="num">' + teamN + '</span>' +
            '</span>';
