@@ -5019,9 +5019,49 @@ async function initAuth() {
       // Safari) that close gets blocked — the status helps when
       // it's not obvious the flow finished.
       try { showApiStatus('\u2713 Signed in'); } catch(_) {}
+      // Drain any action that was queued while waiting for auth.
+      // Set by requireAuthThen() when the user clicked something
+      // that needs sign-in (e.g. Lock). Without this drain, the
+      // user would have to re-click after signing in. Wrapped in
+      // setTimeout so the modal close transition completes first
+      // and the API status toast (above) is visible before the
+      // action's own status messages.
+      var pending = window._frcAuthPendingAction;
+      if (pending) {
+        window._frcAuthPendingAction = null;
+        setTimeout(function() {
+          try { pending(); }
+          catch(err) { console.warn('Pending auth action failed:', err); }
+        }, 50);
+      }
     }
   });
   await refreshAuthUI();
+}
+
+// Run an action that requires sign-in. If the user is already
+// authenticated, runs immediately. Otherwise, queues the action
+// to fire once auth completes (the postMessage handler in initAuth
+// drains the queue) and opens the auth modal.
+//
+// description is a short verb phrase used in the toast — e.g. for
+// the lock button it's "lock or unlock schedules", surfaced as
+// "Sign in to lock or unlock schedules".
+//
+// Only one action can be queued at a time; clicking another
+// auth-required button while a queue is pending overwrites the
+// previous one. That's intentional — users typically want their
+// most recent intent honored.
+window._frcAuthPendingAction = null;
+function requireAuthThen(actionFn, description) {
+  if (typeof getToken === 'function' && getToken()) {
+    return actionFn();
+  }
+  window._frcAuthPendingAction = actionFn;
+  if (typeof showApiStatus === 'function') {
+    showApiStatus('Sign in to ' + (description || 'continue'), true);
+  }
+  if (typeof openAuthModal === 'function') openAuthModal();
 }
 
 async function refreshAuthUI() {
@@ -10024,13 +10064,18 @@ async function createEvent() {
 // work). The URL also gets ?locked=1 for visual continuity but
 // the DB is the authoritative source.
 async function toggleLockSchedule() {
-  // Need an authenticated user to lock anything in the DB. If they
-  // aren't logged in, prompt them to sign in.
-  if (typeof getToken === 'function' && !getToken()) {
-    showApiStatus('Sign in to lock or unlock schedules', true);
-    if (typeof openAuthModal === 'function') openAuthModal();
-    return;
-  }
+  // Auth gate is handled by requireAuthThen — when the user isn't
+  // signed in, that helper queues this action and opens the auth
+  // modal. After the OAuth popup posts back its token, the postMessage
+  // handler in initAuth drains the queue and re-invokes us (this
+  // time with a token in localStorage so the early-return below is
+  // a no-op). User experience: one click, sign in, lock applies
+  // automatically. Previously the user had to click Lock a second
+  // time after sign-in.
+  return requireAuthThen(_doToggleLockSchedule, 'lock or unlock schedules');
+}
+
+async function _doToggleLockSchedule() {
   if (!_currentAssignedScheduleId) {
     // No persisted schedule yet — fall back to the session-only lock
     // so users can still freeze a not-yet-saved schedule. Won't
