@@ -151,12 +151,78 @@
   .filter-row { margin-top: 0.6rem; display: flex; gap: 0.5rem; align-items: center; font-size: 13px; color: var(--text-muted); }
   .filter-row label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; user-select: none; }
 
-  .next-match-card { display: flex; flex-direction: column; }
-  .next-match-card.active { border-left: 4px solid var(--next-match-accent); }
+  /* Status / Field status / Team panels.
+     Historically the right card carried both team-specific output
+     (.next-match-detail / countdown / meta) and overall field
+     state. As of the panel split, team-specific lives in the
+     left card under .team-next-section, and the right card
+     ("Field status") is purely overall. The CSS below scopes
+     the active/empty states to the section, NOT the whole card,
+     so the input row + filter row in the team card stay visually
+     normal even when the section is highlighted or empty. */
   .next-match-detail { font-size: 22px; font-weight: 700; color: var(--text); margin: 4px 0; }
   .next-match-meta { font-size: 13px; color: var(--text-muted); }
   .next-match-meta strong { color: var(--text); font-weight: 600; }
-  .next-match-card.empty { color: var(--text-muted); font-style: italic; }
+
+  /* Team next-match section — moved-from-status-card content lives
+     here. Visual states:
+       .empty   — italic + muted, scoped to the section so the input
+                  row above stays normal-weight.
+       .active  — left-border accent when team's match is currently
+                  playing. Scoped to the section.  */
+  .team-next-section {
+    margin-top: 0.85rem;
+    padding-top: 0.65rem;
+    border-top: 1px dotted var(--border);
+  }
+  .team-next-section.active {
+    border-left: 3px solid var(--next-match-accent);
+    margin-left: -1.25rem;     /* offset card padding so the accent
+                                  sits flush against the card edge */
+    padding-left: 1.05rem;
+  }
+  .team-next-section.empty .next-match-detail {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 13px;
+    font-weight: 400;
+  }
+  .team-next-header {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.4rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .team-next-header-ctx {
+    font-weight: 400;
+    color: var(--text-muted);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 11px;
+  }
+  /* Right-side context span on the card-label row. Used by both
+     the team card ("Team N" / "3 teams") and the field-status
+     card ("Day 2 · Saturday"). margin-left: auto pushes it to
+     the far right of the flex card-label row. */
+  .card-label-ctx {
+    margin-left: auto;
+    font-weight: 400;
+    color: var(--text-muted);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 11px;
+    /* Trim from the right when the row gets tight — the live
+       pill always wins for visibility. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 50%;
+  }
 
   /* Live indicator pill in the status card label. Sits inline with
      "Status" text, becomes visible only when STATE.liveMode is true.
@@ -1513,9 +1579,20 @@
     <div class="live-strip no-print" id="liveStrip" style="display:none;"></div>
 
     <div class="action-grid no-print">
-      <!-- Team search card -->
-      <div class="card">
-        <div class="card-label">Find Your Team(s)</div>
+      <!-- Team search card. Two-section layout: input/filters on top,
+           moved-from-status-card next-match panel on the bottom. The
+           bottom section is a self-contained "team-next-section" that
+           carries the active/empty visual states (left-border accent
+           when team is currently playing; muted italic when empty).
+           Scoping the state classes to the section (not the whole
+           card) keeps the input row looking normal in all states. -->
+      <div class="card team-card" id="teamCard">
+        <div class="card-label">
+          <span>Your Team(s)</span>
+          <!-- Right-aligned context — populated by updateNextMatch
+               with "Team N" or "N teams" when myTeams is non-empty. -->
+          <span class="card-label-ctx" id="teamCardLabelCtx"></span>
+        </div>
         <div class="team-input-row">
           <input type="text" id="myTeam" placeholder="Team number(s) — comma-separated"
                  autocomplete="off" autocapitalize="off" spellcheck="false"
@@ -1528,6 +1605,25 @@
           <label><input type="checkbox" id="onlyMine" onchange="rerender()"> Only my matches</label>
           <span style="flex:1"></span>
           <span id="myStatus"></span>
+        </div>
+
+        <!-- ── Team-specific next-match section (moved from the
+             former Status card). Holds the lead detail line, big
+             countdown, alliance/partners line, queue pill, score,
+             team-stats grid (Rank · Record · Played · Avg · EPA),
+             external links, and estimated finish. updateNextMatch
+             writes into the same IDs as before — they just live
+             here now instead of in the right card. -->
+        <div class="team-next-section empty" id="teamNextSection">
+          <div class="team-next-header">
+            <span>Next match</span>
+            <!-- Same role as the Option C ctx span on the field
+                 status card. Stays empty when no team selected. -->
+            <span class="team-next-header-ctx" id="teamNextHeaderCtx"></span>
+          </div>
+          <div class="next-match-detail" id="nextMatchDetail">Enter your team number to find your matches</div>
+          <div class="next-match-countdown" id="nextMatchCountdown" style="display:none;"></div>
+          <div class="next-match-meta" id="nextMatchMeta"></div>
         </div>
       </div>
 
@@ -1547,10 +1643,30 @@
            Footer: links to Phil's cycle times tool (deep-linked to
            the current event when key is available) and Bennett's
            dashboard. -->
-      <div class="card next-match-card empty" id="nextMatchCard">
+      <!-- Field status card. Three-section layout (all overall —
+           team-specific now lives in the team card to the left):
+           1. Schedule delta box — derived from TBA actual_time on the
+              last completed qual match. Shows "Behind by 12 min" /
+              "On time" / "Ahead by 5 min" with a subtitle giving the
+              last match number, its actual finish vs. scheduled, and
+              the cycle time for context (matches Phil's cycle-times
+              tool format). Hidden when no matches have completed.
+           2. Nexus 3-up — on-field / on-deck / queueing matches per
+              Nexus queue_status. Greyed out (scheduled-time placeholders)
+              when Nexus data isn't available; hidden entirely when no
+              live data at all.
+           3. Cycle-stats panel.
+           Footer: links to Phil's cycle times tool (deep-linked to
+           the current event when key is available) and Bennett's
+           dashboard. -->
+      <div class="card field-status-card" id="nextMatchCard">
         <div class="card-label" id="statusCardLabel">
-          <span>Status</span>
+          <span>Field status</span>
           <span class="status-live-pill" id="statusLivePill" style="display:none;">LIVE</span>
+          <!-- Day context — populated by _renderFieldStatusContext()
+               with "Day 2 · Saturday" or "Practice · Friday" or
+               "Starts Sat Apr 4" depending on event progress. -->
+          <span class="card-label-ctx" id="fieldStatusCtx"></span>
         </div>
 
         <!-- Schedule delta — populated by _renderScheduleDelta() -->
@@ -1631,10 +1747,6 @@
           <div class="field-status-line" id="fieldStatusLine"></div>
           <div class="field-status-countdown" id="fieldStatusCountdown"></div>
         </div>
-
-        <div class="next-match-detail" id="nextMatchDetail">Enter your team number to find your matches</div>
-        <div class="next-match-countdown" id="nextMatchCountdown" style="display:none;"></div>
-        <div class="next-match-meta" id="nextMatchMeta"></div>
 
         <!-- External-tool footer. Renders unconditionally so the
              links are always one click away even before live data
@@ -4418,6 +4530,111 @@ function _updateStatusLinks() {
   bennett.setAttribute('href', 'https://frcdashboard.bennettn.org');
 }
 
+// Populate the right-aligned context span on the field-status card
+// label. Resolves to one of:
+//   "Day 2 · Saturday"   — viewing during the event, day in progress
+//   "Practice · Friday"  — practice day in progress
+//   "Starts Sat Apr 4"   — event hasn't started yet
+//   "Ended Sun Apr 6"    — event finished
+//   ""                   — no schedule loaded
+// The picker walks STATE.computed for day-divider entries (which
+// carry { dayNum, isPractice, date } as YYYY-MM-DD), finds the one
+// whose date matches today, and formats it. If none matches we
+// look at the event start_date / end_date to decide between
+// "starts" and "ended". Day labels reuse eventDayLabel() so the
+// numbering matches the schedule grid above.
+function _renderFieldStatusContext() {
+  var ctx = document.getElementById('fieldStatusCtx');
+  if (!ctx) return;
+  ctx.textContent = '';
+  if (!STATE.computed || !STATE.computed.length) return;
+
+  // Today as YYYY-MM-DD in local time.
+  var now = new Date();
+  var todayStr = now.getFullYear() + '-' +
+                 String(now.getMonth() + 1).padStart(2, '0') + '-' +
+                 String(now.getDate()).padStart(2, '0');
+  var WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  // Collect day-dividers; we'll pick the one whose date is today
+  // first, falling back to whichever divider lies in the future.
+  var dayDividers = STATE.computed.filter(function(e) { return e.type === 'day-divider'; });
+  if (!dayDividers.length) return;
+
+  // Helper: parse YYYY-MM-DD as a *local* Date (avoid the UTC
+  // pitfalls of `new Date('2026-04-05')` which would be midnight
+  // UTC and read as the previous day in negative-offset zones).
+  function parseLocalYMD(s) {
+    if (!s || typeof s !== 'string') return null;
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (!m) return null;
+    return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+  }
+
+  // Currently active day = the divider whose date matches today.
+  var activeDiv = dayDividers.find(function(d) { return d.date === todayStr; });
+  if (activeDiv) {
+    var weekday = WEEKDAYS[parseLocalYMD(activeDiv.date).getDay()] || '';
+    var label;
+    if (activeDiv.isPractice) {
+      label = 'Practice';
+    } else {
+      // Event-day labeling: the label on the divider already
+      // includes the date suffix; strip it to keep the ctx span
+      // tight ("Day 2" not "Day 2 · Sat, Apr 4, 2026").
+      var rawLabel = activeDiv.label || ('Day ' + activeDiv.dayNum);
+      label = rawLabel.split(' \u00b7 ')[0];
+    }
+    ctx.textContent = label + (weekday ? ' \u00b7 ' + weekday : '');
+    return;
+  }
+
+  // No active day → event hasn't started or has ended. Look at
+  // event metadata to decide which message to show.
+  var sch = STATE.schedule || {};
+  var ev  = sch.event || {};
+  var startStr = ev.start_date;
+  var endStr   = ev.end_date;
+  var startD = parseLocalYMD(startStr);
+  var endD   = parseLocalYMD(endStr || startStr);
+  if (!startD) {
+    // No event dates at all — skip; the panel works fine without
+    // a context line.
+    return;
+  }
+  var todayD = parseLocalYMD(todayStr);
+  if (todayD && todayD < startD) {
+    ctx.textContent = 'Starts ' + WEEKDAYS_SHORT[startD.getDay()] +
+                      ' ' + MONTHS_SHORT[startD.getMonth()] +
+                      ' ' + startD.getDate();
+    return;
+  }
+  if (endD && todayD && todayD > endD) {
+    ctx.textContent = 'Ended ' + WEEKDAYS_SHORT[endD.getDay()] +
+                      ' ' + MONTHS_SHORT[endD.getMonth()] +
+                      ' ' + endD.getDate();
+    return;
+  }
+  // Fallback: today is between start and end but no matching divider.
+  // Could happen on a layover day (e.g. travel day between practice
+  // Friday and qualifications Sunday). Show the first divider whose
+  // date is today or later; lets the audience know what's next.
+  var upcoming = dayDividers.find(function(d) {
+    return d.date && d.date >= todayStr;
+  });
+  if (upcoming) {
+    var ud = parseLocalYMD(upcoming.date);
+    if (ud) {
+      ctx.textContent = 'Next: ' + WEEKDAYS_SHORT[ud.getDay()] +
+                        ' ' + MONTHS_SHORT[ud.getMonth()] +
+                        ' ' + ud.getDate();
+    }
+  }
+}
+
 // Toggle the LIVE pill in the status card label based on the
 // current live-mode state. Runs whenever the status panel renders.
 function _renderLivePill() {
@@ -4906,8 +5123,9 @@ function updateFieldStatus() {
   // Each render function is idempotent and defends against missing
   // DOM nodes. Section visibility is set explicitly per state to
   // avoid stale visibility bleed when switching events.
-  try { _renderLivePill();    } catch(_) {}
-  try { _updateStatusLinks(); } catch(_) {}
+  try { _renderLivePill();          } catch(_) {}
+  try { _updateStatusLinks();       } catch(_) {}
+  try { _renderFieldStatusContext();} catch(_) {}
 
   // Hide everything first, then enable per-state.
   var threeUp     = document.getElementById('statusThreeUp');
@@ -5165,29 +5383,59 @@ function _tickFieldCountdown() {
 }
 
 function updateNextMatch(nowMatchNum) {
-  const card = document.getElementById('nextMatchCard');
+  // Two cards now: the team card holds the next-match section; the
+  // field-status card (id "nextMatchCard" preserved for back-compat
+  // with code paths elsewhere) is purely overall. State classes
+  // (active / empty) apply to the section, not the whole card —
+  // see CSS comment above .team-next-section.
+  const section = document.getElementById('teamNextSection');
   const detail = document.getElementById('nextMatchDetail');
   const meta = document.getElementById('nextMatchMeta');
   const myStatus = document.getElementById('myStatus');
   const countdown = document.getElementById('nextMatchCountdown');
+  // Card-label context spans — populated by helpers below. The
+  // team card gets "Team N" / "3 teams" or stays empty when no
+  // teams are selected; the field-status card gets "Day 2 ·
+  // Saturday" or similar.
+  const teamCardCtx     = document.getElementById('teamCardLabelCtx');
+  const teamHeaderCtx   = document.getElementById('teamNextHeaderCtx');
+  // Always refresh the field-status card label context — it's
+  // independent of team selection, but lives in the same render
+  // pass since updateNextMatch is the canonical "render everything"
+  // hook.
+  try { _renderFieldStatusContext(); } catch(_) {}
 
   // Render chips below the input on every refresh
   renderSelectedTeamChips();
 
   if (!STATE.myPrimary) {
-    card.className = 'card next-match-card empty';
-    detail.textContent = 'Enter team number(s) to find your matches';
+    if (section) section.className = 'team-next-section empty';
+    detail.textContent = 'Enter your team number to see your next match and countdown';
     meta.textContent = '';
     myStatus.textContent = '';
     if (countdown) { countdown.style.display = 'none'; }
+    if (teamCardCtx)   teamCardCtx.textContent   = '';
+    if (teamHeaderCtx) teamHeaderCtx.textContent = '';
     _stopCountdown();
     return;
   }
 
   const primaryTeam = STATE.myPrimary;
+  // Populate the card-label + section-header context spans.
+  // Both spans show the same string: when one team is selected,
+  // "Team N"; when multiple, "N teams". The card-label one is
+  // visible from far away (top of the card); the section-header
+  // one sits next to "Next match" so it's clear whose data is
+  // showing inside the section.
+  const totalSelLabel = (STATE.myTeams && STATE.myTeams.size > 1)
+    ? STATE.myTeams.size + ' teams'
+    : 'Team ' + primaryTeam;
+  if (teamCardCtx)   teamCardCtx.textContent   = totalSelLabel;
+  if (teamHeaderCtx) teamHeaderCtx.textContent = totalSelLabel;
+
   const myMatches = (STATE.computed || []).filter(e => e.type === 'match' && matchHasTeam(e, primaryTeam));
   if (!myMatches.length) {
-    card.className = 'card next-match-card empty';
+    if (section) section.className = 'team-next-section empty';
     detail.textContent = 'Team ' + primaryTeam + ' is not in this schedule';
     meta.textContent = '';
     myStatus.textContent = '';
@@ -5253,7 +5501,10 @@ function updateNextMatch(nowMatchNum) {
     }) || myMatches[myMatches.length - 1];  // all done? show the last one
   }
 
-  card.className = 'card next-match-card' + (targetIsPlaying ? ' active' : '');
+  // Apply active state to the section (not the whole card) so the
+  // input row above stays visually normal. The CSS scopes the
+  // accent border to the section.
+  if (section) section.className = 'team-next-section' + (targetIsPlaying ? ' active' : '');
 
   // Header line — "Now playing" / "Up next" / "Final" with match details
   const targetLive = _liveFor(target);
