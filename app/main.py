@@ -30,7 +30,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from app.db import (
-    AbstractSchedule, AssignedSchedule, AsyncSessionLocal,
+    AbstractSchedule, AssignedSchedule, AssignedScheduleHistory,
+    AssignedScheduleLockEvent, AsyncSessionLocal,
     Event, EventTeam, MatchResult, MatchRow, PdfImport, Team, User,
     get_session, init_db,
 )
@@ -846,6 +847,17 @@ async def assign_teams_endpoint(
             return
 
         async with AsyncSessionLocal() as db:
+            # Event-freeze guard for new schedule creation. When the
+            # event is frozen the user shouldn't be able to spin up
+            # new schedules under it (matches the "no changes to the
+            # event" semantics). Done here AFTER the assignment math
+            # rather than at request entry because the assignment is
+            # already done by this point — refusing here just means
+            # we don't persist; the user gets a clean error.
+            ev_check = await db.get(Event, body.event_id) if body.event_id else None
+            if _is_event_frozen(ev_check):
+                yield f"data: {json.dumps({'type':'error','message':'Event is frozen — cannot create new schedules.'})}\n\n"
+                return
             await db.execute(
                 update(AssignedSchedule)
                 .where(AssignedSchedule.event_id == body.event_id)
@@ -872,6 +884,11 @@ async def assign_teams_endpoint(
                     blue1_surrogate=m["blue_surrogate"][0], blue2_surrogate=m["blue_surrogate"][1],
                     blue3_surrogate=m["blue_surrogate"][2],
                 ))
+            # Initial history row — captures the schedule as created.
+            # Without this, history view would be empty until the
+            # first PATCH lands. Action='create' so the UI can
+            # distinguish "this is the original".
+            await _snapshot_schedule_history(db, assigned, action="create", current_user=current_user)
             await db.commit()
 
         yield f"data: {json.dumps({'type':'done','assigned_schedule_id':assigned.id,'score':best_result['score'],'pct':100})}\n\n"
@@ -890,17 +907,23 @@ async def list_assigned_schedules(event_id: int, db: AsyncSession = Depends(get_
         .where(AssignedSchedule.event_id == event_id)
         .order_by(AssignedSchedule.created_at.desc())
     )
-    # Include lock fields so the saved-schedules modal can show a
-    # 🔒 indicator without a per-row GET. Display name comes from
-    # the snapshot stored at lock time.
+    # Include lock + official fields so the saved-schedules modal
+    # can render indicators (🔒 ⭐ "edited") without a per-row GET.
+    # `is_official` is the permanent commitment marker (one per
+    # event), `updated_at` tells the UI whether a schedule has been
+    # edited since creation.
     return [
         {"id": s.id, "name": s.name, "is_active": s.is_active,
          "abstract_schedule_id": s.abstract_schedule_id,
          "num_teams": s.abstract_schedule.num_teams,
          "matches_per_team": s.abstract_schedule.matches_per_team,
          "created_at": s.created_at.isoformat(),
+         "updated_at": s.updated_at.isoformat() if s.updated_at else None,
          "locked_at":      s.locked_at.isoformat() if s.locked_at else None,
-         "locked_by_name": s.locked_by_name}
+         "locked_by_name": s.locked_by_name,
+         "is_official":      s.is_official,
+         "official_at":      s.official_at.isoformat() if s.official_at else None,
+         "official_by_name": s.official_by_name}
         for s in result.scalars()
     ]
 
@@ -910,7 +933,11 @@ async def _build_assigned_schedule_response(assigned: AssignedSchedule, db: Asyn
 
     Includes lock fields so the frontend can render the locked state
     on first load without a separate fetch. Lock fields are nullable
-    (None when unlocked).
+    (None when unlocked). Also includes is_official + official_*
+    metadata so the UI can render the star indicator and gate
+    the Delete button. Event-level lock state ships under
+    `event.locked_at` so the editor can render the "event frozen"
+    banner without a second fetch.
 
     Always fetches abstract_schedule explicitly via db.get() rather
     than dereferencing assigned.abstract_schedule directly. The lazy
@@ -936,6 +963,12 @@ async def _build_assigned_schedule_response(assigned: AssignedSchedule, db: Asyn
             "id": event.id, "key": event.key, "name": event.name,
             "year": event.year, "location": event.location,
             "branding": event.branding or {},
+            # Event-level freeze state — independent of per-schedule
+            # lock. UI uses this to gate a separate "Event frozen"
+            # banner with the matching disabled-buttons treatment.
+            "locked_at":         event.locked_at.isoformat() if event.locked_at else None,
+            "locked_by_user_id": event.locked_by_user_id,
+            "locked_by_name":    event.locked_by_name,
         }
     return {
         "id": assigned.id, "name": assigned.name, "is_active": assigned.is_active,
@@ -950,10 +983,104 @@ async def _build_assigned_schedule_response(assigned: AssignedSchedule, db: Asyn
         "round_boundaries": abstract.round_boundaries,
         "day_config": assigned.day_config,
         "created_at": assigned.created_at.isoformat(),
+        # updated_at lets the UI render an "edited" badge by comparing
+        # against created_at. Bumped on every PATCH and restore.
+        "updated_at": assigned.updated_at.isoformat() if assigned.updated_at else None,
         "locked_at":         assigned.locked_at.isoformat() if assigned.locked_at else None,
         "locked_by_user_id": assigned.locked_by_user_id,
         "locked_by_name":    assigned.locked_by_name,
+        # Official mark — at most one True per event_id (partial
+        # unique index). UI gates Delete and renders the star icon.
+        "is_official":        assigned.is_official,
+        "official_at":        assigned.official_at.isoformat() if assigned.official_at else None,
+        "official_by_user_id": assigned.official_by_user_id,
+        "official_by_name":   assigned.official_by_name,
     }
+
+
+# ─── Helpers for history + lock-event writes ─────────────────────────
+# Centralized so each endpoint that mutates the schedule produces a
+# consistent audit trail. Helpers do NOT commit — the caller's
+# transaction owns the commit so a failed mutation rolls back the
+# history row alongside it.
+
+async def _resolve_actor_display_name(db: AsyncSession, current_user: dict | None) -> tuple[int | None, str | None]:
+    """Return (user_id, display_name) for an audit row.
+
+    Pulls the canonical name from the User row when possible (JWT
+    email could be stale if the user changed providers). Returns
+    (None, None) when the request is anonymous.
+    """
+    if not current_user:
+        return (None, None)
+    uid = current_user.get("id")
+    if not uid:
+        return (None, current_user.get("email"))
+    user_row = await db.get(User, uid)
+    name = (user_row.name if user_row and user_row.name else None) \
+           or (user_row.email if user_row else None) \
+           or current_user.get("email") \
+           or f"user#{uid}"
+    return (uid, name[:256])
+
+
+async def _snapshot_schedule_history(
+    db: AsyncSession,
+    assigned: AssignedSchedule,
+    action: str,
+    current_user: dict | None,
+) -> AssignedScheduleHistory:
+    """Insert a history row carrying the schedule's current state.
+
+    Caller invokes this BEFORE applying changes for action='patch'
+    or 'restore' (so the row preserves the prior state) and AFTER
+    insert for action='create' (so the row matches the just-created
+    schedule).
+    """
+    actor_id, actor_name = await _resolve_actor_display_name(db, current_user)
+    row = AssignedScheduleHistory(
+        assigned_schedule_id=assigned.id,
+        name=assigned.name,
+        day_config=assigned.day_config,
+        slot_map=assigned.slot_map,
+        practice_matches=assigned.practice_matches,
+        action=action,
+        actor_user_id=actor_id,
+        actor_name=actor_name,
+    )
+    db.add(row)
+    return row
+
+
+async def _record_lock_event(
+    db: AsyncSession,
+    schedule_id: int,
+    action: str,        # 'lock' | 'unlock'
+    current_user: dict | None,
+) -> AssignedScheduleLockEvent:
+    """Append an audit row for a lock/unlock action.
+
+    Independent of the live `assigned_schedules.locked_at` column
+    (which carries only the *current* state). This table preserves
+    every change so a future lock_events GET can answer "when was
+    this unlocked, by whom" after the fact.
+    """
+    actor_id, actor_name = await _resolve_actor_display_name(db, current_user)
+    row = AssignedScheduleLockEvent(
+        assigned_schedule_id=schedule_id,
+        action=action,
+        actor_user_id=actor_id,
+        actor_name=actor_name,
+    )
+    db.add(row)
+    return row
+
+
+def _is_event_frozen(event: Event | None) -> bool:
+    """Convenience for guard checks. Returns True when the event
+    carries a non-NULL locked_at — signaling "event frozen" mode
+    where all child mutations are refused."""
+    return bool(event and event.locked_at is not None)
 
 
 @app.get("/api/assigned-schedules/{schedule_id}")
@@ -996,18 +1123,48 @@ async def patch_assigned_schedule(
     if not assigned:
         raise HTTPException(404, "Assigned schedule not found")
 
-    # Lock guard — refuse PATCH on a locked schedule unless the request
-    # is coming from the locker themselves. Returns HTTP 423 Locked
-    # (RFC 4918) which the frontend handles distinctly from 401/403.
-    # The locker-bypass exists because the same user toggling Save in
-    # their own session shouldn't be blocked by their own lock —
-    # they explicitly chose to lock, so they retain edit rights.
+    # ── Guards (in order of severity) ──────────────────────────
+    # 1. Event-frozen → no mutations to anything under the event.
+    #    Must be checked first because freeze overrides everything,
+    #    including locker bypass.
+    event = await db.get(Event, assigned.event_id) if assigned.event_id else None
+    if _is_event_frozen(event):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
+                   "— unfreeze the event before editing any schedules.",
+        )
+    # 2. Official → permanent commitment. PATCH refused while
+    #    is_official=True even by the official-marker; the user
+    #    must unmark official first to make changes. Prevents
+    #    quick-edit-then-relock cycles from quietly drifting away
+    #    from "the schedule we ran the event on".
+    if assigned.is_official:
+        raise HTTPException(
+            status_code=423,
+            detail=f"Schedule is marked official by {assigned.official_by_name or 'another user'} "
+                   "— unmark official before editing.",
+        )
+    # 3. Lock guard — refuse PATCH on a locked schedule unless the
+    #    request is coming from the locker themselves. Returns HTTP
+    #    423 Locked (RFC 4918) which the frontend handles distinctly
+    #    from 401/403. The locker-bypass exists because the same
+    #    user toggling Save in their own session shouldn't be blocked
+    #    by their own lock — they explicitly chose to lock, so they
+    #    retain edit rights.
     if assigned.locked_at is not None:
         if not current_user or assigned.locked_by_user_id != current_user.get("id"):
             raise HTTPException(
                 status_code=423,
                 detail=f"Schedule is locked by {assigned.locked_by_name or 'another user'}.",
             )
+
+    # Snapshot BEFORE mutating so the history row carries the prior
+    # state. If the commit later fails, the history insert rolls back
+    # with the rest of the transaction — no orphaned snapshots.
+    has_changes = "day_config" in payload
+    if has_changes:
+        await _snapshot_schedule_history(db, assigned, action="patch", current_user=current_user)
 
     if "day_config" in payload:
         new_dc = payload["day_config"]
@@ -1018,6 +1175,12 @@ async def patch_assigned_schedule(
         # to be picked up by the dirty-tracker.
         from sqlalchemy.orm.attributes import flag_modified
         flag_modified(assigned, "day_config")
+
+    # Bump updated_at on any meaningful change. The "EDITED" badge
+    # in the saved-schedules modal compares updated_at > created_at.
+    if has_changes:
+        from datetime import datetime, timezone
+        assigned.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(assigned)
@@ -1045,6 +1208,18 @@ async def lock_assigned_schedule(
     if not assigned:
         raise HTTPException(404, "Assigned schedule not found")
 
+    # Event-freeze guard. When the event itself is frozen, granular
+    # per-schedule locks become meaningless — the user is supposed
+    # to be locked out of all schedules under the event. Refuse
+    # rather than silently accept and let the user think they
+    # added protection that's actually redundant.
+    event = await db.get(Event, assigned.event_id) if assigned.event_id else None
+    if _is_event_frozen(event):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen — schedule lock not needed (and not added).",
+        )
+
     if assigned.locked_at is not None:
         # Already locked. If by us, fine — return current state. If by
         # someone else, refuse so users can't quietly steal locks.
@@ -1068,6 +1243,10 @@ async def lock_assigned_schedule(
     assigned.locked_at = datetime.now(timezone.utc)
     assigned.locked_by_user_id = user.get("id")
     assigned.locked_by_name = display_name[:256]
+    # Audit row — preserves history even after this lock is later
+    # cleared (locked_at reset to NULL). Without this, "when was
+    # this unlocked" would be unanswerable.
+    await _record_lock_event(db, schedule_id, action="lock", current_user=user)
     await db.commit()
     await db.refresh(assigned)
     return await _build_assigned_schedule_response(assigned, db)
@@ -1084,10 +1263,31 @@ async def unlock_assigned_schedule(
     Future authorization-matrix work may relax this (event admins
     overriding stale locks, time-based auto-expiry, etc.) — for
     now, "only the locker can unlock" is the safest default.
+
+    Refuses if the schedule is marked official (auto-lock from
+    is_official); user must POST /unmark-official first.
+
+    Refuses if the parent event is frozen — global freeze takes
+    precedence and a granular unlock would be misleading.
     """
     assigned = await db.get(AssignedSchedule, schedule_id)
     if not assigned:
         raise HTTPException(404, "Assigned schedule not found")
+
+    event = await db.get(Event, assigned.event_id) if assigned.event_id else None
+    if _is_event_frozen(event):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
+                   "— unfreeze the event first.",
+        )
+
+    if assigned.is_official:
+        raise HTTPException(
+            status_code=423,
+            detail="Schedule is marked official and remains locked. "
+                   "Unmark official first via POST /unmark-official.",
+        )
 
     if assigned.locked_at is None:
         # Idempotent — unlock on an unlocked schedule is fine.
@@ -1102,6 +1302,9 @@ async def unlock_assigned_schedule(
     assigned.locked_at = None
     assigned.locked_by_user_id = None
     assigned.locked_by_name = None
+    # Audit row — captures who unlocked when. Pairs with the lock
+    # row inserted by /lock.
+    await _record_lock_event(db, schedule_id, action="unlock", current_user=user)
     await db.commit()
     await db.refresh(assigned)
     return await _build_assigned_schedule_response(assigned, db)
@@ -1122,14 +1325,393 @@ async def activate_assigned_schedule(schedule_id: int, db: AsyncSession = Depend
     return {"activated": schedule_id}
 
 
+# ─── History + audit endpoints ──────────────────────────────────────
+
+@app.get("/api/assigned-schedules/{schedule_id}/history")
+async def get_schedule_history(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_session),
+):
+    """List history rows for a schedule, newest first.
+
+    Each row is a snapshot of the schedule taken before a mutation.
+    The UI uses this for the "View history" panel and the "Restore"
+    action. Public — no auth required for read access; restoring
+    requires auth via POST /restore/{history_id}.
+    """
+    # Make sure the schedule exists before exposing history rows.
+    assigned = await db.get(AssignedSchedule, schedule_id)
+    if not assigned:
+        raise HTTPException(404, "Assigned schedule not found")
+    result = await db.execute(
+        select(AssignedScheduleHistory)
+        .where(AssignedScheduleHistory.assigned_schedule_id == schedule_id)
+        .order_by(AssignedScheduleHistory.occurred_at.desc())
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "id": h.id,
+            "action": h.action,
+            "name": h.name,
+            "actor_user_id": h.actor_user_id,
+            "actor_name":    h.actor_name,
+            "occurred_at":   h.occurred_at.isoformat(),
+            # Snapshot bodies — small enough to ship in the list
+            # response. The "diff against previous" UI fetches the
+            # whole list at once, so per-row drill-in fetches aren't
+            # needed. day_config typically <30KB per snapshot.
+            "day_config":       h.day_config,
+            "slot_map":         h.slot_map,
+            "practice_matches": h.practice_matches,
+        }
+        for h in rows
+    ]
+
+
+@app.post("/api/assigned-schedules/{schedule_id}/restore/{history_id}", status_code=200)
+async def restore_schedule_from_history(
+    schedule_id: int,
+    history_id: int,
+    db: AsyncSession = Depends(get_session),
+    current_user: dict | None = Depends(get_current_user),
+):
+    """Restore a schedule to a previous version from a history row.
+
+    Behavior:
+      1. Snapshot the current state with action='restore' (so the
+         pre-restore version remains recoverable).
+      2. Copy the named history row's snapshot back onto the live
+         schedule.
+      3. Bump updated_at.
+
+    Lock state and is_official are NOT touched by restore — they're
+    operational metadata, not content. A locked schedule can be
+    restored (by the locker); an official one cannot be restored
+    (must unmark first).
+
+    Same guard pattern as PATCH: refuses if event is frozen, if
+    is_official, or if locked by someone other than the requester.
+    """
+    assigned = await db.get(AssignedSchedule, schedule_id)
+    if not assigned:
+        raise HTTPException(404, "Assigned schedule not found")
+
+    event = await db.get(Event, assigned.event_id) if assigned.event_id else None
+    if _is_event_frozen(event):
+        raise HTTPException(423, f"Event is frozen by {event.locked_by_name or 'another user'}.")
+    if assigned.is_official:
+        raise HTTPException(423, "Schedule is marked official — unmark first.")
+    if assigned.locked_at is not None:
+        if not current_user or assigned.locked_by_user_id != current_user.get("id"):
+            raise HTTPException(423,
+                f"Schedule is locked by {assigned.locked_by_name or 'another user'}.")
+
+    history_row = await db.get(AssignedScheduleHistory, history_id)
+    if not history_row or history_row.assigned_schedule_id != schedule_id:
+        raise HTTPException(404, "History row not found for this schedule")
+
+    # Snapshot the current state BEFORE applying the restore so we
+    # can roll forward again if the user changes their mind.
+    await _snapshot_schedule_history(db, assigned, action="restore", current_user=current_user)
+
+    # Apply the historical snapshot back to the live row.
+    assigned.name             = history_row.name
+    assigned.day_config       = history_row.day_config
+    assigned.slot_map         = history_row.slot_map
+    assigned.practice_matches = history_row.practice_matches
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(assigned, "day_config")
+    flag_modified(assigned, "slot_map")
+    flag_modified(assigned, "practice_matches")
+    from datetime import datetime, timezone
+    assigned.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(assigned)
+    return await _build_assigned_schedule_response(assigned, db)
+
+
+@app.get("/api/assigned-schedules/{schedule_id}/lock-events")
+async def get_schedule_lock_events(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_session),
+):
+    """List lock/unlock events for a schedule, newest first.
+
+    Diagnostic endpoint — answers "when was this unlocked, by whom"
+    without requiring direct DB access. Public read; the live
+    schedule itself is also publicly readable, so the audit log
+    isn't more sensitive than that.
+    """
+    assigned = await db.get(AssignedSchedule, schedule_id)
+    if not assigned:
+        raise HTTPException(404, "Assigned schedule not found")
+    result = await db.execute(
+        select(AssignedScheduleLockEvent)
+        .where(AssignedScheduleLockEvent.assigned_schedule_id == schedule_id)
+        .order_by(AssignedScheduleLockEvent.occurred_at.desc())
+    )
+    return [
+        {
+            "id": e.id,
+            "action": e.action,
+            "actor_user_id": e.actor_user_id,
+            "actor_name":    e.actor_name,
+            "occurred_at":   e.occurred_at.isoformat(),
+        }
+        for e in result.scalars()
+    ]
+
+
+# ─── Mark/unmark official ──────────────────────────────────────────
+
+@app.post("/api/assigned-schedules/{schedule_id}/mark-official", status_code=200)
+async def mark_schedule_official(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
+    """Mark a schedule as the event's official / canonical version.
+
+    Side effects:
+      - is_official set TRUE
+      - official_at, official_by_user_id, official_by_name set
+      - The schedule is auto-locked (locked_at set if not already)
+        with a paired lock-event row in the audit log
+      - At most one schedule per event_id can be official; the
+        partial unique index in the migration enforces this. If the
+        user attempts to mark a second one, we return a clear 409
+        Conflict error rather than letting the constraint raise a
+        cryptic IntegrityError.
+
+    The auto-lock is necessary: an "official but editable" schedule
+    is a footgun (someone could quietly change the canonical record).
+    Once unmarked, the lock can be cleared independently.
+    """
+    assigned = await db.get(AssignedSchedule, schedule_id)
+    if not assigned:
+        raise HTTPException(404, "Assigned schedule not found")
+
+    event = await db.get(Event, assigned.event_id) if assigned.event_id else None
+    if _is_event_frozen(event):
+        raise HTTPException(423, f"Event is frozen by {event.locked_by_name or 'another user'}.")
+
+    if assigned.is_official:
+        # Idempotent — already official, return current state.
+        return await _build_assigned_schedule_response(assigned, db)
+
+    # Refuse if a different schedule on this event is already
+    # official. Caller must unmark the existing one first; we
+    # refuse to silently steal the marker.
+    existing_official = await db.execute(
+        select(AssignedSchedule)
+        .where(AssignedSchedule.event_id == assigned.event_id)
+        .where(AssignedSchedule.is_official.is_(True))
+    )
+    other = existing_official.scalar_one_or_none()
+    if other is not None and other.id != schedule_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Another schedule (\"{other.name}\") is already marked official "
+                   "for this event. Unmark it first.",
+        )
+
+    # Pull display name from User row for snapshot consistency.
+    actor = await db.get(User, user.get("id"))
+    display_name = (actor.name if actor and actor.name else None) \
+                   or (actor.email if actor else None) \
+                   or user.get("email") \
+                   or f"user#{user.get('id')}"
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    assigned.is_official        = True
+    assigned.official_at        = now
+    assigned.official_by_user_id = user.get("id")
+    assigned.official_by_name   = display_name[:256]
+
+    # Auto-lock if not already locked. Re-uses the same lock columns
+    # so existing lock semantics (PATCH guard, banner) work without
+    # special-casing for "official-implied lock". A separate
+    # is_official check on PATCH catches the case where someone is
+    # the locker but is_official=True — the editor must unmark first.
+    if assigned.locked_at is None:
+        assigned.locked_at         = now
+        assigned.locked_by_user_id = user.get("id")
+        assigned.locked_by_name   = display_name[:256]
+        await _record_lock_event(db, schedule_id, action="lock", current_user=user)
+
+    await db.commit()
+    await db.refresh(assigned)
+    return await _build_assigned_schedule_response(assigned, db)
+
+
+@app.post("/api/assigned-schedules/{schedule_id}/unmark-official", status_code=200)
+async def unmark_schedule_official(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
+    """Clear the is_official mark.
+
+    Lock state is preserved — unmarking official doesn't auto-unlock
+    (the user explicitly unlocks via /unlock if they want to edit).
+    Only the original marker can unmark, mirroring the unlock policy.
+    """
+    assigned = await db.get(AssignedSchedule, schedule_id)
+    if not assigned:
+        raise HTTPException(404, "Assigned schedule not found")
+
+    event = await db.get(Event, assigned.event_id) if assigned.event_id else None
+    if _is_event_frozen(event):
+        raise HTTPException(423, f"Event is frozen by {event.locked_by_name or 'another user'}.")
+
+    if not assigned.is_official:
+        # Idempotent.
+        return await _build_assigned_schedule_response(assigned, db)
+
+    if assigned.official_by_user_id != user.get("id"):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Only {assigned.official_by_name or 'the original marker'} can unmark this schedule.",
+        )
+
+    assigned.is_official = False
+    assigned.official_at = None
+    assigned.official_by_user_id = None
+    assigned.official_by_name = None
+    # Lock stays set — the user explicitly unlocks via /unlock if
+    # they want to edit. Two-step intentional friction: official
+    # status is a permanent commitment, undoing it shouldn't also
+    # silently clear the lock.
+
+    await db.commit()
+    await db.refresh(assigned)
+    return await _build_assigned_schedule_response(assigned, db)
+
+
+# ─── Event-level freeze ────────────────────────────────────────────
+
+@app.post("/api/events/{event_id}/freeze", status_code=200)
+async def freeze_event(
+    event_id: int,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
+    """Freeze the event. Blocks edits to the event itself and to
+    any schedules under it. Independent of per-schedule locks.
+
+    Idempotent if already frozen by the same user. Returns 423
+    if frozen by someone else.
+    """
+    event = await db.get(Event, event_id)
+    if not event:
+        raise HTTPException(404, "Event not found")
+
+    if event.locked_at is not None:
+        if event.locked_by_user_id != user.get("id"):
+            raise HTTPException(
+                status_code=423,
+                detail=f"Event is already frozen by {event.locked_by_name or 'another user'}.",
+            )
+        return _event_freeze_payload(event)
+
+    actor = await db.get(User, user.get("id"))
+    display_name = (actor.name if actor and actor.name else None) \
+                   or (actor.email if actor else None) \
+                   or user.get("email") \
+                   or f"user#{user.get('id')}"
+
+    from datetime import datetime, timezone
+    event.locked_at = datetime.now(timezone.utc)
+    event.locked_by_user_id = user.get("id")
+    event.locked_by_name = display_name[:256]
+    await db.commit()
+    await db.refresh(event)
+    return _event_freeze_payload(event)
+
+
+@app.post("/api/events/{event_id}/unfreeze", status_code=200)
+async def unfreeze_event(
+    event_id: int,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
+    """Unfreeze the event. Only the original freezer can unfreeze
+    (mirrors the per-schedule unlock policy)."""
+    event = await db.get(Event, event_id)
+    if not event:
+        raise HTTPException(404, "Event not found")
+
+    if event.locked_at is None:
+        return _event_freeze_payload(event)
+
+    if event.locked_by_user_id != user.get("id"):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Only {event.locked_by_name or 'the original freezer'} can unfreeze this event.",
+        )
+
+    event.locked_at = None
+    event.locked_by_user_id = None
+    event.locked_by_name = None
+    await db.commit()
+    await db.refresh(event)
+    return _event_freeze_payload(event)
+
+
+def _event_freeze_payload(event: Event) -> dict:
+    """Compact response for freeze/unfreeze endpoints. Mirrors the
+    fields embedded in `event` inside the schedule payload so
+    frontend code can apply the same render path."""
+    return {
+        "id": event.id,
+        "key": event.key,
+        "locked_at":         event.locked_at.isoformat() if event.locked_at else None,
+        "locked_by_user_id": event.locked_by_user_id,
+        "locked_by_name":    event.locked_by_name,
+    }
+
+
 @app.delete("/api/assigned-schedules/{schedule_id}", status_code=204)
 async def delete_assigned_schedule(
     schedule_id: int, db: AsyncSession = Depends(get_session),
     current_user: dict | None = Depends(get_current_user),
 ):
+    """Delete an assigned schedule. Refuses on:
+      - Schedules marked official (must unmark first).
+      - Schedules locked by another user (must be unlocked).
+      - Schedules under a frozen event (must unfreeze first).
+    Owner-only — non-creators get 403 (legacy behavior preserved).
+    """
     assigned = await db.get(AssignedSchedule, schedule_id)
     if not assigned:
         raise HTTPException(404, "Assigned schedule not found")
+    # Event-freeze takes precedence — strongest signal.
+    event = await db.get(Event, assigned.event_id) if assigned.event_id else None
+    if _is_event_frozen(event):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen by {event.locked_by_name or 'another user'}.",
+        )
+    # Official → permanent commitment, can't delete
+    # without unmarking. Prevents losing the canonical record.
+    if assigned.is_official:
+        raise HTTPException(
+            status_code=423,
+            detail=f"Schedule is marked official by {assigned.official_by_name or 'another user'} "
+                   "— unmark official first.",
+        )
+    # Lock guard — refuse if locked by someone other than the requester.
+    # Locker bypass: their own lock shouldn't block their own delete
+    # (consistent with the PATCH locker bypass).
+    if assigned.locked_at is not None:
+        if not current_user or assigned.locked_by_user_id != current_user.get("id"):
+            raise HTTPException(
+                status_code=423,
+                detail=f"Schedule is locked by {assigned.locked_by_name or 'another user'}.",
+            )
     if assigned.created_by and (not current_user or current_user.get("sub") != assigned.created_by):
         raise HTTPException(403, "You do not own this schedule")
     await db.delete(assigned)
@@ -1149,6 +1731,12 @@ async def duplicate_assigned_schedule(
     src = result.scalar_one_or_none()
     if not src:
         raise HTTPException(404, "Schedule not found")
+    # Event-freeze guard — duplication creates a new schedule under
+    # the event, which the freeze should block.
+    src_event = await db.get(Event, src.event_id) if src.event_id else None
+    if _is_event_frozen(src_event):
+        raise HTTPException(423,
+            f"Event is frozen by {src_event.locked_by_name or 'another user'} — cannot duplicate.")
     abs_src = src.abstract_schedule
     new_abs = AbstractSchedule(
         event_id=abs_src.event_id, name=f"{abs_src.name} (copy)",
@@ -1184,6 +1772,9 @@ async def duplicate_assigned_schedule(
             blue1_surrogate=mr.blue1_surrogate, blue2_surrogate=mr.blue2_surrogate,
             blue3_surrogate=mr.blue3_surrogate,
         ))
+    # Initial 'create' history row for the duplicate. Captures the
+    # state-as-duplicated; subsequent edits will land on top.
+    await _snapshot_schedule_history(db, new_asgn, action="create", current_user=current_user)
     await db.commit()
     return {"id": new_asgn.id, "abstract_schedule_id": new_abs.id, "name": new_asgn.name}
 
@@ -2809,6 +3400,11 @@ async def commit_pdf_import(
                 blue1=slot_map_int[am["blue"][0]], blue2=slot_map_int[am["blue"][1]], blue3=slot_map_int[am["blue"][2]],
             ))
 
+        # Initial 'create' history row — captures the imported state
+        # so the user can later compare against subsequent edits and
+        # see which differences came from their own changes vs the
+        # original PDF import.
+        await _snapshot_schedule_history(db, assigned, action="create", current_user=current_user)
         await db.commit()
 
         return {

@@ -1104,12 +1104,25 @@
   /* Body-level indicator stripe and disabled controls when locked.
      Form fields go visually muted but stay readable so users can
      reference values; clicking them does nothing because the
-     handlers short-circuit on window._frcLocked. */
+     handlers short-circuit on window._frcLocked.
+     The same disabled treatment applies to frc-event-frozen and
+     frc-schedule-official — those modes have stricter semantics
+     (no edits at all) but the visual disabled state is identical. */
   body.frc-locked #btnGenerate,
   body.frc-locked #btnAssign,
   body.frc-locked #btnSaveEvent,
   body.frc-locked #btnCommit,
-  body.frc-locked #btnDuplicate {
+  body.frc-locked #btnDuplicate,
+  body.frc-event-frozen #btnGenerate,
+  body.frc-event-frozen #btnAssign,
+  body.frc-event-frozen #btnSaveEvent,
+  body.frc-event-frozen #btnCommit,
+  body.frc-event-frozen #btnDuplicate,
+  body.frc-schedule-official #btnGenerate,
+  body.frc-schedule-official #btnAssign,
+  body.frc-schedule-official #btnSaveEvent,
+  body.frc-schedule-official #btnCommit,
+  body.frc-schedule-official #btnDuplicate {
     opacity: 0.45;
     pointer-events: none;
     filter: grayscale(0.4);
@@ -1119,7 +1132,19 @@
   body.frc-locked .panel input[type="time"],
   body.frc-locked .panel input[type="date"],
   body.frc-locked .panel select,
-  body.frc-locked .panel textarea {
+  body.frc-locked .panel textarea,
+  body.frc-event-frozen .panel input[type="number"],
+  body.frc-event-frozen .panel input[type="text"],
+  body.frc-event-frozen .panel input[type="time"],
+  body.frc-event-frozen .panel input[type="date"],
+  body.frc-event-frozen .panel select,
+  body.frc-event-frozen .panel textarea,
+  body.frc-schedule-official .panel input[type="number"],
+  body.frc-schedule-official .panel input[type="text"],
+  body.frc-schedule-official .panel input[type="time"],
+  body.frc-schedule-official .panel input[type="date"],
+  body.frc-schedule-official .panel select,
+  body.frc-schedule-official .panel textarea {
     background: var(--surface2);
     color: var(--text-muted);
     pointer-events: none;
@@ -1128,10 +1153,23 @@
   body.frc-locked .panel .v2-add-cc,
   body.frc-locked .panel .v2-add-nested-break,
   body.frc-locked #btnAddDay,
-  body.frc-locked #btnAddDayV2 {
+  body.frc-locked #btnAddDayV2,
+  body.frc-event-frozen .panel button.btn-add-break,
+  body.frc-event-frozen .panel .v2-add-cc,
+  body.frc-event-frozen .panel .v2-add-nested-break,
+  body.frc-event-frozen #btnAddDay,
+  body.frc-event-frozen #btnAddDayV2,
+  body.frc-schedule-official .panel button.btn-add-break,
+  body.frc-schedule-official .panel .v2-add-cc,
+  body.frc-schedule-official .panel .v2-add-nested-break,
+  body.frc-schedule-official #btnAddDay,
+  body.frc-schedule-official #btnAddDayV2 {
     opacity: 0.4;
     pointer-events: none;
   }
+  /* Banner visibility: any of the three modes shows it. */
+  body.frc-event-frozen      #frcLockBanner,
+  body.frc-schedule-official #frcLockBanner { display: block; }
   /* Lock banner — JS owns the textContent, CSS only handles
      visibility + styling. body.frc-locked toggles display.
      Sticky so it stays at the top of the viewport while scrolling
@@ -1151,6 +1189,11 @@
     z-index: 100;
   }
   body.frc-locked #frcLockBanner { display: block; }
+  /* Mode-specific banner colors. The body class is set by
+     applyLockState/applyOfficialState/applyEventFreezeState — the
+     strongest mode wins (event freeze > official > schedule lock). */
+  body.frc-event-frozen   #frcLockBanner { background: #cc5555; color: #fff; }
+  body.frc-schedule-official #frcLockBanner { background: #bd92f0; color: #1a0e2e; }
 
   /* Modal */
   .modal-overlay {
@@ -1889,6 +1932,13 @@
              it's a per-session UI safety net. -->
         <button class="btn-sm" id="btnLockSchedule" onclick="toggleLockSchedule()"
           title="Lock schedule against any edits, generates, or saves">&#x1f513; Lock</button>
+        <!-- Freeze event: locks the WHOLE event — metadata edits,
+             new schedules, deletes, all blocked. Different scope
+             from Lock Schedule (which freezes a specific version).
+             Authenticated users only; only the freezer can unfreeze
+             (mirrors per-schedule lock policy). -->
+        <button class="btn-sm" id="btnFreezeEvent" onclick="toggleFreezeEvent()"
+          title="Freeze the whole event — no edits, no new schedules, no deletes">&#x1f6d1; Freeze event</button>
         <button class="btn-sm btn-danger" id="btnDeleteEvent" onclick="deleteEvent()" disabled>&#x2715;</button>
       </div>
     </div>
@@ -2206,6 +2256,25 @@
       </div>
       <div class="saved-schedule-list" id="savedScheduleList">
         <div style="color:var(--text-muted);font-size:0.8rem;">No schedules saved yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Per-schedule history modal — list of snapshots taken before
+       each PATCH or restore. Action='create' rows are the original
+       snapshot; 'patch' rows are pre-edit states; 'restore' rows
+       capture the state right before a previous restore. Each row
+       has a Restore button that brings that snapshot's content back
+       onto the live schedule (snapshotting current state first). -->
+  <div class="modal-overlay" id="modalScheduleHistoryDetail">
+    <div class="modal" style="width:min(720px,95vw);max-height:85vh;display:flex;flex-direction:column;">
+      <button class="modal-close" onclick="closeModal('modalScheduleHistoryDetail')">&#x2715;</button>
+      <div class="modal-title">Edit History</div>
+      <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.5rem;line-height:1.5;">
+        Each row is a snapshot taken before a change. Restore brings that version's <strong>day_config</strong>, <strong>slot_map</strong>, and <strong>practice_matches</strong> back onto the live schedule — the current state is preserved first so you can roll forward again. Schedule lock and official-mark state are unaffected by restore.
+      </div>
+      <div id="scheduleHistoryList" style="flex:1;overflow-y:auto;">
+        <div style="color:var(--text-muted);font-size:0.8rem;padding:0.5rem;">Loading…</div>
       </div>
     </div>
   </div>
@@ -10117,29 +10186,20 @@ async function _doToggleLockSchedule() {
 // banner text, and any pending timers. lockerInfo is { lockedByName,
 // lockedAt, lockedByUserId } when available (from API) or null
 // (session-only / URL-restore without DB info).
+//
+// Mode hierarchy (strongest wins for banner text + button labels):
+//   1. Event frozen      — body.frc-event-frozen
+//   2. Schedule official — body.frc-schedule-official
+//   3. Schedule locked   — body.frc-locked
+// All three classes share the same disabled-controls treatment but
+// the banner copy differs so the user sees the most-restrictive
+// reason first. Each setter only touches its own body class so
+// they compose without stepping on each other.
 function applyLockState(locked, lockerInfo) {
   window._frcLocked = !!locked;
   window._frcLockedBy = lockerInfo || null;
-  // body class drives the global CSS — disabled buttons, frozen
-  // inputs, and the top-of-page banner visibility.
   document.body.classList.toggle('frc-locked', !!locked);
-  // Banner text — set as textContent on the real DOM element so JS
-  // string escapes work normally and the locker's name flows through
-  // without CSS-escape gymnastics. CSS controls visibility via the
-  // body.frc-locked class; this just keeps the message current.
-  // Literal Unicode characters (lock emoji, em dash) used inline
-  // rather than \u escape sequences to be immune to any build step
-  // or string-processing path that might fail to interpret escapes.
-  var bannerEl = document.getElementById('frcLockBanner');
-  if (bannerEl) {
-    if (locked) {
-      var who = lockerInfo && lockerInfo.lockedByName ? ' by ' + lockerInfo.lockedByName : '';
-      bannerEl.textContent = '🔒  Schedule locked' + who +
-        ' — click "Unlock" in the event bar to resume editing.';
-    } else {
-      bannerEl.textContent = '';
-    }
-  }
+  _refreshLockBanner();
   // Button visual state
   var btn = document.getElementById('btnLockSchedule');
   if (btn) {
@@ -10160,6 +10220,161 @@ function applyLockState(locked, lockerInfo) {
   if (locked) {
     clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
     clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
+  }
+}
+
+// Set the "schedule is marked official" mode. Auto-locks at the
+// backend; this just renders the UI state. official=true draws a
+// purple banner ("Schedule marked official by X — unmark to edit")
+// and sets body.frc-schedule-official so the disabled-controls
+// CSS applies. Cleared on event switch / reset.
+function applyOfficialState(official, info) {
+  window._frcOfficial = !!official;
+  window._frcOfficialBy = info || null;
+  document.body.classList.toggle('frc-schedule-official', !!official);
+  _refreshLockBanner();
+}
+
+// Set the "event is frozen" mode. Strongest of the three —
+// overrides locked + official banners. Renders a red banner and
+// disables every editing affordance. Cleared on event switch.
+function applyEventFreezeState(frozen, info) {
+  window._frcEventFrozen = !!frozen;
+  window._frcEventFrozenBy = info || null;
+  document.body.classList.toggle('frc-event-frozen', !!frozen);
+  _refreshLockBanner();
+  // Update freeze button label
+  var btn = document.getElementById('btnFreezeEvent');
+  if (btn) {
+    if (frozen) {
+      btn.classList.add('is-locked');
+      btn.innerHTML = '🛑 Unfreeze';
+      btn.title = info && info.lockedByName
+        ? 'Frozen by ' + info.lockedByName + ' — click to unfreeze'
+        : 'Event is frozen — click to unfreeze';
+    } else {
+      btn.classList.remove('is-locked');
+      btn.innerHTML = '🛑 Freeze event';
+      btn.title = 'Freeze the whole event — no edits, no new schedules, no deletes';
+    }
+  }
+}
+
+// Compute and render the banner text per the current mode hierarchy.
+// Stronger modes overwrite weaker ones. Empty when nothing applies.
+function _refreshLockBanner() {
+  var bannerEl = document.getElementById('frcLockBanner');
+  if (!bannerEl) return;
+  if (window._frcEventFrozen) {
+    var freezerName = (window._frcEventFrozenBy && window._frcEventFrozenBy.lockedByName) || '';
+    bannerEl.textContent = '🛑  Event frozen' +
+      (freezerName ? ' by ' + freezerName : '') +
+      ' — click "Unfreeze" in the event bar to resume editing.';
+    return;
+  }
+  if (window._frcOfficial) {
+    var officialName = (window._frcOfficialBy && window._frcOfficialBy.officialByName) || '';
+    bannerEl.textContent = '⭐  Schedule marked official' +
+      (officialName ? ' by ' + officialName : '') +
+      ' — unmark official from the saved-schedules list to edit.';
+    return;
+  }
+  if (window._frcLocked) {
+    var lockerName = (window._frcLockedBy && window._frcLockedBy.lockedByName) || '';
+    bannerEl.textContent = '🔒  Schedule locked' +
+      (lockerName ? ' by ' + lockerName : '') +
+      ' — click "Unlock" in the event bar to resume editing.';
+    return;
+  }
+  bannerEl.textContent = '';
+}
+
+// Toggle event freeze. Same auth-required UX as schedule lock —
+// routes through requireAuthThen so the user can sign in via the
+// auth modal and have the freeze auto-apply on token arrival.
+async function toggleFreezeEvent() {
+  return requireAuthThen(_doToggleFreezeEvent, 'freeze or unfreeze events');
+}
+
+async function _doToggleFreezeEvent() {
+  if (!_currentEventId) {
+    showApiStatus('No event loaded', true);
+    return;
+  }
+  var endpoint = window._frcEventFrozen ? 'unfreeze' : 'freeze';
+  try {
+    const resp = await apiFetch(
+      '/api/events/' + _currentEventId + '/' + endpoint,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+    );
+    applyEventFreezeState(!!resp.locked_at, {
+      lockedAt:       resp.locked_at,
+      lockedByName:   resp.locked_by_name,
+      lockedByUserId: resp.locked_by_user_id,
+    });
+    showApiStatus(window._frcEventFrozen
+      ? '🛑 Event frozen' + (resp.locked_by_name ? ' by ' + resp.locked_by_name : '')
+      : '✓ Event unfrozen');
+  } catch(e) {
+    showApiStatus(e.message || 'Freeze operation failed', true);
+  }
+}
+
+// Mark/unmark the currently-loaded schedule as official. Routed
+// through requireAuthThen for the same lock-after-login experience.
+async function markScheduleOfficialFromButton() {
+  return requireAuthThen(_doMarkScheduleOfficial, 'mark schedules official');
+}
+
+async function _doMarkScheduleOfficial() {
+  if (!_currentAssignedScheduleId) {
+    showApiStatus('No schedule loaded', true);
+    return;
+  }
+  if (!confirm('Mark this schedule as the OFFICIAL one for this event? '
+             + 'This auto-locks the schedule and is hard to undo.')) return;
+  try {
+    const resp = await apiFetch(
+      '/api/assigned-schedules/' + _currentAssignedScheduleId + '/mark-official',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+    );
+    applyOfficialState(!!resp.is_official, resp.is_official ? {
+      officialAt:        resp.official_at,
+      officialByName:    resp.official_by_name,
+      officialByUserId:  resp.official_by_user_id,
+    } : null);
+    // mark-official also auto-locks; reflect that too.
+    applyLockState(!!resp.locked_at, resp.locked_at ? {
+      lockedAt:    resp.locked_at,
+      lockedByName: resp.locked_by_name,
+      lockedByUserId: resp.locked_by_user_id,
+    } : null);
+    showApiStatus('⭐ Schedule marked official' + (resp.official_by_name ? ' by ' + resp.official_by_name : ''));
+    // Refresh saved-schedules modal if open so the star moves
+    if (typeof loadSavedSchedules === 'function') loadSavedSchedules();
+  } catch(e) {
+    showApiStatus(e.message || 'Mark official failed', true);
+  }
+}
+
+async function unmarkScheduleOfficialFromButton() {
+  return requireAuthThen(_doUnmarkScheduleOfficial, 'unmark schedules official');
+}
+
+async function _doUnmarkScheduleOfficial() {
+  if (!_currentAssignedScheduleId) return;
+  if (!confirm('Unmark this schedule as official? '
+             + 'It stays locked until you also unlock it separately.')) return;
+  try {
+    const resp = await apiFetch(
+      '/api/assigned-schedules/' + _currentAssignedScheduleId + '/unmark-official',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+    );
+    applyOfficialState(false, null);
+    showApiStatus('Official mark cleared (schedule still locked)');
+    if (typeof loadSavedSchedules === 'function') loadSavedSchedules();
+  } catch(e) {
+    showApiStatus(e.message || 'Unmark official failed', true);
   }
 }
 
@@ -10188,6 +10403,12 @@ function _releaseUiLock(reason) {
     showApiStatus(msg);
   }
   applyLockState(false, null);
+  // Also clear the parallel mode states so a fresh event load
+  // doesn't inherit stale official / event-frozen styling. The
+  // setters are idempotent so this is safe even when nothing was
+  // set.
+  if (typeof applyOfficialState === 'function') applyOfficialState(false, null);
+  if (typeof applyEventFreezeState === 'function') applyEventFreezeState(false, null);
 }
 
 async function reloadEvent() {
@@ -10623,6 +10844,15 @@ async function loadSavedSchedules() {
         row.className = 'saved-schedule-row' + (s.is_active ? ' active-sched' : '');
         const dt = new Date(s.created_at).toLocaleString();
         const isLatest = idx === 0;
+        // "EDITED" badge — true when updated_at is meaningfully
+        // after created_at (1-second buffer protects against
+        // sub-second clock skew at insert time).
+        var hasBeenEdited = false;
+        if (s.updated_at && s.created_at) {
+          var dCreated = new Date(s.created_at).getTime();
+          var dUpdated = new Date(s.updated_at).getTime();
+          hasBeenEdited = (dUpdated - dCreated) > 1000;
+        }
 
         let actionBtns = '<button class="btn-sm" onclick="loadSchedule(' + s.id + ')" title="View this schedule">View</button>';
 
@@ -10633,29 +10863,69 @@ async function loadSavedSchedules() {
           actionBtns += ' <button class="btn-promote" onclick="promoteSchedule(' + s.id + ')" title="Make this the active schedule">⬆ Promote to Active</button>';
         }
 
+        // Mark / unmark official toggle. Star icon — gold filled when
+        // this is the event's official schedule, hollow on others.
+        // The backend enforces the "one official per event" rule;
+        // clicking the hollow star on a non-official row will fail
+        // with 409 if another schedule already holds it.
+        if (s.is_official) {
+          actionBtns += ' <button class="btn-sm" onclick="markScheduleOfficialFromRow(' + s.id + ', false)" ' +
+                        'title="Unmark official (schedule stays locked)" style="background:rgba(212,167,44,0.18);color:var(--amber);">⭐</button>';
+        } else {
+          actionBtns += ' <button class="btn-sm" onclick="markScheduleOfficialFromRow(' + s.id + ', true)" ' +
+                        'title="Mark this as the official schedule for the event">☆</button>';
+        }
+        // History viewer — opens the per-schedule history modal
+        // showing every snapshot. Restore is one click from there.
+        actionBtns += ' <button class="btn-sm" onclick="openScheduleHistory(' + s.id + ')" ' +
+                      'title="View edit history and restore previous versions">⌛</button>';
+
         actionBtns += ' <button class="btn-sm btn-danger" onclick="deleteSchedule(' + s.id + ')" title="Delete this version" style="margin-left:0.2rem;">&#x2715;</button>';
 
         // Lock badge — surfaces locker name so users know the
         // schedule is read-only without having to load it. Empty
         // string when unlocked. Hover shows full lock timestamp.
+        // When implied by official status, show "(auto)" so the
+        // user knows clicking unlock won't help.
         var lockBadge = '';
         if (s.locked_at) {
           var lockTitle = 'Locked' +
             (s.locked_by_name ? ' by ' + s.locked_by_name : '') +
-            ' at ' + new Date(s.locked_at).toLocaleString();
+            ' at ' + new Date(s.locked_at).toLocaleString() +
+            (s.is_official ? ' (auto-locked by official mark)' : '');
           lockBadge = ' <span class="version-badge" style="background:rgba(200,153,42,0.16);color:var(--amber);border-color:var(--amber);" title="' +
                       lockTitle.replace(/"/g, '&quot;') + '">\u{1f512}' +
                       (s.locked_by_name ? ' ' + s.locked_by_name : '') +
+                      (s.is_official ? ' (auto)' : '') +
                       '</span>';
+        }
+        // Official badge — purple, separate from lock so the user
+        // sees both signals at once.
+        var officialBadge = '';
+        if (s.is_official) {
+          var officialTitle = 'Official' +
+            (s.official_by_name ? ' (marked by ' + s.official_by_name + ')' : '') +
+            (s.official_at ? ' at ' + new Date(s.official_at).toLocaleString() : '');
+          officialBadge = ' <span class="version-badge" style="background:rgba(189,146,240,0.18);color:#bd92f0;border-color:#bd92f0;" title="' +
+                          officialTitle.replace(/"/g, '&quot;') + '">\u2b50 Official</span>';
+        }
+        // EDITED badge — small amber pill.
+        var editedBadge = '';
+        if (hasBeenEdited) {
+          var editTitle = 'Last edited ' + new Date(s.updated_at).toLocaleString() +
+                          (s.created_at ? ' (created ' + new Date(s.created_at).toLocaleString() + ')' : '');
+          editedBadge = ' <span class="version-badge" style="background:rgba(212,167,44,0.12);color:var(--amber);border-color:rgba(212,167,44,0.3);font-weight:600;" title="' +
+                        editTitle.replace(/"/g, '&quot;') + '">Edited</span>';
         }
 
         row.innerHTML =
           '<div style="flex:1;min-width:0;">' +
-            '<div class="saved-sched-name" style="display:flex;align-items:center;gap:0.4rem;">' +
+            '<div class="saved-sched-name" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">' +
               (isLatest ? '<span class="version-badge older" style="background:rgba(122,164,240,0.12);color:var(--accent);border-color:var(--accent);">Latest</span>' : '<span class="version-badge older">v' + (versions.length - idx) + '</span>') +
               '<span>' + dt + '</span>' +
+              officialBadge +
               lockBadge +
-              (s.is_active ? '' : '') +
+              editedBadge +
             '</div>' +
             '<div class="saved-sched-meta">' + s.name + '</div>' +
           '</div>' +
@@ -10671,8 +10941,178 @@ async function loadSchedule(scheduleId) {
   await loadAssignedSchedule(scheduleId, null);
 }
 
+// Star toggle in the saved-schedules modal — operates on a specific
+// schedule by id rather than the currently-loaded one. Lets the
+// user mark/unmark official from the list view without loading the
+// schedule first.
+async function markScheduleOfficialFromRow(scheduleId, makeOfficial) {
+  return requireAuthThen(function() { return _doMarkScheduleOfficialRow(scheduleId, makeOfficial); },
+                         makeOfficial ? 'mark schedules official' : 'unmark schedules official');
+}
+
+async function _doMarkScheduleOfficialRow(scheduleId, makeOfficial) {
+  if (makeOfficial) {
+    if (!confirm('Mark this schedule as the OFFICIAL one for this event? '
+               + 'Auto-locks the schedule. Hard to undo.')) return;
+  } else {
+    if (!confirm('Unmark this schedule as official? Stays locked separately.')) return;
+  }
+  var endpoint = makeOfficial ? 'mark-official' : 'unmark-official';
+  try {
+    const resp = await apiFetch(
+      '/api/assigned-schedules/' + scheduleId + '/' + endpoint,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+    );
+    showApiStatus(makeOfficial
+      ? '⭐ Schedule marked official' + (resp.official_by_name ? ' by ' + resp.official_by_name : '')
+      : 'Official mark cleared (schedule still locked)');
+    // If this is the currently-loaded schedule, propagate to the
+    // top-of-page banner state so the user sees the change without
+    // re-loading the schedule.
+    if (scheduleId === _currentAssignedScheduleId) {
+      if (typeof applyOfficialState === 'function') {
+        applyOfficialState(!!resp.is_official, resp.is_official ? {
+          officialAt:        resp.official_at,
+          officialByName:    resp.official_by_name,
+          officialByUserId:  resp.official_by_user_id,
+        } : null);
+      }
+      if (typeof applyLockState === 'function') {
+        applyLockState(!!resp.locked_at, resp.locked_at ? {
+          lockedAt:    resp.locked_at,
+          lockedByName: resp.locked_by_name,
+          lockedByUserId: resp.locked_by_user_id,
+        } : null);
+      }
+    }
+    // Re-render the modal so the badge moves to the right row.
+    if (typeof loadSavedSchedules === 'function') loadSavedSchedules();
+  } catch(e) {
+    // 409 conflict (someone else holds the official mark) returns
+    // a useful message — surface verbatim. 423 likewise (event
+    // frozen, schedule locked, etc.).
+    showApiStatus(e.message || 'Mark official failed', true);
+  }
+}
+
 async function activateSchedule(scheduleId) {
   return promoteSchedule(scheduleId);
+}
+
+// ── Per-schedule history viewer ──────────────────────────────────
+// Opens modalScheduleHistoryDetail and loads the schedule's history
+// rows. Each row is a snapshot taken before a change; clicking
+// Restore brings that version back onto the live schedule (the
+// current state is auto-snapshotted first).
+//
+// _historyTargetScheduleId is set when the modal opens so the
+// row-level Restore handler knows which schedule to operate on
+// without threading the id through every closure.
+window._historyTargetScheduleId = null;
+async function openScheduleHistory(scheduleId) {
+  window._historyTargetScheduleId = scheduleId;
+  openModal('modalScheduleHistoryDetail');
+  var listEl = document.getElementById('scheduleHistoryList');
+  if (listEl) listEl.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;padding:0.5rem;">Loading…</div>';
+  try {
+    var rows = await apiFetch('/api/assigned-schedules/' + scheduleId + '/history');
+    _renderScheduleHistory(rows, scheduleId);
+  } catch(e) {
+    if (listEl) listEl.innerHTML = '<div style="color:var(--red);font-size:0.8rem;padding:0.5rem;">Failed to load history: ' +
+                                   (e.message || 'unknown error') + '</div>';
+  }
+}
+
+function _renderScheduleHistory(rows, scheduleId) {
+  var listEl = document.getElementById('scheduleHistoryList');
+  if (!listEl) return;
+  if (!rows || !rows.length) {
+    listEl.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;padding:0.5rem;">No history yet.</div>';
+    return;
+  }
+  // Newest first (the API already orders this way; explicit sort
+  // guards against caller drift). Action labels + colors:
+  //   create  — green, the original snapshot
+  //   patch   — amber, a pre-edit snapshot (most common)
+  //   restore — purple, snapshot taken before a previous restore
+  //   rename  — blue, name-only change
+  var actionMeta = {
+    create:  { label: 'Created', color: '#5daf78', bg: 'rgba(93,175,120,0.12)' },
+    patch:   { label: 'Edit',    color: '#d4a72c', bg: 'rgba(212,167,44,0.12)' },
+    restore: { label: 'Restore', color: '#bd92f0', bg: 'rgba(189,146,240,0.14)' },
+    rename:  { label: 'Rename',  color: '#7aa4f0', bg: 'rgba(122,164,240,0.12)' },
+  };
+  var html = rows.map(function(h, idx) {
+    var meta = actionMeta[h.action] || { label: h.action, color: 'var(--text-muted)', bg: 'rgba(255,255,255,0.04)' };
+    var when = h.occurred_at ? new Date(h.occurred_at).toLocaleString() : '—';
+    var actor = h.actor_name || (h.actor_user_id ? 'user#' + h.actor_user_id : '<em>anonymous</em>');
+    // Day-config summary — number of days and total blocks. Cheap
+    // hint at "what's in this snapshot" without rendering the full
+    // structure; the user clicks Restore to actually apply it.
+    var dcSummary = '';
+    if (h.day_config && h.day_config.days) {
+      var nDays = h.day_config.days.length;
+      var nBlocks = h.day_config.days.reduce(function(s, d) {
+        return s + ((d.blocks || []).length);
+      }, 0);
+      dcSummary = nDays + ' day' + (nDays !== 1 ? 's' : '') + ', ' +
+                  nBlocks + ' block' + (nBlocks !== 1 ? 's' : '');
+    }
+    // First row is the live state (the snapshot was taken right
+    // before the most recent change, so restoring it would put us
+    // back to that prior state — never the current). No 'current'
+    // marker needed; the chronology is clear.
+    return '<div style="display:flex;align-items:flex-start;gap:0.6rem;padding:0.55rem 0.65rem;border:1px solid var(--border);border-radius:4px;margin-bottom:0.35rem;background:' + meta.bg + ';">' +
+           '  <div style="flex:1;min-width:0;">' +
+           '    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">' +
+           '      <span style="font-size:0.65rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:' + meta.color + ';">' + meta.label + '</span>' +
+           '      <span style="font-size:0.78rem;color:var(--text);">' + when + '</span>' +
+           '      <span style="font-size:0.7rem;color:var(--text-muted);">by ' + actor + '</span>' +
+           '    </div>' +
+           '    <div style="font-size:0.7rem;color:var(--text-muted);margin-top:0.2rem;">' +
+           '      Snapshot of "' + (h.name || '').replace(/"/g, '&quot;') + '"' +
+           (dcSummary ? ' &middot; ' + dcSummary : '') +
+           '    </div>' +
+           '  </div>' +
+           '  <button class="btn-sm" onclick="restoreScheduleFromHistory(' + h.id + ')" ' +
+           '    title="Restore the schedule to this snapshot (current state is preserved first)" ' +
+           '    style="flex-shrink:0;">↶ Restore</button>' +
+           '</div>';
+  }).join('');
+  listEl.innerHTML = html;
+}
+
+async function restoreScheduleFromHistory(historyId) {
+  return requireAuthThen(function() { return _doRestoreFromHistory(historyId); }, 'restore schedule history');
+}
+
+async function _doRestoreFromHistory(historyId) {
+  var schedId = window._historyTargetScheduleId;
+  if (!schedId) {
+    showApiStatus('History context lost — reopen the history modal', true);
+    return;
+  }
+  if (!confirm('Restore the schedule to this snapshot? '
+             + 'The current state will be saved as a new history row first, '
+             + 'so this is reversible — but any in-progress unsaved edits will be discarded.')) return;
+  try {
+    showApiStatus('Restoring…');
+    var resp = await apiFetch(
+      '/api/assigned-schedules/' + schedId + '/restore/' + historyId,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+    );
+    showApiStatus('✓ Schedule restored to selected snapshot');
+    closeModal('modalScheduleHistoryDetail');
+    // If this is the currently-loaded schedule, reload it so the
+    // editor reflects the restored state. Otherwise just refresh
+    // the saved-schedules modal so the EDITED badge updates.
+    if (schedId === _currentAssignedScheduleId && typeof loadAssignedSchedule === 'function') {
+      await loadAssignedSchedule(schedId, null);
+    }
+    if (typeof loadSavedSchedules === 'function') loadSavedSchedules();
+  } catch(e) {
+    showApiStatus(e.message || 'Restore failed', true);
+  }
 }
 
 async function promoteSchedule(scheduleId) {
@@ -12988,8 +13428,44 @@ async function loadAssignedSchedule(scheduleId, dayConfig) {
         lockedByUserId: sched.locked_by_user_id,
       } : null);
     }
+    // Apply official + event-frozen states from the same payload.
+    // Both are independent of schedule-level lock; the banner text
+    // resolver picks the strongest mode to display. is_official
+    // implies the lock is also set (auto-locked at mark-official
+    // time), so applyLockState above already reflects that.
+    if (typeof applyOfficialState === 'function') {
+      applyOfficialState(!!sched.is_official, sched.is_official ? {
+        officialAt:        sched.official_at,
+        officialByName:    sched.official_by_name,
+        officialByUserId:  sched.official_by_user_id,
+      } : null);
+    }
+    if (typeof applyEventFreezeState === 'function' && sched.event) {
+      applyEventFreezeState(!!sched.event.locked_at, sched.event.locked_at ? {
+        lockedAt:       sched.event.locked_at,
+        lockedByName:   sched.event.locked_by_name,
+        lockedByUserId: sched.event.locked_by_user_id,
+      } : null);
+    }
 
-    showApiStatus('Schedule loaded');
+    // Status hint surfaces any persisted edit history — a small
+    // cue ("Schedule loaded — last edited Sat") so the user knows
+    // they're looking at an evolved version vs. the original
+    // generation. The history viewer in the saved-schedules modal
+    // is the deeper drill-in; this is just the at-a-glance
+    // confirmation. updated_at > created_at + 1s avoids
+    // sub-second clock skew at insert time.
+    var loadMsg = 'Schedule loaded';
+    try {
+      if (sched.updated_at && sched.created_at) {
+        var dC = new Date(sched.created_at).getTime();
+        var dU = new Date(sched.updated_at).getTime();
+        if ((dU - dC) > 1000) {
+          loadMsg += ' — last edited ' + new Date(sched.updated_at).toLocaleString();
+        }
+      }
+    } catch(_) {}
+    showApiStatus(loadMsg);
   } catch(e) { showApiStatus(e.message, true); }
   finally {
     // Clear the load guard so user-initiated edits resume firing

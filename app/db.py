@@ -80,6 +80,17 @@ class Event(Base):
     created_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
+    # ── Event-level freeze ────────────────────────────────────────
+    # Strategic-level lock. When set, the event itself is frozen:
+    # event metadata can't be PATCH'd, all schedules under it can't
+    # be PATCH'd or DELETE'd, no new schedules can be created, and
+    # the event itself can't be deleted. Independent of per-schedule
+    # locks (which protect a specific version) — see AssignedSchedule
+    # locked_at for the granular case.
+    locked_at:         Mapped[datetime|None] = mapped_column(DateTime(timezone=True), nullable=True)
+    locked_by_user_id: Mapped[int|None]      = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    locked_by_name:    Mapped[str|None]      = mapped_column(String(256), nullable=True)
+
     teams:              Mapped[list["EventTeam"]]        = relationship(back_populates="event", cascade="all, delete-orphan")
     abstract_schedules: Mapped[list["AbstractSchedule"]] = relationship(back_populates="event", cascade="all, delete-orphan")
     assigned_schedules: Mapped[list["AssignedSchedule"]] = relationship(back_populates="event", cascade="all, delete-orphan")
@@ -194,11 +205,86 @@ class AssignedSchedule(Base):
     locked_by_user_id: Mapped[int|None]      = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     locked_by_name:    Mapped[str|None]      = mapped_column(String(256), nullable=True)
 
+    # ── Official mark ────────────────────────────────────────────
+    # "This is THE schedule" — permanent, one per event (enforced by
+    # a partial unique index in the migration). Setting auto-locks
+    # the schedule. Unmarking requires explicit POST /unmark-official
+    # with confirmation in the UI. Once an event is run with a
+    # particular schedule, marking it official locks in the
+    # historical record.
+    is_official:        Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    official_at:        Mapped[datetime|None] = mapped_column(DateTime(timezone=True), nullable=True)
+    official_by_user_id: Mapped[int|None]     = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    official_by_name:   Mapped[str|None]      = mapped_column(String(256), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Bumped to NOW() on every meaningful mutation (PATCH, restore-
+    # from-history, mark-official rename). Lock/unlock and is_active
+    # toggles do NOT bump it — those aren't content changes.
+    # Initialized to created_at on insert so brand-new rows read as
+    # "never edited" until something actually changes them.
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     abstract_schedule: Mapped["AbstractSchedule"]  = relationship(back_populates="assigned_schedules")
     event:             Mapped["Event"]              = relationship(back_populates="assigned_schedules")
     match_rows:        Mapped[list["MatchRow"]]     = relationship(back_populates="assigned_schedule", cascade="all, delete-orphan")
+    history_rows:      Mapped[list["AssignedScheduleHistory"]]   = relationship(back_populates="assigned_schedule", cascade="all, delete-orphan")
+    lock_events:       Mapped[list["AssignedScheduleLockEvent"]] = relationship(back_populates="assigned_schedule", cascade="all, delete-orphan")
+
+
+class AssignedScheduleHistory(Base):
+    """Snapshot of an assigned schedule taken before each mutation.
+
+    Copy-on-write recovery: every PATCH (or restore) writes a row
+    here BEFORE applying changes, so the previous state is preserved.
+    Restoring is `POST /api/assigned-schedules/{id}/restore/{history_id}`
+    which copies the named row back onto the live schedule and inserts
+    a new history row with action='restore'.
+
+    is_active and lock state are intentionally NOT in the snapshot —
+    they're operational metadata, not "content". A restore preserves
+    the live schedule's lock state and active status.
+    """
+    __tablename__ = "assigned_schedule_history"
+
+    id:                   Mapped[int]      = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    assigned_schedule_id: Mapped[int]      = mapped_column(BigInteger, ForeignKey("assigned_schedules.id", ondelete="CASCADE"), index=True)
+
+    name:             Mapped[str]      = mapped_column(String(128))
+    day_config:       Mapped[Any|None] = mapped_column(JSON, nullable=True)
+    slot_map:         Mapped[Any]      = mapped_column(JSON)
+    practice_matches: Mapped[Any|None] = mapped_column(JSON, nullable=True)
+
+    # 'create' | 'patch' | 'rename' | 'restore'
+    action:        Mapped[str]      = mapped_column(String(16))
+    actor_user_id: Mapped[int|None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_name:    Mapped[str|None] = mapped_column(String(256), nullable=True)
+    occurred_at:   Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    assigned_schedule: Mapped["AssignedSchedule"] = relationship(back_populates="history_rows")
+
+
+class AssignedScheduleLockEvent(Base):
+    """One row per lock or unlock action.
+
+    The live `assigned_schedules.locked_at` column carries the
+    *current* state. This audit table preserves the history so
+    diagnostics can answer "when was this unlocked, and by whom"
+    after the fact — without it, that history is lost the instant
+    `locked_at` is reset to NULL.
+    """
+    __tablename__ = "assigned_schedule_lock_events"
+
+    id:                   Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    assigned_schedule_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("assigned_schedules.id", ondelete="CASCADE"), index=True)
+
+    # 'lock' | 'unlock'
+    action:        Mapped[str]      = mapped_column(String(16))
+    actor_user_id: Mapped[int|None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_name:    Mapped[str|None] = mapped_column(String(256), nullable=True)
+    occurred_at:   Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    assigned_schedule: Mapped["AssignedSchedule"] = relationship(back_populates="lock_events")
 
 
 class User(Base):
