@@ -355,6 +355,14 @@
   }
   .status-stage-meta strong { color: var(--text); font-weight: 600; }
   .status-stage-meta em     { color: var(--text-muted); font-style: italic; }
+  /* When the meta line carries the alliance-line layout (compact
+     stacked blocks), drop the nowrap/clip constraints — those were
+     for the old single-line "red vs blue" string. The alliance-line
+     is a block child that manages its own width and height. */
+  .status-stage-meta .alliance-line {
+    white-space: normal;
+    overflow: visible;
+  }
   /* Mobile: stack the 3-up vertically when narrow */
   @media (max-width: 480px) {
     .status-three-up { grid-template-columns: 1fr; }
@@ -1190,14 +1198,33 @@
   }
   .team-chip {
     display: inline-flex; align-items: center; gap: 0.3rem;
-    padding: 3px 8px; font-size: 12px; font-weight: 600;
-    background: var(--my-team-bg); color: #fff;
-    border: 1px solid var(--my-team-bg); border-radius: 12px;
-    cursor: pointer; transition: opacity 0.15s;
+    padding: 3px 8px; font-size: 12px; font-weight: 700;
+    /* --team-color set inline per chip from the universal palette
+       (TEAM_COLORS via _teamColor). Background uses a soft tint
+       so the chip text stays legible; the left border uses the
+       full color for a strong identification cue. */
+    background: color-mix(in srgb, var(--team-color, var(--my-team-bg)) 22%, transparent);
+    color: var(--text);
+    border: 1px solid var(--team-color, var(--my-team-bg));
+    border-left-width: 3px;
+    border-radius: 6px;
+    cursor: pointer; transition: opacity 0.15s, transform 0.1s;
   }
-  .team-chip:hover { opacity: 0.85; }
-  .team-chip.primary { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--primary); }
-  .team-chip .chip-x { font-size: 14px; line-height: 1; opacity: 0.8; }
+  .team-chip:hover { opacity: 0.85; transform: translateY(-1px); }
+  /* Primary indicator — small dot before the team number rather
+     than a focus-ring (the per-team color is already strong, so
+     adding a ring on top would compete visually). */
+  .team-chip.primary { box-shadow: inset 0 0 0 1px var(--team-color, var(--my-team-bg)); }
+  .team-chip.primary::before {
+    content: '';
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--team-color, var(--my-team-bg));
+    margin-right: 4px;
+  }
+  .team-chip .chip-x { font-size: 14px; line-height: 1; opacity: 0.65; }
+  .team-chip:hover .chip-x { opacity: 1; }
 
   /* Clear all chips button — sits alongside the team chips when 2+ are selected.
      Visually distinct (text-only, muted) so it doesn't compete with the team
@@ -1390,6 +1417,121 @@
   tr.completed.alt.result-blue { background: rgba(9,105,218,0.07); }
   tr.completed .col-time .actual-time { color: var(--text-muted); }
   tr.completed .col-time .playing-time { color: var(--next-match-accent); font-weight: 700; }
+
+  /* Alliance roster — two-row Blue/Red display in the next-match
+     card. Each row shows three station cells (1/2/3) with the
+     team number; selected teams get colored chip treatment using
+     their stable palette slot from STATE.teamColorSlots. The
+     `--team-color` CSS variable is set inline per cell — the
+     rules below pull from it for both the background and the
+     bottom-border highlight.
+
+     Layout: single flex line. The two alliances are tinted-
+     background blocks (soft blue / soft red) flanking a centered
+     "vs". No "Blue" / "Red" word labels — the background tint
+     does that work, and the team-number color (also alliance-
+     specific) reinforces it. Belt-and-suspenders so color-blind
+     users still get spatial separation from the block layout. */
+  .alliance-line {
+    display: flex;
+    align-items: stretch;
+    gap: 0.4rem;
+    margin-top: 0.55rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .alliance-block {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    gap: 0.35rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 6px;
+    min-width: 0;
+  }
+  .alliance-block.blue {
+    background: rgba(74,144,226,0.13);
+    border: 1px solid rgba(74,144,226,0.22);
+  }
+  .alliance-block.red {
+    background: rgba(204,85,85,0.13);
+    border: 1px solid rgba(204,85,85,0.22);
+  }
+  .alliance-vs {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    padding: 0 0.25rem;
+  }
+  /* Each cell is a small chip with station number as a superscript
+     prefix. Alliance-color text by default; selected teams gain
+     the palette underline + tint layer on top of the alliance bg. */
+  .team-cell {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 1px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-weight: 600;
+    border-bottom: 3px solid transparent; /* reserve space so my-team
+                                              cells don't shift others */
+  }
+  .team-cell.blue { color: var(--blue-alliance); }
+  .team-cell.red  { color: var(--red-alliance); }
+  .team-cell .station {
+    font-size: 9px;
+    opacity: 0.65;
+    font-weight: 600;
+    margin-right: 1px;
+    position: relative;
+    top: -3px;
+  }
+  .team-cell .num { font-size: 14px; }
+  /* Selected-team highlight — uses --team-color (set inline per
+     cell from the universal palette). Same color treatment as the
+     schedule rows + agenda fit, so the user's "team yellow" is
+     yellow everywhere. The 3px bottom border feels like an
+     underline, less heavy than a full background fill. The number
+     itself stays alliance-colored so the alliance signal isn't
+     lost. */
+  .team-cell.my-team {
+    background: color-mix(in srgb, var(--team-color) 25%, transparent);
+    border-bottom: 3px solid var(--team-color);
+    font-weight: 800;
+  }
+  .team-cell.my-team .station {
+    opacity: 1;
+    color: var(--team-color);
+  }
+  /* Compact variant — used inside the 3-up Nexus cells where each
+     stage box is ~110px wide. Six teams + "vs" can't fit on one
+     line at that width, so the two alliance blocks stack
+     vertically. The vs separator is hidden (redundant when
+     stacked). Smaller font/padding throughout. */
+  .alliance-line.compact {
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 3px;
+  }
+  .alliance-line.compact .alliance-vs { display: none; }
+  .alliance-line.compact .alliance-block {
+    padding: 2px 4px;
+    gap: 2px;
+    border-width: 0.5px;
+  }
+  .alliance-line.compact .team-cell {
+    padding: 1px 3px;
+    border-bottom-width: 2px;
+  }
+  .alliance-line.compact .team-cell .num { font-size: 11px; }
+  .alliance-line.compact .team-cell .station {
+    font-size: 8px;
+    top: -2px;
+  }
 
   /* Per-team stats grid in next-match card */
   .team-stats {
@@ -2172,21 +2314,64 @@ function _hexAlpha(hex, alpha) {
 // the palette color for index 0..5, then wraps for 6+. Returns
 // fallback gray for unknown teams (should be unreachable in
 // normal flow but keeps the function total).
+// Per-team color slots. Persistent across selection changes — when
+// a team is added it gets the lowest-numbered FREE slot; when a
+// team is removed only its slot is freed, so other teams retain
+// their colors. This is what makes the universal-palette
+// highlighting feel coherent: deselecting team B from [A,B,C,D]
+// leaves A=slot0, C=slot2, D=slot3 instead of resequencing
+// everyone (which would feel jarring as colors shift).
+//
+// The map keys are normalized to Number for cross-type lookup —
+// Sets created from URL params can hold strings ("2169") while
+// chip handlers pass numbers (2169). _ensureTeamColorSlot and
+// _freeTeamColorSlot both coerce.
+//
+// Reconciliation against STATE.myTeams happens at the top of
+// updateNextMatch (the canonical refresh hook) so any path that
+// mutates myTeams gets its slot map reconciled before the next
+// render — no need to instrument every setter.
+function _ensureTeamColorSlot(team) {
+  var t = Number(team);
+  if (Number.isNaN(t)) return -1;
+  if (!STATE.teamColorSlots) STATE.teamColorSlots = new Map();
+  if (STATE.teamColorSlots.has(t)) return STATE.teamColorSlots.get(t);
+  // Lowest-free-slot search. Bounded by TEAM_COLORS.length in
+  // practice, but the modulo in _teamColor handles overflow if a
+  // user somehow selects more teams than colors.
+  var used = new Set(STATE.teamColorSlots.values());
+  var slot = 0;
+  while (used.has(slot)) slot++;
+  STATE.teamColorSlots.set(t, slot);
+  return slot;
+}
+
+function _reconcileTeamColorSlots() {
+  if (!STATE.teamColorSlots) STATE.teamColorSlots = new Map();
+  // Remove slots for teams no longer in myTeams. Iterate over a
+  // snapshot of keys so we can safely delete during the walk.
+  var current = STATE.teamColorSlots;
+  var keysToCheck = Array.from(current.keys());
+  for (var i = 0; i < keysToCheck.length; i++) {
+    var t = keysToCheck[i];
+    if (!STATE.myTeams.has(t) && !STATE.myTeams.has(String(t))) {
+      current.delete(t);
+    }
+  }
+  // Assign slots to any newly-added teams. Existing teams are
+  // skipped by _ensureTeamColorSlot's has-check.
+  STATE.myTeams.forEach(function(team) {
+    _ensureTeamColorSlot(team);
+  });
+}
+
 function _teamColor(team) {
   if (!STATE.myTeams || STATE.myTeams.size === 0) return '#888';
-  var idx = -1, i = 0;
-  // Set iteration is insertion-ordered. Walk to find this team's
-  // position; coerce both sides for cross-type safety.
-  var t = team;
-  var tn = Number(team);
-  var ts = String(team);
-  STATE.myTeams.forEach(function(v) {
-    if (idx >= 0) return;
-    if (v === t || v === tn || v === ts || String(v) === ts) idx = i;
-    i++;
-  });
-  if (idx < 0) return '#888';
-  return TEAM_COLORS[idx % TEAM_COLORS.length];
+  var t = Number(team);
+  if (Number.isNaN(t)) return '#888';
+  if (!STATE.teamColorSlots || !STATE.teamColorSlots.has(t)) return '#888';
+  var slot = STATE.teamColorSlots.get(t);
+  return TEAM_COLORS[slot % TEAM_COLORS.length];
 }
 
 // ── State ──────────────────────────────────────────────────────────────
@@ -2195,6 +2380,10 @@ const STATE = {
   computed:   null,       // [{ matchNum, startMin, dayNum, isPracticeDay, red, blue, redSur, blueSur, type }]
   branding:   {},         // {primary_color, logo_url, title, subtitle, ...}
   myTeams:    new Set(),  // selected team numbers; multiple supported
+  // Per-team color slot map (Number → slot index). Maintained by
+  // _ensureTeamColorSlot/_reconcileTeamColorSlots so colors stay
+  // stable as teams are added/removed. _teamColor reads this.
+  teamColorSlots: new Map(),
   myPrimary:  null,       // most-recently-selected team — drives next-match card
   liveMode:   false,
   startEpoch: null,       // event start as epoch ms (for live mode)
@@ -4062,11 +4251,24 @@ function renderSelectedTeamChips() {
     wrap.innerHTML = '';
     return;
   }
+  // Reconcile color slots before rendering so newly-added teams
+  // get their slot assignment for the chip color. updateNextMatch
+  // also calls _reconcileTeamColorSlots, but renderSelectedTeamChips
+  // can be invoked independently (e.g. from toggleTeamSelection
+  // before the next render pass).
+  if (typeof _reconcileTeamColorSlots === 'function') _reconcileTeamColorSlots();
   const sorted = [...STATE.myTeams].sort((a, b) => a - b);
   wrap.style.display = '';
   let html = sorted.map(t => {
     const isPrimary = t === STATE.myPrimary;
+    // Inline --team-color from the palette so the chip styling
+    // CSS (background tint, left border, primary dot) all reach
+    // the same color. _teamColor returns '#888' when the team
+    // isn't in the slot map yet — _reconcileTeamColorSlots above
+    // ensures it always is.
+    const c = _teamColor(t);
     return '<button class="team-chip' + (isPrimary ? ' primary' : '') + '" ' +
+           'style="--team-color:' + c + ';" ' +
            'onclick="toggleTeamSelection(' + t + ')" ' +
            'title="Remove team ' + t + ' from selection">' +
            t + ' <span class="chip-x">×</span></button>';
@@ -4513,11 +4715,15 @@ function _renderFieldThreeUp() {
       // there's no live data — the prefix has to follow the entry.
       var threeUpPrefix = s.match.isPractice ? 'P' : 'Q';
       matchEl.textContent = threeUpPrefix + s.match.matchNum;
-      // Meta line: prefer team rosters if Nexus has it; otherwise
-      // show planned time-of-day (or "in N min" countdown).
+      // Meta line: prefer the alliance-line layout (tinted blue +
+      // red blocks, station numbers, selected-team highlights) when
+      // the entry has full rosters. Falls back to a planned-time
+      // hint when only schedule data is available. Compact mode
+      // stacks the two alliance blocks vertically since the 3-up
+      // cells are ~110px wide each.
       var meta = '';
       if (!muted && s.match.red && s.match.blue && s.match.red.length === 3) {
-        meta = '<strong>' + s.match.red.join(' ') + '</strong> vs <strong>' + s.match.blue.join(' ') + '</strong>';
+        meta = _buildAllianceLineHtml(s.match, { compact: true });
       } else {
         var ts = _resolveMatchTimestamp(s.match);
         if (ts != null) {
@@ -5036,43 +5242,76 @@ function _renderNextOnly() {
   return { rendered: true };
 }
 
-// Render the alliance roster line under "Next on schedule".
-// entry is a STATE.computed match entry with red[] and blue[]
-// arrays. Highlights teams from STATE.myTeams using their
-// per-team palette color (matches the schedule-table convention).
-// Hides the row when there's nothing to show (e.g. surrogate-only
-// or malformed entry).
-function _renderNextOnlyAlliances(entry) {
-  var el = document.getElementById('statusNextOnlyAlliances');
-  if (!el) return;
+// Shared builder for the alliance-line markup. Returns the HTML
+// string for two flex blocks (Blue + Red) flanking a centered
+// "vs". Each block is tinted in alliance color (background +
+// border); team numbers stay alliance-colored. Selected teams
+// gain a palette-colored bottom border + tinted layer on top of
+// the alliance background, so both signals (alliance + slot) are
+// readable on the same digit.
+//
+// Used by:
+//   * _renderAllianceRoster (next-match section in the team card)
+//   * _renderNextOnlyAlliances (next-only fallback under field status)
+//   * _renderFieldThreeUp (3-up Nexus stages — compact variant
+//     shares the same DOM structure but the parent .alliance-line.compact
+//     class shrinks padding and font for the smaller boxes)
+function _buildAllianceLineHtml(entry, opts) {
   if (!entry || !entry.red || !entry.blue ||
-      entry.red.length === 0 || entry.blue.length === 0) {
-    el.innerHTML = '';
-    return;
-  }
-  // Each team rendered as a span. If it's in myTeams, the span
-  // gets the my-team class + inline color (foreground only — the
-  // CSS handles the soft background). Numbers are wrapped in
-  // <strong> so they stand out; the "vs" separator stays muted.
-  function _renderTeam(t) {
+      entry.red.length === 0 || entry.blue.length === 0) return '';
+  var compact = !!(opts && opts.compact);
+  function cellHtml(alliance, t, idx) {
+    var stationNum = idx + 1;
     var teamN = Number(t);
     var inMine = STATE.myTeams && (
       STATE.myTeams.has(teamN) || STATE.myTeams.has(String(t)) || STATE.myTeams.has(t)
     );
+    var cls = 'team-cell ' + (alliance === 'Blue' ? 'blue' : 'red');
+    var titleAttr = ' title="' + alliance + ' ' + stationNum + '"';
     if (inMine) {
       var c = _teamColor(teamN);
-      return '<strong class="my-team" style="color:' + c + ';">' + teamN + '</strong>';
+      return '<span class="' + cls + ' my-team" style="--team-color:' + c + ';"' + titleAttr + '>' +
+             '<span class="station">' + stationNum + '</span>' +
+             '<span class="num">' + teamN + '</span>' +
+             '</span>';
     }
-    return '<strong>' + teamN + '</strong>';
+    return '<span class="' + cls + '"' + titleAttr + '>' +
+           '<span class="station">' + stationNum + '</span>' +
+           '<span class="num">' + teamN + '</span>' +
+           '</span>';
   }
-  var redHtml  = entry.red.map(_renderTeam).join(' ');
-  var blueHtml = entry.blue.map(_renderTeam).join(' ');
-  // Visual: red rosters first then "vs" then blue. The mini-chip
-  // layout in the 3-up uses the same convention (red.join(' ') vs
-  // blue.join(' ')) so the eye flows the same way across both
-  // panels. Color-coded "vs" would over-decorate; muted text
-  // maintains the count-the-numbers reading order.
-  el.innerHTML = redHtml + ' <span style="opacity:0.6;">vs</span> ' + blueHtml;
+  function blockHtml(alliance, teams) {
+    var blockCls = 'alliance-block ' + (alliance === 'Blue' ? 'blue' : 'red');
+    return '<div class="' + blockCls + '">' +
+           teams.map(function(t, i) { return cellHtml(alliance, t, i); }).join('') +
+           '</div>';
+  }
+  // FMS convention: blue-left, red-right. Documented throughout
+  // the codebase as the canonical ordering for the 12h/24h toggle,
+  // schedule rendering, and PDF outputs.
+  var lineCls = 'alliance-line' + (compact ? ' compact' : '');
+  return '<div class="' + lineCls + '">' +
+         blockHtml('Blue', entry.blue) +
+         '<span class="alliance-vs">vs</span>' +
+         blockHtml('Red', entry.red) +
+         '</div>';
+}
+
+// Render the full Blue/Red alliance roster for a match entry,
+// returning an HTML string for the meta block of updateNextMatch.
+// Thin wrapper around _buildAllianceLineHtml — kept as a separate
+// function so the callsite reads as intent ("render alliance
+// roster") rather than implementation ("build line html").
+function _renderAllianceRoster(entry) {
+  return _buildAllianceLineHtml(entry);
+}
+
+function _renderNextOnlyAlliances(entry) {
+  var el = document.getElementById('statusNextOnlyAlliances');
+  if (!el) return;
+  // Same layout as the team-card alliance line — the host card is
+  // also full-width, so no compact treatment needed here.
+  el.innerHTML = _buildAllianceLineHtml(entry);
 }
 
 // Returns true when at least one live source has data we can act
@@ -5462,6 +5701,13 @@ function _tickFieldCountdown() {
 }
 
 function updateNextMatch(nowMatchNum) {
+  // Reconcile color slots before any rendering — this is the
+  // canonical "render everything" hook so any path that mutated
+  // STATE.myTeams (input parse, picker modal, URL load) gets its
+  // slot map synced before downstream renders pull colors via
+  // _teamColor.
+  _reconcileTeamColorSlots();
+
   // Two cards now: the team card holds the next-match section; the
   // field-status card (id "nextMatchCard" preserved for back-compat
   // with code paths elsewhere) is purely overall. State classes
@@ -5512,10 +5758,20 @@ function updateNextMatch(nowMatchNum) {
   if (teamCardCtx)   teamCardCtx.textContent   = totalSelLabel;
   if (teamHeaderCtx) teamHeaderCtx.textContent = totalSelLabel;
 
-  const myMatches = (STATE.computed || []).filter(e => e.type === 'match' && matchHasTeam(e, primaryTeam));
+  // Multi-team mode: the "next match" is the first upcoming match
+  // where ANY selected team plays — not specifically the primary.
+  // For single-team selection this is the same as the previous
+  // behavior. For multi-team this means a coach with [A, B, C]
+  // selected sees the earliest of {A's next, B's next, C's next}.
+  const myMatches = (STATE.computed || []).filter(function(e) {
+    if (e.type !== 'match') return false;
+    return matchHasAnySelectedTeam(e);
+  });
   if (!myMatches.length) {
     if (section) section.className = 'team-next-section empty';
-    detail.textContent = 'Team ' + primaryTeam + ' is not in this schedule';
+    detail.textContent = (STATE.myTeams.size > 1)
+      ? 'None of the selected teams are in this schedule'
+      : 'Team ' + primaryTeam + ' is not in this schedule';
     meta.textContent = '';
     myStatus.textContent = '';
     if (countdown) { countdown.style.display = 'none'; }
@@ -5523,11 +5779,12 @@ function updateNextMatch(nowMatchNum) {
     return;
   }
 
-  // Status line: report total selection but focus on primary
+  // Status line — now reports "next match across N teams" framing
+  // rather than focusing on the primary.
   const totalSel = STATE.myTeams.size;
   if (totalSel > 1) {
-    myStatus.innerHTML = '<strong>Showing team ' + primaryTeam + '</strong> · ' +
-                        totalSel + ' selected total';
+    myStatus.innerHTML = '<strong>Next match across ' + totalSel + ' teams</strong> · ' +
+                        myMatches.length + ' match' + (myMatches.length === 1 ? '' : 'es') + ' total';
   } else {
     myStatus.textContent = myMatches.length + ' match' + (myMatches.length === 1 ? '' : 'es');
   }
@@ -5657,18 +5914,22 @@ function updateNextMatch(nowMatchNum) {
     }
   }
 
-  // Determine alliance + station
+  // Determine alliance + station for the PRIMARY team (drives the
+  // queue pill / score interpretation downstream — those are
+  // primary-focused since most coaches want to know "did MY team
+  // win" rather than "did any of my five selected teams win").
   let alliance = null, station = null;
   if ((station = target.blue.indexOf(primaryTeam) + 1) > 0) alliance = 'Blue';
   else if ((station = target.red.indexOf(primaryTeam) + 1) > 0) alliance = 'Red';
-  const partners = (alliance === 'Blue' ? target.blue : target.red).filter(t => t !== primaryTeam);
-  const opponents = alliance === 'Blue' ? target.red : target.blue;
 
-  // Build the meta block — alliance/partners/opponents + queue status + score (if completed)
-  let metaHtml = '<strong style="color:var(--' + (alliance || '').toLowerCase() + '-alliance);">' +
-                  (alliance || '?') + ' ' + (station || '?') + '</strong> ' +
-                  'with ' + partners.join(', ') +
-                  ' &middot; vs ' + opponents.join(', ');
+  // Multi-team alliance roster — shows both alliances with all six
+  // teams, station numbers visible, and selected teams highlighted
+  // in their universal palette color. This replaces the older
+  // primary-only "Blue 1 with X, Y · vs Z, A, B" line so coaches
+  // tracking multiple teams can see at a glance where each one is.
+  // _renderAllianceRoster handles the highlight logic; it consults
+  // STATE.myTeams for which teams to color.
+  let metaHtml = _renderAllianceRoster(target);
 
   // Queue status pill
   const q = STATE.liveQueueByMatch[target.matchNum];
