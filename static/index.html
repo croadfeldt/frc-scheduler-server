@@ -5389,42 +5389,46 @@ function buildShareUrl() {
   //   pdb=name|HH:MM|HH:MM,...   — practice breaks (NEW; pipe-delimited like d{N}b)
   //   pdcc=after|time;...        — practice cycle changes (NEW); start-of-day uses 'start' as after
   //   pde=N                      — practice early-end after match N (NEW)
-  var _pdEl = document.getElementById('practiceDayEnabled');
-  if (_pdEl && _pdEl.checked) {
+  // Practice day URL fields — pulled from the collectDayConfig
+  // snapshot so V2 edits flow through. _urlPdc points at the same
+  // V1-shape object the day loop below uses; it's computed once
+  // here and reused. When V2 is active and there's no practice
+  // day, _urlPdc.practiceDay is null and the whole block is
+  // skipped. When V1 is active, the V1 form fields are the source
+  // of truth for both editors anyway, so this still reflects
+  // them.
+  var _urlPdcEarly = (typeof collectDayConfig === 'function') ? collectDayConfig() : null;
+  var _urlPd = _urlPdcEarly && _urlPdcEarly.practiceDay;
+  if (_urlPd && _urlPd.enabled) {
     params.set('pday', '1');
-    var _pdS = document.getElementById('practiceStart').value;
-    var _pdE = document.getElementById('practiceEnd').value;
-    if (_pdS && _pdE) params.set('pd', _pdS + '-' + _pdE);
-    var _pdMpt  = document.getElementById('practiceGuaranteed').value;
-    var _pdFill = document.getElementById('practiceFiller').value;
-    var _pdCt   = document.getElementById('practiceCycleTime').value;
-    if (_pdMpt)  params.set('pmpt',  _pdMpt);
-    if (_pdFill && parseInt(_pdFill) !== 99) params.set('pfill', _pdFill);
-    if (_pdCt)   params.set('pct',   _pdCt);
+    if (_urlPd.start && _urlPd.end) params.set('pd', _urlPd.start + '-' + _urlPd.end);
+    if (_urlPd.guaranteed != null) params.set('pmpt', String(_urlPd.guaranteed));
+    if (_urlPd.filler != null && parseInt(_urlPd.filler) !== 99) params.set('pfill', String(_urlPd.filler));
+    if (_urlPd.ct != null) params.set('pct', String(_urlPd.ct));
 
-    // Practice breaks
-    var _pdBreaks = Array.from(document.querySelectorAll('#pdayBreaksList .pday-break-row')).map(function(r) {
-      var name  = (r.querySelector('.break-name').value || 'Break').replace(/[|,]/g, '');
-      var start = r.querySelector('.break-start').value;
-      var end   = r.querySelector('.break-end').value;
-      return (start && end) ? (name + '|' + start + '|' + end) : null;
+    // Practice breaks — note the | separator must not appear in
+    // names, so strip it before encoding (downgradeToV1 set name
+    // from b.label which the user types freely).
+    var _pdBreaks = (_urlPd.breaks || []).map(function(b) {
+      var name = (b.name || 'Break').replace(/[|,]/g, '');
+      return (b.start && b.end) ? (name + '|' + b.start + '|' + b.end) : null;
     }).filter(Boolean);
     if (_pdBreaks.length) params.set('pdb', _pdBreaks.join(','));
 
-    // Practice cycle changes — same encoding as qual:
-    //   start-of-day:   "start|<time>"
-    //   after-match #N: "<N>|<time>"
-    var _pdCcs = Array.from(document.querySelectorAll('#pdayCcList .pday-cc-row')).map(function(r) {
-      var t        = parseFloat(r.querySelector('.cc-time').value);
-      var afterInp = r.querySelector('.cc-after');
+    // Practice cycle changes — encoded the same way as qual cc:
+    //   "start|<time>" for the start-of-day cycle time
+    //   "<N>|<time>"   for after-match #N changes
+    var _pdCcs = (_urlPd.cycleChanges || []).map(function(cc) {
+      var t = parseFloat(cc.time);
       if (!t || t <= 0) return null;
-      if (r.dataset.isStart === '1') return 'start|' + t;
-      var n = parseInt(afterInp.value);
+      if (cc.after === 'start' || cc.after === 0) return 'start|' + t;
+      var n = parseInt(cc.after);
       return (n >= 1) ? (n + '|' + t) : null;
     }).filter(Boolean);
     if (_pdCcs.length) params.set('pdcc', _pdCcs.join(';'));
 
-    // Practice early-end (day-break)
+    // Practice early-end — V1-only concept. Read from the V1 form
+    // input if present (no analog in V2 day_config yet).
     var _pdEeInp = document.querySelector('#pdayEarlyEndList .earlyend-after');
     if (_pdEeInp && _pdEeInp.value && parseInt(_pdEeInp.value) >= 1) {
       params.set('pde', String(parseInt(_pdEeInp.value)));
@@ -5448,21 +5452,41 @@ function buildShareUrl() {
   if (window._frcLocked) params.set('locked', '1');
 
   // Encode per-day schedule: d1=HH:MM-HH:MM, d1b=Name|HH:MM|HH:MM,...
-  document.querySelectorAll('.day-row').forEach(function(row, i) {
-    const dayNum = i + 1;
-    const start = row.querySelector('.day-start').value;
-    const end   = row.querySelector('.day-end').value;
-    if (start && end) params.set('d' + dayNum, start + '-' + end);
-
-    const breaks = Array.from(row.querySelectorAll('.break-row')).map(function(br) {
-      const bname  = (br.querySelector('.break-name').value  || 'Break').replace(/[|,]/g, ' ');
-      const bstart = br.querySelector('.break-start').value;
-      const bend   = br.querySelector('.break-end').value;
-      return bstart && bend ? bname + '|' + bstart + '|' + bend : null;
+  //
+  // Source of truth: collectDayConfig() returns a V1-shape object
+  // regardless of which editor is active. When V2 is active, this
+  // is the downgraded snapshot of the live V2 day blocks; when V1
+  // is active, it's the same thing the form fields hold. Either
+  // way the URL encoding stays V1-compatible (which is the wire
+  // format the URL was designed for) without going stale on V2
+  // edits — the previous implementation walked .day-row directly
+  // and missed all V2 edits because those rows live in hidden V1
+  // markup.
+  //
+  // Tier-3 blocks the user adds in V2 (ceremonies, awards,
+  // alliance selection) round-trip through this URL as named
+  // breaks via downgradeToV1's sibling-breaks flattening. Type
+  // info (subtype, ceremonyKind) is lost in the URL — that's a
+  // V1-shape limitation, not a regression. For full fidelity the
+  // user saves to the backend and the URL just carries sid=.
+  var _urlDc = (typeof collectDayConfig === 'function') ? collectDayConfig() : null;
+  var _urlDays = (_urlDc && Array.isArray(_urlDc.days)) ? _urlDc.days : [];
+  _urlDays.forEach(function(day, i) {
+    var dayNum = i + 1;
+    if (day.start && day.end) params.set('d' + dayNum, day.start + '-' + day.end);
+    var brks = (day.breaks || []).map(function(b) {
+      var bname = (b.name || 'Break').replace(/[|,]/g, ' ');
+      return (b.start && b.end) ? bname + '|' + b.start + '|' + b.end : null;
     }).filter(Boolean);
-    if (breaks.length) params.set('d' + dayNum + 'b', breaks.join(','));
-    var ee = getDayEarlyEnd(row);
-    if (ee !== null) params.set('d' + dayNum + 'e', ee);
+    if (brks.length) params.set('d' + dayNum + 'b', brks.join(','));
+    // Early-end is a V1-only concept; not represented in V2. Read
+    // from the matching .day-row if present (V1 mode), otherwise
+    // omit. getDayEarlyEnd handles a missing row by returning null.
+    var _row = document.querySelectorAll('.day-row')[i];
+    if (_row) {
+      var ee = getDayEarlyEnd(_row);
+      if (ee !== null) params.set('d' + dayNum + 'e', ee);
+    }
   });
 
   // Encode cycle time changes: cc=Day:AfterMatch:Time,...
@@ -6958,23 +6982,39 @@ function renderAgendaBlocks() {
     v2dc.days.forEach(function(day, dIdx) {
       var blocks = (day.blocks || []);
       // Group blocks by kind. For agenda fit we want one bar per
-      // day, with all sub-blocks (qual / playoff / break / nested)
-      // visible inside the bar timeline.
+      // day, with all sub-blocks (qual / playoff / tier-3) visible.
+      // Tier-3 captures break / awards / alliance_selection /
+      // ceremony — anything that's a top-level time reservation.
+      // Without this, a top-level opening-ceremony or awards block
+      // was filtered out of `siblingBreaks` and therefore invisible
+      // on the bar until the user actually generated a schedule.
       var qualOrPractice = blocks.filter(function(b) { return b.type === 'qualification' || b.type === 'practice'; });
       var playoffsInDay  = blocks.filter(function(b) { return b.type === 'playoff'; });
-      var siblingBreaks  = blocks.filter(function(b) { return b.type === 'break'; });
-      // Collect nested breaks under each block too — they're part
+      var siblingBreaks  = blocks.filter(function(b) {
+        return b.type === 'break'
+            || b.type === 'awards'
+            || b.type === 'alliance_selection'
+            || b.type === 'ceremony';
+      });
+      // Collect nested children under each block too — they're part
       // of the same day's timeline even though they live inside
-      // their parent's .breaks[] array.
+      // their parent's .breaks[] array. The array is heterogeneous
+      // post-tier-3 expansion: it carries any tier-3 type.
       var nestedBreaks = [];
       qualOrPractice.concat(playoffsInDay).forEach(function(b) {
         (b.breaks || []).forEach(function(nb) { nestedBreaks.push(nb); });
       });
+      // Map break-like blocks to a uniform { start, end, name,
+      // subtype, breakKind, ceremonyKind } shape so the renderer
+      // below can color/label per type.
       var allBreaks = siblingBreaks.concat(nestedBreaks).map(function(b) {
         return {
-          start: _v2timeStrToMin(b.start),
-          end:   _v2timeStrToMin(b.end),
-          name:  b.label || 'Break',
+          start:        _v2timeStrToMin(b.start),
+          end:          _v2timeStrToMin(b.end),
+          name:         b.label || _v2subtypeDefaultName(b.type, b.breakKind, b.ceremonyKind),
+          subtype:      b.type || 'break',
+          breakKind:    b.breakKind    || null,
+          ceremonyKind: b.ceremonyKind || null,
         };
       }).filter(function(b) { return b.start != null && b.end != null && b.end > b.start; });
 
@@ -7035,17 +7075,43 @@ function renderAgendaBlocks() {
     }, 0);
     var avail = dur - brkMin;
     var dc = dayColor(s.dayNum);
-    // Render small ticks for breaks > AGENDA_BREAK_THRESHOLD inside
-    // the bar (matching the schedule-based bars). Position is the
-    // break's % offset from day start.
+    // Tier-3 inset segments inside the day bar. Renders awards /
+    // alliance_selection / ceremony / break with type-specific
+    // colors and width-tiered labels (full → initials → blank+title)
+    // so the user can spot a closing ceremony at the day's end
+    // without generating the schedule first.
+    //
+    // Replaces the previous "small white tick" rendering — too
+    // ambiguous when there are multiple tier-3 blocks. Now they're
+    // first-class colored bands like in the post-generation render.
     var ticksHtml = s.breaks.filter(function(b) {
       return (b.end - b.start) > AGENDA_BREAK_THRESHOLD;
     }).map(function(b) {
-      var pos = dur > 0 ? ((b.start - s.start) / dur * 100) : 0;
+      var leftPct  = dur > 0 ? ((b.start - s.start) / dur * 100) : 0;
+      var widthPct = dur > 0 ? ((b.end - b.start) / dur * 100) : 0;
       var bDur = Math.round(b.end - b.start);
-      return '<div title="' + (b.name || 'Break') + ' (' + bDur + '\u202fmin)" '
-           + 'style="position:absolute;top:0;bottom:0;left:' + pos.toFixed(1) + '%;'
-           + 'width:2px;background:rgba(255,255,255,0.4);pointer-events:auto;cursor:default;"></div>';
+      var labels = (typeof _v2segLabels === 'function')
+                 ? _v2segLabels(b.subtype, b.breakKind, b.ceremonyKind, b.name)
+                 : { full: b.name || 'Break', initials: 'B' };
+      var inline = bDur >= 30 ? labels.full
+                 : bDur >= 12 ? labels.initials
+                              : '';
+      var bgColor = '#ec8a3f';
+      if      (b.subtype === 'awards')             bgColor = '#d9a13e';
+      else if (b.subtype === 'alliance_selection') bgColor = '#a17ed1';
+      else if (b.subtype === 'ceremony')           bgColor = '#dd7858';
+      var tip = labels.full + ' \u2014 ' + fmtTime12(b.start) + '\u2013' + fmtTime12(b.end) + ' (' + bDur + ' min)';
+      return '<div class="agenda-seg agenda-seg-break" '
+           + 'title="' + tip.replace(/"/g, '&quot;') + '" '
+           + 'style="position:absolute;top:0;bottom:0;left:' + leftPct.toFixed(2) + '%;'
+           +        'width:' + Math.max(widthPct, 0.6).toFixed(2) + '%;'
+           +        'background:' + bgColor + ';'
+           +        'box-shadow:inset 0 0 0 1px rgba(255,255,255,0.35);'
+           +        'display:flex;align-items:center;justify-content:center;'
+           +        'font-size:0.62rem;font-weight:600;color:#fff;'
+           +        'overflow:hidden;white-space:nowrap;z-index:2;">'
+           + (inline ? '<span>' + inline + '</span>' : '')
+           + '</div>';
     }).join('');
     // Playoff segments — render as inset purple bands inside the
     // day bar at the playoff window position. These don't reduce
@@ -7060,7 +7126,7 @@ function renderAgendaBlocks() {
       var tip  = 'Playoff: ' + fmtLabel + ' \u00b7 ' + p.teams + ' teams \u2014 '
                + fmtTime12(p.start) + '\u2013' + fmtTime12(p.end)
                + ' (' + pdur + '\u202fmin)';
-      var inline = widthPct > 14 ? ('Playoff <small>\u00b7 ' + p.teams + 'T</small>')
+      var inline = widthPct > 14 ? ('Playoff <small>\u00b7 ' + p.teams + ' Alliance' + (p.teams === 1 ? '' : 's') + '</small>')
                  : widthPct > 8  ? 'Playoff'
                  :                 '';
       return '<div class="agenda-seg agenda-seg-playoff" '
@@ -7353,6 +7419,66 @@ function renderScheduleBars() {
       // Extend day end if playoff goes past current dEnd.
       if (e > (d.end || 0)) d.end = e;
     });
+  } catch(_) {}
+
+  // Inject top-level tier-3 segments (ceremony / awards / alliance
+  // selection / break) from the live V2 day_config too. These flow
+  // through schedule materialization into _frcScheduled.entries
+  // when a generation runs, but post-assignment a user editing the
+  // V2 blocks (adding a closing ceremony, moving an awards window)
+  // doesn't trigger regeneration — and the bar would otherwise stay
+  // stale until they explicitly regenerate. By layering the live
+  // V2 state on top of the materialized entries, structural edits
+  // appear immediately. Match runs themselves stay aligned with
+  // the last generation (correct: the matches haven't been re-laid;
+  // only their ceremonial context has shifted).
+  //
+  // Dedup: when a tier-3 block IS in the materialized entries (the
+  // common pre-assignment path), the entries-derived segment wins
+  // and the V2 side-channel one is dropped. Match by start time
+  // since that's stable across both sources.
+  try {
+    var _dcLive = (typeof collectDayConfigV2 === 'function') ? collectDayConfigV2() : null;
+    if (_dcLive && _dcLive.days) {
+      _dcLive.days.forEach(function(day, dIdx) {
+        var d = perDay[dIdx];
+        if (!d) return;
+        var existingStarts = {};
+        d.segments.forEach(function(seg) {
+          if (seg.kind === 'break') existingStarts[seg.start] = true;
+        });
+        (day.blocks || []).forEach(function(b) {
+          // Only top-level tier-3 — nested children inside
+          // qual/practice/playoff are handled by the entry-walk
+          // above (and by the playoff inset overlay).
+          if (b.type !== 'break' && b.type !== 'awards' &&
+              b.type !== 'alliance_selection' && b.type !== 'ceremony') return;
+          var s = _v2timeStrToMin(b.start);
+          var e = _v2timeStrToMin(b.end);
+          if (s == null || e == null || e <= s) return;
+          if (existingStarts[s]) return;  // already in entries
+          d.segments.push({
+            kind:    'break',
+            type:    'break',
+            start:   s, end: e,
+            label:        b.label || _v2subtypeDefaultName(b.type, b.breakKind, b.ceremonyKind),
+            subtype:      b.type,
+            breakKind:    b.breakKind    || null,
+            ceremonyKind: b.ceremonyKind || null,
+            duration:     e - s,
+          });
+        });
+        d.segments.sort(function(a, b) { return (a.start || 0) - (b.start || 0); });
+        // Extend day window if a tier-3 block lives outside it.
+        var dayMinStart = d.start, dayMaxEnd = d.end;
+        d.segments.forEach(function(seg) {
+          if (seg.start != null && (dayMinStart == null || seg.start < dayMinStart)) dayMinStart = seg.start;
+          if (seg.end   != null && (dayMaxEnd   == null || seg.end   > dayMaxEnd))   dayMaxEnd   = seg.end;
+        });
+        d.start = dayMinStart;
+        d.end   = dayMaxEnd;
+      });
+    }
   } catch(_) {}
 
   // ── Render ──────────────────────────────────────────────────────
