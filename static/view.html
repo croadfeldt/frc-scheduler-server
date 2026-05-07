@@ -1244,9 +1244,13 @@
     outline: 2px solid var(--primary); outline-offset: -2px;
     border-radius: 3px;
   }
-  /* The "primary" team gets a slightly brighter outline so the user knows
-     which one drives the per-team panel */
-  .my-team-primary { outline: 2px solid var(--primary); outline-offset: -2px; }
+  /* No special treatment for the primary team in the schedule.
+     The primary still drives the per-team stats block, but the
+     cell's palette color is sufficient identity — adding an
+     outline on top read as a grey overlay because the outline
+     color (--primary, alliance blue) blended with the muted
+     palette tints. Same reasoning as removing the dot indicator
+     from the chip strip. */
 
   /* Team picker modal */
   .team-picker-card { max-width: 600px; }
@@ -3207,7 +3211,14 @@ function rerender() {
         const cellCls = ['col-' + side, 'team-cell-clickable'];
         const isSelected = STATE.myTeams && STATE.myTeams.has(val);
         if (isSelected) cellCls.push('my-team-cell');
-        if (val === STATE.myPrimary) cellCls.push('my-team-primary');
+        // Note: no my-team-primary marker on the schedule cells —
+        // the primary team is still tracked internally (drives the
+        // per-team rank/record/EPA stats block) but isn't visually
+        // distinguished here. The cell's palette color is the
+        // team's identity; an extra outline on top read as a grey
+        // overlay because the primary marker color (--primary,
+        // alliance blue) blended with the muted palette tints.
+        // Same reasoning as removing the leading dot from chips.
         // When completed, bold the winning alliance's cells
         if (status === 'completed' && live.winning_alliance === side) cellCls.push('alliance-won');
         // Per-team color via inline style. The darker inset shadow
@@ -4098,6 +4109,18 @@ function matchHasAnySelectedTeam(entry) {
 // it primary; if deselecting the primary, picks another as primary.
 function toggleTeamSelection(team) {
   if (!team || isNaN(team)) return;
+  // Capture the schedule table's screen position BEFORE the
+  // mutation. When the user selects their first team, the team
+  // status section above the schedule grows (countdown, alliance
+  // roster, etc.) which pushes the schedule down. The cursor
+  // stays put, so it ends up over a row ABOVE the one clicked,
+  // triggering its hover outline — confusing because the user
+  // didn't move their mouse. We compensate by scrolling the page
+  // by the same delta after rerender, keeping the schedule (and
+  // therefore the cursor's relationship to it) stationary.
+  var tbl = document.getElementById('matchesTable');
+  var tblTopBefore = tbl ? tbl.getBoundingClientRect().top : null;
+
   if (STATE.myTeams.has(team)) {
     STATE.myTeams.delete(team);
     if (STATE.myPrimary === team) {
@@ -4112,6 +4135,28 @@ function toggleTeamSelection(team) {
   syncTeamSelectionToInput();
   syncTeamSelectionToUrl();
   rerender();
+  // Updates to the team status section happen in updateNextMatch,
+  // which is called separately by the live-poll/timer pipeline.
+  // Trigger it now so the "first selection" expansion lands in the
+  // same paint as the rerender (otherwise the compensation below
+  // would fire before the section grew, doing nothing useful).
+  if (typeof updateNextMatch === 'function') {
+    try { updateNextMatch(); } catch(_) {}
+  }
+
+  if (tblTopBefore != null && tbl) {
+    // Compensate for any vertical shift in the schedule's screen
+    // position. requestAnimationFrame ensures we measure after the
+    // browser has applied the new layout. instant scroll (no
+    // animation) so the user doesn't see the page jump.
+    requestAnimationFrame(function() {
+      var tblTopAfter = tbl.getBoundingClientRect().top;
+      var delta = tblTopAfter - tblTopBefore;
+      if (Math.abs(delta) > 1) {
+        window.scrollBy({ top: delta, behavior: 'instant' });
+      }
+    });
+  }
 }
 
 // Replace the entire selection (used when typing into the input)
