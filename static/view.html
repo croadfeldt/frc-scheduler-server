@@ -2373,7 +2373,19 @@ function _teamColor(team) {
   if (!STATE.myTeams || STATE.myTeams.size === 0) return '#888';
   var t = Number(team);
   if (Number.isNaN(t)) return '#888';
-  if (!STATE.teamColorSlots || !STATE.teamColorSlots.has(t)) return '#888';
+  if (!STATE.teamColorSlots) STATE.teamColorSlots = new Map();
+  // Self-heal: if this team is in myTeams but doesn't have a slot
+  // yet, assign one. Keeps _teamColor robust against any future
+  // render path that consults it before reconciliation has run.
+  // The reconcile-at-top-of-rerender path is the canonical one
+  // (it walks myTeams in insertion order and assigns deterministic
+  // slots), but if it's somehow skipped, this fallback prevents
+  // teams from rendering in the gray fallback color.
+  var inMine = STATE.myTeams.has(t) || STATE.myTeams.has(String(team));
+  if (inMine && !STATE.teamColorSlots.has(t)) {
+    _ensureTeamColorSlot(t);
+  }
+  if (!STATE.teamColorSlots.has(t)) return '#888';
   var slot = STATE.teamColorSlots.get(t);
   return TEAM_COLORS[slot % TEAM_COLORS.length];
 }
@@ -3007,6 +3019,18 @@ function escapeAttr(s) { return escapeHtml(s); }
 
 // ── Rendering ──────────────────────────────────────────────────────────
 function rerender() {
+  // Reconcile color slots before any cell rendering. The schedule
+  // table calls _teamColor() per cell, which reads STATE.teamColorSlots.
+  // Without this reconcile, a team added via toggleTeamSelection
+  // would briefly render in the '#888' gray fallback (it's in
+  // STATE.myTeams but not yet in teamColorSlots) until the next
+  // render cycle runs through updateNextMatch — visible to users
+  // as "the just-selected team appears greyed out, then snaps to
+  // its color on refresh." The fix is to reconcile here too,
+  // since rerender is the choke point for all schedule + agenda
+  // fit + chip rendering paths that consult _teamColor.
+  _reconcileTeamColorSlots();
+
   const tbody = document.getElementById('matchesTbody');
   const computed = STATE.computed || [];
   if (!computed.length) {
