@@ -1107,12 +1107,19 @@
      handlers short-circuit on window._frcLocked.
      The same disabled treatment applies to frc-event-frozen and
      frc-schedule-official — those modes have stricter semantics
-     (no edits at all) but the visual disabled state is identical. */
+     (no edits at all) but the visual disabled state is identical.
+
+     Duplicate is INTENTIONALLY excluded from the lock/official
+     disabled list: copying a locked or official schedule produces
+     a new, separate row that's neither locked nor official, so
+     it's a SAFE action even on a frozen-version-of-truth. The
+     point of "Copy" is exactly to let users iterate on changes
+     without affecting the canonical version. Event-freeze still
+     blocks duplicate (no new schedules under a frozen event). */
   body.frc-locked #btnGenerate,
   body.frc-locked #btnAssign,
   body.frc-locked #btnSaveEvent,
   body.frc-locked #btnCommit,
-  body.frc-locked #btnDuplicate,
   body.frc-event-frozen #btnGenerate,
   body.frc-event-frozen #btnAssign,
   body.frc-event-frozen #btnSaveEvent,
@@ -1121,8 +1128,7 @@
   body.frc-schedule-official #btnGenerate,
   body.frc-schedule-official #btnAssign,
   body.frc-schedule-official #btnSaveEvent,
-  body.frc-schedule-official #btnCommit,
-  body.frc-schedule-official #btnDuplicate {
+  body.frc-schedule-official #btnCommit {
     opacity: 0.45;
     pointer-events: none;
     filter: grayscale(0.4);
@@ -1791,7 +1797,7 @@
       <button class="btn-share" id="btnOpenView" onclick="openInViewMode()"
         title="Open this schedule in the read-only view (a separate page meant for teams, audience, and printable handouts)">&#128065; View Page</button>
       <button class="btn-share" onclick="shareSchedule()" title="Copy a shareable URL for this schedule">&#128279; Share URL</button>
-      <button class="btn-duplicate" id="btnDuplicate" onclick="duplicateSchedule()" style="display:none;" title="Duplicate this schedule as your own">&#10560; Duplicate</button>
+      <button class="btn-duplicate" id="btnDuplicate" onclick="duplicateSchedule()" style="display:none;" title="Make an editable copy — works even on locked or official schedules. The copy starts unlocked.">&#10560; Copy</button>
       <button class="btn-share" onclick="fullReset()" title="Clear everything and start fresh" style="border-color:var(--danger);color:var(--danger);">&#10006; Reset</button>
     </div>
   </div>
@@ -6054,14 +6060,39 @@ async function generateScheduleWithSeed(seed) {
 // ══════════════════════════════════════════════════════════════════════════════
 async function duplicateSchedule() {
   if (!_currentAssignedScheduleId) { showApiStatus('No schedule to duplicate', true); return; }
+  // Auth gate — duplicate creates a new row, so the user must be
+  // signed in to own it (otherwise created_by is NULL and they
+  // can't lock/delete it later). Routes through requireAuthThen so
+  // the action auto-fires after sign-in lands.
+  return requireAuthThen(_doDuplicateSchedule, 'duplicate schedules');
+}
+
+async function _doDuplicateSchedule() {
+  if (!_currentAssignedScheduleId) return;
   try {
+    showApiStatus('Duplicating\u2026');
     const result = await apiFetch('/api/assigned-schedules/' + _currentAssignedScheduleId + '/duplicate',
       { method: 'POST' });
-    _currentAssignedScheduleId = result.id;
-    _currentAbstractScheduleId = result.abstract_schedule_id;
-    await loadSavedSchedules();
-    showApiStatus('\u2713 Duplicated — you now own a copy');
-    document.getElementById('btnDuplicate').style.display = 'none';
+    // Critical: actually LOAD the new copy. Previously we only
+    // updated the id pointer, leaving the editor showing the old
+    // schedule's day_config and assignments. Calling
+    // loadAssignedSchedule populates the form, the agenda fit, and
+    // — importantly — clears any lock/official UI state inherited
+    // from the source (the copy starts unlocked + unofficial,
+    // even when copying a locked or official source).
+    if (typeof loadAssignedSchedule === 'function') {
+      await loadAssignedSchedule(result.id, null);
+    } else {
+      _currentAssignedScheduleId = result.id;
+      _currentAbstractScheduleId = result.abstract_schedule_id;
+    }
+    if (typeof loadSavedSchedules === 'function') loadSavedSchedules();
+    showApiStatus('\u2713 Copy created \u2014 you\u2019re now editing "' + (result.name || 'the copy') + '"');
+    // Hide the duplicate button until the next change. (Copy of
+    // a copy is fine but typically not what users want — the
+    // button reappears on next event load / schedule load.)
+    var btn = document.getElementById('btnDuplicate');
+    if (btn) btn.style.display = 'none';
   } catch(e) { showApiStatus('Duplicate failed: ' + e.message, true); }
 }
 
@@ -10891,6 +10922,14 @@ async function loadSavedSchedules() {
         actionBtns += ' <button class="btn-sm" onclick="openScheduleHistory(' + s.id + ')" ' +
                       'title="View edit history and restore previous versions">⌛</button>';
 
+        // Copy this version — creates a new schedule that starts
+        // unlocked and unofficial. Works on every row, including
+        // locked / official ones. The whole point of Copy is to
+        // let the user iterate without disturbing the canonical
+        // version.
+        actionBtns += ' <button class="btn-sm" onclick="copyScheduleFromRow(' + s.id + ')" ' +
+                      'title="Make an editable copy — preserves team assignments, starts unlocked">⎘ Copy</button>';
+
         actionBtns += ' <button class="btn-sm btn-danger" onclick="deleteSchedule(' + s.id + ')" title="Delete this version" style="margin-left:0.2rem;">&#x2715;</button>';
 
         // Lock badge — surfaces locker name so users know the
@@ -10959,6 +10998,43 @@ async function loadSchedule(scheduleId) {
 async function markScheduleOfficialFromRow(scheduleId, makeOfficial) {
   return requireAuthThen(function() { return _doMarkScheduleOfficialRow(scheduleId, makeOfficial); },
                          makeOfficial ? 'mark schedules official' : 'unmark schedules official');
+}
+
+// Per-row Copy handler (saved-schedules modal). Mirrors the event-bar
+// duplicateSchedule but operates on an arbitrary row id rather than
+// the currently-loaded one. Confirms intent (so the user knows the
+// copy will become the active editing target), POSTs to the
+// duplicate endpoint, then loads the new copy. Works on locked and
+// official schedules — the copy starts unlocked and unofficial.
+async function copyScheduleFromRow(scheduleId) {
+  return requireAuthThen(function() { return _doCopyScheduleFromRow(scheduleId); },
+                         'copy schedules');
+}
+
+async function _doCopyScheduleFromRow(scheduleId) {
+  if (!confirm('Make an editable copy of this schedule?\n\n'
+             + 'The copy starts unlocked and unofficial — '
+             + 'edits to it won\u2019t affect the original. '
+             + 'You\u2019ll be switched to the copy for editing.')) return;
+  try {
+    showApiStatus('Copying\u2026');
+    const result = await apiFetch('/api/assigned-schedules/' + scheduleId + '/duplicate',
+      { method: 'POST' });
+    // Close the modal so the user immediately sees the copied
+    // schedule loaded into the editor. Without this, the modal
+    // hides the active schedule and the user has to manually
+    // close it before they realize anything happened.
+    closeModal('modalSchedules');
+    if (typeof loadAssignedSchedule === 'function') {
+      await loadAssignedSchedule(result.id, null);
+    }
+    showApiStatus('\u2713 Copy created \u2014 editing "' + (result.name || 'the copy') + '"');
+  } catch(e) {
+    // 423 if event is frozen, 404 if source schedule was just
+    // deleted. Surface the verbatim message; the backend's
+    // detail string is already user-friendly.
+    showApiStatus('Copy failed: ' + (e.message || 'unknown error'), true);
+  }
 }
 
 async function _doMarkScheduleOfficialRow(scheduleId, makeOfficial) {
