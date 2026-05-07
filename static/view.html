@@ -637,6 +637,16 @@
     to   { opacity: 1; transform: scale(1.02); }
   }
 
+  /* Date prefix on the next-match line when the match is on a
+     different calendar day than today. Tinted in the accent color
+     so a glance says "this isn't today, pay attention" without
+     overwhelming the time portion. Only applied by
+     _formatMatchTimeWhen when the match isn't today. */
+  .match-when-date {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
   /* ── Agenda fit (timeline preview above the match table) ──────────── */
   .agenda-fit-panel {
     background: var(--bg);
@@ -4488,14 +4498,12 @@ function _tickCountdown() {
     _stopCountdown();
     return;
   }
-  // Absolute target — date + time — appended after the relative
-  // countdown so users know exactly when their team's next match is
-  // scheduled, not just "in 1h 23m". Same format as the field-level
-  // countdown for visual consistency.
-  var absTarget = (typeof _formatAbsoluteTarget === 'function')
-    ? _formatAbsoluteTarget(_countdownTargetTs) : '';
-  el.innerHTML = '<span class="cd-rel">' + text + '</span>' +
-                 (absTarget ? ' <span class="cd-abs">\u00b7 ' + absTarget + '</span>' : '');
+  // Countdown is purely relative — "in 1h 23m". The absolute date
+  // and time live one line up, in the next-match detail line, via
+  // _formatMatchTimeWhen (same-day-aware). Showing both made the
+  // pane read as two separate anchors; this collapses to one
+  // anchor + one delta.
+  el.innerHTML = '<span class="cd-rel">' + text + '</span>';
   el.classList.toggle('soon',  ms > 0 && ms <= 60 * 60 * 1000);  // <1h
   el.classList.toggle('close', ms > 0 && ms <= 10 * 60 * 1000);  // <10m
   el.classList.toggle('now',   ms <= 0);                          // starting
@@ -5306,9 +5314,17 @@ function _renderNextOnly() {
   lab.textContent = (lastActualTs != null) ? 'Next match expected' : 'Next on schedule';
 
   var prefix = nextEntry.isPractice ? 'P' : 'Q';
-  var lineParts = [prefix + nextEntry.matchNum];
-  if (etaTs != null) lineParts.push(_formatTimeOnly(etaTs));
-  lin.textContent = lineParts.join(' · ');
+  // Primary line: "Q42 · 2:11 PM" same-day, "Q42 · Sat, Apr 4 · 2:11 PM"
+  // when the match is on a different calendar day. Date portion is
+  // tinted via the .match-when-date span so the visual cue is
+  // immediate. Same helper used by the team pane's next-match line
+  // for parity across the two status surfaces.
+  var lineHtml = prefix + nextEntry.matchNum;
+  if (etaTs != null) {
+    var when = _formatMatchTimeWhen(etaTs);
+    if (when) lineHtml += ' \u00b7 ' + when;
+  }
+  lin.innerHTML = lineHtml;
 
   // Alliance roster — show red and blue rosters when the entry has
   // them. Highlights any team in STATE.myTeams with the per-team
@@ -5757,6 +5773,48 @@ function _formatAbsoluteTarget(ts) {
   return datePart + ' \u00b7 ' + timePart;
 }
 
+// Same-day-aware time formatter for status panes.
+//
+// When the match is on today's calendar date, show just the time
+// ("2:11 PM"). When it's on a different date, show the full
+// "Sat, Apr 4 · 2:11 PM" so the user can't miss that this isn't
+// today. The date portion gets wrapped in <span class="match-when-date">
+// so view CSS can tint it as a visual cue without changing the
+// time portion.
+//
+// Used by both panes (team next-match line + field-status next-only
+// line) so the rule is identical everywhere. Countdown renders
+// stay purely relative ("in 2h 15m") since the absolute time is
+// already in the line above.
+//
+// Calendar-day comparison uses local time via Date.getFullYear /
+// getMonth / getDate — the same wall-clock the user is reading,
+// not UTC. A match scheduled for 11:00 PM tonight is still "today"
+// regardless of timezone offset.
+function _formatMatchTimeWhen(ts) {
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  var h = d.getHours(), m = d.getMinutes();
+  var timePart;
+  if (window._frcUse24h) {
+    timePart = (h<10?'0':'') + h + ':' + (m<10?'0':'') + m;
+  } else {
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    var h12 = h % 12; if (h12 === 0) h12 = 12;
+    timePart = h12 + ':' + (m<10?'0':'') + m + ' ' + ampm;
+  }
+  var now = new Date();
+  var sameDay = d.getFullYear() === now.getFullYear()
+             && d.getMonth()    === now.getMonth()
+             && d.getDate()     === now.getDate();
+  if (sameDay) return timePart;
+  var WK = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var datePart = WK[d.getDay()] + ', ' + MO[d.getMonth()] + ' ' + d.getDate();
+  return '<span class="match-when-date">' + datePart + '</span> \u00b7 ' + timePart;
+}
+
 function _startFieldCountdown() {
   if (_fieldCountdownHandle) return;
   _tickFieldCountdown();
@@ -5770,32 +5828,28 @@ function _tickFieldCountdown() {
   var block = document.getElementById('fieldStatus');
   if (!cd || !block || !_fieldCountdownTargetTs) return;
   var ms = _fieldCountdownTargetTs - Date.now();
-  // Absolute target — "Sat, Apr 4 · 9:00 AM" — shown alongside the
-  // relative countdown so users know exactly when, not just "in 2d 3h".
-  // Stored once per tick to avoid repeated formatting.
-  var absTarget = _formatAbsoluteTarget(_fieldCountdownTargetTs);
+  // Countdown shows the relative time only — "in 2h 15m" or
+  // "started 1m 23s ago". The absolute date+time is rendered
+  // once, above this countdown, in the primary status line via
+  // _formatMatchTimeWhen. Showing it here too created visual
+  // duplication the user called out; the line + countdown stack
+  // now reads as one anchor + one delta instead of two anchors.
   if (_fieldCountdownIsPlaying) {
-    // Count UP — match started at ts, show elapsed since
     var elapsed = -ms; // ms is negative once match has started
     if (elapsed < 0) {
-      // Edge case: scheduled time is in the future but Nexus says playing
-      cd.innerHTML = '<span class="cd-rel">PLAYING</span>' +
-                     (absTarget ? ' <span class="cd-abs">\u00b7 ' + absTarget + '</span>' : '');
+      cd.innerHTML = '<span class="cd-rel">PLAYING</span>';
       return;
     }
     var s = Math.floor(elapsed / 1000);
     var m = Math.floor(s / 60); var sec = s % 60;
     var elapsedTxt = m > 0 ? ('started ' + m + 'm ' + (sec < 10 ? '0' : '') + sec + 's ago')
                             : ('started ' + sec + 's ago');
-    cd.innerHTML = '<span class="cd-rel">' + elapsedTxt + '</span>' +
-                   (absTarget ? ' <span class="cd-abs">\u00b7 ' + absTarget + '</span>' : '');
+    cd.innerHTML = '<span class="cd-rel">' + elapsedTxt + '</span>';
     block.classList.remove('close');
   } else {
-    // Count DOWN to start
     var text = _formatCountdown(ms);
     var relTxt = (text === null) ? 'STARTING NOW' : text;
-    cd.innerHTML = '<span class="cd-rel">' + relTxt + '</span>' +
-                   (absTarget ? ' <span class="cd-abs">\u00b7 ' + absTarget + '</span>' : '');
+    cd.innerHTML = '<span class="cd-rel">' + relTxt + '</span>';
     if (text === null) {
       block.classList.remove('close');
       return;
@@ -5986,13 +6040,14 @@ function updateNextMatch(nowMatchNum) {
   // card and the last-completed display both used hard-coded "Q",
   // which produced "Q1" for what was actually "P1" during practice.
   var matchPrefix = target.isPractice ? 'P' : 'Q';
-  // Replace bare "2:11 PM" with full "Sat, Apr 4 · 2:11 PM" using
-  // the absolute target formatter when we can resolve a timestamp.
-  // Falls back to time-only if the timestamp isn't resolvable
-  // (e.g. fresh schedule with no event start_date or per-day dates).
+  // Same-day-aware time display via _formatMatchTimeWhen — just
+  // "2:11 PM" if the match is today, "Sat, Apr 4 · 2:11 PM" if it
+  // isn't. Date portion gets tinted via .match-when-date so the
+  // visual cue is unmissable. The countdown below shows only the
+  // relative delta now, so the full "when" appears once per pane.
   var _detailTs = _resolveMatchTimestamp(target);
-  var _detailWhen = (_detailTs != null && typeof _formatAbsoluteTarget === 'function')
-    ? _formatAbsoluteTarget(_detailTs)
+  var _detailWhen = (_detailTs != null && typeof _formatMatchTimeWhen === 'function')
+    ? _formatMatchTimeWhen(_detailTs)
     : etaText;
   detail.innerHTML = leadLabel + ': <strong>' + matchPrefix + target.matchNum + '</strong> · ' + _detailWhen + driftHtml;
 

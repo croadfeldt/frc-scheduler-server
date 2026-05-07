@@ -13588,6 +13588,28 @@ function onV2Change() {
   // changes — adding/removing qual blocks or embedded children
   // changes how many matches the qual time can fit.
   if (typeof _refreshMatchesPerTeamWarning === 'function') _refreshMatchesPerTeamWarning();
+  // Refresh the agenda-fit bars directly. onParamChanged handles
+  // pre-assignment regen which naturally repaints the bars, but
+  // post-assignment it returns early (auto-regen is intentionally
+  // suppressed once teams are assigned — Save vs Generate is a
+  // user choice). Without this direct call, V2 edits to day
+  // boundaries / playoff windows / ceremony placement never
+  // showed up on the agenda-fit bars after assignment, leaving
+  // the user looking at a stale visualization. The bar reads from
+  // collectDayConfigV2() for playoff/ceremony segments and from
+  // _frcScheduled for match runs — so post-assignment the day
+  // structure updates immediately while match runs stay aligned
+  // with the last generation (correct: matches haven't been
+  // re-laid).
+  // Debounced so a held-down arrow key on a time input doesn't
+  // cause a render storm. 80 ms is short enough that release-
+  // and-look feels live.
+  if (typeof updateAgendaFit === 'function') {
+    if (window._v2AgendaFitTimer) clearTimeout(window._v2AgendaFitTimer);
+    window._v2AgendaFitTimer = setTimeout(function() {
+      try { updateAgendaFit(); } catch(_) {}
+    }, 80);
+  }
 }
 
 // ─── Toggle wiring ────────────────────────────────────────────────
