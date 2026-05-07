@@ -4098,22 +4098,33 @@ function renderDiversityCard(card, serverData) {
   var d = serverData || window._latestDiversityData || null;
 
   // ── Compute B2B count from client-side scheduled state ──────────
-  // The server's diversity computation doesn't include B2B because
-  // it's a function of the time-ordered match list rather than the
-  // pure slot structure. Mirror updateB2BStat's logic: in abstract
-  // mode, B2B is meaningless because slot indices aren't real teams.
+  // Single source of truth: the b2bTeams Set carried on each match
+  // entry. The set is populated at render time per-session — once
+  // for the practice day (looking at the previous practice match)
+  // and once for qualification (looking at the previous qual match).
+  // Practice→qual seam is intentionally NOT counted as b2b: they're
+  // conceptually different sessions, and the filter (which renders
+  // the .b2b-match row class) reads the same Set, so count and
+  // filter agree by construction.
+  // Previously this walked a flat list across all days and would
+  // flag the practice-end → qual-start transition, producing a
+  // count the filter couldn't surface (filter only marks matches
+  // where entry.b2bTeams.size > 0).
+  var b2bCount = 0;
+  if (!window._frcAbstractMode) {
+    (window._frcScheduled || []).forEach(function(day) {
+      (day.entries || []).forEach(function(e) {
+        if (e.type === 'match' && e.b2bTeams && e.b2bTeams.size > 0) {
+          b2bCount++;
+        }
+      });
+    });
+  }
+  // _b2bMatches retained as a flat match list for the surrogate
+  // counter below — that path is unaffected by the b2b definition.
   var _b2bMatches = (window._frcScheduled || []).flatMap(function(day) {
     return day.entries.filter(function(e) { return e.type === 'match'; });
   });
-  var b2bCount = 0;
-  if (!window._frcAbstractMode && _b2bMatches.length > 0) {
-    for (var bi = 1; bi < _b2bMatches.length; bi++) {
-      var prevTeams = new Set([].concat(_b2bMatches[bi-1].red, _b2bMatches[bi-1].blue));
-      if ([].concat(_b2bMatches[bi].red, _b2bMatches[bi].blue).some(function(t) { return prevTeams.has(t); })) {
-        b2bCount++;
-      }
-    }
-  }
   // B2B color: green if 0, amber if 1-2, danger otherwise. Matches
   // what the old stats-bar tile did.
   var b2bColor = b2bCount === 0 ? 'var(--accent3)' : b2bCount <= 2 ? 'var(--amber)' : 'var(--danger)';

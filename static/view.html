@@ -449,6 +449,34 @@
     line-height: 1.15;
     font-variant-numeric: tabular-nums;
   }
+  /* Alliance roster line — sits between the match number/ETA and
+     the timing meta. Match-number style (bold) for the team
+     numbers themselves; "vs" stays muted to keep the eye on the
+     digits. The line wraps if 6 numbers + "vs" exceed the card
+     width on narrow viewports. */
+  .status-next-only-alliances {
+    font-size: 13px; line-height: 1.4;
+    color: var(--text-muted);
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+    word-spacing: 0.1em;
+  }
+  .status-next-only-alliances strong { color: var(--text); font-weight: 600; }
+  /* My-team highlight — when the team appears in STATE.myTeams,
+     it gets the same per-team color the schedule table uses, so
+     the user can spot themselves at a glance. The .my-team class
+     is applied per <span> in the renderer. Color comes from the
+     inline style attribute (one of TEAM_COLORS). */
+  .status-next-only-alliances .my-team {
+    font-weight: 700;
+    background: rgba(0,0,0,0.04);
+    padding: 0.05rem 0.3rem;
+    border-radius: 3px;
+  }
+  html[data-theme="dark"] .status-next-only-alliances .my-team { background: rgba(255,255,255,0.07); }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .status-next-only-alliances .my-team { background: rgba(255,255,255,0.07); }
+  }
   .status-next-only-meta {
     font-size: 12px; color: var(--text-muted);
     margin-top: 4px; line-height: 1.35;
@@ -1701,6 +1729,11 @@
         <div class="status-next-only" id="statusNextOnly" style="display:none;">
           <div class="status-next-only-label" id="statusNextOnlyLabel">Next on schedule</div>
           <div class="status-next-only-line" id="statusNextOnlyLine">—</div>
+          <!-- Alliance roster — mirrors the 3-up panel's meta line
+               style. Shows red.join(' ') vs blue.join(' ') with the
+               user's selected teams highlighted via per-team color
+               classes (same convention as the schedule table rows). -->
+          <div class="status-next-only-alliances" id="statusNextOnlyAlliances"></div>
           <div class="status-next-only-meta" id="statusNextOnlyMeta"></div>
         </div>
 
@@ -4977,6 +5010,13 @@ function _renderNextOnly() {
   if (etaTs != null) lineParts.push(_formatTimeOnly(etaTs));
   lin.textContent = lineParts.join(' · ');
 
+  // Alliance roster — show red and blue rosters when the entry has
+  // them. Highlights any team in STATE.myTeams with the per-team
+  // color from TEAM_COLORS so the user can spot themselves in the
+  // queue at a glance. _renderNextOnlyAlliances handles missing
+  // markup defensively (no-op if the element isn't present).
+  _renderNextOnlyAlliances(nextEntry);
+
   // Meta line: countdown + provenance. Avoid double-formatting if
   // ETA is in the past (should be rare given the filter above).
   var metaHtml = '';
@@ -4994,6 +5034,45 @@ function _renderNextOnly() {
   }
   meta.innerHTML = metaHtml;
   return { rendered: true };
+}
+
+// Render the alliance roster line under "Next on schedule".
+// entry is a STATE.computed match entry with red[] and blue[]
+// arrays. Highlights teams from STATE.myTeams using their
+// per-team palette color (matches the schedule-table convention).
+// Hides the row when there's nothing to show (e.g. surrogate-only
+// or malformed entry).
+function _renderNextOnlyAlliances(entry) {
+  var el = document.getElementById('statusNextOnlyAlliances');
+  if (!el) return;
+  if (!entry || !entry.red || !entry.blue ||
+      entry.red.length === 0 || entry.blue.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  // Each team rendered as a span. If it's in myTeams, the span
+  // gets the my-team class + inline color (foreground only — the
+  // CSS handles the soft background). Numbers are wrapped in
+  // <strong> so they stand out; the "vs" separator stays muted.
+  function _renderTeam(t) {
+    var teamN = Number(t);
+    var inMine = STATE.myTeams && (
+      STATE.myTeams.has(teamN) || STATE.myTeams.has(String(t)) || STATE.myTeams.has(t)
+    );
+    if (inMine) {
+      var c = _teamColor(teamN);
+      return '<strong class="my-team" style="color:' + c + ';">' + teamN + '</strong>';
+    }
+    return '<strong>' + teamN + '</strong>';
+  }
+  var redHtml  = entry.red.map(_renderTeam).join(' ');
+  var blueHtml = entry.blue.map(_renderTeam).join(' ');
+  // Visual: red rosters first then "vs" then blue. The mini-chip
+  // layout in the 3-up uses the same convention (red.join(' ') vs
+  // blue.join(' ')) so the eye flows the same way across both
+  // panels. Color-coded "vs" would over-decorate; muted text
+  // maintains the count-the-numbers reading order.
+  el.innerHTML = redHtml + ' <span style="opacity:0.6;">vs</span> ' + blueHtml;
 }
 
 // Returns true when at least one live source has data we can act
