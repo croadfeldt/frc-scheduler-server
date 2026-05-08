@@ -259,24 +259,46 @@ def derive_parameters(matches: list[dict]) -> dict[str, Any]:
                     "end":   _min_to_hhmm(end),
                 })
 
-    day_config = {
+    # Emit V2-shape day_config per docs/V2_SPEC.md. The single derived
+    # day becomes one V2 day with one qualification block; breaks
+    # become tier-3 nested children of the qual block. Lunch breaks
+    # detected by name get breakKind="lunch"; everything else is
+    # generic "break". The breakKind heuristic is intentionally
+    # narrow — schedule_derive's input doesn't carry richer hints,
+    # so we don't try to detect awards/ceremonies.
+    qual_block: dict[str, Any] = {
+        "type":      "qualification",
+        "start":     _min_to_hhmm(day_start_min) or "08:30",
+        "end":       _min_to_hhmm(day_end_min)   or "17:00",
+        "cycleTime": cycle_time_min,
+        "changes":   [],
+        "breaks":    [
+            {
+                "type":      "break",
+                "start":     b["start"],
+                "end":       b["end"],
+                "label":     b.get("name") or "Break",
+                "breakKind": "lunch" if (b.get("name") or "").lower() == "lunch" else "break",
+            }
+            for b in breaks
+        ],
+    }
+    day_config: dict[str, Any] = {
+        "dayConfigVersion": 2,
+        "cycleTime":   cycle_time_min,
+        "breakBuffer": 5,
         "days": [
             {
-                "start":  _min_to_hhmm(day_start_min) or "08:30",
-                "end":    _min_to_hhmm(day_end_min)   or "17:00",
-                "breaks": breaks,
-                "earlyEnd":     None,
-                "cycleChanges": [],
+                "label":  "Day 1",
+                "date":   "",
+                "blocks": [qual_block],
             }
         ],
-        "practiceDay": {
-            "enabled": False,
-            "start":   "",
-            "end":     "",
-            "ct":      cycle_time_min,
-            "guaranteed": 1,
-        },
-        "timeline_blocks": [],
+        # Side-channel state preserved across the V2 wire — these
+        # aren't part of the canonical V2 model but the editor
+        # piggybacks them on day_config. They get stripped on full
+        # validation; preserving them here keeps existing UI flows
+        # working through the transition.
         "autoPopulate":  True,
         "autoMaxCycles": True,
         "autoAssign":    False,

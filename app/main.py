@@ -48,6 +48,8 @@ from app import xlsx_extract
 from app import csv_extract
 from app import schedule_derive
 from app import llm_client
+from app import day_config_v2
+from app.day_config_v2 import normalize_to_v2, validate_v2, is_v2_shape
 from app.auth import (
     get_current_user, require_auth,
     google_login_url, google_exchange_code,
@@ -86,6 +88,54 @@ def get_pool() -> ProcessPoolExecutor:
 
 def _noop(_: None = None) -> None:
     pass
+
+
+# ── day_config V2 normalization helper ────────────────────────────────────────
+def _normalize_dc(dc: object, *, allow_none: bool = True) -> dict | None:
+    """Normalize an incoming day_config to V2 shape and validate it.
+
+    Called at the top of every write endpoint that accepts a
+    body.day_config payload. Centralizes the shape contract so write
+    sites don't need to know about V1 vs V2 — they always store V2.
+
+    Behavior:
+    * None or missing: returns None (when allow_none, the typical case)
+      or raises 400 (when the endpoint requires day_config).
+    * V1-shape: migrated to V2 via day_config_v2.migrate_v1_to_v2.
+    * V2-shape: validated against the V2 Pydantic model.
+    * Invalid V2: raises HTTP 400 with the validation error.
+
+    The returned dict is JSON-serializable and ready to write to the
+    DB column. Pydantic's model_dump() with mode='json' converts
+    Decimal/datetime/etc. to JSON-native types if any sneak in.
+    """
+    if dc is None:
+        if allow_none:
+            return None
+        raise HTTPException(400, "day_config is required")
+    if not isinstance(dc, dict):
+        raise HTTPException(400, "day_config must be an object")
+
+    # Normalize shape: migrate V1 to V2 if needed. Idempotent on V2.
+    normalized = normalize_to_v2(dc)
+    if normalized is None:
+        # Shouldn't happen for dict input — normalize_to_v2 only
+        # returns None for None or non-dict — but handle defensively.
+        raise HTTPException(400, "day_config could not be normalized to V2")
+
+    # Validate against V2 schema. Reject malformed input loud and
+    # early rather than letting it sit in the DB as a time bomb.
+    try:
+        validated = validate_v2(normalized)
+    except Exception as exc:
+        # Pydantic ValidationError serializes to a readable string
+        # via str(exc); FastAPI surfaces this back to the client.
+        raise HTTPException(400, f"day_config validation failed: {exc}") from exc
+
+    # model_dump(mode='json') gives a plain dict suitable for JSON
+    # storage. Use exclude_none=False so reserved fields (alliances,
+    # matches) round-trip as empty arrays rather than disappearing.
+    return validated.model_dump(mode='json')
 
 
 _gen_concurrency = max(2, (CPU_WORKERS or os.cpu_count() or 4) // 3)
@@ -676,6 +726,11 @@ async def generate_abstract(
     pool = get_pool()
     _seed_int = int(body.seed, 16) if body.seed else None
 
+    # Normalize day_config to V2 shape + validate. Done at request
+    # entry (before the long-running stream) so a malformed payload
+    # gets rejected immediately with a 400, not silently stored.
+    body.day_config = _normalize_dc(body.day_config)
+
     async def stream() -> AsyncGenerator[str, None]:
         yield ": connected\n\n"
         sem = get_generation_semaphore()
@@ -748,7 +803,12 @@ async def get_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(get
         "cooldown": sched.cooldown, "seed": sched.seed,
         "iterations_run": sched.iterations_run, "score": sched.score,
         "matches": sched.matches, "surrogate_count": sched.surrogate_count,
-        "round_boundaries": sched.round_boundaries, "day_config": sched.day_config,
+        "round_boundaries": sched.round_boundaries,
+        # Normalize to V2 on read. Pre-migration rows store V1 shape;
+        # the DB migration (phase 2) will rewrite them in place but
+        # until that runs, this normalize-on-read keeps the API
+        # contract V2-only. Idempotent on V2 inputs.
+        "day_config": normalize_to_v2(sched.day_config),
         "weights": sched.weights,  # None means FIRST defaults were used
         "created_at": sched.created_at.isoformat(),
     }
@@ -773,6 +833,10 @@ async def assign_teams_endpoint(
     body: AssignRequest,
     current_user: dict | None = Depends(get_current_user),
 ):
+    # Normalize day_config to V2 shape + validate. Same rationale as
+    # generate_abstract: fail fast on malformed input rather than
+    # storing a future bug.
+    body.day_config = _normalize_dc(body.day_config)
     async with AsyncSessionLocal() as db:
         abstract = await db.get(AbstractSchedule, abstract_id)
         if not abstract:
@@ -981,7 +1045,9 @@ async def _build_assigned_schedule_response(assigned: AssignedSchedule, db: Asyn
         "practice_matches": resolved_practice_matches,
         "surrogate_count": abstract.surrogate_count,
         "round_boundaries": abstract.round_boundaries,
-        "day_config": assigned.day_config,
+        # Normalize day_config to V2 shape on read. Pre-migration
+        # rows hold V1 shape; phase 2 DB migration fixes them in place.
+        "day_config": normalize_to_v2(assigned.day_config),
         "created_at": assigned.created_at.isoformat(),
         # updated_at lets the UI render an "edited" badge by comparing
         # against created_at. Bumped on every PATCH and restore.
@@ -1208,8 +1274,11 @@ async def patch_assigned_schedule(
 
     if "day_config" in payload:
         new_dc = payload["day_config"]
-        if not isinstance(new_dc, dict):
-            raise HTTPException(400, "day_config must be an object")
+        # Normalize to V2 + validate. _normalize_dc handles the
+        # type-check (must be dict), V1→V2 migration (idempotent on
+        # V2 input), and shape validation. On invalid input, raises
+        # HTTPException(400) with a useful message.
+        new_dc = _normalize_dc(new_dc, allow_none=False)
         assigned.day_config = new_dc
         # SQLAlchemy needs an explicit flag for JSON column mutation
         # to be picked up by the dirty-tracker.
@@ -2076,19 +2145,21 @@ def _resolve_practice_matches(
 
 
 def _synthesize_day_config_from_tba(qual_matches: list[dict]) -> dict | None:
-    """Build a minimal day_config from TBA match times. The view page uses this
+    """Build a minimal V2 day_config from TBA match times. The view page uses this
     for break/cycle-time logic; for TBA data we just want a reasonable default
     so the schedule can render at all. The actual times shown will come from
-    TBA's predicted_time/actual_time per match, not from day_config math."""
+    TBA's predicted_time/actual_time per match, not from day_config math.
+
+    Per V2_SPEC: one V2 day per distinct calendar date, each with a single
+    qualification block spanning the day's match window. No breaks are
+    inferred (TBA doesn't carry break metadata)."""
     times = [m.get("time") or m.get("predicted_time") or m.get("actual_time")
              for m in qual_matches]
     times = [t for t in times if t]
     if not times:
         return None
     from datetime import datetime as _dt, timezone as _tz
-    first = _dt.fromtimestamp(min(times), tz=_tz.utc).astimezone()
-    last  = _dt.fromtimestamp(max(times), tz=_tz.utc).astimezone()
-    # Group matches by date, build a day per distinct calendar date
+    # Group matches by date, build a V2 day per distinct calendar date
     days_by_date: dict[str, list[int]] = {}
     for t in sorted(times):
         d = _dt.fromtimestamp(t, tz=_tz.utc).astimezone()
@@ -2097,18 +2168,28 @@ def _synthesize_day_config_from_tba(qual_matches: list[dict]) -> dict | None:
     for date_str, day_times in days_by_date.items():
         d_start = _dt.fromtimestamp(min(day_times), tz=_tz.utc).astimezone()
         d_end   = _dt.fromtimestamp(max(day_times), tz=_tz.utc).astimezone()
+        # Each TBA day → one V2 day with one qualification block.
+        # cycleTime is nominal; the view page uses real per-match
+        # times rather than computing from cycle.
         days.append({
-            "start": d_start.strftime("%H:%M"),
-            "end":   d_end.strftime("%H:%M"),
-            "breaks": [], "cycleChanges": [], "earlyEnd": None,
-            "dateLabel": d_start.strftime("%a %b %d"),
+            "label":  d_start.strftime("%a %b %d"),
+            "date":   date_str,
+            "blocks": [
+                {
+                    "type":      "qualification",
+                    "start":     d_start.strftime("%H:%M"),
+                    "end":       d_end.strftime("%H:%M"),
+                    "cycleTime": 8,
+                    "changes":   [],
+                    "breaks":    [],
+                }
+            ],
         })
     return {
-        "cycleTime": 8,  # ignored for TBA data — UI uses real times per match
+        "dayConfigVersion": 2,
+        "cycleTime":   8,    # ignored for TBA data — UI uses real times per match
         "breakBuffer": 5,
-        "numDays": len(days),
-        "days": days,
-        "practiceDay": None,
+        "days":        days,
     }
 
 
@@ -2150,7 +2231,9 @@ async def _build_assigned_payload(
         "practice_matches": resolved_practice_matches,
         "surrogate_count": abstract.surrogate_count,
         "round_boundaries": abstract.round_boundaries,
-        "day_config": assigned.day_config,
+        # Normalize day_config to V2 shape on read. Pre-migration
+        # rows hold V1 shape; phase 2 DB migration fixes them in place.
+        "day_config": normalize_to_v2(assigned.day_config),
         "created_at": assigned.created_at.isoformat(),
     }
 
@@ -2748,7 +2831,10 @@ async def import_pdf(
         # we'd rather surface "AttributeError: 'list' object has no
         # attribute 'lower'" than a 500 with no body.
         try:
-            legacy_cfg = pdf_dayplan.to_legacy_day_config(dayplan)
+            # V2-native emit path. Internally goes through the legacy
+            # builder + migrate_v1_to_v2 so existing PDF parsing logic
+            # (auto-cap, lunch detection) is reused without porting.
+            legacy_cfg = pdf_dayplan.to_v2_day_config(dayplan)
         except Exception as e:
             log.exception(
                 "Day-plan adapter failed. dayplan keys: %s, blocks count: %s",
@@ -3334,6 +3420,11 @@ async def commit_pdf_import(
     and the cost of a manual review step is small vs the cost of importing
     a wrong schedule.
     """
+    # Normalize day_config to V2 shape + validate. PDF imports build
+    # day_config from the parser's output (pdf_dayplan emits V2
+    # natively post-phase-1) but the user may have edited it during
+    # the preview — so we re-validate here regardless of source.
+    body.day_config = _normalize_dc(body.day_config)
     async with AsyncSessionLocal() as db:
         pdf_import = await db.get(PdfImport, body.pdf_import_id)
         if not pdf_import:

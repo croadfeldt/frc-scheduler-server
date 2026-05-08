@@ -216,6 +216,88 @@ def _hhmm_to_min(hhmm: str | None) -> int | None:
         return None
 
 
+def to_v2_day_config(extracted: dict[str, Any], *,
+                     default_cycle_time: float = 8.0,
+                     default_break_buffer: float = 5.0) -> dict[str, Any]:
+    """Convert the rich block-list output into a V2 day_config.
+
+    This is the V2-native emit path per docs/V2_SPEC.md. Strategy:
+    1. Run the internal V1-shape builder (`to_legacy_day_config`) which
+       carries all the existing PDF-parsing logic — auto-cap of qual
+       end at playoff start, lunch detection, practice day extraction,
+       etc.
+    2. Migrate the V1 result through `day_config_v2.migrate_v1_to_v2()`
+       so the output is V2-shape with proper tier-3 hoisting (alliance
+       selection, ceremonies, awards land at day level), playoff blocks
+       on the day not on a side-channel, breakKind detection, etc.
+
+    Going through V1→V2 migration rather than building V2 directly
+    means the V2 emission shares one classification path with the
+    legacy migration code; if the heuristics improve there, both
+    paths benefit.
+    """
+    from app.day_config_v2 import migrate_v1_to_v2  # local import to avoid cycles
+    legacy = to_legacy_day_config(
+        extracted,
+        default_cycle_time=default_cycle_time,
+        default_break_buffer=default_break_buffer,
+    )
+    # Inject playoff/ceremony info from timeline_blocks into the V1
+    # `playoffBlocks` side-channel so the migrator picks them up.
+    # to_legacy_day_config emits them as `timeline_blocks` (informational
+    # only — scheduler ignored them); we want them in V2 as proper
+    # playoff blocks.
+    #
+    # Day-index translation: timeline_blocks carry the *input* day_index
+    # (e.g. 1 for the qual day when practice was on day 0), but
+    # to_legacy_day_config compresses the day list to "qual days only"
+    # and re-indexes from 0. Build a map: input day_index → output
+    # days[] position. Practice day stays separate (in practiceDay,
+    # not days[]) so it doesn't appear here.
+    timeline = legacy.get("timeline_blocks") or []
+    legacy["playoffBlocks"] = legacy.get("playoffBlocks") or []
+    qual_input_indices = sorted({
+        b.get("day_index") for b in (extracted.get("blocks") or [])
+        if isinstance(b, dict) and b.get("kind") == "qual"
+        and isinstance(b.get("day_index"), int)
+    })
+    input_to_output = {qi: oi for oi, qi in enumerate(qual_input_indices)}
+
+    for tb in timeline:
+        if not isinstance(tb, dict):
+            continue
+        in_di  = tb.get("day_index", 0)
+        out_di = input_to_output.get(in_di, 0)
+        if tb.get("kind") == "playoff" and tb.get("start") and tb.get("end"):
+            legacy["playoffBlocks"].append({
+                "dayIndex":  out_di,
+                "start":     tb["start"],
+                "end":       tb["end"],
+                "format":    "double_elim",
+                "alliances": 8,
+            })
+        # Ceremonies stay in timeline_blocks; the migrator's break-name
+        # detection picks up "ceremony" / "opening" / "closing" keywords
+        # in any breaks named that way. PDF day-plans don't typically
+        # emit ceremony blocks as breaks, so we add them to the day's
+        # break list to give the migrator something to detect.
+        elif tb.get("kind") == "ceremony" and tb.get("start") and tb.get("end"):
+            if 0 <= out_di < len(legacy.get("days", [])):
+                legacy["days"][out_di].setdefault("breaks", []).append({
+                    "name":  tb.get("label") or "Ceremony",
+                    "start": tb["start"],
+                    "end":   tb["end"],
+                })
+
+    v2 = migrate_v1_to_v2(legacy)
+    if v2 is None:
+        # Defensive: shouldn't happen for dict input, but fall back
+        # to a minimal V2 shape if migration failed for some reason.
+        v2 = {"dayConfigVersion": 2, "cycleTime": default_cycle_time,
+              "breakBuffer": default_break_buffer, "days": []}
+    return v2
+
+
 def to_legacy_day_config(extracted: dict[str, Any], *,
                           default_cycle_time: float = 8.0,
                           default_break_buffer: float = 5.0) -> dict[str, Any]:
