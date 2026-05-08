@@ -820,7 +820,11 @@
     align-items: center;
     justify-content: center;
     color: #fff;
-    text-shadow: 0 1px 1px rgba(0,0,0,0.45);
+    /* Two-layer drop shadow: a sharp bottom-offset shadow handles
+       saturated mid-tone fills (qual blue, ceremony coral); a soft
+       halo handles bright fills (amber, teal). Same treatment on
+       every segment kind — match, break, awards, playoff, ceremony. */
+    text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.5);
     font-size: 0.68rem;
     font-weight: 600;
     min-width: 0;
@@ -861,10 +865,11 @@
   }
   .agenda-seg:hover { filter: brightness(1.1); }
   .agenda-seg-matches { cursor: pointer; }
-  .agenda-seg-break {
-    color: #2a1808;
-    text-shadow: none;
-  }
+  /* Break/playoff/awards/ceremony segments inherit the white text +
+     drop shadow from .agenda-seg above. The previous dark-text
+     override (color: #2a1808; text-shadow: none) was removed so
+     every segment reads with the same treatment regardless of fill
+     color — see .agenda-seg's two-layer shadow comment for why. */
   /* Break segments on the agenda timeline. Default = orange. The
      subtype-aware rules below override per-kind so awards/ceremony/
      alliance_selection/playoff render in their distinct V2 palette
@@ -883,17 +888,13 @@
   html[data-theme="light"] .agenda-seg-break:not([data-subtype]) {
     background: #f4b366;
   }
-  /* Playoff band — purple, distinct from match runs. Slightly
-     muted on light theme so it doesn't pull focus from match
-     content. */
+  /* Playoff band — solid purple, matching the V2 palette and the
+     other break-subtype fills. White text + drop shadow inherits
+     from .agenda-seg base; no dark-color or gradient overrides
+     here since both pages now share the same uniform treatment
+     across every segment kind. */
   .agenda-seg-playoff {
-    background: linear-gradient(180deg, #bd92f0 0%, #a875e0 100%);
-    color: #1a0e2e;
-    text-shadow: none;
-    font-weight: 600;
-  }
-  html[data-theme="light"] .agenda-seg-playoff {
-    background: linear-gradient(180deg, #c9a8f0 0%, #b594e0 100%);
+    background: #bd92f0;
   }
   /* Idle / unallocated time — diagonal hatch so it visually reads
      as "empty / available" rather than a real scheduled slot. */
@@ -1141,7 +1142,7 @@
      style winning over zebra-stripe rules in tr.alt. */
   tr.my-team td { font-weight: 700; }
   /* Selected-team cell — underline-only treatment via inset
-     box-shadow (3px bottom edge in --team-color from inline style).
+     box-shadow (4px bottom edge in --team-color from inline style).
      Box-shadow chosen over border-bottom because it doesn't affect
      cell layout — table rows stay the same height regardless of
      selection state, so adding/removing a selected team doesn't
@@ -1150,7 +1151,7 @@
      used by alliance-line + field-position cells elsewhere. */
   td.my-team-cell {
     font-weight: 700;
-    box-shadow: inset 0 -3px 0 0 var(--team-color, var(--my-team-bg));
+    box-shadow: inset 0 -4px 0 0 var(--team-color, var(--my-team-bg));
   }
   /* Currently-playing match (live mode) */
   tr.now-playing { box-shadow: inset 4px 0 0 var(--next-match-accent), 0 0 0 2px var(--next-match-accent) inset; }
@@ -1693,7 +1694,7 @@
     padding: 2px 5px;
     border-radius: 3px;
     font-weight: 600;
-    border-bottom: 3px solid transparent; /* reserve space so my-team
+    border-bottom: 4px solid transparent; /* reserve space so my-team
                                               cells don't shift others */
   }
   .team-cell.blue { color: var(--blue-alliance); }
@@ -1709,13 +1710,15 @@
   .team-cell .num { font-size: 14px; }
   /* Selected-team highlight — underline-only treatment to keep the
      alliance signal (blue/red cell tint) intact even when the
-     team's palette slot is in a conflicting hue family. 3px solid
+     team's palette slot is in a conflicting hue family. 4px solid
      bottom border in --team-color; the cell's own alliance
      background stays unchanged. The number bolds and the station
      number gets the team color so the selection still reads
-     decisively without overpowering the alliance. */
+     decisively without overpowering the alliance. Compact variant
+     (.alliance-line.compact below) drops to 3px since the 3-up
+     cells are tighter. */
   .team-cell.my-team {
-    border-bottom: 3px solid var(--team-color);
+    border-bottom: 4px solid var(--team-color);
     font-weight: 800;
   }
   .team-cell.my-team .station {
@@ -1740,7 +1743,7 @@
   }
   .alliance-line.compact .team-cell {
     padding: 1px 3px;
-    border-bottom-width: 2px;
+    border-bottom-width: 3px;
   }
   .alliance-line.compact .team-cell .num { font-size: 11px; }
   .alliance-line.compact .team-cell .station {
@@ -1818,11 +1821,16 @@
   }
   /* Selected-team highlight — underline-only, mirrors the linear
      .team-cell.my-team treatment. Cell keeps its alliance tint;
-     selection signals via a 2px bottom border in --team-color so a
+     selection signals via a 4px bottom border in --team-color so a
      red-family palette slot can't read as "red alliance" on a blue
-     cell. Same pattern across all alliance views. */
+     cell. Same pattern across all alliance views. Compact variant
+     (.alliance-field.compact below) drops to 3px since the 3-up
+     stage cells are tighter. */
   .alliance-field .field-cell.my-team {
-    border-bottom: 2px solid var(--team-color);
+    border-bottom: 4px solid var(--team-color);
+  }
+  .alliance-field.compact .field-cell.my-team {
+    border-bottom-width: 3px;
   }
   /* Center column — placeholder for a countdown / status when this
      layout is used inline in a larger card. In the compact 3-up

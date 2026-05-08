@@ -1412,28 +1412,37 @@
     min-width: 0;
     padding: 2px 4px;
     color: #fff;
-    text-shadow: 0 1px 1px rgba(0,0,0,0.45);
+    /* Two-layer drop shadow: a sharp drop (1px down, 2px blur, 0.85
+       alpha) plus a soft halo (3px blur, 0.5 alpha). The halo keeps
+       white text readable on bright fills (amber, teal, lavender);
+       the drop carries the shadow on darker fills (qual blue,
+       practice green, ceremony coral). Same treatment applies to
+       every segment kind — break/playoff overrides that used dark
+       text were dropped so the bar reads consistently. */
+    text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.5);
     cursor: default;
     transition: filter 0.15s;
     overflow: hidden;
   }
   .agenda-seg:hover { filter: brightness(1.12); }
   .agenda-seg-matches { cursor: pointer; }
+  /* Break/playoff/awards/ceremony segments inherit the white text +
+     drop shadow from .agenda-seg above. The previous dark-text
+     override (color: #2a1808; text-shadow: none) was removed so
+     every segment reads with the same treatment regardless of fill
+     color. */
   .agenda-seg-break {
-    color: #2a1808;
-    text-shadow: none;
     font-weight: 600;
     font-size: 0.64rem;
   }
-  /* Playoff segment — purple tint to match the V2 playoff pill. The
-     segment is non-clickable (no match-detail tooltip available
-     yet); it just reserves bracket time on the agenda. Slightly
-     lighter weight than match segments so users immediately read
-     it as a distinct kind of block. */
+  /* Playoff segment — solid lavender to match the V2 playoff pill
+     and the view page. White text + drop shadow inherited from
+     .agenda-seg. The segment is non-clickable (no match-detail
+     tooltip available yet); it just reserves bracket time on the
+     agenda. Slightly lighter weight than match segments so users
+     immediately read it as a distinct kind of block. */
   .agenda-seg-playoff {
-    background: linear-gradient(180deg, #bd92f0 0%, #a875e0 100%);
-    color: #1a0e2e;
-    text-shadow: none;
+    background: #bd92f0;
     font-weight: 600;
     font-size: 0.64rem;
     cursor: default;
