@@ -15061,6 +15061,18 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
     document.getElementById('progressWrap').style.display = 'none';
     return;
   }
+  // V2 → V1 downgrade. finishGeneration was written for V1-shape
+  // day_config (each day has .start/.end/.breaks/.cycleChanges at
+  // the day level) and crashes on V2 inputs (where those fields
+  // live on the qual block, not the day). Phase 1 made the API
+  // return V2; this surgical conversion keeps finishGeneration
+  // working without rewriting it. Phase 5 cleanup makes
+  // finishGeneration V2-native and removes this wedge.
+  if (dayConfigOverride && dayConfigOverride.dayConfigVersion === 2 &&
+      typeof downgradeToV1 === 'function') {
+    try { dayConfigOverride = downgradeToV1(dayConfigOverride); }
+    catch(e) { console.warn('finishGeneration: V2→V1 downgrade failed:', e); }
+  }
   const numTeams = parseInt(document.getElementById('numTeams').value);
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value) || 6;
   // Use override day config if provided (e.g. from loaded schedule), else read from UI
