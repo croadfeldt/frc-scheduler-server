@@ -1096,32 +1096,59 @@
     html:not([data-theme]) tr.current-match  td { background: rgba(255,235,59,0.10) !important; }
     html:not([data-theme]) tr.upcoming-match td { background: rgba(255,152,0,0.10) !important; }
   }
-  /* Break/lunch row */
+  /* Break/lunch row — generic default. Per-subtype overrides below
+     pick distinct colors that mirror the V2 editor's palette so the
+     view page reads the same visual language as the editor. */
   tr.break-row td {
     background: var(--break-bg); color: var(--break-text); font-style: italic;
     font-weight: 500; padding: 0.6rem 1rem; text-align: center;
   }
+  /* Subtype-specific break tints. Light-mode values:
+     alliance_selection → teal, awards → gold, ceremony → coral,
+     playoff → purple, break → default (the rule above). The hex
+     numbers are direct V2_BLOCK_TYPES colors at ~18% alpha for the
+     background and a darker tone for the text so it stays readable
+     against a light backdrop. */
+  tr.break-row[data-subtype="alliance_selection"] td { background: rgba(63,166,160,0.18);  color: #1f6663; }
+  tr.break-row[data-subtype="awards"]             td { background: rgba(217,161,62,0.18);  color: #7e5a1d; }
+  tr.break-row[data-subtype="ceremony"]           td { background: rgba(221,120,88,0.18);  color: #874431; }
+  tr.break-row[data-subtype="playoff"]            td { background: rgba(189,146,240,0.18); color: #5d3aa1; }
+  /* Dark-mode versions. Same hue family, lighter text, slightly more
+     opaque background — same dual-rule pattern as other components. */
+  html[data-theme="dark"] tr.break-row[data-subtype="alliance_selection"] td { background: rgba(63,166,160,0.22);  color: #8de0d9; }
+  html[data-theme="dark"] tr.break-row[data-subtype="awards"]             td { background: rgba(217,161,62,0.22);  color: #f0cf86; }
+  html[data-theme="dark"] tr.break-row[data-subtype="ceremony"]           td { background: rgba(221,120,88,0.22);  color: #f3a892; }
+  html[data-theme="dark"] tr.break-row[data-subtype="playoff"]            td { background: rgba(189,146,240,0.22); color: #d4bcf5; }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) tr.break-row[data-subtype="alliance_selection"] td { background: rgba(63,166,160,0.22);  color: #8de0d9; }
+    html:not([data-theme]) tr.break-row[data-subtype="awards"]             td { background: rgba(217,161,62,0.22);  color: #f0cf86; }
+    html:not([data-theme]) tr.break-row[data-subtype="ceremony"]           td { background: rgba(221,120,88,0.22);  color: #f3a892; }
+    html:not([data-theme]) tr.break-row[data-subtype="playoff"]            td { background: rgba(189,146,240,0.22); color: #d4bcf5; }
+  }
   /* Informational blocks from the day-plan PDF — ceremonies, playoffs,
      awards. Same row shape as breaks but with kind-specific tinting so
-     they read as event milestones rather than scheduling gaps. */
+     they read as event milestones rather than scheduling gaps. Colors
+     match the V2 editor palette (V2_BLOCK_TYPES). */
   tr.info-block-row td {
     font-style: normal;
-    /* Slight color shifts per kind, layered over break-bg */
   }
-  tr.info-block-row[data-kind="playoff"]  td { background: rgba(229, 115, 115, 0.18); color: #b54040; }
-  tr.info-block-row[data-kind="ceremony"] td { background: rgba(155, 109, 255, 0.15); color: #6b3fc7; }
-  tr.info-block-row[data-kind="practice"] td { background: rgba(93, 175, 120, 0.15); color: #2c7a4a; }
-  /* Info-block-row dark variants — keep the same hue but lighten
-     the text and shift the background opacity. Same pattern as
-     other components: dual-rule for both manual toggle and OS-
-     default fallback. */
-  html[data-theme="dark"] tr.info-block-row[data-kind="playoff"]  td { background: rgba(229,115,115,0.18); color: #f5a3a3; }
-  html[data-theme="dark"] tr.info-block-row[data-kind="ceremony"] td { background: rgba(155,109,255,0.18); color: #c5b3ff; }
-  html[data-theme="dark"] tr.info-block-row[data-kind="practice"] td { background: rgba(93,175,120,0.20); color: #95d4a9; }
+  tr.info-block-row[data-kind="playoff"]  td { background: rgba(189,146,240,0.18); color: #5d3aa1; }
+  tr.info-block-row[data-kind="ceremony"] td { background: rgba(221,120,88,0.18);  color: #874431; }
+  tr.info-block-row[data-kind="practice"] td { background: rgba(93,175,120,0.18);  color: #2c7a4a; }
+  tr.info-block-row[data-kind="awards"]   td { background: rgba(217,161,62,0.18);  color: #7e5a1d; }
+  tr.info-block-row[data-kind="alliance_selection"] td { background: rgba(63,166,160,0.18); color: #1f6663; }
+  /* Info-block-row dark variants */
+  html[data-theme="dark"] tr.info-block-row[data-kind="playoff"]  td { background: rgba(189,146,240,0.22); color: #d4bcf5; }
+  html[data-theme="dark"] tr.info-block-row[data-kind="ceremony"] td { background: rgba(221,120,88,0.22);  color: #f3a892; }
+  html[data-theme="dark"] tr.info-block-row[data-kind="practice"] td { background: rgba(93,175,120,0.22);  color: #95d4a9; }
+  html[data-theme="dark"] tr.info-block-row[data-kind="awards"]   td { background: rgba(217,161,62,0.22);  color: #f0cf86; }
+  html[data-theme="dark"] tr.info-block-row[data-kind="alliance_selection"] td { background: rgba(63,166,160,0.22); color: #8de0d9; }
   @media (prefers-color-scheme: dark) {
-    html:not([data-theme]) tr.info-block-row[data-kind="playoff"]  td { background: rgba(229,115,115,0.18); color: #f5a3a3; }
-    html:not([data-theme]) tr.info-block-row[data-kind="ceremony"] td { background: rgba(155,109,255,0.18); color: #c5b3ff; }
-    html:not([data-theme]) tr.info-block-row[data-kind="practice"] td { background: rgba(93,175,120,0.20); color: #95d4a9; }
+    html:not([data-theme]) tr.info-block-row[data-kind="playoff"]  td { background: rgba(189,146,240,0.22); color: #d4bcf5; }
+    html:not([data-theme]) tr.info-block-row[data-kind="ceremony"] td { background: rgba(221,120,88,0.22);  color: #f3a892; }
+    html:not([data-theme]) tr.info-block-row[data-kind="practice"] td { background: rgba(93,175,120,0.22);  color: #95d4a9; }
+    html:not([data-theme]) tr.info-block-row[data-kind="awards"]   td { background: rgba(217,161,62,0.22);  color: #f0cf86; }
+    html:not([data-theme]) tr.info-block-row[data-kind="alliance_selection"] td { background: rgba(63,166,160,0.22); color: #8de0d9; }
   }
   /* Day divider */
   tr.day-divider td {
@@ -2638,10 +2665,14 @@ function _v2DowngradeToV1ForView(dc) {
 
   // Helper: tier-3 V2 block → V1 break entry. Synthesizes a name when
   // label is missing so the V1 consumer always gets a non-empty name.
+  // Preserves type-aware fields (subtype/breakKind/ceremonyKind) for the
+  // renderer to apply distinct colors per kind. Earlier these were
+  // dropped, which caused alliance_selection / awards / ceremony to all
+  // render in the same generic-break color on the view page.
   const _v2BlockToV1Break = (b) => {
     let name = b.label;
+    const t = b.type || 'break';
     if (!name) {
-      const t = b.type || 'break';
       if (t === 'ceremony') {
         const kind = b.ceremonyKind || 'opening';
         name = kind.charAt(0).toUpperCase() + kind.slice(1) + ' ceremony';
@@ -2649,7 +2680,12 @@ function _v2DowngradeToV1ForView(dc) {
       else if (t === 'awards')               name = 'Awards';
       else                                    name = (b.breakKind === 'lunch') ? 'Lunch' : 'Break';
     }
-    return { name, start: b.start, end: b.end };
+    return {
+      name, start: b.start, end: b.end,
+      subtype:      t,
+      breakKind:    b.breakKind    || null,
+      ceremonyKind: b.ceremonyKind || null,
+    };
   };
 
   let practiceEmitted = false;
@@ -2987,6 +3023,9 @@ function computeMatchTimes() {
       name: b.name || 'Break',
       start: typeof b.start === 'number' ? b.start : timeStrToMin(b.start),
       end:   typeof b.end   === 'number' ? b.end   : timeStrToMin(b.end),
+      subtype:      b.subtype      || 'break',
+      breakKind:    b.breakKind    || null,
+      ceremonyKind: b.ceremonyKind || null,
       done:  false,
     })).sort((a, b) => a.start - b.start);
 
@@ -3018,14 +3057,14 @@ function computeMatchTimes() {
       // Flush due breaks
       for (const bk of pBreaks) {
         if (!bk.done && bk.start <= pCursor) {
-          computed.push({type: 'break', name: bk.name, start: bk.start, end: bk.end, isPractice: true});
+          computed.push({type: 'break', name: bk.name, start: bk.start, end: bk.end, subtype: bk.subtype||'break', breakKind: bk.breakKind||null, ceremonyKind: bk.ceremonyKind||null, isPractice: true});
           pCursor = Math.max(pCursor, bk.end);
           bk.done = true;
         }
       }
       const next = pBreaks.find(b => !b.done && b.start > pCursor);
       if (next && breakBuf > 0 && next.start - pCursor < breakBuf) {
-        computed.push({type: 'break', name: next.name, start: next.start, end: next.end, isPractice: true});
+        computed.push({type: 'break', name: next.name, start: next.start, end: next.end, subtype: next.subtype||'break', breakKind: next.breakKind||null, ceremonyKind: next.ceremonyKind||null, isPractice: true});
         pCursor = Math.max(pCursor, next.end);
         next.done = true;
         continue;
@@ -3049,7 +3088,7 @@ function computeMatchTimes() {
     }
     // Emit unused breaks
     pBreaks.filter(b => !b.done).forEach(b => {
-      computed.push({type: 'break', name: b.name, start: b.start, end: b.end, isPractice: true});
+      computed.push({type: 'break', name: b.name, start: b.start, end: b.end, subtype: b.subtype||'break', breakKind: b.breakKind||null, ceremonyKind: b.ceremonyKind||null, isPractice: true});
     });
   }
 
@@ -3063,6 +3102,12 @@ function computeMatchTimes() {
       name: b.name || 'Break',
       start: typeof b.start === 'number' ? b.start : timeStrToMin(b.start),
       end:   typeof b.end   === 'number' ? b.end   : timeStrToMin(b.end),
+      // Preserve type-aware fields so the schedule table + agenda
+      // timeline can render distinct colors per kind. Source: V2
+      // block.type (subtype) plus optional breakKind/ceremonyKind.
+      subtype:      b.subtype      || 'break',
+      breakKind:    b.breakKind    || null,
+      ceremonyKind: b.ceremonyKind || null,
       done:  false,
     }));
     const ccs = day.cycleChanges || [];
@@ -3113,7 +3158,7 @@ function computeMatchTimes() {
       // Flush breaks at/before cursor
       for (const bk of breaksRun) {
         if (!bk.done && bk.start <= cursor) {
-          computed.push({type: 'break', name: bk.name, start: bk.start, end: bk.end});
+          computed.push({type: 'break', name: bk.name, start: bk.start, end: bk.end, subtype: bk.subtype||'break', breakKind: bk.breakKind||null, ceremonyKind: bk.ceremonyKind||null});
           cursor = Math.max(cursor, bk.end);
           bk.done = true;
         }
@@ -3121,7 +3166,7 @@ function computeMatchTimes() {
       // Break-buffer
       const next = breaksRun.find(b => !b.done && b.start > cursor);
       if (next && breakBuf > 0 && next.start - cursor < breakBuf) {
-        computed.push({type: 'break', name: next.name, start: next.start, end: next.end});
+        computed.push({type: 'break', name: next.name, start: next.start, end: next.end, subtype: next.subtype||'break', breakKind: next.breakKind||null, ceremonyKind: next.ceremonyKind||null});
         cursor = Math.max(cursor, next.end);
         next.done = true;
         continue;
@@ -3138,7 +3183,7 @@ function computeMatchTimes() {
         ? null
         : breaksRun.find(b => !b.done && b.start > cursor && b.start < matchEnd);
       if (interrupt) {
-        computed.push({type: 'break', name: interrupt.name, start: interrupt.start, end: interrupt.end});
+        computed.push({type: 'break', name: interrupt.name, start: interrupt.start, end: interrupt.end, subtype: interrupt.subtype||'break', breakKind: interrupt.breakKind||null, ceremonyKind: interrupt.ceremonyKind||null});
         cursor = Math.max(cursor, interrupt.end);
         interrupt.done = true;
         continue;
@@ -3162,7 +3207,7 @@ function computeMatchTimes() {
     }
     // Emit unused breaks for visual consistency
     breaksRun.filter(b => !b.done).forEach(b => {
-      computed.push({type: 'break', name: b.name, start: b.start, end: b.end});
+      computed.push({type: 'break', name: b.name, start: b.start, end: b.end, subtype: b.subtype||'break', breakKind: b.breakKind||null, ceremonyKind: b.ceremonyKind||null});
     });
   }
 
@@ -3332,7 +3377,11 @@ function rerender() {
       html += '<tr class="day-divider"><td colspan="8">' + escapeHtml(entry.label) + '</td></tr>';
       zebra = 0;
     } else if (entry.type === 'break') {
-      html += '<tr class="break-row"><td colspan="8">⏸ ' + escapeHtml(entry.name) +
+      // data-subtype drives the row color via CSS — alliance_selection,
+      // awards, ceremony, playoff, break each get distinct tints
+      // matching the V2 editor palette.
+      const _bsub = entry.subtype || 'break';
+      html += '<tr class="break-row" data-subtype="' + escapeAttr(_bsub) + '"><td colspan="8">⏸ ' + escapeHtml(entry.name) +
               ' · ' + minToTime12(entry.start) + ' – ' + minToTime12(entry.end) + '</td></tr>';
     } else if (entry.type === 'info-block') {
       // Informational block from the day-plan PDF (ceremony, playoff, awards).
@@ -3761,6 +3810,13 @@ function renderAgendaFitView() {
             kind: 'break',
             start: entry.start, end: entry.end,
             label: entry.name || 'Break',
+            // Subtype lets the renderer pick a color matching the V2
+            // editor (alliance_selection / awards / ceremony / playoff
+            // each get distinct hues; subtype='break' falls back to
+            // the default orange).
+            subtype:      entry.subtype      || 'break',
+            breakKind:    entry.breakKind    || null,
+            ceremonyKind: entry.ceremonyKind || null,
             duration: bdur,
           });
         }
@@ -3895,12 +3951,25 @@ function renderAgendaFitView() {
                '</div>';
       }
       if (seg.kind === 'break') {
+        // Color by subtype — matches the V2 editor's V2_BLOCK_TYPES palette.
+        // alliance_selection: teal · awards: gold · ceremony: coral
+        // playoff (rare here — usually a separate kind): purple
+        // break (default): orange.
+        var _segColors = {
+          alliance_selection: '#3fa6a0',
+          awards:             '#d9a13e',
+          ceremony:           '#dd7858',
+          playoff:            '#bd92f0',
+          break:              '#ec8a3f',
+        };
+        var _bColor = _segColors[seg.subtype] || '#ec8a3f';
         var inline2 = segDur >= 30 ? seg.label : (segDur >= 12 ? '\u23F8' : '');
         var tipB = (seg.label || 'Break') + ' — ' +
                    fmtT(seg.start) + '–' + fmtT(seg.end) +
                    ' (' + Math.round(segDur) + ' min)';
         return '<div class="agenda-seg agenda-seg-break" ' +
-               'style="width:' + widthPct.toFixed(2) + '%;background:#ec8a3f;" ' +
+               'data-subtype="' + (seg.subtype || 'break') + '" ' +
+               'style="width:' + widthPct.toFixed(2) + '%;background:' + _bColor + ';" ' +
                'title="' + tipB.replace(/"/g, '&quot;') + '">' +
                (inline2 ? '<span class="agenda-seg-label">' + inline2 + '</span>' : '') +
                '</div>';

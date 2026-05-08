@@ -232,7 +232,7 @@ round-trip tests.
 
 ---
 
-## Phase 5 — final cleanup *(✓ done)*
+## Phase 5 — V1 helper deletion *(✓ done)*
 
 **Goal:** no V1 helper functions in the codebase *except* the V1
 URL parser, which stays indefinitely as a sub-100-line back-compat
@@ -283,6 +283,48 @@ tests unchanged.
 preserved.
 
 ---
+## Phase 5b — V2-native scheduler input *(✓ done)*
+
+**Goal:** finishGeneration consumes V2 day_config natively. Drop the
+ambiguously-named `downgradeToV1` wedge.
+
+**What we did:**
+
+1. ✓ Renamed `downgradeToV1` → `_v2BuildSchedulerInput`. Same logic,
+   clearer name. The function builds the V1-shape input list the qual
+   scheduler walks (`{ days, practiceDay, playoffBlocks, cycleTime,
+   breakBuffer }`); the rename clarifies it's not a "downgrade" in any
+   wire-format sense, just an internal scheduler-input transform.
+2. ✓ Added `_v2ExtractPlayoffs(dc)` — lighter helper for callers that
+   only need the playoff side-channel (the agenda renderer's playoff
+   inject path used to call the full transform just for one field).
+3. ✓ Updated agenda renderer (`renderScheduleBars`) to use
+   `_v2ExtractPlayoffs` instead of the full transform.
+4. ✓ Deleted `toggleDayConfigEditor` (~20 lines) — dead since stage 1.
+5. ✓ Fixed view page color rendering: `_v2BlockToV1Break` now
+   preserves `subtype`/`breakKind`/`ceremonyKind` (was stripping them,
+   making everything render as a generic break). Schedule table
+   `<tr class="break-row" data-subtype="...">` and agenda timeline
+   segments now color by subtype matching the V2 editor palette
+   (alliance_selection teal, awards gold, ceremony coral, playoff
+   purple, break orange).
+6. ✓ Updated CSS: comprehensive `tr.break-row[data-subtype]` palette
+   + dark-mode variants. Brought existing `tr.info-block-row`
+   colors into alignment with the V2 editor (playoff was wrong red,
+   ceremony was wrong purple — both now correct).
+
+**What stays:**
+
+- `_v2BuildSchedulerInput` itself — it's the V2→scheduler-input
+  transform. Future "phase 5c" could rewrite the qual-scheduling
+  inner loop to walk V2 blocks per-block (per-block cycleTime, true
+  multi-qual-block-per-day support); for now this transform centralizes
+  the V2→V1-shape mapping.
+- `migrateLegacyDayConfig` — V1 URL back-compat.
+
+**Risk:** low. Pure rename + extraction + view-page color fix.
+Same scheduler logic, same data flow.
+
 
 ## Open questions
 
@@ -360,6 +402,63 @@ Revisit after phase 3 ships.
 
 ---
 
+---
+## Phase 5c — multi-qual-block per-block cycleTime *(✓ done)*
+
+**Goal:** correctly schedule events with multiple qual blocks per day at
+different cycle times. Pre-5c, `_v2BuildSchedulerInput` used the FIRST
+qual block's cycleTime for the entire day; matches scheduled in the
+second qual block's window inherited the wrong cycleTime.
+
+**What we did:**
+
+1. ✓ **`_v2dayCycleChanges(scheduleableBlocks, baseMatchOffset)`**
+   replaces `_v2blockChangesToV1(matchBlock, ...)` (kept as a single-block
+   shim). Walks all schedulable blocks (qual + practice) in start-time
+   order, emits the first block's cycleTime as `isStart`, then a boundary
+   cycle change at each subsequent block's start (using the cumulative
+   match count at that point), plus each block's local `changes` shifted
+   by the cumulative offset.
+2. ✓ **Synthetic gap breaks.** When schedulable blocks aren't back-to-back
+   AND no sibling break (lunch / ceremony / playoff / etc.) covers the
+   gap, `_v2BuildSchedulerInput` now inserts a generic 'Idle' break for
+   the gap. Without it, the qual scheduler would fill the gap with matches
+   at the previous block's cycleTime, bleeding the next block's intended
+   start time.
+3. ✓ **Block ordering.** V2 storage order isn't guaranteed to match
+   wall-clock order. `_v2BuildSchedulerInput` now sorts schedulable blocks
+   by start time before computing offsets.
+4. ✓ **Mirrored in Python.** `app/day_config_v2.py:downgrade_v2_to_v1`
+   gets the same logic so backend round-trip stays consistent. The
+   `block_offset` accumulator replaces the old day-level estimate with
+   per-block precision.
+5. ✓ **11 new tests** in `tests/test_v2_scheduler_input.js`:
+   - Single-block days produce identical output to pre-5c.
+   - Two qual blocks with different CTs → boundary cc emitted.
+   - Three blocks with cumulative offset.
+   - Per-block + boundary changes interleave correctly.
+   - `baseMatchOffset` for multi-day events.
+   - Block reorder when V2 storage is out of order.
+   - Synthetic gap break for uncovered gaps.
+   - Sibling-break-covered gap → no synthetic.
+   - Mixed practice+qual day.
+
+**What stays:**
+
+- The qual scheduler's inner loop (`_finishGenerationInner`) still walks
+  one V1-shape `days[]` array. The full V2-native scheduler walking V2
+  blocks per-block was deferred — the per-block cycleTime issue, which
+  was the user-visible loss, is fully addressed by the cycle-changes +
+  gap-breaks approach. A future "phase 5d" could rewrite the loop to walk
+  blocks directly (cleaner code, but no new capability for users).
+- `_v2BuildSchedulerInput` (the renamed `downgradeToV1`). Still the
+  V2 → scheduler-input transform.
+
+**Risk:** medium. The cycleChanges computation changed, with a defensive
+isStart-when-different test in Python that matches the prior behavior for
+single-block days. Phase 5c tests cover the new semantics; existing tests
+unchanged. The scheduler loop itself is untouched.
+
 ## Status tracker
 
 | Phase | Status      | Owner | Notes                                       |
@@ -370,3 +469,5 @@ Revisit after phase 3 ships.
 | 3     | ✓ Done      | claude| V1 markup gone; helpers retired in phase 5  |
 | 4     | ✓ Done      | claude| V2 URL emit/parse + 36 round-trip tests    |
 | 5     | ✓ Done      | claude| ~870 lines of V1 helpers + plumbing deleted |
+| 5b    | ✓ Done      | claude| Scheduler-input rename + view colors fixed  |
+| 5c    | ✓ Done      | claude| Multi-qual-block per-block cycleTime       |

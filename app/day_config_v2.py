@@ -645,32 +645,76 @@ def downgrade_v2_to_v1(dc: dict) -> dict:
             day_end   = primary.get("end") or ""
             day_ct    = primary.get("cycleTime") or out["cycleTime"]
 
+        # Phase 5c: per-block cycleTime support. When a day has multiple
+        # schedulable blocks (qual + qual, or practice + qual), each can
+        # have its own cycleTime. Sort by start time and walk in order
+        # to compute the cumulative match offset between blocks.
+        scheduleable = sorted(
+            (practices + quals),
+            key=lambda b: _hhmm_to_min(b.get("start") or "") or 0,
+        )
+
         # Flatten breaks: nested + hoisted tier-3 → V1 breaks list.
         v1_breaks: list[dict] = []
-        if primary:
-            for nb in primary.get("breaks") or []:
+        for sb in scheduleable:
+            for nb in sb.get("breaks") or []:
                 v1_breaks.append(_v2_block_to_v1_break(nb))
         for t3 in tier3s:
             v1_breaks.append(_v2_block_to_v1_break(t3))
+        # Synthetic gap breaks: when two schedulable blocks aren't
+        # back-to-back AND no sibling break covers the gap, the qual
+        # scheduler would otherwise fill the window with matches at the
+        # previous block's cycleTime — bleeding the second block's
+        # intended start time. Insert a generic 'Idle' break for each
+        # uncovered gap so the scheduler stops and resumes at the next
+        # block's start.
+        for i in range(len(scheduleable) - 1):
+            gap_s = _hhmm_to_min(scheduleable[i].get("end") or "")
+            gap_e = _hhmm_to_min(scheduleable[i + 1].get("start") or "")
+            if gap_s is None or gap_e is None or gap_e <= gap_s:
+                continue
+            covered = False
+            for b in v1_breaks:
+                bs = _hhmm_to_min(b.get("start") or "")
+                be = _hhmm_to_min(b.get("end") or "")
+                if bs is not None and be is not None and bs <= gap_s and be >= gap_e:
+                    covered = True
+                    break
+            if not covered:
+                v1_breaks.append({
+                    "start": scheduleable[i].get("end"),
+                    "end":   scheduleable[i + 1].get("start"),
+                    "name":  "Idle",
+                    "subtype": "break",
+                })
         v1_breaks.sort(key=lambda b: _hhmm_to_min(b.get("start") or "") or 0)
 
-        # Cycle changes from the primary block — translate block-local
-        # afterMatch to global. V1's scheduler sees the global indices.
+        # Cycle changes from all schedulable blocks — translate
+        # block-local afterMatch to global, and emit a boundary cycle
+        # change at the start of each subsequent block to capture its
+        # own cycleTime. Mirrors _v2dayCycleChanges in static/index.html.
         v1_cc: list[dict] = []
-        if primary and primary.get("cycleTime"):
-            # Don't emit isStart for the day's primary cycleTime —
-            # that's already captured by the day-level field. But
-            # if the primary's cycleTime differs from the day-config
-            # cycleTime, we'd need an isStart. V1's day field is
-            # called `cycleTime` (set at top-level day, not per-block);
-            # we encode any deviation as an isStart cc.
-            if abs(float(primary.get("cycleTime")) - float(out["cycleTime"])) > 0.001:
+        block_offset = global_match_offset
+        for i, sb in enumerate(scheduleable):
+            sb_ct = sb.get("cycleTime") or DEFAULT_CYCLE_TIME
+            try:
+                sb_ct = float(sb_ct)
+            except (ValueError, TypeError):
+                sb_ct = DEFAULT_CYCLE_TIME
+            if i == 0:
+                # First block: emit isStart only if it differs from the
+                # day-config default (mirrors V1's day-level cycleTime field).
+                if abs(sb_ct - float(out["cycleTime"])) > 0.001:
+                    v1_cc.append({"isStart": True, "time": sb_ct})
+            else:
+                # Subsequent block: boundary cycle change at the global
+                # match index where this block starts.
                 v1_cc.append({
-                    "isStart": True,
-                    "time":    float(primary.get("cycleTime")),
+                    "isStart": False,
+                    "afterMatch": block_offset,
+                    "time": sb_ct,
                 })
-        if primary:
-            for cc in primary.get("changes") or []:
+            for cc in sb.get("changes") or []:
                 if not isinstance(cc, dict):
                     continue
                 am = cc.get("afterMatch")
@@ -679,11 +723,15 @@ def downgrade_v2_to_v1(dc: dict) -> dict:
                     try:
                         v1_cc.append({
                             "isStart":    False,
-                            "afterMatch": int(am) + global_match_offset,
+                            "afterMatch": int(am) + block_offset,
                             "time":       float(t),
                         })
                     except (ValueError, TypeError):
                         pass
+            sb_s = _hhmm_to_min(sb.get("start") or "")
+            sb_e = _hhmm_to_min(sb.get("end") or "")
+            if sb_s is not None and sb_e is not None and sb_ct > 0:
+                block_offset += max(0, int((sb_e - sb_s) / sb_ct))
 
         v1_day: dict[str, Any] = {
             "start":        day_start,
@@ -709,10 +757,9 @@ def downgrade_v2_to_v1(dc: dict) -> dict:
             })
 
         # Update running match count for next day's afterMatch translation.
-        s_min = _hhmm_to_min(day_start)
-        e_min = _hhmm_to_min(day_end)
-        if s_min is not None and e_min is not None and day_ct and day_ct > 0:
-            global_match_offset += max(0, int((e_min - s_min) / day_ct))
+        # block_offset has the per-block-aware tally; use it directly so
+        # the next day's afterMatch translation sees the correct base.
+        global_match_offset = block_offset
 
     if not practice_day_emitted:
         # V1 always carries a practiceDay slot, even if disabled.

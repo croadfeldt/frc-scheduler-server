@@ -2455,7 +2455,7 @@
              original markup (practice day section + days container +
              add-day + warnings). The v2 editor is the block-based
              form. Both read/write the same day_config JSON via
-             migrateLegacyDayConfig / downgradeToV1 / collectDayConfigV2.
+             migrateLegacyDayConfig / _v2BuildSchedulerInput / collectDayConfigV2.
              The v1 form was retired in favor of v2's block editor;
              v1 markup is kept hidden in the DOM so direct readers of
              #practiceStart / #practiceEnd / .day-start etc. continue
@@ -2474,7 +2474,7 @@
 
         <!-- v2 editor — block-based, the only day-config editor
              since v1 was retired. Always visible (no longer behind
-             a toggle). Mirrors the v1 storage shape; downgradeToV1
+             a toggle). Mirrors the v1 storage shape; _v2BuildSchedulerInput
              converts back when the backend or older code paths
              need v1-shaped data. -->
         <div id="v2DaysWrapper">
@@ -5760,7 +5760,7 @@ function fullReset(silent) {
       }
     } catch(_) {}
     // The legacy V1 helpers stay for save-flow backward compat
-    // (downgradeToV1 still emits V1-shape JSON for the wire) —
+    // (_v2BuildSchedulerInput still emits V1-shape JSON for the scheduler) —
     // calling these is a defensive no-op when V1 markup is gone.
     try { if (typeof validateTimes === 'function') validateTimes(); } catch(_) {}
   }
@@ -6770,7 +6770,7 @@ function renderScheduleBars() {
         var bdur = (entry.end || 0) - (entry.start || 0);
         if (bdur > AGENDA_BREAK_THRESHOLD) {
           flushRun(entry.start);
-          // Playoff "break" entries (synthesized by downgradeToV1 to
+          // Playoff "break" entries (synthesized by _v2BuildSchedulerInput to
           // halt qual scheduling at playoff start) don't render here.
           // The rich playoff segment — with format/teams/embedded
           // children — comes from the v1.playoffBlocks side-channel
@@ -6826,7 +6826,7 @@ function renderScheduleBars() {
   }
 
   // Inject playoff segments from the V2 day_config (carried through
-  // downgradeToV1 as the side-channel `playoffBlocks` array). These
+  // _v2ExtractPlayoffs as the side-channel `playoffBlocks` array). These
   // aren't in window._frcScheduled because match generation for
   // playoffs is deferred — but the time windows still belong on the
   // bar so users see the full event timeline. Each playoff block has
@@ -6835,8 +6835,7 @@ function renderScheduleBars() {
   // concern here because dayIndex is the V2 array position.
   try {
     var _dc = (typeof collectDayConfigV2 === 'function') ? collectDayConfigV2() : null;
-    var _v1dc = _dc ? downgradeToV1(_dc) : null;
-    var _playoffs = _v1dc && _v1dc.playoffBlocks ? _v1dc.playoffBlocks : [];
+    var _playoffs = _dc ? _v2ExtractPlayoffs(_dc) : [];
     _playoffs.forEach(function(pb) {
       // perDay is built in V2-day order (practice + quals). dayIndex
       // matches the V2 day index: we look up perDay by position.
@@ -7122,7 +7121,7 @@ function renderScheduleBars() {
       }
       if (seg.kind === 'break') {
         // Type-aware rendering for tier-3 segments. Subtype +
-        // kinds were carried through downgradeToV1 + the
+        // kinds were carried through _v2BuildSchedulerInput + the
         // schedule materialization, so the renderer can pick
         // a color and label tailored to opening / closing /
         // awards / alliance selection / lunch / break / other.
@@ -7702,7 +7701,7 @@ function applyAgendaToSchedule() {
 
 function getPracticeConfig() {
   // V2 is the only editor mode (phase 3 retired the toggle). Read
-  // from the V2 day blocks via collectDayConfigV2 + downgradeToV1
+  // from the V2 day blocks via collectDayConfigV2 + _v2BuildSchedulerInput
   // so we get the field names (ct/filler/guaranteed) the rest of
   // the codepath expects.
   //
@@ -7711,7 +7710,7 @@ function getPracticeConfig() {
   // practiceDayEnabled-unchecked path used to.
   var v2dc = (typeof collectDayConfigV2 === 'function') ? collectDayConfigV2() : null;
   if (!v2dc) return null;
-  var v1 = downgradeToV1(v2dc);
+  var v1 = _v2BuildSchedulerInput(v2dc);
   var pd = v1 && v1.practiceDay;
   if (!pd || !pd.enabled || !pd.start || !pd.end) return null;
   var startMin = timeToMin(pd.start), endMin = timeToMin(pd.end);
@@ -11822,13 +11821,57 @@ function migrateLegacyDayConfig(dc) {
   return out;
 }
 
-// Reverse: v2 → v1. The scheduler and backend still consume v1, so
-// this runs at generate/save time. Lossless for the four block types
-// because v1 supports breaks (mapped from break sub-blocks AND any
-// sibling break blocks within a qual day) + cycleChanges (mapped from
-// match block `changes` arrays + the first match block's cycleTime as
-// isStart).
-function downgradeToV1(dc) {
+// V2 day_config → flat list of playoff blocks (side-channel for the
+// agenda renderer). Lighter than _v2BuildSchedulerInput when the
+// caller only needs playoff metadata: walks days/blocks once and
+// extracts type='playoff' entries with their format/teams/embedded
+// children. Mirrors the playoffBlocks[] entries that
+// _v2BuildSchedulerInput emits, so callers can switch between the
+// two depending on whether they need the full V1-shape transform.
+function _v2ExtractPlayoffs(dc) {
+  if (!dc || !dc.days) return [];
+  var out = [];
+  dc.days.forEach(function(day, idx) {
+    (day.blocks || []).forEach(function(b) {
+      if (b.type !== 'playoff') return;
+      out.push({
+        dayIndex: idx,
+        date:     day.date || '',
+        start:    b.start, end: b.end,
+        format:   b.playoffFormat || 'double_elim',
+        teams:    (b.playoffAlliances != null) ? b.playoffAlliances
+                : (b.playoffTeams     != null) ? b.playoffTeams
+                : 8,
+        breaks:   (b.breaks || []).map(function(eb) {
+          var subtype = eb.type || 'break';
+          return {
+            start: eb.start, end: eb.end,
+            name: eb.label || _v2subtypeDefaultName(subtype, eb.breakKind, eb.ceremonyKind),
+            subtype:      subtype,
+            breakKind:    eb.breakKind    || null,
+            ceremonyKind: eb.ceremonyKind || null,
+          };
+        }).sort(function(a, b) { return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start); }),
+      });
+    });
+  });
+  return out;
+}
+
+// V2 day_config → scheduler-ready day list. The qual scheduler in
+// _finishGenerationInner walks `days[]` with V1-shape semantics
+// (start/end/breaks/cycleChanges per day). Rather than rewrite the
+// scheduling loop to walk V2 blocks per-block, we materialize the
+// V1-shape input list here from V2 input. Phase 5b renamed this from
+// `downgradeToV1` to clarify it's an internal scheduler-input helper,
+// not a wire-format downgrade. Output side-channels:
+//   - playoffBlocks[]: rich playoff data for the agenda renderer
+//   - practiceDay: V1 practice slot for getPracticeConfig
+// Lossless on the path that matters (qual scheduling) because:
+//   - day.start/end span all non-playoff blocks (covers ceremonies)
+//   - breaks include sibling tier-3 + playoff (qual stops at each)
+//   - cycleChanges merge per-block changes with global afterMatch
+function _v2BuildSchedulerInput(dc) {
   if (!dc || dc.dayConfigVersion !== 2) return dc;
   var v1 = {
     cycleTime:   dc.cycleTime,
@@ -11947,7 +11990,47 @@ function downgradeToV1(dc) {
     var allBreaks = siblingBreaks.slice();
     qBlocks.forEach(function(qb) { (qb.breaks || []).forEach(function(b) { allBreaks.push(b); }); });
     pBlocks.forEach(function(pb) { (pb.breaks || []).forEach(function(b) { allBreaks.push(b); }); });
-    var qFirst = qBlocks[0] || pBlocks[0];
+
+    // Phase 5c: per-block cycleTime support. When a day has multiple
+    // schedulable blocks (qual + qual, or practice + qual), each can
+    // have its own cycleTime. Build a sorted-by-start list of all
+    // schedulable blocks so the cycle-change emitter and the gap-break
+    // synthesizer see them in chronological order — V2 storage order
+    // isn't guaranteed to match wall-clock order.
+    var scheduleable = qBlocks.concat(pBlocks).slice().sort(function(a, b) {
+      return (_v2timeStrToMin(a.start) || 0) - (_v2timeStrToMin(b.start) || 0);
+    });
+
+    // Synthetic gap breaks. When two schedulable blocks aren't
+    // back-to-back AND no sibling break (lunch / ceremony / playoff)
+    // covers the gap, the qual scheduler would otherwise fill the
+    // window with matches at the previous block's cycleTime — bleeding
+    // the second block's intended start time. Insert a generic 'break'
+    // entry covering each uncovered gap so the scheduler stops and
+    // resumes at the next block's start.
+    for (var sci = 0; sci < scheduleable.length - 1; sci++) {
+      var gapStart = _v2timeStrToMin(scheduleable[sci].end);
+      var gapEnd   = _v2timeStrToMin(scheduleable[sci + 1].start);
+      if (gapStart == null || gapEnd == null || gapEnd <= gapStart) continue;
+      // Covered by an existing sibling break? (start <= gapStart and
+      // end >= gapEnd). Partial overlaps are uncommon and we treat
+      // them defensively as covered to avoid double-stops.
+      var covered = allBreaks.some(function(b) {
+        var bs = _v2timeStrToMin(b.start);
+        var be = _v2timeStrToMin(b.end);
+        return bs != null && be != null && bs <= gapStart && be >= gapEnd;
+      });
+      if (covered) continue;
+      allBreaks.push({
+        type:  'break',
+        start: scheduleable[sci].end,
+        end:   scheduleable[sci + 1].start,
+        label: 'Idle',
+        breakKind: null,
+      });
+    }
+
+    var qFirst = scheduleable[0];
     v1.days.push({
       start: dayStart, end: dayEnd,
       cycleTime: qFirst ? qFirst.cycleTime : 9,
@@ -11987,11 +12070,17 @@ function downgradeToV1(dc) {
           ceremonyKind: b.ceremonyKind || null,    // for ceremony: opening/closing
         };
       }).sort(function(a, b) { return _v2timeStrToMin(a.start) - _v2timeStrToMin(b.start); }),
-      cycleChanges: _v2blockChangesToV1(qFirst, globalMatchOffset),
+      // Phase 5c: walk all schedulable blocks (in start-time order)
+      // for cycle changes, not just qFirst. This makes per-block
+      // cycleTime work correctly: a 9-min CT qual block followed by
+      // an 8-min CT qual block emits {isStart:9, after-N:8} where N
+      // is the predicted match count of the first block.
+      cycleChanges: _v2dayCycleChanges(scheduleable, globalMatchOffset),
     });
 
-    // Track global match offset across days
-    qBlocks.concat(pBlocks).forEach(function(b) {
+    // Track global match offset across days. Same per-block estimate
+    // _v2dayCycleChanges uses internally — keeps this offset in sync.
+    scheduleable.forEach(function(b) {
       var dur = (_v2timeStrToMin(b.end) || 0) - (_v2timeStrToMin(b.start) || 0);
       globalMatchOffset += Math.max(0, Math.floor(dur / (b.cycleTime || 9)));
     });
@@ -12000,7 +12089,7 @@ function downgradeToV1(dc) {
 }
 
 // Default display name for a tier-3 subtype when the user hasn't
-// supplied a custom label. Used by downgradeToV1 when collapsing
+// supplied a custom label. Used by _v2BuildSchedulerInput when collapsing
 // V2 ceremonies/awards/alliance_selection/break entries to V1
 // breaks. Mirrors the labels the editor shows.
 function _v2subtypeDefaultName(subtype, breakKind, ceremonyKind) {
@@ -12102,26 +12191,52 @@ function _v2reorderSiblingsByTime(blockEl) {
   if (addBtn) parent.appendChild(addBtn);
 }
 
-function _v2blockChangesToV1(matchBlock, matchOffset) {
-  if (!matchBlock) return [];
-  // afterMatch in V2 is local to the block (1-based within this
-  // qual/practice block). The V1 scheduler uses a global matchIdx
-  // counter that doesn't reset across days. So when downgrading,
-  // shift each non-start cycle change by matchOffset (= the count
-  // of matches scheduled before this block) so the cc fires at
-  // the right global match number. Without this, a multi-day
-  // event with "after match 5" on day 2 would trigger immediately
-  // on day 2's first match (because matchIdx is already past 5).
-  var offset = matchOffset || 0;
-  var ccs = [{ isStart: true, time: matchBlock.cycleTime }];
-  (matchBlock.changes || []).forEach(function(cc) {
-    ccs.push({
-      afterMatch: (cc.afterMatch || 0) + offset,
-      time:       cc.cycleTime,
-      isStart:    false,
+// Multi-block-aware cycle change emitter. Phase 5c: when a V2 day
+// has more than one schedulable block (qual + qual, or practice + qual),
+// each block can have its own cycleTime and per-block changes. The
+// V1-shape scheduler walks one global match counter and one cycleChanges
+// list, so we flatten:
+//   - block 0: emit {isStart:true, time:cycleTime} + each change (offset)
+//   - block N>0: emit {afterMatch:cumulative_count, time:cycleTime} +
+//                each change at (offset + cumulative)
+// "cumulative_count" is the number of matches that fit in earlier blocks
+// using their own cycleTime, computed as floor(window / cycleTime) — same
+// approximation _v2BuildSchedulerInput uses for globalMatchOffset.
+//
+// Single-block days produce the same output as the old _v2blockChangesToV1.
+function _v2dayCycleChanges(scheduleableBlocks, baseMatchOffset) {
+  if (!scheduleableBlocks || !scheduleableBlocks.length) return [];
+  var ccs = [];
+  var offset = baseMatchOffset || 0;
+  scheduleableBlocks.forEach(function(b, i) {
+    var bCt = b.cycleTime || 9;
+    if (i === 0) {
+      ccs.push({ isStart: true, time: bCt });
+    } else {
+      // Boundary cycle change: at the global match index where this block
+      // starts, switch to its cycleTime. Even when this block's CT equals
+      // the previous block's, we emit a no-op change rather than tracking
+      // identity — the scheduler tolerates redundant entries.
+      ccs.push({ afterMatch: offset, time: bCt, isStart: false });
+    }
+    (b.changes || []).forEach(function(cc) {
+      ccs.push({
+        afterMatch: (cc.afterMatch || 0) + offset,
+        time:       cc.cycleTime,
+        isStart:    false,
+      });
     });
+    var dur = (_v2timeStrToMin(b.end) || 0) - (_v2timeStrToMin(b.start) || 0);
+    offset += Math.max(0, Math.floor(dur / bCt));
   });
   return ccs;
+}
+
+// Compatibility shim — older callers / comments may still reference
+// the single-block helper. _v2dayCycleChanges with a one-element array
+// produces the same output _v2blockChangesToV1 used to.
+function _v2blockChangesToV1(matchBlock, matchOffset) {
+  return matchBlock ? _v2dayCycleChanges([matchBlock], matchOffset) : [];
 }
 
 // Read v2 form state from DOM (#v2DaysContainer) into a day_config
@@ -13171,27 +13286,7 @@ function onV2Change() {
   }
 }
 
-// ─── Toggle wiring ────────────────────────────────────────────────
-function toggleDayConfigEditor(useV2) {
-  var v1Wrap = document.getElementById('v1DaysWrapper');
-  var v2Wrap = document.getElementById('v2DaysWrapper');
-  if (!v1Wrap || !v2Wrap) return;
-  if (useV2) {
-    var v1dc = collectDayConfig();
-    var v2dc = migrateLegacyDayConfig(v1dc);
-    renderDayConfigV2(v2dc);
-    v1Wrap.style.display = 'none';
-    v2Wrap.style.display = '';
-    _v2validateAll();
-  } else {
-    var v2dc = collectDayConfigV2();
-    var v1dc = downgradeToV1(v2dc);
-    if (typeof applyDayConfigToUI === 'function' && v1dc) applyDayConfigToUI(v1dc);
-    v2Wrap.style.display = 'none';
-    v1Wrap.style.display = '';
-  }
-  try { localStorage.setItem('frcDayConfigUseV2', useV2 ? '1' : '0'); } catch(e) {}
-}
+// toggleDayConfigEditor() removed in phase 5b (V1 toggle retired)
 
 document.addEventListener('DOMContentLoaded', function() {
   try {
@@ -13236,10 +13331,10 @@ function collectDayConfig() {
   // V2 is the only editor mode (phase 3 retired the toggle). Read
   // V2 markup, downgrade to V1 shape (which the rest of the codepath
   // and the URL builder still consume — phase 4 changes URL emit to
-  // V2-native and downgradeToV1 retires).
+  // V2-native and _v2BuildSchedulerInput is the canonical V2→scheduler-input transform).
   var v2dc = collectDayConfigV2();
   if (v2dc) {
-    var v1 = downgradeToV1(v2dc);
+    var v1 = _v2BuildSchedulerInput(v2dc);
     // Splice in the auto-flags + autoAssign that the v1 path adds.
     // Without these, downstream code that expects them would
     // misbehave (autoPopulate, autoMaxCycles, autoAssign).
@@ -14132,17 +14227,18 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
     document.getElementById('progressWrap').style.display = 'none';
     return;
   }
-  // V2 → V1 downgrade. finishGeneration was written for V1-shape
-  // day_config (each day has .start/.end/.breaks/.cycleChanges at
-  // the day level) and crashes on V2 inputs (where those fields
-  // live on the qual block, not the day). Phase 1 made the API
-  // return V2; this surgical conversion keeps finishGeneration
-  // working without rewriting it. Phase 5 cleanup makes
-  // finishGeneration V2-native and removes this wedge.
+  // V2 → scheduler-input transform. The qual scheduler walks the
+  // day list with V1-shape semantics (start/end/breaks/cycleChanges
+  // per day). Phase 1 made the API return V2; _v2BuildSchedulerInput
+  // produces the V1-shape input list. Phase 5b renamed this from the
+  // earlier `downgradeToV1` to clarify it's the scheduler-input
+  // transform, not a wire-format downgrade. Future work could rewrite
+  // the qual-scheduling loop to walk V2 blocks per-block; for now
+  // the transform centralizes the V2→V1-shape mapping.
   if (dayConfigOverride && dayConfigOverride.dayConfigVersion === 2 &&
-      typeof downgradeToV1 === 'function') {
-    try { dayConfigOverride = downgradeToV1(dayConfigOverride); }
-    catch(e) { console.warn('finishGeneration: V2→V1 downgrade failed:', e); }
+      typeof _v2BuildSchedulerInput === 'function') {
+    try { dayConfigOverride = _v2BuildSchedulerInput(dayConfigOverride); }
+    catch(e) { console.warn('finishGeneration: V2→scheduler-input transform failed:', e); }
   }
   const numTeams = parseInt(document.getElementById('numTeams').value);
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value) || 6;
