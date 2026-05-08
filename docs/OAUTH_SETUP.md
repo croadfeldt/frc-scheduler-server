@@ -508,6 +508,93 @@ which the server stores as-is.
 | User signs in successfully but `users` row not created | Database connectivity issue at upsert time; check application logs                            |
 | Login redirects in a loop                       | JWT cookie / localStorage delivery failed; usually a `targetOrigin` mismatch — check `BASE_URL` |
 
+### Apple `400 Bad Request` from `/auth/token`
+
+The server now surfaces Apple's actual error code in the response —
+look for messages like `Apple token endpoint returned 400:
+invalid_client (...)` in the JSON `detail` field or the server logs.
+The most common causes, in rough order:
+
+1. **`APPLE_CLIENT_ID` is the App ID, not the Service ID.** The App
+   ID looks like `com.example.app` and is the *bundle identifier*.
+   The Service ID looks similar (often `com.example.app.web`) but
+   is a separate object in the developer portal under
+   **Identifiers → Services IDs**. The Service ID is what the
+   web flow uses; the App ID is for native iOS apps. Mixing them
+   produces an opaque `invalid_client`.
+
+2. **Whitespace in env-var values.** OpenShift's secret editor
+   often adds trailing newlines when pasting from a webpage. The
+   server now whitespace-strips `APPLE_TEAM_ID`, `APPLE_KEY_ID`,
+   `APPLE_CLIENT_ID`, and `BASE_URL` at load time. If your
+   diagnostic still points at one of these, verify the actual
+   pod-side value:
+
+   ```bash
+   oc rsh deployment/frc-scheduler-server python3 -c \
+     "import os; v=os.getenv('APPLE_CLIENT_ID',''); print(repr(v))"
+   ```
+
+   Trailing `\n` would show as `'com.example.app.web\n'` — easy
+   to miss in shell output, obvious in `repr()`.
+
+3. **Key not associated with the App ID.** The Sign In with Apple
+   key (the .p8 file) must be linked to a primary App ID in the
+   developer portal. If you generated the key without selecting an
+   App ID, it can't sign client secrets for any Service ID.
+   Re-check **Keys → (your key) → Configure → Primary App ID** in
+   the portal. If it's empty, fix it (you may need to regenerate
+   the key — the binding can't always be edited after creation).
+
+4. **Service ID not associated with the App ID.** Symmetric to #3.
+   In the portal, **Identifiers → (Service ID) → Sign In with
+   Apple → Configure → Primary App ID** must point at the App ID
+   the key is bound to.
+
+5. **`APPLE_PRIVATE_KEY` is incomplete or malformed.** The .p8
+   file has a `-----BEGIN PRIVATE KEY-----` line, a base64 body,
+   and `-----END PRIVATE KEY-----`. All three are required. The
+   server logs `Apple client secret: APPLE_PRIVATE_KEY does not
+   contain 'BEGIN PRIVATE KEY'` when the wrappers are missing.
+
+6. **`APPLE_TEAM_ID` mismatch.** The 10-character team ID from
+   the developer portal Membership page. If you have multiple
+   Apple Developer teams, confirm you're using the team that owns
+   the App ID and Service ID.
+
+7. **Domain verification incomplete.** Apple won't issue
+   credentials for a Service ID whose domain isn't verified.
+   Check `https://YOUR_HOST/.well-known/apple-developer-domain-association`
+   returns 200 with `text/plain`, then click **Verify** in the
+   portal. The token endpoint may keep returning `invalid_client`
+   for a few minutes after verification completes.
+
+8. **`code` reused or expired.** Apple authorization codes are
+   one-time-use and live ~10 minutes. Hitting the callback twice
+   (e.g., from a stuck retry) produces `invalid_grant` not
+   `invalid_client`, but the symptom is the same 400.
+
+The diagnostic flow:
+
+```bash
+# 1. See the actual Apple error code and description in the logs
+oc logs -l app=frc-scheduler-server-git --tail=200 | grep -i apple
+
+# 2. Confirm the four env vars are present, no whitespace, no defaults
+oc rsh deployment/frc-scheduler-server python3 -c "
+import os
+for k in ['APPLE_CLIENT_ID','APPLE_TEAM_ID','APPLE_KEY_ID']:
+    v = os.getenv(k,'')
+    print(f'{k}: {repr(v)}  len={len(v)}')
+print('APPLE_PRIVATE_KEY first line:',
+      repr(os.getenv('APPLE_PRIVATE_KEY','').splitlines()[:1]))
+print('BEGIN PRIVATE KEY' in os.getenv('APPLE_PRIVATE_KEY',''))
+"
+
+# 3. Confirm domain-association file is reachable
+curl -I https://YOUR_HOST/.well-known/apple-developer-domain-association
+```
+
 For deeper diagnostics, the server logs OAuth errors at WARNING
 level. Fetch with:
 

@@ -32,15 +32,24 @@ JWT_SECRET       = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_ALGORITHM    = "HS256"
 JWT_EXPIRE_SECS  = 60 * 60 * 24 * 30
 
-GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
 
-APPLE_CLIENT_ID   = os.getenv("APPLE_CLIENT_ID", "")
-APPLE_TEAM_ID     = os.getenv("APPLE_TEAM_ID", "")
-APPLE_KEY_ID      = os.getenv("APPLE_KEY_ID", "")
+# All four Apple values get stripped at load time because OpenShift's
+# secret-editor commonly introduces trailing newlines when pasting
+# values from the developer portal — and Apple rejects JWT claims
+# containing whitespace with an opaque `invalid_client` error. The
+# stripped values are also what `_apple_client_secret` and
+# `apple_exchange_code` use everywhere downstream.
+APPLE_CLIENT_ID   = os.getenv("APPLE_CLIENT_ID", "").strip()
+APPLE_TEAM_ID     = os.getenv("APPLE_TEAM_ID", "").strip()
+APPLE_KEY_ID      = os.getenv("APPLE_KEY_ID", "").strip()
+# Private key is NOT stripped — the PEM format requires its trailing
+# newline. Strip is done in _apple_client_secret only on the
+# whitespace-around the body; internal newlines are preserved.
 APPLE_PRIVATE_KEY = os.getenv("APPLE_PRIVATE_KEY", "")
 
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").strip().rstrip("/")
 
 
 def create_jwt(user_id: int, sub: str, provider: str, email: str | None) -> str:
@@ -157,18 +166,53 @@ APPLE_KEYS_URL  = "https://appleid.apple.com/auth/keys"
 
 
 def _apple_client_secret() -> str:
+    # Apple requires a short-lived JWT signed with the .p8 private key
+    # as the client_secret. The JWT carries:
+    #   iss = APPLE_TEAM_ID    — 10-char team identifier
+    #   sub = APPLE_CLIENT_ID  — Service ID (NOT the App ID)
+    #   aud = appleid.apple.com
+    #   iat / exp window
+    # Header carries `kid = APPLE_KEY_ID` so Apple knows which public
+    # key to verify against.
     if not APPLE_PRIVATE_KEY:
+        log.error("Apple client secret: APPLE_PRIVATE_KEY is unset")
+        return ""
+    missing = [name for name, val in [
+        ("APPLE_TEAM_ID",   APPLE_TEAM_ID),
+        ("APPLE_KEY_ID",    APPLE_KEY_ID),
+        ("APPLE_CLIENT_ID", APPLE_CLIENT_ID),
+    ] if not val]
+    if missing:
+        log.error("Apple client secret: missing env vars: %s", ", ".join(missing))
+        return ""
+    # The .p8 file is a multi-line PEM. OpenShift secrets often store
+    # it as escaped \n; normalize both. Also ensure the BEGIN/END
+    # lines are present — a common error is pasting only the base64
+    # body without the wrappers.
+    private_key = APPLE_PRIVATE_KEY.replace("\\n", "\n").strip()
+    if "BEGIN PRIVATE KEY" not in private_key:
+        log.error(
+            "Apple client secret: APPLE_PRIVATE_KEY does not contain "
+            "'BEGIN PRIVATE KEY'. Paste the FULL .p8 file contents, "
+            "including the -----BEGIN PRIVATE KEY----- and "
+            "-----END PRIVATE KEY----- lines."
+        )
         return ""
     now = int(time.time())
     try:
         return jwt.encode(
             {"iss": APPLE_TEAM_ID, "iat": now, "exp": now + 86400,
              "aud": "https://appleid.apple.com", "sub": APPLE_CLIENT_ID},
-            APPLE_PRIVATE_KEY.replace("\\n", "\n"), algorithm="ES256",
+            private_key, algorithm="ES256",
             headers={"alg": "ES256", "kid": APPLE_KEY_ID},
         )
     except Exception as e:
-        log.error("Apple client secret generation failed: %s", e)
+        log.error(
+            "Apple client secret JWT encode failed: %s. Check that "
+            "APPLE_PRIVATE_KEY contains a valid ES256 (P-256) PEM "
+            "private key — Apple's .p8 files are this format.",
+            e,
+        )
         return ""
 
 
@@ -183,14 +227,51 @@ def apple_login_url(state: str = "") -> str:
 
 
 async def apple_exchange_code(code: str, id_token_raw: str | None = None) -> dict:
+    # Generate the JWT client_secret. If this fails (missing env vars,
+    # malformed private key), `_apple_client_secret` returns "" and
+    # logs the cause. Posting an empty client_secret to Apple yields
+    # a 400 with no useful surface diagnostic — catch it here.
     client_secret = _apple_client_secret()
+    if not client_secret:
+        raise ValueError(
+            "Apple client secret could not be generated. Check that "
+            "APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_CLIENT_ID, and "
+            "APPLE_PRIVATE_KEY are all set and that the private key "
+            "is the .p8 contents (not just the filename). See "
+            "earlier log entries for the underlying cryptographic "
+            "error."
+        )
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(APPLE_TOKEN_URL, data={
             "client_id": APPLE_CLIENT_ID, "client_secret": client_secret,
             "code": code, "grant_type": "authorization_code",
             "redirect_uri": f"{BASE_URL}/auth/apple/callback",
         })
-        resp.raise_for_status()
+        # Apple returns JSON with `error` and `error_description` fields
+        # on failure — the standard OAuth2 error shape. Surfacing those
+        # in the exception turns "400 Bad Request" into something
+        # actionable like "invalid_client: Client authentication failed."
+        # Common error codes from Apple at this endpoint:
+        #   invalid_client       — client_secret JWT rejected (wrong team/key/sub,
+        #                          expired, or wrong algorithm). Most common cause:
+        #                          APPLE_CLIENT_ID is the App ID instead of the
+        #                          Service ID, or the key isn't associated with the
+        #                          App ID in the developer portal.
+        #   invalid_grant        — `code` already used or expired (~10 min lifetime).
+        #   invalid_request      — malformed body (rare; would mean a code bug).
+        #   unsupported_grant_type — bug in our request shape.
+        if resp.status_code != 200:
+            try:
+                err_body = resp.json()
+                err_code = err_body.get("error", "unknown")
+                err_desc = err_body.get("error_description", "")
+                detail = f"Apple token endpoint returned {resp.status_code}: {err_code}"
+                if err_desc:
+                    detail += f" ({err_desc})"
+            except Exception:
+                detail = f"Apple token endpoint returned {resp.status_code}: {resp.text[:300]}"
+            log.error("Apple OAuth token exchange failed: %s", detail)
+            raise ValueError(detail)
         tokens = resp.json()
     async with httpx.AsyncClient(timeout=15.0) as client:
         keys_resp = await client.get(APPLE_KEYS_URL)
