@@ -43,6 +43,12 @@
     --blue-team: #89b4fa;
     --amber: #f9e2af;
     --danger: #f38ba8;
+    /* Match-segment fills on the agenda bar — match the view page so
+       both surfaces render qualification matches in the same blue and
+       practice matches in the same green. View defines these in
+       static/view.html with identical hex values. */
+    --blue-alliance: #58a6ff;
+    --secondary:     #5daf78;
   }
   /* Light mode */
   [data-theme="light"] {
@@ -60,6 +66,8 @@
     --blue-team: #3b7dd8;
     --amber: #9a6c00;
     --danger: #c0394e;
+    --blue-alliance: #0969da;
+    --secondary:     #5daf78;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -7237,8 +7245,16 @@ function renderScheduleBars() {
              + insetHtml
              + '</div>';
       }
-      // matches segment
-      var segColor = (d.isPractice ? '#5daf78' : dc);
+      // matches segment — colors mirror the view page: practice =
+      // #5daf78 (V2 practice green), qual = --blue-alliance. View
+      // uses these exact hex values so both surfaces render match
+      // segments identically. The per-day color cycling that used to
+      // run here has been retained only for the day-bar BORDER and
+      // tint background (set on the parent .agenda-day-bar) — that
+      // visual day-distinction is editor-only, useful when scanning
+      // a multi-day plan in the editor preview. The match segment
+      // fill itself stays uniform across days.
+      var segColor = d.isPractice ? '#5daf78' : 'var(--blue-alliance)';
       var matches = seg.matchCount;
       var ctList = seg.cycleProgression.map(fmtCt).join('\u2192') + ' min';
       var avgCtStr = fmtCt(seg.avgCt) + ' min avg';

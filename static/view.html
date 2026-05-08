@@ -763,12 +763,27 @@
     font-weight: 600;
     color: var(--primary);
   }
+  /* Clickable day label — same look as the editor's day-label-link
+     in renderScheduleBars. Color comes from inline style (set by
+     the renderer based on practice vs qual). Hover lightens the
+     underline so the affordance reads on mouse-capable devices
+     without firing on touch. */
+  .agenda-day-head .day-label-link {
+    text-decoration: none;
+    transition: text-decoration 0.12s;
+  }
+  @media (hover: hover) {
+    .agenda-day-head .day-label-link:hover {
+      text-decoration: underline;
+    }
+  }
   .agenda-day-head .day-times,
   .agenda-day-head .day-summary {
     color: var(--text-muted);
     font-size: 0.68rem;
   }
   .agenda-day-head .day-summary { margin-left: auto; }
+  .agenda-day-head .day-summary strong { color: var(--text); font-weight: 600; }
   .agenda-bar {
     position: relative;
     display: flex;
@@ -2190,15 +2205,6 @@
 
         <!-- 3-up Nexus row — populated by _renderFieldThreeUp() -->
         <div class="status-three-up-wrap" id="statusThreeUpWrap" style="display:none;">
-          <div class="status-three-up-header no-print">
-            <button type="button" class="status-view-toggle"
-                    id="btnFieldViewToggle"
-                    onclick="toggleFieldView()"
-                    title="Switch between linear and field-position alliance layouts">
-              <span id="fieldViewToggleIcon">&#9783;</span>
-              <span id="fieldViewToggleLabel">Field view</span>
-            </button>
-          </div>
           <div class="status-three-up" id="statusThreeUp">
             <div class="status-stage" data-stage="field">
               <div class="status-stage-label"><span class="status-dot status-dot-field"></span>On field</div>
@@ -2328,6 +2334,19 @@
              row as the table title. Auto-hides on print via no-print
              class. flex:1 spacer pushes Share to the right edge. -->
         <span class="match-table-actions no-print">
+          <!-- Field / linear view toggle — switches alliance displays
+               (3-up status grid + team-card next-match + next-only
+               fallback) between the linear "blue vs red" line and the
+               rotated top-down field-position layout. Always visible
+               here so the choice is discoverable even pre-event when
+               the 3-up grid is hidden. Persists via localStorage. -->
+          <button class="btn btn-secondary"
+                  id="btnFieldViewToggle"
+                  onclick="toggleFieldView()"
+                  title="Switch alliance display between linear and field-position layouts">
+            <span id="fieldViewToggleIcon">&#9783;</span>
+            <span id="fieldViewToggleLabel">Field view</span>
+          </button>
           <!-- Day/night theme toggle. Default light; persists per-user
                in localStorage. Inline in the toolbar so it's discoverable
                but unobtrusive. Icon + label flips on toggle. Initial
@@ -3341,7 +3360,10 @@ function computeMatchTimes() {
     const pday = cfg.practiceDay;
     const pStart = timeStrToMin(pday.start || '08:30');
     const pEnd   = timeStrToMin(pday.end   || '17:00');
-    const pCt    = parseFloat(pday.cycleTime || cfg.practiceCycleTime || 9);
+    // pday.ct is the canonical V1 field name (emitted by
+    // _v2DowngradeToV1ForView). Fall through to legacy `cycleTime`
+    // and `practiceCycleTime` for back-compat with older saves.
+    const pCt    = parseFloat(pday.ct || pday.cycleTime || cfg.practiceCycleTime || 9);
     const pBreaks = (pday.breaks || []).map(b => ({
       name: b.name || 'Break',
       start: typeof b.start === 'number' ? b.start : timeStrToMin(b.start),
@@ -4374,8 +4396,12 @@ function renderAgendaFitView() {
                (pInline ? '<span class="agenda-seg-label">' + pInline + '</span>' : '') +
                '</div>';
       }
-      // matches segment
-      var segColor = seg.isPractice ? 'var(--secondary)' : 'var(--blue-alliance)';
+      // matches segment — colors mirror the editor's bar so both
+      // pages render identical visuals. Practice = #5daf78 (V2
+      // practice green); qual = the page's `--blue-alliance`. Same
+      // CSS variable pair used in the editor (its `--accent` and
+      // hardcoded #5daf78), so the two bars look interchangeable.
+      var segColor = seg.isPractice ? '#5daf78' : 'var(--blue-alliance)';
       // Cycle-time progression — distinct cycleTime values walked in
       // order from the segment's match entries. Each entry's cycle
       // is endMin - startMin. Mirrors the editor's "9→8 min" label.
@@ -4514,13 +4540,40 @@ function renderAgendaFitView() {
             'title="Now: ' + fmtT(nowMin) + '"></div>';
     }
 
+    // Day head — mirrors the editor's `renderScheduleBars` head:
+    // a colored, clickable day label that scrolls to the first
+    // match of the day, an inline date label when one's set, the
+    // window time range in muted text, and a right-justified
+    // summary (match count + avg cycle). Practice days get the
+    // green accent; qual days get the blue match accent. Same
+    // semantics as the editor's `dc` color choice so both pages
+    // feel like the same component.
+    var headColor = d.isPractice ? '#5daf78' : 'var(--blue-alliance)';
+    var firstMatch = (d.entries || []).find(function(e) { return e.type === 'match'; });
+    var clickAttr  = firstMatch
+      ? ' onclick="agendaScrollToMatch(' + firstMatch.matchNum + ',' + (firstMatch.isPractice ? 'true' : 'false') + ')"'
+      : '';
+    // Date label — formatted "Sat Apr 4" style. Pulled from d.date
+    // (YYYY-MM-DD); falls back to whatever the day-divider already
+    // included in d.label when no explicit date is set.
+    var dateLabelStr = '';
+    if (d.date && typeof formatDateLabel === 'function') {
+      try { dateLabelStr = formatDateLabel(d.date); } catch(_) {}
+    }
+    var dateHtml = dateLabelStr
+      ? '<span style="font-size:0.68rem;color:var(--text-muted);">\u00b7 ' + escapeHtml(dateLabelStr) + '</span>'
+      : '';
     var dayHead =
       '<div class="agenda-day-head">' +
-        '<span class="day-label">' + escapeHtml(d.label) + '</span>' +
-        '<span class="day-times">' + fmtT(d.start) + '–' + fmtT(d.end) + '</span>' +
+        '<span class="day-label day-label-link" ' +
+              'style="color:' + headColor + ';font-weight:600;cursor:' + (firstMatch ? 'pointer' : 'default') + ';" ' +
+              'title="Scroll to ' + escapeAttr(d.label) + '"' + clickAttr + '>' +
+          escapeHtml(d.label) + '</span>' +
+        dateHtml +
+        '<span class="day-times">' + fmtT(d.start) + '\u2013' + fmtT(d.end) + '</span>' +
         '<span class="day-summary">' +
           '<strong>' + totalMatches + '</strong> match' + (totalMatches !== 1 ? 'es' : '') +
-          (avgCt > 0 ? ' · <strong>' + avgCt.toFixed(1) + '</strong> min avg' : '') +
+          (avgCt > 0 ? ' \u00b7 <strong>' + avgCt.toFixed(1) + '</strong> min avg' : '') +
         '</span>' +
       '</div>';
 
@@ -5409,29 +5462,138 @@ function _findFieldThreeUp() {
     };
   }
 
-  // No Nexus, no TBA-playing — pure scheduled fallback. Show the
-  // next three scheduled matches whose planned time hasn't passed.
-  // Practice matches included so the 3-up shows P1/P2/P3 during
-  // practice-day setup. Once Nexus or TBA actuals appear the upper
-  // branches above take over (qual-only, by design — TBA/Nexus
-  // don't track practice).
-  var nowMs = Date.now();
-  var pending = [];
+  // No Nexus, no TBA-playing — pure scheduled fallback. State
+  // machine for the estimated 3-up display:
+  //
+  //   T-15 min before next session → show field + deck (no queueing)
+  //   T-5  min before next session → show field + deck + queueing
+  //   In session (current match in-window or prev match ended <
+  //                SESSION_GAP ago) → show all 3, walking by schedule
+  //   Otherwise (event over, or > 15 min before next session) → null
+  //
+  // "Session" = a contiguous run of matches without a long break.
+  // Detected by checking the gap between consecutive matches: if
+  // the previous match ended within SESSION_GAP_MS of this one's
+  // start, they're in the same session. Inside a session, the 3-up
+  // always shows all three stages and rolls forward by clock —
+  // even if a small gap exists between matches (no need to re-cross
+  // the 15/5 thresholds mid-session).
+  //
+  // Active-day gate: only matches whose `date` attribute matches
+  // today's calendar date are eligible. Entries without a date stay
+  // eligible (old saves or fresh local schedules) since the timing
+  // guards below provide the safety net.
+  //
+  // Live data (Nexus / TBA actuals) overrides every gate here —
+  // those branches return earlier with source 'nexus'.
+  var nowMs    = Date.now();
+  var nowDate  = new Date(nowMs);
+  var todayStr = nowDate.getFullYear() + '-' +
+                 String(nowDate.getMonth() + 1).padStart(2, '0') + '-' +
+                 String(nowDate.getDate()).padStart(2, '0');
+  var WINDOW_15_MS    = 15 * 60 * 1000;
+  var WINDOW_5_MS     =  5 * 60 * 1000;
+  var SESSION_GAP_MS  =  5 * 60 * 1000;  // ≤5 min gap = same session
+
+  // Build today's full match list (past + current + future) sorted
+  // by start time. Need past matches to detect session continuity.
+  var todayMatches = [];
   for (var i3 = 0; i3 < STATE.computed.length; i3++) {
     var e3 = STATE.computed[i3];
     if (e3.type !== 'match') continue;
-    var ts = _resolveMatchTimestamp(e3);
-    if (ts != null && ts <= nowMs) continue;          // past
-    pending.push(e3);
-    if (pending.length >= 3) break;
+    if (e3.date && e3.date !== todayStr) continue;
+    var ts3 = _resolveMatchTimestamp(e3);
+    if (ts3 == null) continue;  // need timestamps to reason about timing
+    todayMatches.push({ entry: e3, startMs: ts3 });
   }
-  if (!pending.length) return { field: null, deck: null, queueing: null, source: null };
-  return {
-    field:    pending[0] || null,
-    deck:     pending[1] || null,
-    queueing: pending[2] || null,
-    source:   'scheduled',
-  };
+  if (!todayMatches.length) {
+    return { field: null, deck: null, queueing: null, source: null };
+  }
+  todayMatches.sort(function(a, b) { return a.startMs - b.startMs; });
+
+  // Per-match "endMs" — start + that match's cycle time. The cycle
+  // time comes from the entry's startMin/endMin if present (set by
+  // computeMatchTimes); otherwise fall back to the spacing to the
+  // next match in the list.
+  for (var iM = 0; iM < todayMatches.length; iM++) {
+    var t = todayMatches[iM];
+    var ent = t.entry;
+    var ctMin = (ent.endMin != null && ent.startMin != null)
+              ? Math.max(1, ent.endMin - ent.startMin)
+              : null;
+    if (ctMin == null && iM + 1 < todayMatches.length) {
+      ctMin = Math.max(1, (todayMatches[iM + 1].startMs - t.startMs) / 60000);
+    }
+    if (ctMin == null) ctMin = 8;  // last-resort fallback
+    t.endMs = t.startMs + ctMin * 60000;
+  }
+
+  // Find onFieldIdx — the schedule's "current" match. Three cases:
+  //   (a) we're inside a match's window  → that match
+  //   (b) we're before all matches       → the first one
+  //   (c) we're between matches          → the next pending one
+  // If we're past the last match's end, there's nothing to show.
+  var onFieldIdx = -1;
+  for (var iF = 0; iF < todayMatches.length; iF++) {
+    var tm = todayMatches[iF];
+    if (nowMs >= tm.startMs && nowMs < tm.endMs) { onFieldIdx = iF; break; }
+    if (nowMs < tm.startMs) { onFieldIdx = iF; break; }
+  }
+  if (onFieldIdx < 0) {
+    return { field: null, deck: null, queueing: null, source: null };
+  }
+
+  var onField   = todayMatches[onFieldIdx];
+  var deckEntry = todayMatches[onFieldIdx + 1] || null;
+  var queueEntry = todayMatches[onFieldIdx + 2] || null;
+
+  // In-session detection. We're in session when:
+  //   - now >= onField.startMs (we're inside the current match's window), OR
+  //   - the previous match (if any) ended within SESSION_GAP_MS of
+  //     onField.startMs (continuous run, no long break)
+  var inSession = false;
+  if (nowMs >= onField.startMs) {
+    inSession = true;
+  } else if (onFieldIdx > 0) {
+    var prev = todayMatches[onFieldIdx - 1];
+    if ((onField.startMs - prev.endMs) <= SESSION_GAP_MS) inSession = true;
+  }
+
+  var threeUp;
+  if (inSession) {
+    // In session — always show all 3, rolling by schedule.
+    threeUp = {
+      field:    onField.entry,
+      deck:     deckEntry  ? deckEntry.entry  : null,
+      queueing: queueEntry ? queueEntry.entry : null,
+      source:   'scheduled',
+    };
+  } else {
+    // Pre-session: gate by time-to-onField.
+    var timeToStart = onField.startMs - nowMs;
+    if (timeToStart > WINDOW_15_MS) {
+      // More than 15 min out — too early to surface any state.
+      return { field: null, deck: null, queueing: null, source: null };
+    }
+    if (timeToStart > WINDOW_5_MS) {
+      // 5–15 min out — show field + deck only.
+      threeUp = {
+        field:    onField.entry,
+        deck:     deckEntry ? deckEntry.entry : null,
+        queueing: null,
+        source:   'scheduled',
+      };
+    } else {
+      // ≤5 min out — show all 3.
+      threeUp = {
+        field:    onField.entry,
+        deck:     deckEntry  ? deckEntry.entry  : null,
+        queueing: queueEntry ? queueEntry.entry : null,
+        source:   'scheduled',
+      };
+    }
+  }
+  return threeUp;
 }
 
 // Render the 3-up Nexus row (On field / On deck / Queueing). Each

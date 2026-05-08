@@ -4,6 +4,13 @@ Living specification documents for the FRC scheduler. These are the
 source of truth for what the system does, what it should do, and how
 we get from here to there.
 
+## Onboarding / handoff
+
+| Document                                          | What it covers                                |
+|---------------------------------------------------|-----------------------------------------------|
+| [HANDOFF.md](HANDOFF.md)                          | Current state, open items, code locations, operational quirks. Read first when picking up the project. |
+| [REPRODUCTION_PROMPT.md](REPRODUCTION_PROMPT.md)  | Standard onboarding context for an AI / new contributor. |
+
 ## V2 day_config workstream *(active)*
 
 | Document                                  | What it covers                                     |
