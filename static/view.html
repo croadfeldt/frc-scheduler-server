@@ -112,6 +112,29 @@
     .brand-header .logo { width: 44px; height: 44px; font-size: 14px; }
   }
 
+  /* ── Status section header — sits above the .action-grid and
+       names the two-card row as "Status" with the field/linear
+       toggle anchored to the right. Lightweight: no wrapper element,
+       just a header row + thin divider. The two cards below stay
+       in the existing action-grid layout. */
+  .status-section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0 0.25rem 0.4rem 0.25rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .status-section-header .status-section-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .status-section-header .status-section-actions {
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+
   /* ── Action row (team search + next match card) ──────────────────────── */
   .action-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
@@ -1117,16 +1140,17 @@
      only handles the !important override that keeps the inline
      style winning over zebra-stripe rules in tr.alt. */
   tr.my-team td { font-weight: 700; }
-  /* Selected-team cell — structural styling only. The background
-     color, text color, and outline are applied inline per-cell
-     by the renderer using _teamColor() / _readableTextOn() so each
-     team's selection has its own color. The font-weight + radius +
-     padding rules below stay structural (consistent across all
-     selected cells regardless of team). */
+  /* Selected-team cell — underline-only treatment via inset
+     box-shadow (3px bottom edge in --team-color from inline style).
+     Box-shadow chosen over border-bottom because it doesn't affect
+     cell layout — table rows stay the same height regardless of
+     selection state, so adding/removing a selected team doesn't
+     reflow the schedule. The cell's natural alliance treatment
+     (background tint, color) stays untouched. Same underline pattern
+     used by alliance-line + field-position cells elsewhere. */
   td.my-team-cell {
     font-weight: 700;
-    border-radius: 4px;
-    padding: 4px 8px !important;
+    box-shadow: inset 0 -3px 0 0 var(--team-color, var(--my-team-bg));
   }
   /* Currently-playing match (live mode) */
   tr.now-playing { box-shadow: inset 4px 0 0 var(--next-match-accent), 0 0 0 2px var(--next-match-accent) inset; }
@@ -1683,15 +1707,14 @@
     top: -3px;
   }
   .team-cell .num { font-size: 14px; }
-  /* Selected-team highlight — uses --team-color (set inline per
-     cell from the universal palette). Same color treatment as the
-     schedule rows + agenda fit, so the user's "team yellow" is
-     yellow everywhere. The 3px bottom border feels like an
-     underline, less heavy than a full background fill. The number
-     itself stays alliance-colored so the alliance signal isn't
-     lost. */
+  /* Selected-team highlight — underline-only treatment to keep the
+     alliance signal (blue/red cell tint) intact even when the
+     team's palette slot is in a conflicting hue family. 3px solid
+     bottom border in --team-color; the cell's own alliance
+     background stays unchanged. The number bolds and the station
+     number gets the team color so the selection still reads
+     decisively without overpowering the alliance. */
   .team-cell.my-team {
-    background: color-mix(in srgb, var(--team-color) 25%, transparent);
     border-bottom: 3px solid var(--team-color);
     font-weight: 800;
   }
@@ -1793,13 +1816,13 @@
   .alliance-field .field-cell.red {
     flex-direction: row-reverse;
   }
-  /* Selected-team highlight — uses --team-color set inline. Same
-     treatment as the linear .team-cell so the user's palette color
-     reads consistently across both view modes. */
+  /* Selected-team highlight — underline-only, mirrors the linear
+     .team-cell.my-team treatment. Cell keeps its alliance tint;
+     selection signals via a 2px bottom border in --team-color so a
+     red-family palette slot can't read as "red alliance" on a blue
+     cell. Same pattern across all alliance views. */
   .alliance-field .field-cell.my-team {
-    background: color-mix(in srgb, var(--team-color) 20%, transparent);
-    border-color: var(--team-color);
-    border-bottom-width: 2px;
+    border-bottom: 2px solid var(--team-color);
   }
   /* Center column — placeholder for a countdown / status when this
      layout is used inline in a larger card. In the compact 3-up
@@ -2106,6 +2129,25 @@
     <!-- Live status strip — visible only in ?live=1 mode -->
     <div class="live-strip no-print" id="liveStrip" style="display:none;"></div>
 
+    <!-- Status section — names the two-card row below ("Your Team(s)"
+         on the left, "Field Status" on the right) and parks the
+         field/linear view toggle in the header. The toggle controls
+         the alliance display in BOTH cards (3-up grid + team-card
+         next-match alliance roster + next-only fallback) so the
+         header above is the natural home for it. -->
+    <div class="status-section-header no-print">
+      <span class="status-section-title">Status</span>
+      <span class="status-section-actions">
+        <button class="btn btn-secondary"
+                id="btnFieldViewToggle"
+                onclick="toggleFieldView()"
+                title="Switch alliance display between linear and field-position layouts">
+          <span id="fieldViewToggleIcon">&#9783;</span>
+          <span id="fieldViewToggleLabel">Field view</span>
+        </button>
+      </span>
+    </div>
+
     <div class="action-grid no-print">
       <!-- Team search card. Two-section layout: input/filters on top,
            moved-from-status-card next-match panel on the bottom. The
@@ -2334,19 +2376,6 @@
              row as the table title. Auto-hides on print via no-print
              class. flex:1 spacer pushes Share to the right edge. -->
         <span class="match-table-actions no-print">
-          <!-- Field / linear view toggle — switches alliance displays
-               (3-up status grid + team-card next-match + next-only
-               fallback) between the linear "blue vs red" line and the
-               rotated top-down field-position layout. Always visible
-               here so the choice is discoverable even pre-event when
-               the 3-up grid is hidden. Persists via localStorage. -->
-          <button class="btn btn-secondary"
-                  id="btnFieldViewToggle"
-                  onclick="toggleFieldView()"
-                  title="Switch alliance display between linear and field-position layouts">
-            <span id="fieldViewToggleIcon">&#9783;</span>
-            <span id="fieldViewToggleLabel">Field view</span>
-          </button>
           <!-- Day/night theme toggle. Default light; persists per-user
                in localStorage. Inline in the toolbar so it's discoverable
                but unobtrusive. Icon + label flips on toggle. Initial
@@ -2651,13 +2680,25 @@ function syncThemeButton() {
 // Adjacent-slot distinguishability also improved with the
 // saturation bump — earlier muted set had slots that blurred
 // together, especially the two greens.
+// Universal team-selection palette. V4 — six hues that are
+// intentionally distinct from the red and blue alliance colors so a
+// selected-team highlight on a blue cell can never read as "red
+// alliance" (and vice versa). The previous palette V3 had rose pink
+// in slot 0 and cyan-blue in slot 1, both of which collided with
+// alliance colors when the selected team played on the opposite
+// alliance — replaced here with teal and yellow.
+//
+// Slots used in lowest-free order via _teamColor() so a single-team
+// selection always picks slot 0 (amber). Multi-team selections walk
+// down the list. Modulo-wraps after slot 5 if a 7th team is added,
+// matching the chip rendering downstream.
 var TEAM_COLORS = [
-  '#d56e9e',  // 0: rose pink        (HSL 333°, 55%, 64%)
-  '#39a5c4',  // 1: cyan-blue        (HSL 192°, 56%, 49%)
-  '#d9a13e',  // 2: amber/gold       (HSL  39°, 67%, 55%)
-  '#9bbc3f',  // 3: chartreuse-lime  (HSL  75°, 51%, 49%)
-  '#a17ed1',  // 4: lavender         (HSL 263°, 47%, 66%)
-  '#dd7858',  // 5: coral-orange     (HSL  12°, 67%, 61%)
+  '#d9a13e',  // 0: amber/gold       (HSL  39°, 67%, 55%)
+  '#9bbc3f',  // 1: chartreuse-lime  (HSL  75°, 51%, 49%)
+  '#a17ed1',  // 2: lavender         (HSL 263°, 47%, 66%)
+  '#3fa6a0',  // 3: teal             (HSL 177°, 45%, 45%)
+  '#dd7858',  // 4: coral            (HSL  12°, 67%, 61%)
+  '#e8d050',  // 5: sun yellow       (HSL  52°, 78%, 61%)
 ];
 
 // Build a standardized day label using event-day numbering — the
@@ -3812,34 +3853,26 @@ function rerender() {
       // and (for completed matches) winning-alliance bold styling.
       // Cells are clickable: clicking a team toggles its membership in the
       // selection, just like the picker does.
-      // Selected cells get inline background+color from the team's
-      // palette slot via _teamColor() so multi-team selections
-      // differentiate visually. The CSS rule for .my-team-cell now
-      // only carries structural styling (font-weight, padding,
-      // border-radius); the inline style provides the color.
+      // Selected cells preserve the alliance-tinted background and
+      // signal selection via a 3px underline in the team's palette
+      // color. This keeps the alliance signal (blue/red cell tint)
+      // intact even when the team's palette color is pink or
+      // amber — previously the full-cell palette fill could cause a
+      // selected blue-alliance team to read as "red" because slot 0
+      // was rose pink. The underline is the same pattern the
+      // alliance-line + chips use elsewhere in the app.
       const td = (val, isSur, side) => {
         const cellCls = ['col-' + side, 'team-cell-clickable'];
         const isSelected = STATE.myTeams && STATE.myTeams.has(val);
         if (isSelected) cellCls.push('my-team-cell');
-        // Note: no my-team-primary marker on the schedule cells —
-        // the primary team is still tracked internally (drives the
-        // per-team rank/record/EPA stats block) but isn't visually
-        // distinguished here. The cell's palette color is the
-        // team's identity; an extra outline on top read as a grey
-        // overlay because the primary marker color (--primary,
-        // alliance blue) blended with the muted palette tints.
-        // Same reasoning as removing the leading dot from chips.
-        // When completed, bold the winning alliance's cells
         if (status === 'completed' && live.winning_alliance === side) cellCls.push('alliance-won');
-        // Per-team color via inline style. The darker inset shadow
-        // gives the cell a visible boundary so it reads as "marked"
-        // even when adjacent to another colored or tinted cell.
         let inlineStyle = '';
         if (isSelected) {
+          // Set --team-color so the my-team-cell CSS rule can paint
+          // the underline; no inline background or text-color
+          // overrides — the cell keeps its alliance treatment.
           const c = _teamColor(val);
-          const txt = _readableTextOn(c);
-          inlineStyle = ' style="background:' + c + ';color:' + txt +
-                        ';box-shadow:inset 0 0 0 1px rgba(0,0,0,0.5);"';
+          inlineStyle = ' style="--team-color:' + c + ';"';
         }
         return '<td class="' + cellCls.join(' ') + '"' + inlineStyle +
                ' onclick="toggleTeamSelection(' + val + ')" ' +
