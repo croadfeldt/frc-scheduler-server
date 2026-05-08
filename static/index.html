@@ -12239,6 +12239,203 @@ function _v2blockChangesToV1(matchBlock, matchOffset) {
   return matchBlock ? _v2dayCycleChanges([matchBlock], matchOffset) : [];
 }
 
+// Phase 5c V2-native scheduler input. Walks V2 day_config and produces
+// a "qual plan" the V2-native qual scheduler can consume directly:
+//
+//   - segments[]: qual blocks. Each carries its own cycleTime, local
+//     `changes` (afterMatch is segment-local — no offset shifting),
+//     local breaks, and a dayIdx pointer so output entries land in
+//     the right day. Segments are scheduled one at a time; the
+//     scheduler's match counter is global, but cycle changes are
+//     interpreted segment-locally.
+//   - blockers[]: tier-3 (break / awards / alliance_selection /
+//     ceremony) AND playoff blocks AND practice blocks on mixed
+//     practice+qual days. Each carries a dayIdx so it scopes to one
+//     day, and a subtype/breakKind/ceremonyKind for color-aware
+//     rendering. The scheduler treats blockers exactly like breaks —
+//     stops the match cursor at the start, resumes after the end.
+//   - dayMeta[]: per-day envelope (start, end, date, label,
+//     classifier, labelOverride). Replaces the V1 day shape's
+//     metadata fields. Days with no qual segments still have meta;
+//     they just produce empty entries arrays.
+//   - practiceDay: V1-shape practice slot for the existing _pracCfg
+//     code path. Mirrors what _v2BuildSchedulerInput produced. Only
+//     populated for practice-ONLY days; mixed practice+qual days
+//     leave the practice block as a blocker (qual matches don't
+//     bleed into practice time).
+//   - playoffBlocks: side-channel for the agenda renderer; same
+//     shape _v2ExtractPlayoffs returns.
+//
+// Pure function over `dc`; no DOM access. Defensive on shape — V1
+// inputs return an empty plan (the qual scheduler then schedules
+// nothing, which is the same as how the legacy V2→V1 transform
+// would have behaved on a malformed input).
+function _v2BuildQualPlan(dc) {
+  const empty = {
+    cycleTime:    (dc && dc.cycleTime)   || 9,
+    breakBuffer:  (dc && dc.breakBuffer) || 0,
+    segments:     [],
+    blockers:     [],
+    dayMeta:      [],
+    practiceDay:  null,
+    playoffBlocks: [],
+  };
+  if (!dc || dc.dayConfigVersion !== 2) return empty;
+
+  const plan = {
+    cycleTime:    dc.cycleTime || 9,
+    breakBuffer:  dc.breakBuffer || 0,
+    segments:     [],
+    blockers:     [],
+    dayMeta:      [],
+    practiceDay:  null,
+    playoffBlocks: [],
+  };
+  let practiceEmitted = false;
+
+  (dc.days || []).forEach(function(day, di) {
+    const blocks    = day.blocks || [];
+    const practices = blocks.filter(b => b.type === 'practice');
+    const quals     = blocks.filter(b => b.type === 'qualification');
+    const playoffs  = blocks.filter(b => b.type === 'playoff');
+    const tier3s    = blocks.filter(b =>
+      b.type === 'break' || b.type === 'awards' ||
+      b.type === 'alliance_selection' || b.type === 'ceremony'
+    );
+
+    // Day envelope — min/max start/end across all blocks. Covers
+    // pre/post-qual ceremonies in the agenda window.
+    let dayStartMin = null, dayEndMin = null;
+    blocks.forEach(b => {
+      const s = _v2timeStrToMin(b.start);
+      const e = _v2timeStrToMin(b.end);
+      if (s != null && (dayStartMin == null || s < dayStartMin)) dayStartMin = s;
+      if (e != null && (dayEndMin   == null || e > dayEndMin))   dayEndMin   = e;
+    });
+    plan.dayMeta.push({
+      idx:           di,
+      start:         dayStartMin != null ? dayStartMin : 0,
+      end:           dayEndMin   != null ? dayEndMin   : 0,
+      date:          day.date  || '',
+      label:         day.label || ('Day ' + (di + 1)),
+      labelOverride: (day.label && day.label.trim()) ? day.label.trim() : null,
+      classifier:    _v2dayClassifierFromBlocks(blocks),
+      hasQual:       quals.length > 0,
+      hasPractice:   practices.length > 0,
+    });
+
+    // Practice-only day → practiceDay slot for the _pracCfg path.
+    if (practices.length && !quals.length && !practiceEmitted) {
+      const p = practices[0];
+      const pBreaks = practices.flatMap(pb => (pb.breaks || []).map(b => ({
+        name: b.label || _v2subtypeDefaultName(b.type || 'break', b.breakKind, b.ceremonyKind),
+        start: b.start, end: b.end,
+        subtype:      b.type || 'break',
+        breakKind:    b.breakKind    || null,
+        ceremonyKind: b.ceremonyKind || null,
+      }))).concat(tier3s.map(b => ({
+        name: b.label || _v2subtypeDefaultName(b.type, b.breakKind, b.ceremonyKind),
+        start: b.start, end: b.end,
+        subtype:      b.type,
+        breakKind:    b.breakKind    || null,
+        ceremonyKind: b.ceremonyKind || null,
+      }))).sort((a, b) => (_v2timeStrToMin(a.start) || 0) - (_v2timeStrToMin(b.start) || 0));
+
+      plan.practiceDay = {
+        enabled: true,
+        label:   day.label || 'Practice',
+        date:    day.date  || '',
+        start:   p.start,
+        end:     practices[practices.length - 1].end,
+        ct:         p.cycleTime,
+        guaranteed: p.guaranteed != null ? p.guaranteed : 3,
+        filler:     p.maxFiller  != null ? p.maxFiller  : 99,
+        breaks:     pBreaks,
+        cycleChanges: [{ isStart: true, time: p.cycleTime }].concat(
+          (p.changes || []).map(cc => ({
+            isStart: false,
+            afterMatch: cc.afterMatch,
+            time: cc.cycleTime,
+          }))
+        ),
+      };
+      practiceEmitted = true;
+    }
+
+    // Qual blocks → segments. Each keeps its own cycleTime and
+    // segment-local `changes`. Sort by start so multi-qual-block
+    // days schedule in chronological order.
+    quals.slice().sort((a, b) =>
+      (_v2timeStrToMin(a.start) || 0) - (_v2timeStrToMin(b.start) || 0)
+    ).forEach(qb => {
+      plan.segments.push({
+        dayIdx:    di,
+        type:      'qualification',
+        start:     _v2timeStrToMin(qb.start),
+        end:       _v2timeStrToMin(qb.end),
+        cycleTime: qb.cycleTime || dc.cycleTime || 9,
+        changes:   (qb.changes || []).slice(),
+        breaks:    (qb.breaks || []).map(b => ({
+          name:         b.label || _v2subtypeDefaultName(b.type || 'break', b.breakKind, b.ceremonyKind),
+          start:        _v2timeStrToMin(b.start),
+          end:          _v2timeStrToMin(b.end),
+          subtype:      b.type || 'break',
+          breakKind:    b.breakKind    || null,
+          ceremonyKind: b.ceremonyKind || null,
+        })).filter(b => b.end > b.start),
+        label:     qb.label || null,
+      });
+    });
+
+    // Blockers: tier-3 + playoff + practice-on-mixed-day. Each is
+    // an off-limits time window. Practice-on-mixed-day prevents qual
+    // matches from bleeding into the practice window — a slight
+    // improvement over the legacy V1 path which would have placed
+    // qual matches at practice cycleTime within that window.
+    const blockerBlocks = tier3s.slice();
+    playoffs.forEach(pb => blockerBlocks.push(pb));
+    if (practices.length && quals.length) {
+      practices.forEach(pb => blockerBlocks.push(pb));
+    }
+    blockerBlocks.forEach(b => {
+      const subtype = b.type || 'break';
+      const sMin = _v2timeStrToMin(b.start);
+      const eMin = _v2timeStrToMin(b.end);
+      if (sMin == null || eMin == null || eMin <= sMin) return;
+      plan.blockers.push({
+        dayIdx:       di,
+        start:        sMin,
+        end:          eMin,
+        name:         b.label || _v2subtypeDefaultName(subtype, b.breakKind, b.ceremonyKind),
+        subtype:      subtype,
+        breakKind:    b.breakKind    || null,
+        ceremonyKind: b.ceremonyKind || null,
+      });
+    });
+
+    // Playoff side-channel for the agenda renderer.
+    playoffs.forEach(pb => {
+      plan.playoffBlocks.push({
+        dayIndex: di,
+        date:     day.date || '',
+        start:    pb.start,
+        end:      pb.end,
+        format:   pb.playoffFormat || 'double_elim',
+        teams:    pb.playoffAlliances != null ? pb.playoffAlliances
+                : pb.playoffTeams     != null ? pb.playoffTeams
+                : 8,
+      });
+    });
+  });
+
+  // Global segment ordering: by dayIdx, then by start.
+  plan.segments.sort((a, b) => {
+    if (a.dayIdx !== b.dayIdx) return a.dayIdx - b.dayIdx;
+    return (a.start || 0) - (b.start || 0);
+  });
+  return plan;
+}
+
 // Read v2 form state from DOM (#v2DaysContainer) into a day_config
 // object. Mirrors the markup created by buildV2DayRow / buildV2Block.
 function collectDayConfigV2() {
@@ -14227,86 +14424,65 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
     document.getElementById('progressWrap').style.display = 'none';
     return;
   }
-  // V2 → scheduler-input transform. The qual scheduler walks the
-  // day list with V1-shape semantics (start/end/breaks/cycleChanges
-  // per day). Phase 1 made the API return V2; _v2BuildSchedulerInput
-  // produces the V1-shape input list. Phase 5b renamed this from the
-  // earlier `downgradeToV1` to clarify it's the scheduler-input
-  // transform, not a wire-format downgrade. Future work could rewrite
-  // the qual-scheduling loop to walk V2 blocks per-block; for now
-  // the transform centralizes the V2→V1-shape mapping.
-  if (dayConfigOverride && dayConfigOverride.dayConfigVersion === 2 &&
-      typeof _v2BuildSchedulerInput === 'function') {
-    try { dayConfigOverride = _v2BuildSchedulerInput(dayConfigOverride); }
-    catch(e) { console.warn('finishGeneration: V2→scheduler-input transform failed:', e); }
-  }
+  // ── Phase 5c: V2-native scheduler input ───────────────────────────────
+  // Earlier phases ran the V2 day_config through `_v2BuildSchedulerInput`
+  // (formerly downgradeToV1) to produce a V1-shape `days[]` list with
+  // day-level cycleChanges + breaks. The qual scheduler then walked
+  // that list. The transform was lossy on the per-block-cycleTime
+  // axis: phase 5b/5c band-aids encoded multi-block cycleTimes as
+  // boundary cycle-changes and synthesized "Idle" breaks for
+  // uncovered between-block gaps. Phase 5c proper drops the
+  // transform: `_v2BuildQualPlan` produces a segment list (one entry
+  // per qual block) plus per-day blockers (tier-3 + playoff +
+  // practice-on-mixed-day) plus per-day metadata. The qual loop walks
+  // segments directly — segment-local cycleTime, segment-local
+  // afterMatch on cycle changes, no synthetic gap fixups needed.
+  //
+  // Practice-only days continue through the existing _pracCfg path
+  // below; the plan exposes plan.practiceDay for compatibility with
+  // it. _v2BuildSchedulerInput stays for getPracticeConfig +
+  // collectDayConfig (which produce V1-shape data for save/load
+  // paths) — the qual scheduler just doesn't use it anymore.
   const numTeams = parseInt(document.getElementById('numTeams').value);
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value) || 6;
-  // Use override day config if provided (e.g. from loaded schedule), else read from UI
   const _dc = dayConfigOverride;
+
+  // Build the V2-native plan. If the override is missing or already
+  // V1-shape (legacy save round-trip), fall through to the V1-shape
+  // day list below — this preserves load behavior for any V1 saves
+  // not yet migrated.
+  let _qPlan = null;
+  if (_dc && _dc.dayConfigVersion === 2 && typeof _v2BuildQualPlan === 'function') {
+    try { _qPlan = _v2BuildQualPlan(_dc); }
+    catch(e) { console.warn('finishGeneration: _v2BuildQualPlan failed:', e); }
+  }
+
   const defaultCycleTime = _dc ? _dc.cycleTime : (parseFloat(document.getElementById('cycleTime').value) || 8);
   const breakBuffer = _dc && _dc.breakBuffer != null ? _dc.breakBuffer
     : (parseFloat(document.getElementById('breakBuffer').value) || 5);
-  const cycleChanges = _dc ? (_dc.cycleChanges || []) : [];
 
-  // Build days array — each day carries its own cycleChanges list
-  const days = (_dc && _dc.days ? _dc.days : Array.from(document.querySelectorAll('.day-row'))).map(row => {
-    const isObj = typeof row === 'object' && row.start && !row.querySelector;
-    // Per-day cycle changes: array of {isStart, afterMatch, time}
-    var dayCycleChanges = [];
-    if (isObj) {
-      dayCycleChanges = row.cycleChanges || [];
-    } else {
-      Array.from(row.querySelectorAll('.day-cc-row')).forEach(function(ccRow) {
-        var timeInp  = ccRow.querySelector('.cc-time');
-        var afterInp = ccRow.querySelector('.cc-after');
-        var t = timeInp ? parseFloat(timeInp.value) : defaultCycleTime;
-        if (t > 0) {
-          if (ccRow.dataset.isStart === '1') {
-            dayCycleChanges.push({ isStart: true, afterMatch: null, time: t });
-          } else if (afterInp) {
-            var am = parseInt(afterInp.value);
-            if (!isNaN(am) && am >= 1) dayCycleChanges.push({ isStart: false, afterMatch: am, time: t });
-          }
-        }
-      });
-    }
-    return {
-      start: isObj ? timeToMin(row.start) : timeToMin(row.querySelector('.day-start').value),
-      end:   isObj ? timeToMin(row.end)   : timeToMin(row.querySelector('.day-end').value),
-      earlyEnd: isObj ? (row.earlyEnd || null) : null,  // V1 .day-row gone
-      cycleChanges: dayCycleChanges,
-      // Date round-trip: when the working day comes from a day_config
-      // object (isObj), pull date directly from it. When it comes from
-      // the v1 .day-row DOM (no date input), pull from the
-      // window._frcPreservedDayDates side-channel that v1
-      // collectDayConfig stashes. Without this, the date populated
-      // through here as undefined and the schedule output day title
-      // dropped the date for everything except practice (which uses a
-      // separate _pracCfg.date path).
-      date: isObj
-        ? (row.date || '')
-        : ((window._frcPreservedDayDates &&
-            window._frcPreservedDayDates['day' + (Array.from(document.querySelectorAll('.day-row')).indexOf(row) + 1)]) || ''),
-      breaks: (isObj ? (row.breaks||[]) : Array.from(row.querySelectorAll('.break-row')).map(br => ({
-        name: br.querySelector('.break-name').value || 'Break',
-        start: br.querySelector('.break-start').value,
-        end:   br.querySelector('.break-end').value,
-      }))).map(b => ({
-        name: b.name || 'Break',
-        // Carry tier-3 subtype + kind through so the agenda bar
-        // can render type-aware labels/initials. When the break
-        // came from a v1 row (no V2 origin) these fields are
-        // null and the renderer falls back to the generic break
-        // treatment.
-        subtype:      b.subtype      || 'break',
-        breakKind:    b.breakKind    || null,
-        ceremonyKind: b.ceremonyKind || null,
-        start: timeToMin(b.start), end: timeToMin(b.end), done: false,
-      })).filter(b => b.end > b.start).sort((a,b) => a.start - b.start),
-    };
-  // Strip breaks that start at or after the day end (e.g. lunch on a noon-end final day)
-  }).map(day => { day.breaks = day.breaks.filter(b => b.start < day.end); return day; });
+  // Legacy V1-shape day list. Populated only when we DON'T have a V2
+  // plan — covers the unlikely case of a V1-shape override slipping
+  // through (e.g. a hand-crafted test fixture). The V2-native loop
+  // below skips this when _qPlan is set.
+  const days = (!_qPlan && _dc && _dc.days)
+    ? _dc.days.map(row => ({
+        start: timeToMin(row.start),
+        end:   timeToMin(row.end),
+        earlyEnd: row.earlyEnd || null,
+        cycleChanges: row.cycleChanges || [],
+        date: row.date || '',
+        labelOverride: row.labelOverride || null,
+        classifier:    row.classifier    || null,
+        breaks: (row.breaks || []).map(b => ({
+          name: b.name || 'Break',
+          subtype:      b.subtype      || 'break',
+          breakKind:    b.breakKind    || null,
+          ceremonyKind: b.ceremonyKind || null,
+          start: timeToMin(b.start), end: timeToMin(b.end), done: false,
+        })).filter(b => b.end > b.start).sort((a,b) => a.start - b.start),
+      })).map(day => { day.breaks = day.breaks.filter(b => b.start < day.end); return day; })
+    : [];
 
   window._frcFinalDayOverflow = null;
   const totalMatches = matches.length;
@@ -14502,113 +14678,219 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
 
 
 
-  // Iterate all configured days. The inner loop stops when all matches are placed,
-  // but we still push remaining days (with empty entries) so agenda fit bars show
-  // the full configured time even when matches don't fill all days.
-  for (let d = 0; d < days.length; d++) {
-    const day = days[d];
-    // Deep copy breaks with done flag
-    const breaks = day.breaks.map(b => Object.assign({}, b, {done: false}));
-    const entries = [];
-    let cursor = day.start;
-    let dayMatchCount = 0;
+  // ── Qual scheduling ─────────────────────────────────────────────────────
+  // Phase 5c V2-native path: walk segments from `_qPlan` directly when
+  // available. Each segment is a qual block carrying its own
+  // cycleTime, segment-local cycle changes (afterMatch is local to
+  // the segment, not a shifted-global index), and segment-local
+  // breaks. Day blockers (tier-3 + playoff + practice-on-mixed-day)
+  // are merged into each segment's effective break list.
+  //
+  // The legacy V1-shape `days[]` walk below stays for the unlikely
+  // case of a V1-shape override (none in practice, but harmless to
+  // keep as a defensive fallback).
+  if (_qPlan) {
+    // Per-day entries collector. Days without qual segments simply
+    // get an empty entries[] — rendering still emits the day frame
+    // (date/label/agenda window) so practice-only and ceremonies-
+    // only days remain on the agenda fit bar.
+    const entriesByDay = {};
+    const ensureDay = (di) => {
+      if (!entriesByDay[di]) entriesByDay[di] = [];
+      return entriesByDay[di];
+    };
 
-    while (matchIdx < totalMatches) {
-      // Flush any breaks whose start time has passed
-      let flushed = true;
-      while (flushed) {
-        flushed = false;
-        for (const brk of breaks) {
-          if (!brk.done && brk.start <= cursor) {
-            entries.push({type:'break', name:brk.name, start:brk.start, end:brk.end, subtype:brk.subtype||'break', breakKind:brk.breakKind||null, ceremonyKind:brk.ceremonyKind||null});
-            cursor = Math.max(cursor, brk.end);
-            brk.done = true;
-            flushed = true;
-          }
-        }
-      }
+    for (let segIdx = 0; segIdx < _qPlan.segments.length; segIdx++) {
+      const seg = _qPlan.segments[segIdx];
+      const dayEntries = ensureDay(seg.dayIdx);
 
-      // Break buffer: schedule the match if its START is >= breakBuffer minutes
-      // before the break. Only defer if breakStart - cursor < breakBuffer.
-      const nextBreak = breaks.find(b => !b.done && b.start > cursor);
-      if (nextBreak && breakBuffer > 0 && nextBreak.start - cursor < breakBuffer) {
-        // Not enough lead time before the break — take the break now
-        entries.push({type:'break', name:nextBreak.name, start:nextBreak.start, end:nextBreak.end, subtype:nextBreak.subtype||'break', breakKind:nextBreak.breakKind||null, ceremonyKind:nextBreak.ceremonyKind||null});
-        cursor = Math.max(cursor, nextBreak.end);
-        nextBreak.done = true;
-        continue;
-      }
+      // Active break list = segment's own breaks + day blockers
+      // overlapping the segment window. Sorted by start. Each has
+      // a local `done` flag tracked per scheduling pass.
+      const dayBlockers = _qPlan.blockers
+        .filter(b => b.dayIdx === seg.dayIdx && b.start < seg.end && b.end > seg.start)
+        .map(b => Object.assign({}, b, { done: false }));
+      const activeBreaks = seg.breaks.map(b => Object.assign({}, b, { done: false }))
+        .concat(dayBlockers)
+        .filter(b => b.end > b.start)
+        .sort((a, b) => a.start - b.start);
 
-      // Check if a break interrupts the next match
-      // Get effective cycle time: use day's start-of-day ct, then apply after-match changes
-      const dayCt = (function() {
-        var ct = defaultCycleTime;
-        for (var ci = 0; ci < day.cycleChanges.length; ci++) {
-          var cc = day.cycleChanges[ci];
-          if (cc.isStart) { ct = cc.time; }
-          else if (matchIdx + 1 > cc.afterMatch) { ct = cc.time; }
-        }
+      let cursor = seg.start;
+      let segMatchCount = 0;  // segment-local match counter (for cycle changes)
+
+      // Helper: emit a break entry (preserves color-aware fields)
+      const pushBreak = (b) => {
+        dayEntries.push({
+          type: 'break', name: b.name,
+          start: b.start, end: b.end,
+          subtype:      b.subtype      || 'break',
+          breakKind:    b.breakKind    || null,
+          ceremonyKind: b.ceremonyKind || null,
+        });
+      };
+
+      // Helper: effective cycle time after N matches in this segment
+      // (segment-local — cycles changes are interpreted as
+      // "after this many matches in THIS qual block").
+      const segCtAt = (n) => {
+        let ct = seg.cycleTime;
+        (seg.changes || []).forEach(cc => {
+          if (n > (cc.afterMatch || 0) && cc.cycleTime) ct = cc.cycleTime;
+        });
         return ct;
-      })();
-      const matchEnd = cursor + dayCt;
-      // Only interrupt for a break if the match start did NOT already clear the buffer.
-      // If breakStart - cursor >= breakBuffer, the match was intentionally committed to
-      // run even if the cycle time overlaps the break start.
-      const interruptBreak = (!nextBreak || breakBuffer <= 0 || (nextBreak.start - cursor < breakBuffer))
-        ? breaks.find(b => !b.done && b.start > cursor && b.start < matchEnd)
-        : null;
-      if (interruptBreak) {
-        entries.push({type:'break', name:interruptBreak.name, start:interruptBreak.start, end:interruptBreak.end, subtype:interruptBreak.subtype||'break', breakKind:interruptBreak.breakKind||null, ceremonyKind:interruptBreak.ceremonyKind||null});
-        cursor = Math.max(cursor, interruptBreak.end);
-        interruptBreak.done = true;
-        continue;
-      }
+      };
 
-      // Check if match fits in the day
-      if (matchEnd > day.end) {
-        // On intermediate days: matches roll to the next day silently (expected).
-        // Only warn if it's the last day — nowhere left to roll.
-        if (d === days.length - 1) {
-          window._frcFinalDayOverflow = { unscheduled: totalMatches - matchIdx, dayEnd: day.end };
-        }
-        break;
-      }
-
-      // Compute back-to-back teams for this match
-      var b2bSet = new Set();
-      if (matchIdx > 0) {
-        var prevTeams = new Set([...matches[matchIdx-1].red, ...matches[matchIdx-1].blue]);
-        [...matches[matchIdx].red, ...matches[matchIdx].blue].forEach(function(t) { if (prevTeams.has(t)) b2bSet.add(t); });
-      }
-      entries.push({
-        type: 'match',
-        num: matchIdx + 1,
-        startMin: cursor,
-        endMin: matchEnd,
-        red: matches[matchIdx].red,
-        blue: matches[matchIdx].blue,
-        redSurrogate: matches[matchIdx].redSurrogate,
-        blueSurrogate: matches[matchIdx].blueSurrogate,
-        b2bTeams: b2bSet,
-      });
-      cursor = matchEnd;
-      matchIdx++;
-      dayMatchCount++;
-      if (day.earlyEnd !== null && day.earlyEnd !== undefined && dayMatchCount >= day.earlyEnd) break;
-
-      // After advancing matchIdx, check if cycle time changes for the next match
-      // and inject a cycle-change marker row
-      if (matchIdx < totalMatches) {
-        const prevDayCt = (function() {
-          var ct = defaultCycleTime;
-          for (var ci = 0; ci < day.cycleChanges.length; ci++) {
-            var cc = day.cycleChanges[ci];
-            if (cc.isStart) { ct = cc.time; }
-            else if (matchIdx > cc.afterMatch) { ct = cc.time; }
+      while (matchIdx < totalMatches) {
+        // Flush due breaks
+        let flushed = true;
+        while (flushed) {
+          flushed = false;
+          for (const brk of activeBreaks) {
+            if (!brk.done && brk.start <= cursor) {
+              pushBreak(brk);
+              cursor = Math.max(cursor, brk.end);
+              brk.done = true;
+              flushed = true;
+            }
           }
-          return ct;
-        })();
-        const nextDayCt = (function() {
+        }
+
+        // Break buffer: if next break is too close, take it now
+        const nextBreak = activeBreaks.find(b => !b.done && b.start > cursor);
+        if (nextBreak && breakBuffer > 0 && nextBreak.start - cursor < breakBuffer) {
+          pushBreak(nextBreak);
+          cursor = Math.max(cursor, nextBreak.end);
+          nextBreak.done = true;
+          continue;
+        }
+
+        // Effective cycle time for the next match (segment-local)
+        const ct = segCtAt(segMatchCount + 1);
+        const matchEnd = cursor + ct;
+
+        // Interrupt break check
+        const interruptBreak = (!nextBreak || breakBuffer <= 0 || (nextBreak.start - cursor < breakBuffer))
+          ? activeBreaks.find(b => !b.done && b.start > cursor && b.start < matchEnd)
+          : null;
+        if (interruptBreak) {
+          pushBreak(interruptBreak);
+          cursor = Math.max(cursor, interruptBreak.end);
+          interruptBreak.done = true;
+          continue;
+        }
+
+        // Time fit — relative to segment end. If the match doesn't
+        // fit, stop scheduling in this segment; remaining matches
+        // roll to the next segment (or trigger overflow on last).
+        if (matchEnd > seg.end) {
+          if (segIdx === _qPlan.segments.length - 1) {
+            window._frcFinalDayOverflow = { unscheduled: totalMatches - matchIdx, dayEnd: seg.end };
+          }
+          break;
+        }
+
+        // Back-to-back team set
+        const b2bSet = new Set();
+        if (matchIdx > 0) {
+          const prevTeams = new Set([...matches[matchIdx-1].red, ...matches[matchIdx-1].blue]);
+          [...matches[matchIdx].red, ...matches[matchIdx].blue].forEach(t => {
+            if (prevTeams.has(t)) b2bSet.add(t);
+          });
+        }
+        dayEntries.push({
+          type: 'match', num: matchIdx + 1,
+          startMin: cursor, endMin: matchEnd,
+          red:  matches[matchIdx].red,  blue: matches[matchIdx].blue,
+          redSurrogate:  matches[matchIdx].redSurrogate,
+          blueSurrogate: matches[matchIdx].blueSurrogate,
+          b2bTeams: b2bSet,
+        });
+        cursor = matchEnd;
+        matchIdx++;
+        segMatchCount++;
+
+        // Cycle-change marker — segment-local. The marker fires at
+        // the boundary between two distinct cycle times within this
+        // segment. Boundaries between segments produce no marker
+        // here (segments are independent); the renderer surfaces
+        // segment transitions implicitly through the time gap
+        // between the last match of one segment and the first of
+        // the next.
+        if (matchIdx < totalMatches) {
+          const prevCt = segCtAt(segMatchCount);
+          const nextCt = segCtAt(segMatchCount + 1);
+          if (nextCt !== prevCt) {
+            dayEntries.push({type: 'cycle-change', afterMatch: matchIdx, newTime: nextCt, atMin: cursor});
+          }
+        }
+      }
+
+      // Flush remaining breaks within this segment for visual
+      // continuity (so a 4 PM "Awards" still shows up on the agenda
+      // even when it falls after the last match).
+      activeBreaks.filter(b => !b.done).forEach(pushBreak);
+    }
+
+    // Build scheduled[] from per-day collected entries. Only days
+    // with qual segments get a scheduled entry — practice-only days
+    // are handled by the _pracCfg path above (which emits its own
+    // dayNum:0 entry), and tier-3-only days (e.g. an awards-only
+    // closing day) don't need a schedule frame. Mirrors the legacy
+    // V1 path which emitted scheduled[] only for v1.days entries.
+    //
+    // dayNum is sequential in the OUTPUT order, not the V2 day index
+    // — so a qual-only Day 2 still renders as "Day 1" of the qual
+    // schedule when there's a separate practice day before it. This
+    // matches the V1 path's `d+1` numbering.
+    let _outDayNum = 0;
+    _qPlan.dayMeta.forEach(meta => {
+      if (!meta.hasQual) return;
+      _outDayNum++;
+      scheduled.push({
+        dayNum:        _outDayNum,
+        start:         meta.start,
+        end:           meta.end,
+        date:          meta.date || '',
+        classifier:    meta.classifier    || null,
+        labelOverride: meta.labelOverride || null,
+        entries:       entriesByDay[meta.idx] || [],
+      });
+    });
+  } else {
+    // ── Legacy V1-shape fallback ──────────────────────────────────────
+    // Iterate all configured days. The inner loop stops when all matches are placed,
+    // but we still push remaining days (with empty entries) so agenda fit bars show
+    // the full configured time even when matches don't fill all days.
+    for (let d = 0; d < days.length; d++) {
+      const day = days[d];
+      const breaks = day.breaks.map(b => Object.assign({}, b, {done: false}));
+      const entries = [];
+      let cursor = day.start;
+      let dayMatchCount = 0;
+
+      while (matchIdx < totalMatches) {
+        let flushed = true;
+        while (flushed) {
+          flushed = false;
+          for (const brk of breaks) {
+            if (!brk.done && brk.start <= cursor) {
+              entries.push({type:'break', name:brk.name, start:brk.start, end:brk.end, subtype:brk.subtype||'break', breakKind:brk.breakKind||null, ceremonyKind:brk.ceremonyKind||null});
+              cursor = Math.max(cursor, brk.end);
+              brk.done = true;
+              flushed = true;
+            }
+          }
+        }
+
+        const nextBreak = breaks.find(b => !b.done && b.start > cursor);
+        if (nextBreak && breakBuffer > 0 && nextBreak.start - cursor < breakBuffer) {
+          entries.push({type:'break', name:nextBreak.name, start:nextBreak.start, end:nextBreak.end, subtype:nextBreak.subtype||'break', breakKind:nextBreak.breakKind||null, ceremonyKind:nextBreak.ceremonyKind||null});
+          cursor = Math.max(cursor, nextBreak.end);
+          nextBreak.done = true;
+          continue;
+        }
+
+        const dayCt = (function() {
           var ct = defaultCycleTime;
           for (var ci = 0; ci < day.cycleChanges.length; ci++) {
             var cc = day.cycleChanges[ci];
@@ -14617,34 +14899,80 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
           }
           return ct;
         })();
-        if (nextDayCt !== prevDayCt) {
-          entries.push({type: 'cycle-change', afterMatch: matchIdx, newTime: nextDayCt, atMin: cursor});
+        const matchEnd = cursor + dayCt;
+        const interruptBreak = (!nextBreak || breakBuffer <= 0 || (nextBreak.start - cursor < breakBuffer))
+          ? breaks.find(b => !b.done && b.start > cursor && b.start < matchEnd)
+          : null;
+        if (interruptBreak) {
+          entries.push({type:'break', name:interruptBreak.name, start:interruptBreak.start, end:interruptBreak.end, subtype:interruptBreak.subtype||'break', breakKind:interruptBreak.breakKind||null, ceremonyKind:interruptBreak.ceremonyKind||null});
+          cursor = Math.max(cursor, interruptBreak.end);
+          interruptBreak.done = true;
+          continue;
+        }
+
+        if (matchEnd > day.end) {
+          if (d === days.length - 1) {
+            window._frcFinalDayOverflow = { unscheduled: totalMatches - matchIdx, dayEnd: day.end };
+          }
+          break;
+        }
+
+        var b2bSet = new Set();
+        if (matchIdx > 0) {
+          var prevTeams = new Set([...matches[matchIdx-1].red, ...matches[matchIdx-1].blue]);
+          [...matches[matchIdx].red, ...matches[matchIdx].blue].forEach(function(t) { if (prevTeams.has(t)) b2bSet.add(t); });
+        }
+        entries.push({
+          type: 'match', num: matchIdx + 1,
+          startMin: cursor, endMin: matchEnd,
+          red: matches[matchIdx].red, blue: matches[matchIdx].blue,
+          redSurrogate: matches[matchIdx].redSurrogate,
+          blueSurrogate: matches[matchIdx].blueSurrogate,
+          b2bTeams: b2bSet,
+        });
+        cursor = matchEnd;
+        matchIdx++;
+        dayMatchCount++;
+        if (day.earlyEnd !== null && day.earlyEnd !== undefined && dayMatchCount >= day.earlyEnd) break;
+
+        if (matchIdx < totalMatches) {
+          const prevDayCt = (function() {
+            var ct = defaultCycleTime;
+            for (var ci = 0; ci < day.cycleChanges.length; ci++) {
+              var cc = day.cycleChanges[ci];
+              if (cc.isStart) { ct = cc.time; }
+              else if (matchIdx > cc.afterMatch) { ct = cc.time; }
+            }
+            return ct;
+          })();
+          const nextDayCt = (function() {
+            var ct = defaultCycleTime;
+            for (var ci = 0; ci < day.cycleChanges.length; ci++) {
+              var cc = day.cycleChanges[ci];
+              if (cc.isStart) { ct = cc.time; }
+              else if (matchIdx + 1 > cc.afterMatch) { ct = cc.time; }
+            }
+            return ct;
+          })();
+          if (nextDayCt !== prevDayCt) {
+            entries.push({type: 'cycle-change', afterMatch: matchIdx, newTime: nextDayCt, atMin: cursor});
+          }
         }
       }
+
+      breaks.filter(b => !b.done).forEach(b => {
+        entries.push({type:'break', name:b.name, start:b.start, end:b.end, subtype:b.subtype||'break', breakKind:b.breakKind||null, ceremonyKind:b.ceremonyKind||null});
+      });
+
+      scheduled.push({
+        dayNum: d+1,
+        start: day.start, end: day.end,
+        date: day.date || '',
+        classifier:    day.classifier    || null,
+        labelOverride: day.labelOverride || null,
+        entries,
+      });
     }
-
-    // Add any remaining breaks
-    breaks.filter(b => !b.done).forEach(b => {
-      entries.push({type:'break', name:b.name, start:b.start, end:b.end, subtype:b.subtype||'break', breakKind:b.breakKind||null, ceremonyKind:b.ceremonyKind||null});
-    });
-
-    scheduled.push({
-      dayNum: d+1,
-      start: day.start, end: day.end,
-      date: day.date || '',
-      // V2 classifier + user label override come straight from the
-      // V1 day_config (downgradeToV1 emits them from V2 blocks /
-      // V2 day-card override input). The renderer uses them in this
-      // order:
-      //   1. labelOverride (user typed something)
-      //   2. classifier    (auto from blocks present)
-      //   3. eventDayLabel (legacy V1 fallback)
-      // Both fields are null when not set, so the falsy short-circuit
-      // chain in the renderer works.
-      classifier:    day.classifier    || null,
-      labelOverride: day.labelOverride || null,
-      entries,
-    });
   }
 
   // Update stats. The meta line (#scheduleMeta) holds basic facts;
@@ -14656,7 +14984,13 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
   document.getElementById('statMatches').textContent = totalMatches;
   document.getElementById('statTeams').textContent   = numTeams;
   document.getElementById('statPerTeam').textContent = matchesPerTeam;
-  document.getElementById('statDays').textContent    = days.length;
+  // Day count for the meta line. Phase 5c V2-native path leaves
+  // `days[]` empty (the legacy V1-shape array) and pushes one
+  // scheduled[] entry per qual day, so source from scheduled[] when
+  // we have a plan. Fall back to days.length on the legacy V1 path.
+  document.getElementById('statDays').textContent    =
+    (_qPlan ? scheduled.filter(s => s && (s.entries || []).some(e => e.type === 'match')).length
+            : days.length);
   // Show the meta line — starts hidden so empty schedules don't show
   // "— matches · — teams" placeholder text.
   var metaEl = document.getElementById('scheduleMeta');

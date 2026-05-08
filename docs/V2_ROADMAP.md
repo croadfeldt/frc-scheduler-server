@@ -403,61 +403,102 @@ Revisit after phase 3 ships.
 ---
 
 ---
-## Phase 5c — multi-qual-block per-block cycleTime *(✓ done)*
+## Phase 5c — V2-native qual scheduler *(✓ done)*
 
-**Goal:** correctly schedule events with multiple qual blocks per day at
-different cycle times. Pre-5c, `_v2BuildSchedulerInput` used the FIRST
-qual block's cycleTime for the entire day; matches scheduled in the
-second qual block's window inherited the wrong cycleTime.
+**Goal:** drop the V2→V1 transform from the qual scheduler entirely.
+The scheduler now walks V2 blocks directly: each qual block is a
+"segment" with its own cycleTime, segment-local cycle changes, and
+segment-local breaks. Tier-3 + playoff + practice-on-mixed-day blocks
+become per-day "blockers" — off-limits time windows the segment
+scheduler stops at.
+
+This subsumes the earlier 5c band-aid (cycle-changes + synthetic gap
+breaks in `_v2BuildSchedulerInput`). Both still exist in the codebase
+because `getPracticeConfig` and `collectDayConfig` (save/load paths)
+still need the V1-shape transform — but `_finishGenerationInner` no
+longer does.
 
 **What we did:**
 
-1. ✓ **`_v2dayCycleChanges(scheduleableBlocks, baseMatchOffset)`**
-   replaces `_v2blockChangesToV1(matchBlock, ...)` (kept as a single-block
-   shim). Walks all schedulable blocks (qual + practice) in start-time
-   order, emits the first block's cycleTime as `isStart`, then a boundary
-   cycle change at each subsequent block's start (using the cumulative
-   match count at that point), plus each block's local `changes` shifted
-   by the cumulative offset.
-2. ✓ **Synthetic gap breaks.** When schedulable blocks aren't back-to-back
-   AND no sibling break (lunch / ceremony / playoff / etc.) covers the
-   gap, `_v2BuildSchedulerInput` now inserts a generic 'Idle' break for
-   the gap. Without it, the qual scheduler would fill the gap with matches
-   at the previous block's cycleTime, bleeding the next block's intended
-   start time.
-3. ✓ **Block ordering.** V2 storage order isn't guaranteed to match
-   wall-clock order. `_v2BuildSchedulerInput` now sorts schedulable blocks
-   by start time before computing offsets.
-4. ✓ **Mirrored in Python.** `app/day_config_v2.py:downgrade_v2_to_v1`
-   gets the same logic so backend round-trip stays consistent. The
-   `block_offset` accumulator replaces the old day-level estimate with
-   per-block precision.
-5. ✓ **11 new tests** in `tests/test_v2_scheduler_input.js`:
-   - Single-block days produce identical output to pre-5c.
-   - Two qual blocks with different CTs → boundary cc emitted.
-   - Three blocks with cumulative offset.
-   - Per-block + boundary changes interleave correctly.
-   - `baseMatchOffset` for multi-day events.
-   - Block reorder when V2 storage is out of order.
-   - Synthetic gap break for uncovered gaps.
-   - Sibling-break-covered gap → no synthetic.
-   - Mixed practice+qual day.
+1. ✓ **`_v2BuildQualPlan(dc)`** — new function producing a complete
+   V2-native scheduling plan: `{cycleTime, breakBuffer, segments[],
+   blockers[], dayMeta[], practiceDay, playoffBlocks[]}`. Pure over
+   `dc`; no DOM access. Defensive on shape — non-V2 input returns an
+   empty plan.
+   - `segments[]` are qual blocks with **segment-LOCAL** afterMatch
+     on cycle changes (no offset shifting). Sorted by `dayIdx` then
+     `start`.
+   - `blockers[]` carry tier-3 + playoff + practice-on-mixed-day,
+     each tagged with a `dayIdx` so they scope to the right day.
+     Practice on mixed days as a blocker is a slight improvement
+     over the old V1 path: qual matches no longer bleed into the
+     practice window at practice cycleTime.
+   - `dayMeta[]` covers the full day envelope (min start / max end
+     across all blocks, including pre/post-qual ceremonies) plus
+     `hasQual` / `hasPractice` booleans for the output emitter.
+   - `practiceDay` only populated for practice-ONLY days, matching
+     the existing `_pracCfg` consumer's expectations.
+   - `playoffBlocks[]` is the same side-channel the agenda renderer
+     consumed before.
+2. ✓ **Rewrote the qual scheduling loop** in `_finishGenerationInner`.
+   The new loop walks `_qPlan.segments[]` in order. For each segment:
+   - Builds the active-break list from segment's own breaks plus day
+     blockers overlapping the segment window.
+   - Uses a segment-local cursor + segment-local match count.
+   - Reads cycleTime from a `segCtAt(n)` helper that walks segment
+     changes — **no global afterMatch**, no boundary cycle-change
+     tricks. Per-block cycleTime is just inherent to the segment.
+   - Emits cycle-change markers only at intra-segment boundaries.
+   - Match overflow on the last segment triggers
+     `window._frcFinalDayOverflow`.
+   - Time fit is bounded by `seg.end`, not `day.end` — matches
+     can't bleed past the segment.
+3. ✓ **Output assembly walks dayMeta**, pushing one `scheduled[]`
+   entry per day with qual segments. `dayNum` is sequential output
+   ordering (matches the V1 path's `d+1`), so a qual-only Day 2
+   still renders as "Day 1" of the qual schedule when there's a
+   separate practice day before it.
+4. ✓ **Legacy V1-shape branch preserved** as a fallback — runs
+   only when `_qPlan` couldn't be built (e.g. a hand-crafted V1
+   fixture or a malformed override). Real loads always hit the
+   V2-native branch.
+5. ✓ **`statDays.textContent`** now sources from `scheduled[]`
+   (counting days with at least one match), not `days[]` which is
+   empty on the V2-native path.
+6. ✓ **9 new tests** in `tests/test_v2_scheduler_input.js`:
+   - Empty / non-V2 input returns empty plan.
+   - Single qual block → 1 segment, no blockers.
+   - Two qual blocks same day, different CT → 2 segments with own cycleTime.
+   - Mixed practice+qual day → 1 segment, practice in blockers (not practiceDay).
+   - Practice-only day → 0 segments, practiceDay populated.
+   - Tier-3 between qual blocks → blocker only.
+   - Playoffs → blockers AND playoffBlocks side-channel.
+   - Day with only ceremonies → 0 segments, hasQual=false.
+   - Multi-day: segments ordered by dayIdx then start.
 
 **What stays:**
 
-- The qual scheduler's inner loop (`_finishGenerationInner`) still walks
-  one V1-shape `days[]` array. The full V2-native scheduler walking V2
-  blocks per-block was deferred — the per-block cycleTime issue, which
-  was the user-visible loss, is fully addressed by the cycle-changes +
-  gap-breaks approach. A future "phase 5d" could rewrite the loop to walk
-  blocks directly (cleaner code, but no new capability for users).
-- `_v2BuildSchedulerInput` (the renamed `downgradeToV1`). Still the
-  V2 → scheduler-input transform.
+- `_v2BuildSchedulerInput` (the V2→V1-shape transform from phase 5b).
+  Still used by `getPracticeConfig` (extracts the practice slot) and
+  `collectDayConfig` (returns V1-shape for save/load round-trips).
+  These could be rewritten V2-native in a future cleanup but are out
+  of scope for 5c — the user-visible scheduling correctness is the
+  point of phase 5c, and that's now V2-native.
+- `_v2dayCycleChanges` + the synthetic gap-break logic. They live in
+  `_v2BuildSchedulerInput` only and are no longer on the scheduler's
+  path. Kept because the V1-shape transform is still consumed by
+  `view.html`'s downgrade and the save/load callers.
+- The V1-shape fallback branch in `_finishGenerationInner`. Defensive;
+  no real callers hit it.
 
-**Risk:** medium. The cycleChanges computation changed, with a defensive
-isStart-when-different test in Python that matches the prior behavior for
-single-block days. Phase 5c tests cover the new semantics; existing tests
-unchanged. The scheduler loop itself is untouched.
+**Risk:** medium-high. This is a core scheduler rewrite. The new path
+has been unit-tested for plan construction (9 tests on shape +
+ordering); the scheduling math itself was lifted from the V1 loop
+and adapted to segment-local indices, so the inner loop logic is
+the same algorithm with different bookends. Worth verifying live:
+single-day single-block, multi-day same CT, multi-day with cycle
+change at after-match-N, practice-only day, mixed practice+qual day,
+multi-qual-block-per-day at different CTs.
 
 ## Status tracker
 
@@ -470,4 +511,4 @@ unchanged. The scheduler loop itself is untouched.
 | 4     | ✓ Done      | claude| V2 URL emit/parse + 36 round-trip tests    |
 | 5     | ✓ Done      | claude| ~870 lines of V1 helpers + plumbing deleted |
 | 5b    | ✓ Done      | claude| Scheduler-input rename + view colors fixed  |
-| 5c    | ✓ Done      | claude| Multi-qual-block per-block cycleTime       |
+| 5c    | ✓ Done      | claude| V2-native qual scheduler (segments + blockers) |

@@ -796,9 +796,24 @@
     color: #2a1808;
     text-shadow: none;
   }
-  /* Light-theme break tone — saturated orange in the editor reads
-     as too aggressive on the lighter view-page palette; soften. */
-  html[data-theme="light"] .agenda-seg-break { background: #f4b366 !important; }
+  /* Break segments on the agenda timeline. Default = orange. The
+     subtype-aware rules below override per-kind so awards/ceremony/
+     alliance_selection/playoff render in their distinct V2 palette
+     colors (matching the editor). The earlier light-mode override
+     used !important which clobbered subtype-specific colors —
+     replaced by data-subtype selectors that don't need !important. */
+  .agenda-seg-break { background: #ec8a3f; }
+  .agenda-seg-break[data-subtype="alliance_selection"] { background: #3fa6a0; }
+  .agenda-seg-break[data-subtype="awards"]             { background: #d9a13e; }
+  .agenda-seg-break[data-subtype="ceremony"]           { background: #dd7858; }
+  .agenda-seg-break[data-subtype="playoff"]            { background: #bd92f0; }
+  /* Light-mode softening on the default break only — subtype-
+     specific colors stay true to the editor palette so the visual
+     language matches. */
+  html[data-theme="light"] .agenda-seg-break[data-subtype="break"],
+  html[data-theme="light"] .agenda-seg-break:not([data-subtype]) {
+    background: #f4b366;
+  }
   /* Playoff band — purple, distinct from match runs. Slightly
      muted on light theme so it doesn't pull focus from match
      content. */
@@ -1106,24 +1121,25 @@
   /* Subtype-specific break tints. Light-mode values:
      alliance_selection → teal, awards → gold, ceremony → coral,
      playoff → purple, break → default (the rule above). The hex
-     numbers are direct V2_BLOCK_TYPES colors at ~18% alpha for the
+     numbers are direct V2_BLOCK_TYPES colors at ~30% alpha for the
      background and a darker tone for the text so it stays readable
-     against a light backdrop. */
-  tr.break-row[data-subtype="alliance_selection"] td { background: rgba(63,166,160,0.18);  color: #1f6663; }
-  tr.break-row[data-subtype="awards"]             td { background: rgba(217,161,62,0.18);  color: #7e5a1d; }
-  tr.break-row[data-subtype="ceremony"]           td { background: rgba(221,120,88,0.18);  color: #874431; }
-  tr.break-row[data-subtype="playoff"]            td { background: rgba(189,146,240,0.18); color: #5d3aa1; }
+     against a light backdrop. Earlier 18% values read as "barely
+     tinted" against the white card; bumped for clear separation. */
+  tr.break-row[data-subtype="alliance_selection"] td { background: rgba(63,166,160,0.32);  color: #1a5e5b; }
+  tr.break-row[data-subtype="awards"]             td { background: rgba(217,161,62,0.32);  color: #7e5a1d; }
+  tr.break-row[data-subtype="ceremony"]           td { background: rgba(221,120,88,0.32);  color: #5e2e21; }
+  tr.break-row[data-subtype="playoff"]            td { background: rgba(189,146,240,0.32); color: #4a2c89; }
   /* Dark-mode versions. Same hue family, lighter text, slightly more
      opaque background — same dual-rule pattern as other components. */
-  html[data-theme="dark"] tr.break-row[data-subtype="alliance_selection"] td { background: rgba(63,166,160,0.22);  color: #8de0d9; }
-  html[data-theme="dark"] tr.break-row[data-subtype="awards"]             td { background: rgba(217,161,62,0.22);  color: #f0cf86; }
-  html[data-theme="dark"] tr.break-row[data-subtype="ceremony"]           td { background: rgba(221,120,88,0.22);  color: #f3a892; }
-  html[data-theme="dark"] tr.break-row[data-subtype="playoff"]            td { background: rgba(189,146,240,0.22); color: #d4bcf5; }
+  html[data-theme="dark"] tr.break-row[data-subtype="alliance_selection"] td { background: rgba(63,166,160,0.30);  color: #8de0d9; }
+  html[data-theme="dark"] tr.break-row[data-subtype="awards"]             td { background: rgba(217,161,62,0.30);  color: #f0cf86; }
+  html[data-theme="dark"] tr.break-row[data-subtype="ceremony"]           td { background: rgba(221,120,88,0.30);  color: #f3a892; }
+  html[data-theme="dark"] tr.break-row[data-subtype="playoff"]            td { background: rgba(189,146,240,0.30); color: #d4bcf5; }
   @media (prefers-color-scheme: dark) {
-    html:not([data-theme]) tr.break-row[data-subtype="alliance_selection"] td { background: rgba(63,166,160,0.22);  color: #8de0d9; }
-    html:not([data-theme]) tr.break-row[data-subtype="awards"]             td { background: rgba(217,161,62,0.22);  color: #f0cf86; }
-    html:not([data-theme]) tr.break-row[data-subtype="ceremony"]           td { background: rgba(221,120,88,0.22);  color: #f3a892; }
-    html:not([data-theme]) tr.break-row[data-subtype="playoff"]            td { background: rgba(189,146,240,0.22); color: #d4bcf5; }
+    html:not([data-theme]) tr.break-row[data-subtype="alliance_selection"] td { background: rgba(63,166,160,0.30);  color: #8de0d9; }
+    html:not([data-theme]) tr.break-row[data-subtype="awards"]             td { background: rgba(217,161,62,0.30);  color: #f0cf86; }
+    html:not([data-theme]) tr.break-row[data-subtype="ceremony"]           td { background: rgba(221,120,88,0.30);  color: #f3a892; }
+    html:not([data-theme]) tr.break-row[data-subtype="playoff"]            td { background: rgba(189,146,240,0.30); color: #d4bcf5; }
   }
   /* Informational blocks from the day-plan PDF — ceremonies, playoffs,
      awards. Same row shape as breaks but with kind-specific tinting so
@@ -3379,8 +3395,20 @@ function rerender() {
     } else if (entry.type === 'break') {
       // data-subtype drives the row color via CSS — alliance_selection,
       // awards, ceremony, playoff, break each get distinct tints
-      // matching the V2 editor palette.
-      const _bsub = entry.subtype || 'break';
+      // matching the V2 editor palette. Subtype comes from the V2
+      // block.type (preserved through _v2BlockToV1Break). For older
+      // schedules saved before the V2 plumbing was added, fall back
+      // to a name-based heuristic so common labels still pick up the
+      // right hue. The heuristic only fires when subtype is missing
+      // or generic ("break") — a real subtype always wins.
+      let _bsub = entry.subtype || 'break';
+      if (_bsub === 'break' && entry.name) {
+        const _nm = String(entry.name).toLowerCase();
+        if      (/award/.test(_nm))                        _bsub = 'awards';
+        else if (/alliance/.test(_nm))                     _bsub = 'alliance_selection';
+        else if (/ceremony|opening|closing|presentation/.test(_nm)) _bsub = 'ceremony';
+        else if (/playoff|elimination|finals?\b/.test(_nm)) _bsub = 'playoff';
+      }
       html += '<tr class="break-row" data-subtype="' + escapeAttr(_bsub) + '"><td colspan="8">⏸ ' + escapeHtml(entry.name) +
               ' · ' + minToTime12(entry.start) + ' – ' + minToTime12(entry.end) + '</td></tr>';
     } else if (entry.type === 'info-block') {
@@ -3805,6 +3833,17 @@ function renderAgendaFitView() {
         // Threshold matches the editor's AGENDA_BREAK_THRESHOLD.
         var bdur = entry.end - entry.start;
         if (bdur >= 5) {
+          // Subtype with name-based fallback — same heuristic as the
+          // schedule-table renderer. Lets pre-V2 schedules pick up
+          // matching colors based on the break label.
+          var _segSubtype = entry.subtype || 'break';
+          if (_segSubtype === 'break' && entry.name) {
+            var _nm = String(entry.name).toLowerCase();
+            if      (/award/.test(_nm))                        _segSubtype = 'awards';
+            else if (/alliance/.test(_nm))                     _segSubtype = 'alliance_selection';
+            else if (/ceremony|opening|closing|presentation/.test(_nm)) _segSubtype = 'ceremony';
+            else if (/playoff|elimination|finals?\b/.test(_nm)) _segSubtype = 'playoff';
+          }
           flushRun(entry.start);
           segs.push({
             kind: 'break',
@@ -3814,7 +3853,7 @@ function renderAgendaFitView() {
             // editor (alliance_selection / awards / ceremony / playoff
             // each get distinct hues; subtype='break' falls back to
             // the default orange).
-            subtype:      entry.subtype      || 'break',
+            subtype:      _segSubtype,
             breakKind:    entry.breakKind    || null,
             ceremonyKind: entry.ceremonyKind || null,
             duration: bdur,
@@ -3951,25 +3990,19 @@ function renderAgendaFitView() {
                '</div>';
       }
       if (seg.kind === 'break') {
-        // Color by subtype — matches the V2 editor's V2_BLOCK_TYPES palette.
-        // alliance_selection: teal · awards: gold · ceremony: coral
-        // playoff (rare here — usually a separate kind): purple
-        // break (default): orange.
-        var _segColors = {
-          alliance_selection: '#3fa6a0',
-          awards:             '#d9a13e',
-          ceremony:           '#dd7858',
-          playoff:            '#bd92f0',
-          break:              '#ec8a3f',
-        };
-        var _bColor = _segColors[seg.subtype] || '#ec8a3f';
+        // Color-by-subtype is handled in CSS via data-subtype, so the
+        // renderer just emits the attribute and lets stylesheet rules
+        // pick the right hue. Inline background was overridden by the
+        // light-theme `.agenda-seg-break { ... !important }` rule and
+        // would otherwise lose the subtype distinction. Width still
+        // needs to be inline since it's data-driven.
         var inline2 = segDur >= 30 ? seg.label : (segDur >= 12 ? '\u23F8' : '');
         var tipB = (seg.label || 'Break') + ' — ' +
                    fmtT(seg.start) + '–' + fmtT(seg.end) +
                    ' (' + Math.round(segDur) + ' min)';
         return '<div class="agenda-seg agenda-seg-break" ' +
                'data-subtype="' + (seg.subtype || 'break') + '" ' +
-               'style="width:' + widthPct.toFixed(2) + '%;background:' + _bColor + ';" ' +
+               'style="width:' + widthPct.toFixed(2) + '%;" ' +
                'title="' + tipB.replace(/"/g, '&quot;') + '">' +
                (inline2 ? '<span class="agenda-seg-label">' + inline2 + '</span>' : '') +
                '</div>';

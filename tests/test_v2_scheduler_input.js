@@ -57,6 +57,7 @@ const exposeNames = [
   '_v2subtypeDefaultName', '_v2dayClassifierFromBlocks',
   '_v2dayCycleChanges', '_v2blockChangesToV1',
   '_v2BuildSchedulerInput', '_v2ExtractPlayoffs',
+  '_v2BuildQualPlan',
 ];
 const wrappedCode = helpersCode + '\n' + exposeNames.map(
   n => `try { globalThis.${n} = ${n}; } catch(e) {}`
@@ -65,7 +66,8 @@ eval(wrappedCode);
 
 const buildSchedulerInput = globalThis._v2BuildSchedulerInput;
 const dayCycleChanges     = globalThis._v2dayCycleChanges;
-if (!buildSchedulerInput || !dayCycleChanges) {
+const buildQualPlan       = globalThis._v2BuildQualPlan;
+if (!buildSchedulerInput || !dayCycleChanges || !buildQualPlan) {
   console.error('Failed to extract helpers; got:',
     Object.keys(globalThis).filter(k => k.startsWith('_v2')));
   process.exit(2);
@@ -296,6 +298,133 @@ test('practice + qual on same day — both contribute to cycleChanges', () => {
   // both blocks contributing to cycleChanges.
   assertContains(v1.days[0].cycleChanges, cc => cc.isStart === true && cc.time === 11, 'isStart=11 (practice)');
   assertContains(v1.days[0].cycleChanges, cc => cc.afterMatch === 16 && cc.time === 9, 'after-16→9 (qual)');
+});
+
+console.log('\n== _v2BuildQualPlan (V2-native scheduler input) ==');
+
+test('empty / non-V2 input returns empty plan', () => {
+  const plan = buildQualPlan(null);
+  assertEq(plan.segments,  []);
+  assertEq(plan.blockers,  []);
+  assertEq(plan.dayMeta,   []);
+  if (plan.practiceDay !== null) throw new Error('practiceDay should be null');
+});
+
+test('single qual block → 1 segment, no blockers', () => {
+  const plan = buildQualPlan({
+    dayConfigVersion: 2, cycleTime: 9, breakBuffer: 5,
+    days: [{ label: 'Day 1', date: '2026-04-04', blocks: [
+      { type: 'qualification', start: '09:00', end: '17:00', cycleTime: 9, changes: [], breaks: [] },
+    ]}],
+  });
+  assertEq(plan.segments.length, 1, 'one segment');
+  assertEq(plan.segments[0].cycleTime, 9, 'segment cycleTime');
+  assertEq(plan.segments[0].dayIdx, 0, 'segment dayIdx');
+  assertEq(plan.blockers, [], 'no blockers');
+  assertEq(plan.dayMeta.length, 1, 'one dayMeta entry');
+  assertEq(plan.dayMeta[0].hasQual, true);
+});
+
+test('two qual blocks same day, different CT → 2 segments with own cycleTime', () => {
+  const plan = buildQualPlan({
+    dayConfigVersion: 2, cycleTime: 9, breakBuffer: 5,
+    days: [{ label: 'Day 1', date: '', blocks: [
+      { type: 'qualification', start: '09:00', end: '12:00', cycleTime: 9, changes: [], breaks: [] },
+      { type: 'qualification', start: '13:00', end: '17:00', cycleTime: 8, changes: [], breaks: [] },
+    ]}],
+  });
+  assertEq(plan.segments.length, 2);
+  assertEq(plan.segments[0].cycleTime, 9, 'seg0 ct');
+  assertEq(plan.segments[1].cycleTime, 8, 'seg1 ct');
+  assertEq(plan.segments[0].dayIdx, plan.segments[1].dayIdx, 'same day');
+});
+
+test('mixed practice+qual day → 1 segment, practice in blockers (not practiceDay)', () => {
+  const plan = buildQualPlan({
+    dayConfigVersion: 2, cycleTime: 9, breakBuffer: 5,
+    days: [{ label: 'Day 1', date: '', blocks: [
+      { type: 'practice', start: '09:00', end: '12:00', cycleTime: 11, guaranteed: 3, maxFiller: 99, changes: [], breaks: [] },
+      { type: 'qualification', start: '13:00', end: '17:00', cycleTime: 9, changes: [], breaks: [] },
+    ]}],
+  });
+  assertEq(plan.segments.length, 1, 'one qual segment');
+  assertEq(plan.segments[0].type, 'qualification');
+  if (plan.practiceDay !== null) throw new Error('practiceDay should be null on mixed day');
+  assertContains(plan.blockers, b => b.subtype === 'practice', 'practice in blockers');
+});
+
+test('practice-only day → 0 segments, practiceDay populated', () => {
+  const plan = buildQualPlan({
+    dayConfigVersion: 2, cycleTime: 9, breakBuffer: 5,
+    days: [{ label: 'Day 0', date: '', blocks: [
+      { type: 'practice', start: '08:00', end: '17:00', cycleTime: 11, guaranteed: 3, maxFiller: 99, changes: [], breaks: [] },
+    ]}],
+  });
+  assertEq(plan.segments, [], 'no qual segments');
+  if (!plan.practiceDay)         throw new Error('practiceDay should be populated');
+  assertEq(plan.practiceDay.enabled, true);
+  assertEq(plan.practiceDay.ct, 11);
+  assertEq(plan.dayMeta[0].hasQual,     false);
+  assertEq(plan.dayMeta[0].hasPractice, true);
+});
+
+test('tier-3 between qual blocks → blocker only (no synthetic break)', () => {
+  const plan = buildQualPlan({
+    dayConfigVersion: 2, cycleTime: 9, breakBuffer: 5,
+    days: [{ label: 'Day 1', date: '', blocks: [
+      { type: 'qualification', start: '09:00', end: '12:00', cycleTime: 9, changes: [], breaks: [] },
+      { type: 'break', start: '12:00', end: '13:00', label: 'Lunch', breakKind: 'lunch' },
+      { type: 'qualification', start: '13:00', end: '17:00', cycleTime: 9, changes: [], breaks: [] },
+    ]}],
+  });
+  assertEq(plan.segments.length, 2, 'two segments');
+  assertContains(plan.blockers, b => b.subtype === 'break' && b.name === 'Lunch', 'lunch blocker');
+});
+
+test('playoffs → blockers AND playoffBlocks side-channel', () => {
+  const plan = buildQualPlan({
+    dayConfigVersion: 2, cycleTime: 9, breakBuffer: 5,
+    days: [{ label: 'Day 1', date: '', blocks: [
+      { type: 'qualification', start: '09:00', end: '14:00', cycleTime: 9, changes: [], breaks: [] },
+      { type: 'playoff', start: '14:00', end: '17:00', playoffFormat: 'double_elim', playoffAlliances: 8 },
+    ]}],
+  });
+  assertContains(plan.blockers, b => b.subtype === 'playoff', 'playoff blocker present');
+  assertEq(plan.playoffBlocks.length, 1);
+  assertEq(plan.playoffBlocks[0].format, 'double_elim');
+  assertEq(plan.playoffBlocks[0].teams, 8);
+});
+
+test('day with only ceremonies → 0 segments, hasQual=false', () => {
+  const plan = buildQualPlan({
+    dayConfigVersion: 2, cycleTime: 9, breakBuffer: 5,
+    days: [{ label: 'Day 4', date: '', blocks: [
+      { type: 'ceremony', start: '09:00', end: '10:00', label: 'Opening', ceremonyKind: 'opening' },
+      { type: 'awards',   start: '14:00', end: '15:00', label: 'Awards' },
+    ]}],
+  });
+  assertEq(plan.segments, [], 'no segments');
+  assertEq(plan.dayMeta[0].hasQual, false);
+  assertEq(plan.blockers.length, 2, 'tier-3 in blockers');
+});
+
+test('multi-day: segments ordered by dayIdx then start', () => {
+  const plan = buildQualPlan({
+    dayConfigVersion: 2, cycleTime: 9, breakBuffer: 5,
+    days: [
+      { label: 'Day 1', date: '', blocks: [
+        { type: 'qualification', start: '13:00', end: '17:00', cycleTime: 9, changes: [], breaks: [] },
+        { type: 'qualification', start: '09:00', end: '12:00', cycleTime: 9, changes: [], breaks: [] },
+      ]},
+      { label: 'Day 2', date: '', blocks: [
+        { type: 'qualification', start: '09:00', end: '17:00', cycleTime: 9, changes: [], breaks: [] },
+      ]},
+    ],
+  });
+  assertEq(plan.segments.length, 3);
+  assertEq(plan.segments[0].dayIdx, 0);  assertEq(plan.segments[0].start, 9*60);
+  assertEq(plan.segments[1].dayIdx, 0);  assertEq(plan.segments[1].start, 13*60);
+  assertEq(plan.segments[2].dayIdx, 1);
 });
 
 console.log(`\n${testsRun - testsFailed}/${testsRun} tests passed.`);
