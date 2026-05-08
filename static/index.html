@@ -2465,12 +2465,19 @@
         <div class="section-label">
           <span>Daily Schedule</span>
         </div>
-        <!-- v2-on flag preserved as a hidden input so the many
-             `document.getElementById('dayConfigUseV2').checked`
-             checks scattered through the codebase keep returning
-             true without a wider refactor. Always-checked, always-
-             hidden, never user-toggleable. -->
-        <input type="checkbox" id="dayConfigUseV2" checked style="display:none;">
+        <!-- Phase 3: V2 is the only editor mode. The legacy
+             `dayConfigUseV2` toggle has been retired — every code
+             path that checked it is unconditionally on the V2
+             branch now. The hidden V1 form markup below stays
+             in place for two narrow reasons:
+              1. The URL parser still emits V1-shape params and
+                 needs the form rows to write to before triggering
+                 the V2 render pass. Phase 4 changes the URL format
+                 and the V1 markup retires with it.
+              2. `migrateLegacyDayConfig` (defensive, only fires
+                 for legacy URL/data) writes through V1 form
+                 fields. Same lifecycle as #1.
+             Nothing user-facing renders here. -->
 
         <!-- v1 editor (RETIRED). The full markup stays in the DOM
              but the wrapper is locked to display:none — nothing
@@ -5681,11 +5688,12 @@ function applyDayConfigToUI(dc) {
   (dc.days || []).forEach(function(d, i) {
     if (d && d.date) window._frcPreservedDayDates['day' + (i + 1)] = d.date;
   });
-  // If v2 is the active editor, also render the block view from
-  // the same data so toggling between editors stays in sync.
-  // Migrate first since incoming dc may be v1 from older saves.
-  var v2cb = document.getElementById('dayConfigUseV2');
-  if (v2cb && v2cb.checked && typeof renderDayConfigV2 === 'function') {
+  // V2 is the active editor (phase 3 retired the toggle). Render the
+  // block view from the same data the V1 form will be populated with.
+  // Migrate first since incoming dc may be V1-shape from older saves
+  // — server-side normalize-on-read handles this for API loads, but
+  // legacy URL params still carry V1 shape until phase 4.
+  if (typeof renderDayConfigV2 === 'function') {
     try { renderDayConfigV2(migrateLegacyDayConfig(dc)); }
     catch(e) { console.warn('renderDayConfigV2 failed:', e); }
   }
@@ -6462,15 +6470,13 @@ function toggleTimeFormat() {
   if (typeof renderScheduleBars   === 'function') try { renderScheduleBars(); }   catch(e) {}
   if (typeof updateAgendaFit      === 'function') try { updateAgendaFit(); }      catch(e) {}
   if (typeof renderDayConfigV2    === 'function') {
-    // v2 day cards include time strings in their summary lines —
-    // refresh those by re-collecting + re-rendering when v2 is on.
-    var v2cb = document.getElementById('dayConfigUseV2');
-    if (v2cb && v2cb.checked) {
-      try {
-        var cur = collectDayConfigV2();
-        if (cur) renderDayConfigV2(cur);
-      } catch(e) {}
-    }
+    // V2 day cards include time strings in their summary lines —
+    // refresh those by re-collecting + re-rendering. (Phase 3
+    // retired the toggle; V2 is unconditionally the editor mode.)
+    try {
+      var cur = collectDayConfigV2();
+      if (cur) renderDayConfigV2(cur);
+    } catch(e) {}
   }
 }
 
@@ -8320,70 +8326,35 @@ function togglePracticeDay() {
 }
 
 function getPracticeConfig() {
-  // V2 mode: read from the v2 day data directly. The v1 form fields
-  // (#practiceStart, #practiceGuaranteed, etc.) are NOT synced when
-  // v2 is the active editor — they hold whatever they had before
-  // toggling. Reading them in v2 mode produced stale values, which
-  // is why edits to the v2 practice block weren't taking effect.
-  // We funnel through downgradeToV1 so we get the same field names
-  // (ct/filler/guaranteed) the rest of the codepath expects.
-  var v2cb = document.getElementById('dayConfigUseV2');
-  if (v2cb && v2cb.checked) {
-    var v2dc = (typeof collectDayConfigV2 === 'function') ? collectDayConfigV2() : null;
-    if (v2dc) {
-      var v1 = downgradeToV1(v2dc);
-      var pd = v1 && v1.practiceDay;
-      if (!pd || !pd.enabled || !pd.start || !pd.end) return null;
-      var startMin = timeToMin(pd.start), endMin = timeToMin(pd.end);
-      if (endMin <= startMin) return null;
-      var breaksMin = (pd.breaks || []).map(function(b) {
-        return { name: b.name || 'Break', start: timeToMin(b.start), end: timeToMin(b.end) };
-      }).filter(function(b) { return b.end > b.start; })
-        .sort(function(a, b) { return a.start - b.start; });
-      return {
-        start: pd.start, end: pd.end,
-        startMin: startMin, endMin: endMin,
-        guaranteed: pd.guaranteed != null ? pd.guaranteed : 3,
-        filler:     pd.filler     != null ? pd.filler     : 99,
-        ct:         pd.ct         != null ? pd.ct         : 11,
-        breaks: breaksMin,
-        cycleChanges: pd.cycleChanges || [],
-        earlyEnd: pd.earlyEnd || null,
-        date: pd.date || '',
-      };
-    }
-    // v2 active but no schedule data — fall through to v1 form-field
-    // path (which will return null since practiceDayEnabled is off).
-  }
-  // V1 mode: read from the v1 form fields directly.
-  var enabled = document.getElementById('practiceDayEnabled');
-  if (!enabled || !enabled.checked) return null;
-  var start = document.getElementById('practiceStart').value;
-  var end   = document.getElementById('practiceEnd').value;
-  var guaranteed = parseInt(document.getElementById('practiceGuaranteed').value) || 3;
-  var filler = parseInt(document.getElementById('practiceFiller').value);
-  if (isNaN(filler)) filler = 99;
-  var ct = parseFloat(document.getElementById('practiceCycleTime').value) || 11;
-  if (!start || !end) return null;
-  var startMin = timeToMin(start), endMin = timeToMin(end);
+  // V2 is the only editor mode (phase 3 retired the toggle). Read
+  // from the V2 day blocks via collectDayConfigV2 + downgradeToV1
+  // so we get the field names (ct/filler/guaranteed) the rest of
+  // the codepath expects.
+  //
+  // Falls back to null if no practice block is set in V2 — caller
+  // treats null as "no practice day," same as the legacy
+  // practiceDayEnabled-unchecked path used to.
+  var v2dc = (typeof collectDayConfigV2 === 'function') ? collectDayConfigV2() : null;
+  if (!v2dc) return null;
+  var v1 = downgradeToV1(v2dc);
+  var pd = v1 && v1.practiceDay;
+  if (!pd || !pd.enabled || !pd.start || !pd.end) return null;
+  var startMin = timeToMin(pd.start), endMin = timeToMin(pd.end);
   if (endMin <= startMin) return null;
-  // Convert UI breaks (HH:MM strings) to minutes for scheduling math
-  var breaks = getPracticeBreaks().map(function(b) {
-    return { name: b.name, start: timeToMin(b.start), end: timeToMin(b.end) };
+  var breaksMin = (pd.breaks || []).map(function(b) {
+    return { name: b.name || 'Break', start: timeToMin(b.start), end: timeToMin(b.end) };
   }).filter(function(b) { return b.end > b.start; })
     .sort(function(a, b) { return a.start - b.start; });
   return {
-    start: start, end: end, startMin: startMin, endMin: endMin,
-    guaranteed: guaranteed, filler: filler, ct: ct,
-    breaks: breaks,
-    cycleChanges: getPracticeCycleChanges(),
-    earlyEnd: getPracticeEarlyEnd(),
-    // Practice-day date round-trip: v2 carries it on the day card,
-    // v1 stashes it on window._frcPreservedDayDates during
-    // applyDayConfigToUI so v1 doesn't drop it on save. Either way
-    // it lands in collectDayConfig().practiceDay.date and we read
-    // it back here so renderSchedule + agenda fit show the date.
-    date: (window._frcPreservedDayDates && window._frcPreservedDayDates.practice) || '',
+    start: pd.start, end: pd.end,
+    startMin: startMin, endMin: endMin,
+    guaranteed: pd.guaranteed != null ? pd.guaranteed : 3,
+    filler:     pd.filler     != null ? pd.filler     : 99,
+    ct:         pd.ct         != null ? pd.ct         : 11,
+    breaks: breaksMin,
+    cycleChanges: pd.cycleChanges || [],
+    earlyEnd: pd.earlyEnd || null,
+    date: pd.date || '',
   };
 }
 
@@ -8534,34 +8505,6 @@ function addPracticeEarlyEnd(afterMatch) {
   inp.addEventListener('change', onCycleTimeChanged);
   inp.addEventListener('input',  onCycleTimeChanged);
   if (!afterVal) setTimeout(function() { inp.focus(); inp.select(); }, 0);
-}
-
-// Read practice day breaks / cycle changes / early end from the UI
-function getPracticeBreaks() {
-  return Array.from(document.querySelectorAll('#pdayBreaksList .pday-break-row')).map(function(r) {
-    return {
-      name:  r.querySelector('.break-name').value || 'Break',
-      start: r.querySelector('.break-start').value,
-      end:   r.querySelector('.break-end').value,
-    };
-  }).filter(function(b) { return b.start && b.end; });
-}
-function getPracticeCycleChanges() {
-  return Array.from(document.querySelectorAll('#pdayCcList .pday-cc-row')).map(function(r) {
-    var t = parseFloat(r.querySelector('.cc-time').value);
-    var afterInp = r.querySelector('.cc-after');
-    return {
-      isStart:    r.dataset.isStart === '1',
-      afterMatch: afterInp ? parseInt(afterInp.value) : null,
-      time:       t,
-    };
-  }).filter(function(c) { return c.time > 0 && (c.isStart || (!isNaN(c.afterMatch) && c.afterMatch >= 1)); });
-}
-function getPracticeEarlyEnd() {
-  var inp = document.querySelector('#pdayEarlyEndList .earlyend-after');
-  if (!inp || !inp.value) return null;
-  var v = parseInt(inp.value);
-  return (isNaN(v) || v < 1) ? null : v;
 }
 
 // ── Day/Night mode ────────────────────────────────────────────────────────────
@@ -13936,21 +13879,15 @@ function toggleDayConfigEditor(useV2) {
 
 document.addEventListener('DOMContentLoaded', function() {
   try {
-    // V1 was retired; V2 (block view) is now the only editor.
-    // Force-init regardless of the legacy `frcDayConfigUseV2`
-    // localStorage flag: it might still be '0' from old sessions
-    // where the user had explicitly opted out of v2. Call
-    // toggleDayConfigEditor(true) so the v2 wrapper is populated
-    // from migrated day_config and the v1 shadow markup stays
-    // hidden. Wrapped in setTimeout so other DOMContentLoaded
-    // handlers (default fields, etc.) run first.
-    var cb = document.getElementById('dayConfigUseV2');
-    if (cb) cb.checked = true;
+    // V1 was retired; V2 (block view) is the only editor (phase 3).
+    // Show the V2 wrapper, hide the legacy V1 wrapper. Run on a
+    // setTimeout so other DOMContentLoaded handlers (default fields,
+    // etc.) finish first.
     setTimeout(function() {
       try { toggleDayConfigEditor(true); } catch(_) {}
     }, 100);
-    // Persist '1' so downstream session reads see the same answer
-    // even if some old code path consults the localStorage flag.
+    // Persist the v2-on flag — some old code paths may consult
+    // localStorage.frcDayConfigUseV2; keep them happy.
     try { localStorage.setItem('frcDayConfigUseV2', '1'); } catch(_) {}
   } catch(e) {}
 });
@@ -13980,24 +13917,29 @@ function collectDayConfig() {
     window._frcPreservedDayDates = holder;
   }
 
-  var v2cb = document.getElementById('dayConfigUseV2');
-  if (v2cb && v2cb.checked) {
-    var v2dc = collectDayConfigV2();
-    if (v2dc) {
-      var v1 = downgradeToV1(v2dc);
-      // Splice in the auto-flags + autoAssign that the v1 path adds.
-      // Without these, downstream code that expects them would
-      // misbehave (autoPopulate, autoMaxCycles, autoAssign).
-      var elAP = document.getElementById('autoPopulate');
-      var elAM = document.getElementById('autoMaxCycles');
-      var elAS = document.getElementById('autoAssign');
-      v1.autoPopulate  = elAP ? elAP.checked : false;
-      v1.autoMaxCycles = elAM ? elAM.checked : false;
-      v1.autoAssign    = elAS ? elAS.checked : false;
-      _stashDatesFromDc(v1);
-      return v1;
-    }
+  // V2 is the only editor mode (phase 3 retired the toggle). Read
+  // V2 markup, downgrade to V1 shape (which the rest of the codepath
+  // and the URL builder still consume — phase 4 changes URL emit to
+  // V2-native and downgradeToV1 retires).
+  var v2dc = collectDayConfigV2();
+  if (v2dc) {
+    var v1 = downgradeToV1(v2dc);
+    // Splice in the auto-flags + autoAssign that the v1 path adds.
+    // Without these, downstream code that expects them would
+    // misbehave (autoPopulate, autoMaxCycles, autoAssign).
+    var elAP = document.getElementById('autoPopulate');
+    var elAM = document.getElementById('autoMaxCycles');
+    var elAS = document.getElementById('autoAssign');
+    v1.autoPopulate  = elAP ? elAP.checked : false;
+    v1.autoMaxCycles = elAM ? elAM.checked : false;
+    v1.autoAssign    = elAS ? elAS.checked : false;
+    _stashDatesFromDc(v1);
+    return v1;
   }
+  // Defensive fallback: V2 markup not yet built (very early in page
+  // load) — return a minimal V1-shape object from the visible root
+  // fields. Form-field reads below were the V1 editor path; they
+  // return safe defaults when the (now-hidden) V1 form is empty.
   var defaultCt = parseFloat(document.getElementById('cycleTime').value) || 8;
   var elAP = document.getElementById('autoPopulate');
   var elAM = document.getElementById('autoMaxCycles');

@@ -108,39 +108,62 @@ and explicit "type 'apply'" confirmation.
 
 ---
 
-## Phase 3 — editor V2-only
+## Phase 3 — editor V2-only *(stage 1 complete)*
 
 **Goal:** `static/index.html` no longer renders or reads V1 markup.
 The V2 editor (`#v2DaysContainer`) is the only editor.
 
-**Work:**
-1. Delete the V1 form rendering: `buildDaysUI`, `addDayRow`, the
-   `.day-row` HTML template, the practice-day form fields
-   (`#practiceStart` etc.), `#numDays`. Per
-   [V1_RETIREMENT.md](V1_RETIREMENT.md) R-11 and the markup list.
-2. Delete the V1 form READ helpers: `getCycleTimeChanges`,
-   `getDayStartCycleTime`, `getDayForMatch`, `addDayCycleChange`.
-   Per [V1_RETIREMENT.md](V1_RETIREMENT.md) R-05/R-06/R-07/R-10.
-3. Strip `applyDayConfigToUI` of its V1 branches; rename to reflect
-   V2-only role (e.g. `applyDayConfig` — no -ToUI suffix).
-4. Delete the `dayConfigUseV2` toggle. V2 is the only mode.
-5. Delete the V1 fallback paths in `getPracticeConfig` etc. — already
-   V2-aware, just remove the `if (!v2cb.checked)` branches.
-6. Remove the `migrateLegacyDayConfig` function (W-03). The server
-   migrator is the only place V1→V2 happens.
-7. The `downgradeToV1` function (W-04) survives this phase if the
-   URL still uses V1 params; gets killed in phase 4.
-8. Walk-down: `git grep '\.day-row\|day-cc-row\|practiceStart\|practiceEnd\|practiceGuaranteed\|practiceFiller\|practiceCycleTime\|getCycleTimeChanges\|migrateLegacyDayConfig'`
-   should return only doc-comment matches.
+The work decomposes into two stages because some V1 markup is still
+needed by the V1 URL parser (which writes V1-shape form fields, then
+triggers V2 render via the migrator) until phase 4 changes the URL
+emit format. Stage 1 handles the V1/V2 toggle and unreachable
+fallbacks; stage 2 (after phase 4) handles the V1 markup itself.
 
-**Exit criteria:**
-- Editor builds, runs, generates schedules identical to phase 2 output.
-- The grep above returns only doc references.
-- The URL still uses V1 params; tests confirm shared links from before
-  the phase still load correctly.
+### Stage 1 *(✓ done)*
 
-**Risk:** low-medium. Mostly deletion. The risk is missing a V1 reference
-that fails silently (e.g. an event listener wired in HTML).
+1. ✓ Removed the V1/V2 toggle. The `dayConfigUseV2` checkbox is gone
+   from the DOM. Every `if (v2cb && v2cb.checked) { ... }` site was
+   inlined to the V2 branch.
+2. ✓ `getPracticeConfig()` simplified — V1 form-field fallback
+   removed. Was unreachable in practice since V2 was forced on, but
+   the dead branch obscured the V2 read path.
+3. ✓ `collectDayConfig()` — V2 path is unconditional; V1 fallback
+   kept narrow as a defensive last-resort for very-early page loads.
+4. ✓ Dead V1 helpers deleted: `getPracticeBreaks`,
+   `getPracticeCycleChanges`, `getPracticeEarlyEnd`. Each had one
+   declaration, zero callers post-cleanup.
+5. Net deletion: ~60 lines of dead V1 code.
+
+### Stage 2 *(blocked on phase 4)*
+
+What remains is dead-code-but-still-rendered:
+
+1. The V1 form markup (`.day-row`, practice-day form fields,
+   `#numDays`) — hidden via `display:none` since V2 went live, but
+   still in the DOM. The V1 URL parser (lifecycle: phase 4) writes
+   to these as a stepping stone to V2 rendering. Once phase 4 swaps
+   to V2-native URL params, the markup truly has no users.
+2. The V1 form rendering functions (`buildDaysUI`, `addDayRow`,
+   `applyDayConfigToUI` V1 branches). Same lifecycle.
+3. The V1 read helpers (`getCycleTimeChanges`, `getDayStartCycleTime`,
+   `getDayForMatch`, `addDayCycleChange`). Same lifecycle.
+4. `migrateLegacyDayConfig` (the JS one) — still called defensively
+   from `applyDayConfigToUI` for legacy URL data. Server-side
+   `app.day_config_v2.migrate_v1_to_v2` already handles API-loaded
+   data; the JS migrator stays until V1 URLs retire.
+5. `downgradeToV1` — still called by `buildShareUrl` and
+   `collectDayConfig` to produce V1-shape output for the wire
+   format. Phase 4 ditches V1 URL params; this function retires
+   alongside.
+
+**Exit criteria for stage 2:** the grep walkthrough returns only
+doc-comment matches for `\.day-row`, `day-cc-row`, `practiceStart`,
+`migrateLegacyDayConfig`, `downgradeToV1`, etc.
+
+**Risk:** stage 1 was low (deletion of unreachable code only).
+Stage 2 lands during/after phase 4 with the same ratchet:
+phase 4 makes V1 URL parsing the only V1-using path, then deletes
+that, then stage 2's deletions become safe.
 
 ---
 
@@ -289,8 +312,8 @@ Revisit after phase 3 ships.
 | Phase | Status      | Owner | Notes                                       |
 |-------|-------------|-------|---------------------------------------------|
 | 0     | ✓ Done      | claude| Specs ratified, doc reviews complete        |
-| 1     | ✓ Done (pending review) | claude | Backend V2 in place — see phase 1 notes  |
-| 2     | ⏳ Ready to run | you | Run `./scripts/openshift_migrate.sh apply`  |
-| 3     | Not started |       | Frontend cleanup; mostly deletion           |
+| 1     | ✓ Done      | claude| Backend V2 in place; deployed                |
+| 2     | ✓ Done      | you   | DB migration applied                        |
+| 3     | ⏳ Stage 1 done | claude | Toggle + dead code gone; stage 2 awaits phase 4 |
 | 4     | Not started |       | URL format change with back-compat          |
 | 5     | Not started |       | Cleanup; 6 months after phase 4            |
