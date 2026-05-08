@@ -282,5 +282,26 @@ async def apple_exchange_code(code: str, id_token_raw: str | None = None) -> dic
     key      = next((k for k in jwks["keys"] if k["kid"] == header["kid"]), None)
     if not key:
         raise ValueError("Apple public key not found")
-    claims = jwt.decode(id_token, key, algorithms=["RS256"], audience=APPLE_CLIENT_ID)
+    # Apple's id_token includes an `at_hash` claim — a hash of the
+    # access_token, designed to let a relying party verify that the
+    # access_token and id_token belong to the same OAuth response.
+    # python-jose validates this automatically when the access_token
+    # is passed in. Without it, jose raises:
+    #   "No access_token provided to compare against at_hash claim"
+    # Apple sends the access_token in the same response body that
+    # carried the id_token, so we always have it available here. If
+    # the token endpoint omitted access_token (shouldn't happen for
+    # an authorization_code grant, but be defensive), we fall back
+    # to disabling the at_hash check rather than failing the login.
+    access_token = tokens.get("access_token")
+    decode_kwargs = {
+        "key":        key,
+        "algorithms": ["RS256"],
+        "audience":   APPLE_CLIENT_ID,
+    }
+    if access_token:
+        decode_kwargs["access_token"] = access_token
+    else:
+        decode_kwargs["options"] = {"verify_at_hash": False}
+    claims = jwt.decode(id_token, **decode_kwargs)
     return {"sub": claims.get("sub"), "email": claims.get("email"), "name": None}
