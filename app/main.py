@@ -1118,7 +1118,7 @@ async def _resolve_actor_display_name(db: AsyncSession, user: dict | None) -> tu
     """
     if not user:
         return (None, None)
-    uid = user.get("id")
+    uid = user.get("uid")
     if not uid:
         return (None, user.get("email"))
     user_row = await db.get(User, uid)
@@ -1298,7 +1298,7 @@ async def patch_assigned_schedule(
     #    by their own lock — they explicitly chose to lock, so they
     #    retain edit rights.
     if assigned.locked_at is not None:
-        if not user or assigned.locked_by_user_id != user.get("id"):
+        if not user or assigned.locked_by_user_id != user.get("uid"):
             raise HTTPException(
                 status_code=423,
                 detail=f"Schedule is locked by {assigned.locked_by_name or 'another user'}.",
@@ -1372,7 +1372,7 @@ async def lock_assigned_schedule(
     if assigned.locked_at is not None:
         # Already locked. If by us, fine — return current state. If by
         # someone else, refuse so users can't quietly steal locks.
-        if assigned.locked_by_user_id != user.get("id"):
+        if assigned.locked_by_user_id != user.get("uid"):
             raise HTTPException(
                 status_code=423,
                 detail=f"Schedule is already locked by {assigned.locked_by_name or 'another user'}.",
@@ -1382,15 +1382,15 @@ async def lock_assigned_schedule(
     # Pull display name from the User row so the snapshot reflects
     # what's currently in the DB rather than what's in the JWT
     # (JWT email could be stale if the user changed providers).
-    locker = await db.get(User, user.get("id"))
+    locker = await db.get(User, user.get("uid"))
     display_name = (locker.name if locker and locker.name else None) \
                    or (locker.email if locker else None) \
                    or user.get("email") \
-                   or f"user#{user.get('id')}"
+                   or f"user#{user.get('uid')}"
 
     from datetime import datetime, timezone
     assigned.locked_at = datetime.now(timezone.utc)
-    assigned.locked_by_user_id = user.get("id")
+    assigned.locked_by_user_id = user.get("uid")
     assigned.locked_by_name = display_name[:256]
     # Audit row — preserves history even after this lock is later
     # cleared (locked_at reset to NULL). Without this, "when was
@@ -1442,7 +1442,7 @@ async def unlock_assigned_schedule(
         # Idempotent — unlock on an unlocked schedule is fine.
         return await _build_assigned_schedule_response(assigned, db)
 
-    if assigned.locked_by_user_id != user.get("id"):
+    if assigned.locked_by_user_id != user.get("uid"):
         raise HTTPException(
             status_code=423,
             detail=f"Only {assigned.locked_by_name or 'the original locker'} can unlock this schedule.",
@@ -1552,7 +1552,7 @@ async def restore_schedule_from_history(
     if assigned.is_official:
         raise HTTPException(423, "Schedule is marked official — unmark first.")
     if assigned.locked_at is not None:
-        if not user or assigned.locked_by_user_id != user.get("id"):
+        if not user or assigned.locked_by_user_id != user.get("uid"):
             raise HTTPException(423,
                 f"Schedule is locked by {assigned.locked_by_name or 'another user'}.")
 
@@ -1667,17 +1667,17 @@ async def mark_schedule_official(
         )
 
     # Pull display name from User row for snapshot consistency.
-    actor = await db.get(User, user.get("id"))
+    actor = await db.get(User, user.get("uid"))
     display_name = (actor.name if actor and actor.name else None) \
                    or (actor.email if actor else None) \
                    or user.get("email") \
-                   or f"user#{user.get('id')}"
+                   or f"user#{user.get('uid')}"
 
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     assigned.is_official        = True
     assigned.official_at        = now
-    assigned.official_by_user_id = user.get("id")
+    assigned.official_by_user_id = user.get("uid")
     assigned.official_by_name   = display_name[:256]
 
     # Auto-lock if not already locked. Re-uses the same lock columns
@@ -1687,7 +1687,7 @@ async def mark_schedule_official(
     # the locker but is_official=True — the editor must unmark first.
     if assigned.locked_at is None:
         assigned.locked_at         = now
-        assigned.locked_by_user_id = user.get("id")
+        assigned.locked_by_user_id = user.get("uid")
         assigned.locked_by_name   = display_name[:256]
         await _record_lock_event(db, schedule_id, action="lock", user=user)
 
@@ -1720,7 +1720,7 @@ async def unmark_schedule_official(
         # Idempotent.
         return await _build_assigned_schedule_response(assigned, db)
 
-    if assigned.official_by_user_id != user.get("id"):
+    if assigned.official_by_user_id != user.get("uid"):
         raise HTTPException(
             status_code=423,
             detail=f"Only {assigned.official_by_name or 'the original marker'} can unmark this schedule.",
@@ -1759,22 +1759,22 @@ async def freeze_event(
         raise HTTPException(404, "Event not found")
 
     if event.locked_at is not None:
-        if event.locked_by_user_id != user.get("id"):
+        if event.locked_by_user_id != user.get("uid"):
             raise HTTPException(
                 status_code=423,
                 detail=f"Event is already frozen by {event.locked_by_name or 'another user'}.",
             )
         return _event_freeze_payload(event)
 
-    actor = await db.get(User, user.get("id"))
+    actor = await db.get(User, user.get("uid"))
     display_name = (actor.name if actor and actor.name else None) \
                    or (actor.email if actor else None) \
                    or user.get("email") \
-                   or f"user#{user.get('id')}"
+                   or f"user#{user.get('uid')}"
 
     from datetime import datetime, timezone
     event.locked_at = datetime.now(timezone.utc)
-    event.locked_by_user_id = user.get("id")
+    event.locked_by_user_id = user.get("uid")
     event.locked_by_name = display_name[:256]
     await db.commit()
     await db.refresh(event)
@@ -1796,7 +1796,7 @@ async def unfreeze_event(
     if event.locked_at is None:
         return _event_freeze_payload(event)
 
-    if event.locked_by_user_id != user.get("id"):
+    if event.locked_by_user_id != user.get("uid"):
         raise HTTPException(
             status_code=423,
             detail=f"Only {event.locked_by_name or 'the original freezer'} can unfreeze this event.",
@@ -1858,7 +1858,7 @@ async def delete_assigned_schedule(
     # Locker bypass: their own lock shouldn't block their own delete
     # (consistent with the PATCH locker bypass).
     if assigned.locked_at is not None:
-        if not user or assigned.locked_by_user_id != user.get("id"):
+        if not user or assigned.locked_by_user_id != user.get("uid"):
             raise HTTPException(
                 status_code=423,
                 detail=f"Schedule is locked by {assigned.locked_by_name or 'another user'}.",
