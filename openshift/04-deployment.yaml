@@ -229,6 +229,18 @@ spec:
             # to the volumeMount above plus the ConfigMap key name.
             - name: APPLE_DOMAIN_ASSOCIATION_FILE
               value: "/etc/apple-domain-association/apple-developer-domain-association"
+            # Comma-separated email allow-list for admin role.
+            # Users whose email matches get is_admin=true on next
+            # login. Interim: replaced by RBAC role grants per
+            # docs/RBAC_MODEL.md when that ships. Removing an email
+            # from this list does NOT auto-revoke admin status —
+            # that requires direct DB UPDATE.
+            - name: ADMIN_EMAILS
+              valueFrom:
+                secretKeyRef:
+                  name: frc-auth-secret
+                  key: ADMIN_EMAILS
+                  optional: true
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

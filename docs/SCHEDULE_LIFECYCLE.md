@@ -811,6 +811,185 @@ If any of these become priorities, they get their own spec.
 
 ---
 
+## Part 13 — Layered authorization rules
+
+This section formalizes the actor-aware enforcement layered on
+top of the lifecycle states. It supersedes ad-hoc per-endpoint
+checks with a single decision rule.
+
+### Conceptual model
+
+Three sources of restriction stack at any mutation:
+
+1. **Authentication** (Phase A — already shipped). The user must
+   carry a valid JWT.
+2. **Lifecycle state** (per Part 1–4). Once-official schedules
+   are structurally frozen forever; locked schedules are owned
+   by the locker.
+3. **Event freeze** (per Part 1). An event in frozen state is
+   under administrative hold.
+
+A request to mutate is permitted iff **every** layer permits.
+The lifecycle (state) layer answers "is this kind of change
+ever allowed right now"; the event freeze answers "is this user
+allowed to make changes to this event right now."
+
+### Freezer-and-admin override semantics
+
+Event freeze is **protective, not terminal**. The freezer says
+"nobody else mess with this," but retains the ability to fix
+things. Specifically:
+
+- The freezer can mutate any schedule under their frozen event.
+  They can promote-active, mark-official, edit, delete drafts,
+  and unfreeze. Their ownership of the lock confers trust that
+  they're the right person to make changes during the freeze.
+- An admin can do the same — cross-event override authority.
+  Useful for recovery (the freezer is unavailable, support
+  needs to act) and for system-wide concerns. The admin's
+  actions are auditable like any other.
+- Anyone else gets 423 with a message naming the freezer.
+
+This mirrors the working-lock semantics from Part 3: the locker
+keeps full access to the locked schedule; others are blocked.
+Freeze is the same idea at the event level.
+
+### The single guard
+
+A function that endpoints call before any mutation:
+
+```python
+def authorize_event_mutation(
+    user: dict,
+    *,
+    event: Event,
+    schedule: AssignedSchedule | None = None,
+    action: str,
+) -> None:
+    """Raise HTTPException if `user` is not permitted to perform
+    `action` on `event` (and optionally `schedule`).
+
+    Rules, in priority order:
+      1. If admin — permitted unconditionally for all actions
+         except those explicitly admin-locked-out (none currently).
+      2. If event is frozen — only the freezer may mutate.
+         Anyone else: 423 "Event is frozen by {locked_by_name}".
+      3. If `schedule` is given and is currently working-locked —
+         only the locker may mutate. Anyone else: 423.
+      4. If `schedule` has ever been official — structural
+         mutations forbidden. Suggest fork.
+      5. Otherwise: permit.
+
+    The order matters for error messages: most specific layer
+    wins. A frozen event with a locked schedule by another user
+    surfaces the freeze first; if the freeze were lifted, the
+    next attempt would surface the lock.
+    """
+```
+
+The guard is called from every write endpoint after authentication
+(Phase A's `Depends(require_auth)`) but before any database
+mutations. Endpoints stop reproducing the layering logic.
+
+### Capability matrix (state-aware)
+
+Each row is a capability; each column is the actor's relationship
+to the event. ✓ = permitted, • = subject to additional
+schedule-level checks (locked, official), ✗ = forbidden.
+
+| Capability                                | Anonymous | Auth, no role | Schedule locker | Event freezer | Admin |
+|-------------------------------------------|:---------:|:-------------:|:---------------:|:-------------:|:-----:|
+| View `/view`                              | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Edit schedule structure (unfrozen event)  | ✗ | • | • | • | • |
+| Edit schedule structure (frozen event)    | ✗ | ✗ | ✗ | • | • |
+| Take working lock (unfrozen)              | ✗ | ✓ | ✓ | ✓ | ✓ |
+| Take working lock (frozen)                | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Force-unlock another user's lock          | ✗ | ✗ | ✗ | ✗ | ✓ |
+| Promote-to-active (unfrozen)              | ✗ | ✓ | ✓ | ✓ | ✓ |
+| Promote-to-active (frozen)                | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Mark schedule official                    | ✗ | • | • | • | • |
+| Unmark official                           | ✗ | ✗ | ✗ | ✗ | ✓ |
+| Edit event metadata (unfrozen)            | ✗ | ✓ | ✓ | ✓ | ✓ |
+| Edit event metadata (frozen)              | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Freeze event                              | ✗ | ✓ | ✓ | n/a | ✓ |
+| Unfreeze event                            | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Delete event (unfrozen)                   | ✗ | ✓ | ✓ | ✓ | ✓ |
+| Delete event (frozen)                     | ✗ | ✗ | ✗ | ✓ | ✓ |
+
+The "Auth, no role" column reflects current pre-RBAC reality —
+any authenticated user has these privileges. RBAC narrows that
+column further, but the freezer / admin overrides on this
+matrix stay the same.
+
+### Active-schedule promotion endpoint
+
+The active-schedule decision deserves its own endpoint because
+it's structurally different from a per-schedule field PATCH:
+
+- It's a *cross-schedule* operation (promotes one, demotes all
+  others in the event)
+- The authorization model is different — promotion in a frozen
+  event by a non-freezer must be blocked even if both involved
+  schedules are unlocked
+- The audit story is cleaner with a dedicated event-level row
+
+Proposed shape:
+
+```
+POST /api/events/{event_id}/active-schedule
+Body: {schedule_id: int}
+
+Returns: {
+  event_id, active_schedule_id,
+  previous_active_schedule_id,
+  promoted_at, promoted_by_user_id, promoted_by_name
+}
+```
+
+Behavior:
+1. Calls `authorize_event_mutation(user, event=event, action="promote-active")`
+2. Sets `is_active=true` on the named schedule, `is_active=false`
+   on all others in the event, in a single transaction
+3. Writes an `event_audit_events` row with action='schedule-promote-active'
+   and details `{new_active_id, previous_active_id}`
+
+The PATCH endpoint can keep working for backward compatibility,
+but it should reject `is_active` field changes — those route
+through this dedicated endpoint exclusively.
+
+### What's enforced today vs. what's deferred
+
+The freezer-and-admin override is **shippable now** with the
+existing `events.locked_at` model and the interim `is_admin`
+flag from Phase E. This part of Part 13 ships in the same change
+that adds the `is_admin` column and `ADMIN_EMAILS` env-var
+allow-list.
+
+The single-guard refactor and the active-schedule promotion
+endpoint are **deferred**. The current code calls the freeze
+helper from each write endpoint individually; it's correct but
+duplicative. Centralizing into `authorize_event_mutation` is
+mechanical refactoring that doesn't change behavior but reduces
+the risk of new endpoints forgetting the check. That work can
+ship after the live event without disrupting anything.
+
+### Migration impact
+
+This part doesn't require schema changes beyond the `is_admin`
+column already specified in Phase E. The behavior changes are:
+
+- The freezer can now mutate their own frozen event (previously
+  blocked along with everyone else)
+- Admins can now mutate any frozen event (previously blocked)
+- Admins can unfreeze events they didn't freeze (previously
+  blocked)
+
+Those are all *expansions* of who can act, never restrictions.
+No previously-permitted action becomes forbidden as a result of
+this part landing.
+
+---
+
 ## Decision points
 
 Before implementation:

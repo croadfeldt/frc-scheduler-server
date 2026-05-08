@@ -296,6 +296,19 @@ class User(Base):
     provider:   Mapped[str]      = mapped_column(String(32))
     email:      Mapped[str|None] = mapped_column(String(256), nullable=True)
     name:       Mapped[str|None] = mapped_column(String(256), nullable=True)
+    # Interim admin flag — replaced by RBAC role grants when that
+    # workstream lands (see docs/RBAC_MODEL.md). For now: a single
+    # boolean granting cross-event override authority. Set via the
+    # ADMIN_EMAILS env-var allow-list at login time, or directly
+    # via DB. Capabilities gated on this flag:
+    #   - Override event freeze (mutate frozen events the user
+    #     didn't freeze themselves)
+    #   - Override schedule lock (currently NOT — locker-only
+    #     remains for now; admin override can be added later if
+    #     operationally needed)
+    #   - Future: unmark-official, force-unlock, etc. (per
+    #     SCHEDULE_LIFECYCLE.md Phase E)
+    is_admin:   Mapped[bool]     = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -489,6 +502,14 @@ async def init_db(retries: int = 10, delay: float = 2.0) -> None:
                 ))
                 await conn.execute(text(
                     "ALTER TABLE abstract_schedules ADD COLUMN IF NOT EXISTS weights JSONB"
+                ))
+                # Interim admin flag — replaced by RBAC role grants
+                # (docs/RBAC_MODEL.md) when that workstream lands.
+                # Default false for all existing users; promotion
+                # happens via ADMIN_EMAILS env-var allow-list at
+                # login or by direct DB UPDATE.
+                await conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"
                 ))
             return
         except Exception as e:

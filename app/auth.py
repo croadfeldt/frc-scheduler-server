@@ -51,11 +51,38 @@ APPLE_PRIVATE_KEY = os.getenv("APPLE_PRIVATE_KEY", "")
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").strip().rstrip("/")
 
+# Interim admin allow-list: comma-separated email addresses that are
+# automatically promoted to is_admin=true at login time. Replaced
+# by RBAC role grants when docs/RBAC_MODEL.md ships. Whitespace and
+# case are normalized; an empty value disables the allow-list (no
+# auto-promotion happens, and only manually-set is_admin survives).
+#
+# Removing an email from this list does NOT revoke admin status —
+# that requires direct DB intervention. This is intentional:
+# auto-revoke would risk locking out the only admin during a
+# config typo or a deploy that briefly drops the env var.
+_admin_emails_raw = os.getenv("ADMIN_EMAILS", "")
+ADMIN_EMAILS = frozenset(
+    e.strip().lower()
+    for e in _admin_emails_raw.split(",")
+    if e.strip()
+)
+if ADMIN_EMAILS:
+    log.info("Admin allow-list configured for %d email(s)", len(ADMIN_EMAILS))
 
-def create_jwt(user_id: int, sub: str, provider: str, email: str | None) -> str:
+
+def create_jwt(user_id: int, sub: str, provider: str, email: str | None,
+               is_admin: bool = False) -> str:
     payload = {
         "sub": sub, "uid": user_id, "provider": provider,
         "email": email or "",
+        # Embed is_admin in the JWT so freeze/lock guards can check
+        # without a DB round-trip per request. Trade-off: when admin
+        # status changes (DB update or ADMIN_EMAILS allow-list), the
+        # change takes effect on the user's NEXT login (max 30 days
+        # given JWT_EXPIRE_SECS). Acceptable for an interim flag;
+        # RBAC will revisit when it lands.
+        "is_admin": bool(is_admin),
         "iat": int(time.time()), "exp": int(time.time()) + JWT_EXPIRE_SECS,
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -95,6 +122,15 @@ async def upsert_user(sub: str, provider: str, email: str | None,
     else:
         user = User(sub=sub, provider=provider, email=email, name=name)
         db.add(user)
+    # Apply the ADMIN_EMAILS allow-list. Idempotent — flips the
+    # flag on if the user's email matches; never flips it off, so
+    # an admin promoted via DB stays admin even if their email is
+    # not in the env-var list. To revoke admin status, set
+    # is_admin=false directly in the DB.
+    if email and ADMIN_EMAILS and email.strip().lower() in ADMIN_EMAILS:
+        if not user.is_admin:
+            user.is_admin = True
+            log.info("Promoted user %s to admin via ADMIN_EMAILS allow-list", email)
     await db.commit()
     await db.refresh(user)
     return user

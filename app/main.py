@@ -1181,9 +1181,42 @@ async def _record_lock_event(
     return row
 
 
-def _is_event_frozen(event: Event | None) -> bool:
-    """Convenience for guard checks. Returns True when the event
-    carries a non-NULL locked_at — signaling "event frozen" mode.
+def _is_admin(user: dict | None) -> bool:
+    """Read the is_admin flag from a JWT-derived user dict.
+
+    Default-False on any malformed input. Callers should pass the
+    user object straight from `Depends(require_auth)` or
+    `Depends(get_current_user)`.
+    """
+    return bool(user and user.get("is_admin"))
+
+
+def _user_can_bypass_event_freeze(event: Event | None, user: dict | None) -> bool:
+    """Return True if `user` is permitted to mutate a frozen event.
+
+    Two paths bypass the freeze:
+      1. The original freezer (event.locked_by_user_id matches the
+         JWT's uid). Symmetric to working-lock semantics — the user
+         who took the lock retains full access while it's held.
+      2. An admin (JWT's is_admin claim is True). Cross-event
+         override authority for support and recovery cases.
+
+    When the event is not frozen at all, this returns True (there's
+    nothing to bypass). Callers should typically gate this behind a
+    `_is_event_frozen(event)` check first, but it's safe to call
+    unconditionally.
+    """
+    if not event or event.locked_at is None:
+        return True
+    if not user:
+        return False
+    if _is_admin(user):
+        return True
+    return event.locked_by_user_id == user.get("uid")
+
+
+def _is_event_frozen(event: Event | None, user: dict | None = None) -> bool:
+    """Returns True when the event freeze blocks `user`'s mutations.
 
     Use this for endpoints that operate on the event itself (event
     metadata edits, mark-official / unmark-official, schedule
@@ -1191,37 +1224,65 @@ def _is_event_frozen(event: Event | None) -> bool:
     Those operations affect the canonical state of the event and
     must respect the freeze.
 
+    Freeze semantics:
+      - Event is not frozen → returns False (no block)
+      - Event is frozen but user is the freezer → returns False
+      - Event is frozen but user is admin → returns False
+      - Event is frozen and user is anyone else → returns True (blocked)
+
+    The `user` arg is optional for backward compatibility; calling
+    without `user` means "is the event in frozen state at all" and
+    is correct for code paths that have already authorized the
+    actor separately. New call sites should pass `user`.
+
     For per-schedule mutations (PATCH / DELETE / lock / unlock /
     restore), use _schedule_protected_by_event_freeze instead —
     that helper applies snapshot-in-time semantics: schedules
     created AFTER the freeze are sandbox copies, exempt.
     """
-    return bool(event and event.locked_at is not None)
+    if not event or event.locked_at is None:
+        return False
+    if user is None:
+        # Legacy call — no user available. Report raw frozen state.
+        return True
+    return not _user_can_bypass_event_freeze(event, user)
 
 
 def _schedule_protected_by_event_freeze(
-    event: Event | None, assigned: AssignedSchedule
+    event: Event | None, assigned: AssignedSchedule, user: dict | None = None,
 ) -> bool:
     """Returns True if the schedule should be blocked by the event freeze.
 
     Snapshot-in-time semantics: a schedule is protected when (a) the
     event is frozen AND (b) the schedule existed at freeze time
-    (created_at < locked_at). Schedules created after the freeze
-    are sandbox copies — created via /duplicate, which intentionally
-    bypasses the freeze guard so users can iterate without affecting
-    the canonical state.
+    (created_at < locked_at) AND (c) the user is neither the freezer
+    nor an admin. Schedules created after the freeze are sandbox
+    copies — created via /duplicate, which intentionally bypasses
+    the freeze guard so users can iterate without affecting the
+    canonical state.
 
     Why this rule: a "copy to experiment" workflow doesn't make
     sense if the copy is itself frozen. Pre-freeze schedules
     represent the canonical state at the moment the user said
     "this is set, don't touch it." Post-freeze copies are
     derivative and explicitly outside that scope.
+
+    The `user` arg is optional for backward compatibility — calling
+    without `user` means "is this schedule under a frozen
+    canonical-state event" with no actor-aware override. New call
+    sites should pass `user` so the freezer (and admins) can
+    continue to mutate their own frozen events.
     """
     if not event or event.locked_at is None:
         return False
     # Both columns are timezone-aware (DateTime(timezone=True)) so
     # comparison is well-defined.
-    return assigned.created_at < event.locked_at
+    if assigned.created_at >= event.locked_at:
+        # Sandbox copy — exempt from freeze regardless of user.
+        return False
+    if user is not None and _user_can_bypass_event_freeze(event, user):
+        return False
+    return True
 
 
 @app.get("/api/assigned-schedules/{schedule_id}")
@@ -1272,7 +1333,7 @@ async def patch_assigned_schedule(
     #    remain editable. Must be checked first because freeze
     #    overrides everything, including locker bypass.
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _schedule_protected_by_event_freeze(event, assigned):
+    if _schedule_protected_by_event_freeze(event, assigned, user):
         raise HTTPException(
             status_code=423,
             detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
@@ -1363,7 +1424,7 @@ async def lock_assigned_schedule(
     # protect their experimental work-in-progress within the
     # frozen event.
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _schedule_protected_by_event_freeze(event, assigned):
+    if _schedule_protected_by_event_freeze(event, assigned, user):
         raise HTTPException(
             status_code=423,
             detail=f"Event is frozen — schedule lock not needed (and not added).",
@@ -1424,7 +1485,7 @@ async def unlock_assigned_schedule(
         raise HTTPException(404, "Assigned schedule not found")
 
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _schedule_protected_by_event_freeze(event, assigned):
+    if _schedule_protected_by_event_freeze(event, assigned, user):
         raise HTTPException(
             status_code=423,
             detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
@@ -1547,7 +1608,7 @@ async def restore_schedule_from_history(
         raise HTTPException(404, "Assigned schedule not found")
 
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _schedule_protected_by_event_freeze(event, assigned):
+    if _schedule_protected_by_event_freeze(event, assigned, user):
         raise HTTPException(423, f"Event is frozen by {event.locked_by_name or 'another user'}.")
     if assigned.is_official:
         raise HTTPException(423, "Schedule is marked official — unmark first.")
@@ -1643,7 +1704,7 @@ async def mark_schedule_official(
         raise HTTPException(404, "Assigned schedule not found")
 
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _is_event_frozen(event):
+    if _is_event_frozen(event, user):
         raise HTTPException(423, f"Event is frozen by {event.locked_by_name or 'another user'}.")
 
     if assigned.is_official:
@@ -1713,7 +1774,7 @@ async def unmark_schedule_official(
         raise HTTPException(404, "Assigned schedule not found")
 
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _is_event_frozen(event):
+    if _is_event_frozen(event, user):
         raise HTTPException(423, f"Event is frozen by {event.locked_by_name or 'another user'}.")
 
     if not assigned.is_official:
@@ -1796,10 +1857,12 @@ async def unfreeze_event(
     if event.locked_at is None:
         return _event_freeze_payload(event)
 
-    if event.locked_by_user_id != user.get("uid"):
+    # Original freezer can always unfreeze. Admins can override —
+    # cross-event recovery authority. Anyone else: 423.
+    if event.locked_by_user_id != user.get("uid") and not _is_admin(user):
         raise HTTPException(
             status_code=423,
-            detail=f"Only {event.locked_by_name or 'the original freezer'} can unfreeze this event.",
+            detail=f"Only {event.locked_by_name or 'the original freezer'} or an admin can unfreeze this event.",
         )
 
     event.locked_at = None
@@ -1841,7 +1904,7 @@ async def delete_assigned_schedule(
     # Sandbox copies (post-freeze) can be deleted freely — they
     # don't represent canonical state.
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
-    if _schedule_protected_by_event_freeze(event, assigned):
+    if _schedule_protected_by_event_freeze(event, assigned, user):
         raise HTTPException(
             status_code=423,
             detail=f"Event is frozen by {event.locked_by_name or 'another user'}.",
@@ -3632,7 +3695,7 @@ async def google_callback(request: Request, code: str = Query(..., max_length=51
         raise HTTPException(400, f"Google OAuth failed: {e}")
     user  = await upsert_user(sub=f"google:{info['sub']}", provider="google",
                               email=info.get("email"), name=info.get("name"), db=db)
-    token = create_jwt(user.id, user.sub, "google", user.email)
+    token = create_jwt(user.id, user.sub, "google", user.email, is_admin=user.is_admin)
     return _oauth_popup_response(token)
 
 
@@ -3665,7 +3728,7 @@ async def apple_callback(request: Request, db: AsyncSession = Depends(get_sessio
             pass
     user  = await upsert_user(sub=f"apple:{info['sub']}", provider="apple",
                               email=info.get("email"), name=name, db=db)
-    token = create_jwt(user.id, user.sub, "apple", user.email)
+    token = create_jwt(user.id, user.sub, "apple", user.email, is_admin=user.is_admin)
     return _oauth_popup_response(token)
 
 
@@ -3677,6 +3740,11 @@ async def auth_me(current_user: dict | None = Depends(get_current_user)):
         "authenticated": True, "sub": current_user.get("sub"),
         "email": current_user.get("email"), "provider": current_user.get("provider"),
         "uid": current_user.get("uid"),
+        # Surface is_admin so the frontend can conditionally render
+        # admin-only affordances (force-unfreeze, unmark-official, etc.).
+        # The flag is sourced from the JWT, which was issued at login —
+        # admin-status changes since then take effect on next sign-in.
+        "is_admin": bool(current_user.get("is_admin")),
     }
 
 

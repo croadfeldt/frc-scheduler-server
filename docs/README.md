@@ -50,6 +50,7 @@ architecture as the framing for the work.
 | [ARCHITECTURE.md](ARCHITECTURE.md)                | Design principles and structural decisions.   |
 | [PRIORITIES.md](PRIORITIES.md)                    | Team-placement scheduling algorithm.          |
 | [AUTH_DESIGN.md](AUTH_DESIGN.md)                  | Authentication and authorization model.       |
+| [RBAC_MODEL.md](RBAC_MODEL.md)                    | Role-based access control proposal — roles, delegation, notifications, role requests. Paused proposal; supersedes the EventManager section of AUTH_DESIGN.md and the `is_admin` flag from SCHEDULE_LIFECYCLE.md Phase E. |
 | [OAUTH_SETUP.md](OAUTH_SETUP.md)                  | Operator runbook for configuring Google and Apple sign-in: callback URLs, env vars, provider-console steps, troubleshooting. |
 | [SCHEDULE_LIFECYCLE.md](SCHEDULE_LIFECYCLE.md)    | Lifecycle, locking, freeze, and audit-trail spec — auth-mandatory, fork model, admin role, full audit table coverage. |
 | [INTEGRATIONS.md](INTEGRATIONS.md)                | TBA / Nexus / Statbotics / FMS integrations.  |
