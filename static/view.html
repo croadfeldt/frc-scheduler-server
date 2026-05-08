@@ -145,11 +145,11 @@
   }
   .card {
     background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-    padding: 1rem 1.25rem; box-shadow: var(--shadow);
+    padding: 0.6rem 0.85rem; box-shadow: var(--shadow);
   }
   .card-label {
     text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px;
-    color: var(--text-muted); font-weight: 600; margin-bottom: 0.5rem;
+    color: var(--text-muted); font-weight: 600; margin-bottom: 0.3rem;
   }
   .team-input-row { display: flex; gap: 0.5rem; align-items: center; }
   .team-input-row input {
@@ -694,8 +694,8 @@
   .agenda-fit-legend {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem 0.85rem;
-    font-size: 0.7rem;
+    gap: 0.25rem 0.55rem;
+    font-size: 0.62rem;
     color: var(--text-muted);
     margin-left: auto;
     /* Allow the legend to take a full row of its own when the
@@ -706,7 +706,7 @@
   .agenda-legend-item {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.22rem;
   }
   /* The selected-team container holds a "Teams:" label plus N
      per-team chips. Force it to its own row in the legend (flex:
@@ -745,8 +745,8 @@
   }
   .agenda-legend-swatch {
     display: inline-block;
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
     border-radius: 2px;
   }
   .agenda-legend-idle {
@@ -914,51 +914,59 @@
   /* Stack order inside .agenda-bar (which is overflow:hidden):
        agenda-seg                   z=auto (default, base)
        agenda-team-mark             z=2
-       agenda-seg-label             z=3 (text always reads on top)
+       agenda-seg-label,
+       agenda-seg-line1,
+       agenda-seg-line2             z=3 (text always reads on top)
        agenda-progress-elapsed      z=auto (gray wash overlay)
        agenda-progress-past         z=auto
        agenda-now-line              z=4 (always topmost)
      Without this, the team-mark divs (rendered later in DOM order)
      paint on top of segment text labels and obscure them. The label
-     wrapper span sits in normal flow but with relative positioning
-     so its z-index takes effect.
+     wrappers sit in normal flow but with relative positioning so
+     z-index takes effect. line1/line2 cover the new two-line match
+     label format that replaced the single .agenda-seg-label span;
+     all three classes need the same z-stacking treatment.
 
      The text-shadow on labels (already on .agenda-seg) survives the
      z-stacking — it's part of the span's own paint. */
-  .agenda-seg-label {
+  .agenda-seg-label,
+  .agenda-seg-line1,
+  .agenda-seg-line2 {
     position: relative;
     z-index: 3;
     pointer-events: none;
   }
 
-  /* Selected-team marker — vertical strips on the match segment
-     showing where the team is competing. Positioned absolutely
-     inside the agenda-bar so they overlay all underlying segments.
-     Color is set inline per-team via _teamColor() so users with
-     multiple teams selected can distinguish their teams' matches
-     at a glance. The outline + drop-shadow combo ensures the
-     strip stands out against any background segment color
-     (qual blue, practice green, break orange, idle hatched). */
+  /* Selected-team marker — small "top tab" indicator showing where
+     the team is competing. 8px tall, clipped to the top of the bar
+     so it doesn't cross the label text. Per-match positioning + per-
+     team color (set inline via _teamColor()) so multi-team selections
+     differentiate. The bottom corners round slightly so the tab
+     reads as a flag on top of the bar rather than another full-height
+     segment. Replaces the prior full-height strips that obstructed
+     the new two-line match labels. */
   .agenda-team-mark {
     position: absolute;
     top: 0;
-    bottom: 0;
+    height: 8px;
     pointer-events: none;
-    border-radius: 1px;
-    z-index: 2;
-    /* Dark outline for contrast against any segment background.
-       The outer drop-shadow adds a subtle halo so the mark
-       reads as "above" the segments rather than blending in. */
+    border-bottom-left-radius: 2px;
+    border-bottom-right-radius: 2px;
+    z-index: 5;
+    /* Thin dark outline + soft drop so the tab reads as "above" the
+       segment rather than blending in. Lower contrast than the old
+       full-height treatment since smaller marks don't need the
+       same visual weight. */
     box-shadow:
-      inset 0 0 0 1px rgba(0,0,0,0.55),
-      0 0 3px rgba(0,0,0,0.35);
+      inset 0 0 0 0.5px rgba(0,0,0,0.55),
+      0 1px 2px rgba(0,0,0,0.30);
   }
   /* Light theme — outline goes lighter on light background but
-     keeps the contrast against bright team colors. */
+     keeps contrast against bright team colors. */
   html[data-theme="light"] .agenda-team-mark {
     box-shadow:
-      inset 0 0 0 1px rgba(0,0,0,0.35),
-      0 0 2px rgba(0,0,0,0.18);
+      inset 0 0 0 0.5px rgba(0,0,0,0.40),
+      0 1px 2px rgba(0,0,0,0.18);
   }
 
   /* Time-progress overlays. Three states per day, exclusive:
@@ -1245,24 +1253,34 @@
     html:not([data-theme]) .field-pill.estimated.field-pill-queueing { color: #afa9ec; }
   }
 
-  /* Live status source banner — single line above the match table
-     telling the user where the on-field / on-deck / queueing data
-     came from. Three modes: nexus / scheduled / null (hidden). */
-  .status-source-banner {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 12px;
-    font-size: 12px;
+  /* Live status source — inline pill in the Status section header.
+     Three modes: live (green pulsing dot + "Live from Nexus / TBA"),
+     estimated (amber dot + "Status estimated"), or null (hidden).
+     Replaces the prior wide banner that sat above the match table —
+     the pill version is more compact and lives next to the cards
+     it actually describes. The .status-source-inline class is
+     applied alongside the same #statusSourceBanner id so the
+     renderer doesn't need to change. */
+  .status-source-inline {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 0;
+    font-size: 11px;
     color: var(--text-muted);
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-alt, var(--bg));
+    margin-left: 0.6rem;
+    /* Truncate on overflow rather than wrap to a new line — keeps
+       the header on one row even when the message is long. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .status-source-banner .source-dot {
-    width: 8px; height: 8px; border-radius: 50%;
+  .status-source-inline .source-dot {
+    width: 7px; height: 7px; border-radius: 50%;
     flex-shrink: 0;
   }
-  .status-source-banner.live  .source-dot { background: #4d8b1a; animation: pulse-dot 1.6s infinite; }
-  .status-source-banner.estimated .source-dot { background: #BA7517; }
-  .status-source-banner strong { color: var(--text); font-weight: 600; }
+  .status-source-inline.live  .source-dot { background: #4d8b1a; animation: pulse-dot 1.6s infinite; }
+  .status-source-inline.estimated .source-dot { background: #BA7517; }
+  .status-source-inline strong { color: var(--text); font-weight: 600; }
   /* Break/lunch row — generic default. Per-subtype overrides below
      pick distinct colors that mirror the V2 editor's palette so the
      view page reads the same visual language as the editor. */
@@ -2145,6 +2163,20 @@
          header above is the natural home for it. -->
     <div class="status-section-header no-print">
       <span class="status-section-title">Status</span>
+      <!-- Source pill — populated by the table-render flow with the
+           data source of the on-field / on-deck / queueing rows.
+           Three modes:
+             live      → green pulsing dot + "Live from Nexus / TBA"
+             estimated → amber dot + "Status estimated from schedule"
+             (none)    → hidden when nothing is being marked
+           Same renderer that used to fill the table-top banner now
+           fills this inline pill — kept the same IDs so the JS
+           writes here without changes. The banner below the match
+           table was retired in favor of this pill. -->
+      <span class="status-source-inline" id="statusSourceBanner" style="display:none;">
+        <span class="source-dot"></span>
+        <span id="statusSourceText"></span>
+      </span>
       <span class="status-section-actions">
         <button class="btn btn-secondary"
                 id="btnFieldViewToggle"
@@ -2399,13 +2431,13 @@
           <button class="btn btn-secondary" onclick="openShareModal()" title="Show QR code">&#128241; QR</button>
         </span>
       </div>
-      <!-- Live status source banner — populated by render() with the
-           source of the on-field / on-deck / queueing data
-           (Nexus + TBA actuals → "Live", clock-only → "Estimated"). -->
-      <div class="status-source-banner no-print" id="statusSourceBanner" style="display:none;">
-        <span class="source-dot"></span>
-        <span id="statusSourceText"></span>
-      </div>
+      <!-- Live status source moved to the Status section header
+           above the team / field cards (#statusSourceInline). The
+           pill there carries the same dot + text and is populated
+           by the same renderer; renders inline next to the
+           "Status" title where it's near the cards it actually
+           describes. The banner that used to sit here has been
+           retired. -->
       <table class="matches" id="matchesTable">
         <thead>
           <tr>
@@ -3972,11 +4004,14 @@ function rerender() {
 
   tbody.innerHTML = html;
 
-  // Live status source banner — visible only when there's at least
-  // one row marked current/upcoming/queueing. Three modes:
-  //   nexus     → "Live status from Nexus / TBA"
-  //   scheduled → "Status estimated from the schedule (no live data)"
+  // Live status source pill — visible only when at least one row
+  // is marked current/upcoming/queueing. Three modes:
+  //   nexus     → "Live from Nexus / TBA" (green pulsing dot)
+  //   scheduled → "Estimated from schedule" (amber dot)
   //   null      → hidden entirely
+  // Shorter text than the prior banner since the pill lives in the
+  // Status header alongside the title — context already implies
+  // "this is the data source for what's below."
   (function() {
     var banner = document.getElementById('statusSourceBanner');
     var text   = document.getElementById('statusSourceText');
@@ -3986,14 +4021,18 @@ function rerender() {
       banner.style.display = 'none';
       return;
     }
-    banner.style.display = 'flex';
+    // 'inline-flex' — the pill sits between the "Status" title and
+    // the toggle button on the same row. The CSS default for
+    // .status-source-inline is also inline-flex; this keeps the
+    // explicit setter in sync with the class definition.
+    banner.style.display = 'inline-flex';
     banner.classList.remove('live', 'estimated');
     if (fieldSource === 'scheduled') {
       banner.classList.add('estimated');
-      text.innerHTML = '<strong>Status estimated</strong> from the schedule \u2014 no live data from Nexus or TBA yet.';
+      text.innerHTML = '<strong>Estimated</strong> from schedule';
     } else {
       banner.classList.add('live');
-      text.innerHTML = '<strong>Live status</strong> from Nexus / TBA \u2014 on-field, on-deck, queueing rows are confirmed by the upstream feed.';
+      text.innerHTML = '<strong>Live</strong> from Nexus / TBA';
     }
   })();
 

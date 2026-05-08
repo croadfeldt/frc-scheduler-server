@@ -1396,13 +1396,19 @@
   .agenda-team-mark {
     position: absolute;
     top: 0;
-    bottom: 0;
+    height: 8px;
     pointer-events: none;
-    border-radius: 1px;
-    z-index: 2;
+    border-bottom-left-radius: 2px;
+    border-bottom-right-radius: 2px;
+    z-index: 5;
+    /* Top-tab style — clipped to the top 8px of the bar so the
+       indicator sits above the label region without crossing it.
+       Same per-match positioning + per-team color logic; just
+       half the visual weight. Replaces the prior full-height
+       strips that obstructed the two-line match labels. */
     box-shadow:
-      inset 0 0 0 1px rgba(0,0,0,0.55),
-      0 0 3px rgba(0,0,0,0.35);
+      inset 0 0 0 0.5px rgba(0,0,0,0.55),
+      0 1px 2px rgba(0,0,0,0.30);
   }
   .agenda-seg {
     display: flex;
