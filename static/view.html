@@ -772,7 +772,7 @@
   .agenda-bar {
     position: relative;
     display: flex;
-    height: 36px;
+    height: 38px;
     border: 1px solid var(--border);
     border-radius: 4px;
     overflow: hidden;
@@ -789,6 +789,37 @@
     overflow: hidden;
     cursor: default;
     transition: filter 0.15s;
+  }
+  /* Match-segment two-line label — mirrors the editor's format
+     ("X matches" + "X/Y min · 9→8 min"). The agenda-seg-matches
+     parent is overridden inline to flex-direction: row so the
+     committed + idle-tail children sit side-by-side; the two
+     labels live inside an agenda-seg-matches-inner wrapper that
+     stacks them column-wise. Idle tail is the hatched section
+     after the last scheduled match within the segment window. */
+  .agenda-seg-matches-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-width: 0;
+  }
+  .agenda-seg-line1 {
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .agenda-seg-line2 {
+    font-size: 0.58rem;
+    font-weight: 500;
+    line-height: 1.2;
+    opacity: 0.92;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    margin-top: 1px;
   }
   .agenda-seg:hover { filter: brightness(1.1); }
   .agenda-seg-matches { cursor: pointer; }
@@ -1088,29 +1119,110 @@
     content: "▶"; color: var(--next-match-accent); margin-right: 4px;
   }
   /* Field-level highlighting (independent of team selection)
-     - current-match: light yellow (Nexus says actively playing)
-     - upcoming-match: light orange (next match in queue)
+     - current-match: green   (on field, actively playing)
+     - upcoming-match: amber  (on deck, next match)
+     - queueing-match: purple (queueing, the match after on-deck)
      The colors are intentionally light so my-team highlighting (which
      uses box-shadow) remains visible on top. cells use !important
-     because zebra-stripe rules also target td backgrounds. */
-  tr.current-match  td { background: rgba(255,235,59,0.18) !important; }
-  tr.upcoming-match td { background: rgba(255,152,0,0.14) !important; }
+     because zebra-stripe rules also target td backgrounds.
+     Estimated variant (.estimated) drops the alpha to ~10% so rows
+     still read as "this state, but tentative" — applied when the
+     source is purely clock-based (no Nexus / TBA actuals). */
+  tr.current-match  td { background: rgba(99,153,34,0.18)  !important; }
+  tr.upcoming-match td { background: rgba(239,159,39,0.18) !important; }
+  tr.queueing-match td { background: rgba(127,119,221,0.18) !important; }
   /* Stronger left edge so the row stands out beyond just background tint */
-  tr.current-match  { box-shadow: inset 4px 0 0 #fbc02d; }
-  tr.upcoming-match { box-shadow: inset 4px 0 0 #fb8c00; }
+  tr.current-match  { box-shadow: inset 4px 0 0 #639922; }
+  tr.upcoming-match { box-shadow: inset 4px 0 0 #BA7517; }
+  tr.queueing-match { box-shadow: inset 4px 0 0 #7F77DD; }
+  /* Estimated: row tint dimmed, left bar dashed via repeating gradient
+     since box-shadow can't dash. Implemented as a thin border-left
+     overlay; cells remain background-tinted at 10% so the state still
+     reads at a glance without claiming authority. */
+  tr.current-match.estimated  td { background: rgba(99,153,34,0.10)  !important; }
+  tr.upcoming-match.estimated td { background: rgba(239,159,39,0.10) !important; }
+  tr.queueing-match.estimated td { background: rgba(127,119,221,0.10) !important; }
+  tr.current-match.estimated  { box-shadow: none; border-left: 4px dashed #639922; }
+  tr.upcoming-match.estimated { box-shadow: none; border-left: 4px dashed #BA7517; }
+  tr.queueing-match.estimated { box-shadow: none; border-left: 4px dashed #7F77DD; }
   /* my-team takes precedence over field highlighting for the box-shadow
      so the user's row indicator stays visible. The cell tints still apply. */
   tr.my-team.current-match  { box-shadow: inset 4px 0 0 var(--my-team-bg); }
   tr.my-team.upcoming-match { box-shadow: inset 4px 0 0 var(--my-team-bg); }
-  /* Field-level row tints — drop the alpha in dark mode so the
-     yellow/orange hint reads against the dark base without
-     blowing out the surrounding cells. Both selectors covered. */
-  html[data-theme="dark"] tr.current-match  td { background: rgba(255,235,59,0.10) !important; }
-  html[data-theme="dark"] tr.upcoming-match td { background: rgba(255,152,0,0.10) !important; }
+  tr.my-team.queueing-match { box-shadow: inset 4px 0 0 var(--my-team-bg); }
+  /* Dark-mode tint adjustments — the 18% alpha values read OK on
+     dark surfaces (the same hues just stay subtle), but the estimated
+     10% values become invisible. Bump dark-mode alphas slightly. */
+  html[data-theme="dark"] tr.current-match  td { background: rgba(99,153,34,0.16)  !important; }
+  html[data-theme="dark"] tr.upcoming-match td { background: rgba(239,159,39,0.16) !important; }
+  html[data-theme="dark"] tr.queueing-match td { background: rgba(127,119,221,0.18) !important; }
+  html[data-theme="dark"] tr.current-match.estimated  td { background: rgba(99,153,34,0.09)  !important; }
+  html[data-theme="dark"] tr.upcoming-match.estimated td { background: rgba(239,159,39,0.09) !important; }
+  html[data-theme="dark"] tr.queueing-match.estimated td { background: rgba(127,119,221,0.10) !important; }
   @media (prefers-color-scheme: dark) {
-    html:not([data-theme]) tr.current-match  td { background: rgba(255,235,59,0.10) !important; }
-    html:not([data-theme]) tr.upcoming-match td { background: rgba(255,152,0,0.10) !important; }
+    html:not([data-theme]) tr.current-match  td { background: rgba(99,153,34,0.16)  !important; }
+    html:not([data-theme]) tr.upcoming-match td { background: rgba(239,159,39,0.16) !important; }
+    html:not([data-theme]) tr.queueing-match td { background: rgba(127,119,221,0.18) !important; }
   }
+
+  /* Field-state pills — solid colored badges with white text, used
+     inline next to the match number in the schedule table to confirm
+     a row's field state at a glance. Distinct from .queue-pill (which
+     reflects per-match Nexus queue_status) — these track field-level
+     status from _findFieldThreeUp() and only appear on the three
+     active rows. Hollow variant (.field-pill.estimated) signals the
+     state is clock-derived rather than confirmed by an upstream
+     source. */
+  .field-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    margin-left: 6px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-radius: 999px;
+    color: #fff;
+    vertical-align: middle;
+    line-height: 1.4;
+    border: 1px solid transparent;
+  }
+  .field-pill-on-field  { background: #4d8b1a; border-color: #4d8b1a; }
+  .field-pill-on-deck   { background: #c66800; border-color: #c66800; }
+  .field-pill-queueing  { background: #5d4ec9; border-color: #5d4ec9; }
+  /* Estimated: hollow, color from the same family as text + border. */
+  .field-pill.estimated.field-pill-on-field { background: transparent; color: #4d8b1a; }
+  .field-pill.estimated.field-pill-on-deck  { background: transparent; color: #c66800; }
+  .field-pill.estimated.field-pill-queueing { background: transparent; color: #5d4ec9; }
+  /* Dark-mode hollow pills use lighter text so they read against
+     the surrounding dark surface; the saturated border stays. */
+  html[data-theme="dark"] .field-pill.estimated.field-pill-on-field { color: #97c459; }
+  html[data-theme="dark"] .field-pill.estimated.field-pill-on-deck  { color: #ef9f27; }
+  html[data-theme="dark"] .field-pill.estimated.field-pill-queueing { color: #afa9ec; }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .field-pill.estimated.field-pill-on-field { color: #97c459; }
+    html:not([data-theme]) .field-pill.estimated.field-pill-on-deck  { color: #ef9f27; }
+    html:not([data-theme]) .field-pill.estimated.field-pill-queueing { color: #afa9ec; }
+  }
+
+  /* Live status source banner — single line above the match table
+     telling the user where the on-field / on-deck / queueing data
+     came from. Three modes: nexus / scheduled / null (hidden). */
+  .status-source-banner {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-alt, var(--bg));
+  }
+  .status-source-banner .source-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .status-source-banner.live  .source-dot { background: #4d8b1a; animation: pulse-dot 1.6s infinite; }
+  .status-source-banner.estimated .source-dot { background: #BA7517; }
+  .status-source-banner strong { color: var(--text); font-weight: 600; }
   /* Break/lunch row — generic default. Per-subtype overrides below
      pick distinct colors that mirror the V2 editor's palette so the
      view page reads the same visual language as the editor. */
@@ -1598,6 +1710,172 @@
     top: -2px;
   }
 
+  /* ── Field-position alliance layout (top-down view) ─────────────
+     Used when the user picks "Field view" on the 3-up grid. Blue
+     stack on the left, red stack on the right, scoring-table line
+     spanning the bottom. Station labels are digit-only superscripts
+     anchored to the inside edge of each chip; the alliance color
+     carries the B/R distinction. */
+  .alliance-field {
+    display: flex; flex-direction: column;
+    margin-top: 0.4rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .alliance-field .field-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 6px;
+    align-items: stretch;
+  }
+  .alliance-field .field-stack {
+    display: flex; flex-direction: column; gap: 3px;
+    min-width: 0;
+  }
+  .alliance-field .field-cell {
+    display: flex; align-items: baseline;
+    gap: 5px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 0.5px solid transparent;
+    cursor: pointer;
+    min-width: 0;
+  }
+  .alliance-field .field-cell.blue {
+    background: rgba(74,144,226,0.13);
+    border-color: rgba(74,144,226,0.30);
+    color: var(--blue-alliance);
+    justify-content: flex-start;
+  }
+  .alliance-field .field-cell.red {
+    background: rgba(204,85,85,0.13);
+    border-color: rgba(204,85,85,0.30);
+    color: var(--red-alliance);
+    justify-content: flex-end;
+  }
+  /* Station label = small superscript digit. White text-shadow ring
+     keeps it legible against the alliance-tinted background without
+     competing with the team number. */
+  .alliance-field .field-cell .station {
+    font-size: 9px;
+    font-weight: 700;
+    opacity: 0.85;
+    position: relative;
+    top: -3px;
+    text-shadow:
+      -1px -1px 0 #fff, 1px -1px 0 #fff,
+      -1px  1px 0 #fff, 1px  1px 0 #fff,
+       0 -1px 0 #fff, 0  1px 0 #fff,
+      -1px  0 0 #fff, 1px  0 0 #fff;
+  }
+  .alliance-field .field-cell .num {
+    font-size: 13px; font-weight: 600;
+    flex: 1;
+    text-align: inherit;
+  }
+  /* Red side flips num/station order so station sits inside (toward
+     the centerline) — mirrors blue cells where station is on the
+     left. The HTML order doesn't change; we use flex direction. */
+  .alliance-field .field-cell.red {
+    flex-direction: row-reverse;
+  }
+  /* Selected-team highlight — uses --team-color set inline. Same
+     treatment as the linear .team-cell so the user's palette color
+     reads consistently across both view modes. */
+  .alliance-field .field-cell.my-team {
+    background: color-mix(in srgb, var(--team-color) 20%, transparent);
+    border-color: var(--team-color);
+    border-bottom-width: 2px;
+  }
+  /* Center column — placeholder for a countdown / status when this
+     layout is used inline in a larger card. In the compact 3-up
+     cell variant the center is a thin spacer, so the inner label
+     auto-hides via CSS. */
+  .alliance-field .field-center {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 0 4px;
+    min-width: 28px;
+  }
+  .alliance-field .field-center-label {
+    font-size: 9px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    font-style: italic;
+  }
+  /* Scoring-table line — solid bar across the bottom + tucked
+     "scoring table" caption that anchors the orientation. */
+  .alliance-field .field-table-line {
+    margin-top: 8px; padding-top: 5px;
+    border-top: 1.5px solid var(--text-muted);
+    text-align: center;
+    position: relative;
+    height: 14px;
+  }
+  .alliance-field .field-table-line span {
+    position: absolute;
+    top: -7px; left: 50%; transform: translateX(-50%);
+    background: var(--bg);
+    padding: 0 6px;
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  /* Inside the 3-up stage cells the parent background is rgba(0,0,0,0.025)
+     in light or rgba(255,255,255,0.04) in dark — the line caption needs
+     to match so the "scoring table" text gap stays clean. */
+  .status-stage .alliance-field .field-table-line span { background: var(--bg); }
+  html[data-theme="dark"] .status-stage .alliance-field .field-table-line span { background: #2c2c2a; }
+
+  /* Compact variant — used inside the 3-up cells (~110px wide). Tighter
+     spacing, smaller digits, station label drops to 8px. The center
+     column collapses to a thin gap (no field/countdown text). */
+  .alliance-field.compact {
+    margin-top: 3px;
+  }
+  .alliance-field.compact .field-row {
+    gap: 4px;
+  }
+  .alliance-field.compact .field-cell {
+    padding: 2px 4px;
+    gap: 3px;
+  }
+  .alliance-field.compact .field-cell .num { font-size: 11px; }
+  .alliance-field.compact .field-cell .station { font-size: 8px; top: -2px; }
+  .alliance-field.compact .field-center { display: none; }
+  .alliance-field.compact .field-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .alliance-field.compact .field-table-line {
+    margin-top: 6px; padding-top: 4px;
+    height: 11px;
+  }
+  .alliance-field.compact .field-table-line span {
+    font-size: 8px;
+  }
+
+  /* Field/linear view toggle button — sits in the 3-up header. Uses
+     the same compact-action button styling as the table actions. */
+  .status-three-up-header {
+    display: flex; justify-content: flex-end;
+    margin-bottom: 0.4rem;
+  }
+  .status-view-toggle {
+    background: transparent;
+    border: 0.5px solid var(--border);
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+    font-weight: 500;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .status-view-toggle:hover {
+    background: rgba(127,127,127,0.08);
+    color: var(--text);
+    border-color: var(--text-muted);
+  }
+
   /* Per-team stats grid in next-match card */
   .team-stats {
     display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
@@ -1911,21 +2189,32 @@
         </div>
 
         <!-- 3-up Nexus row — populated by _renderFieldThreeUp() -->
-        <div class="status-three-up" id="statusThreeUp" style="display:none;">
-          <div class="status-stage" data-stage="field">
-            <div class="status-stage-label"><span class="status-dot status-dot-field"></span>On field</div>
-            <div class="status-stage-match" id="stageFieldMatch">—</div>
-            <div class="status-stage-meta" id="stageFieldMeta"></div>
+        <div class="status-three-up-wrap" id="statusThreeUpWrap" style="display:none;">
+          <div class="status-three-up-header no-print">
+            <button type="button" class="status-view-toggle"
+                    id="btnFieldViewToggle"
+                    onclick="toggleFieldView()"
+                    title="Switch between linear and field-position alliance layouts">
+              <span id="fieldViewToggleIcon">&#9783;</span>
+              <span id="fieldViewToggleLabel">Field view</span>
+            </button>
           </div>
-          <div class="status-stage" data-stage="deck">
-            <div class="status-stage-label"><span class="status-dot status-dot-deck"></span>On deck</div>
-            <div class="status-stage-match" id="stageDeckMatch">—</div>
-            <div class="status-stage-meta" id="stageDeckMeta"></div>
-          </div>
-          <div class="status-stage" data-stage="queueing">
-            <div class="status-stage-label"><span class="status-dot status-dot-queueing"></span>Queueing</div>
-            <div class="status-stage-match" id="stageQueueingMatch">—</div>
-            <div class="status-stage-meta" id="stageQueueingMeta"></div>
+          <div class="status-three-up" id="statusThreeUp">
+            <div class="status-stage" data-stage="field">
+              <div class="status-stage-label"><span class="status-dot status-dot-field"></span>On field</div>
+              <div class="status-stage-match" id="stageFieldMatch">—</div>
+              <div class="status-stage-meta" id="stageFieldMeta"></div>
+            </div>
+            <div class="status-stage" data-stage="deck">
+              <div class="status-stage-label"><span class="status-dot status-dot-deck"></span>On deck</div>
+              <div class="status-stage-match" id="stageDeckMatch">—</div>
+              <div class="status-stage-meta" id="stageDeckMeta"></div>
+            </div>
+            <div class="status-stage" data-stage="queueing">
+              <div class="status-stage-label"><span class="status-dot status-dot-queueing"></span>Queueing</div>
+              <div class="status-stage-match" id="stageQueueingMatch">—</div>
+              <div class="status-stage-meta" id="stageQueueingMeta"></div>
+            </div>
           </div>
         </div>
 
@@ -2017,6 +2306,10 @@
           <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:var(--blue-alliance);"></span>Matches</span>
           <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:var(--secondary);"></span>Practice</span>
           <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:#ec8a3f;"></span>Breaks</span>
+          <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:#d9a13e;"></span>Awards</span>
+          <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:#3fa6a0;"></span>Alliance selection</span>
+          <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:#dd7858;"></span>Ceremony</span>
+          <span class="agenda-legend-item"><span class="agenda-legend-swatch" style="background:#bd92f0;"></span>Playoff</span>
           <span class="agenda-legend-item"><span class="agenda-legend-swatch agenda-legend-idle"></span>Unallocated</span>
           <span class="agenda-legend-item"><span class="agenda-legend-swatch agenda-legend-elapsed"></span>Elapsed</span>
           <span class="agenda-legend-item"><span class="agenda-legend-swatch agenda-legend-now"></span>Now</span>
@@ -2049,6 +2342,13 @@
           <button class="btn btn-secondary" onclick="openExportModal()" title="Print, save as PDF, or download as XLSX/CSV/JSON/FMS">&#x2913; Print / Export&hellip;</button>
           <button class="btn btn-secondary" onclick="openShareModal()" title="Show QR code">&#128241; QR</button>
         </span>
+      </div>
+      <!-- Live status source banner — populated by render() with the
+           source of the on-field / on-deck / queueing data
+           (Nexus + TBA actuals → "Live", clock-only → "Estimated"). -->
+      <div class="status-source-banner no-print" id="statusSourceBanner" style="display:none;">
+        <span class="source-dot"></span>
+        <span id="statusSourceText"></span>
       </div>
       <table class="matches" id="matchesTable">
         <thead>
@@ -2503,6 +2803,13 @@ async function boot() {
   // theme. (The actual theme was applied in the head script before
   // first paint to avoid flash.)
   syncThemeButton();
+
+  // Sync the field/linear view toggle label to the saved preference
+  // (frc_field_view_mode in localStorage). The button itself only
+  // surfaces once a schedule is loaded and the 3-up grid is visible.
+  if (typeof _updateFieldViewToggleLabel === 'function') {
+    try { _updateFieldViewToggleLabel(); } catch(_) {}
+  }
 
   // Tick the agenda-fit time-progress overlay every 30 seconds so
   // the "now" red line walks forward without needing a manual
@@ -3312,64 +3619,52 @@ function rerender() {
   const hasSelection = STATE.myTeams && STATE.myTeams.size > 0;
   const onlyMine = document.getElementById('onlyMine').checked;
 
-  // Determine "now playing" preferring live API state over clock estimation.
-  // A match is "playing" when it has an actual_time but no post_result_time.
+  // Field-level current/next/queueing derivation — uses
+  // _findFieldThreeUp() so the schedule-table row tints share the
+  // same source resolution as the 3-up status grid:
+  //   nexus     → live queue_status from Nexus, or TBA actual_time
+  //               for "playing now". Solid pills, full-alpha tint.
+  //   scheduled → no live data; pure clock-vs-schedule estimate.
+  //               Hollow pills, lower-alpha tint, dashed left bar.
+  //   null      → no playable matches found; no row marking.
   //
-  // Field-level current/next derivation:
-  //   currentFieldMatchNum  — Nexus says this match is actively playing
-  //                            (has actual_time, no post_result_time).
-  //                            null if nothing is actively on the field.
-  //   upcomingFieldMatchNum — First non-completed match in schedule order.
-  //                            When a match is currently playing, this is
-  //                            the match immediately after it. When nothing
-  //                            is playing, this is the next match queued
-  //                            up. null when all matches are completed or
-  //                            there's no live data.
-  // The TABLE render applies .current-match (light yellow) to the row
-  // matching currentFieldMatchNum, and .upcoming-match (light orange)
-  // to upcomingFieldMatchNum. Independent of team selection.
+  // The TABLE render applies these classes to the matching rows:
+  //   .current-match  (green tint)
+  //   .upcoming-match (amber tint)
+  //   .queueing-match (purple tint)
+  //   .estimated      (added when source === 'scheduled')
   let nowMatchNum = null;
   let nowFromLive = false;
-  let currentFieldMatchNum  = null;
-  let upcomingFieldMatchNum = null;
-  for (const m of Object.values(STATE.liveByMatch || {})) {
-    if (m.actual_time && !m.post_result_time && m.comp_level === 'qm') {
-      nowMatchNum = m.match_number;
+  let currentFieldMatchNum   = null;
+  let upcomingFieldMatchNum  = null;
+  let queueingFieldMatchNum  = null;
+  let fieldSource            = null;  // 'nexus' | 'scheduled' | null
+  if (typeof _findFieldThreeUp === 'function') {
+    var _three = _findFieldThreeUp();
+    fieldSource           = _three.source;
+    currentFieldMatchNum  = _three.field    ? _three.field.matchNum    : null;
+    upcomingFieldMatchNum = _three.deck     ? _three.deck.matchNum     : null;
+    queueingFieldMatchNum = _three.queueing ? _three.queueing.matchNum : null;
+    if (_three.field && _three.field.matchNum && fieldSource === 'nexus') {
+      // Treat the field-slot match as "now" for the visual NOW
+      // line on the agenda bar. Only when we have nexus-grade data
+      // — pure schedule estimates shouldn't drag the live-mode
+      // visuals along (the dashed pill and dimmed tint already
+      // signal "we're guessing").
+      nowMatchNum = _three.field.matchNum;
       nowFromLive = true;
-      currentFieldMatchNum = m.match_number;
-      break;
     }
   }
+  // Legacy clock fallback for nowMatchNum: if _findFieldThreeUp didn't
+  // find a field slot but live mode is on, walk computed for a match
+  // whose time window contains "now". This keeps the agenda's NOW line
+  // behaving like it did pre-unification when no live data exists.
   if (!nowMatchNum && STATE.liveMode) {
-    // Fallback: clock estimation
     const now = new Date();
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const nowMin = (now.getTime() - todayStart.getTime()) / 60000;
     const cur = computed.find(e => e.type === 'match' && e.startMin <= nowMin && nowMin < e.endMin);
     if (cur) nowMatchNum = cur.matchNum;
-  }
-  // Compute upcomingFieldMatchNum: walk computed matches in order, find
-  // the first match whose live status isn't 'completed'. If currentField
-  // is set, skip past it to find the NEXT one.
-  if (STATE.liveMode || Object.keys(STATE.liveByMatch || {}).length > 0) {
-    let foundCurrent = (currentFieldMatchNum == null);
-    for (const e of computed) {
-      if (e.type !== 'match' || e.isPractice) continue;
-      const live = STATE.liveByMatch[e.matchNum];
-      const isCompleted = live && live.post_result_time;
-      if (!foundCurrent) {
-        if (e.matchNum === currentFieldMatchNum) foundCurrent = true;
-        continue;
-      }
-      if (!isCompleted) {
-        upcomingFieldMatchNum = e.matchNum;
-        break;
-      }
-    }
-    // If nothing was actively playing AND we found an upcoming match,
-    // treat the upcoming one as the "current" target for the status
-    // display purposes (countdown to its start). The row highlights
-    // still distinguish: light orange because it's not yet playing.
   }
 
   let html = '';
@@ -3447,10 +3742,21 @@ function rerender() {
       if (matched) cls.push('my-team');
       if (isNow) cls.push('now-playing');
       // Field-level highlighting (independent of team selection).
-      // current-match → light yellow background (Nexus says playing now)
-      // upcoming-match → light orange background (next match queued)
-      if (entry.matchNum === currentFieldMatchNum)  cls.push('current-match');
-      if (entry.matchNum === upcomingFieldMatchNum) cls.push('upcoming-match');
+      // Source-aware: row gets .estimated when fieldSource is
+      // 'scheduled' (no Nexus / TBA actuals — the highlight is a
+      // clock-based guess). Pill rendering below mirrors the same.
+      var fieldPillKind = null;
+      if (entry.matchNum === currentFieldMatchNum) {
+        cls.push('current-match');
+        fieldPillKind = 'on-field';
+      } else if (entry.matchNum === upcomingFieldMatchNum) {
+        cls.push('upcoming-match');
+        fieldPillKind = 'on-deck';
+      } else if (entry.matchNum === queueingFieldMatchNum) {
+        cls.push('queueing-match');
+        fieldPillKind = 'queueing';
+      }
+      if (fieldPillKind && fieldSource === 'scheduled') cls.push('estimated');
       // Win/loss tint when match is completed
       if (status === 'completed' && live.winning_alliance) {
         cls.push('result-' + live.winning_alliance);  // 'result-red'/'result-blue'/'result-tie'
@@ -3541,8 +3847,23 @@ function rerender() {
         }
       }
 
-      // Match-number cell — adds queue status pill
+      // Match-number cell — adds queue status pill (per-match Nexus
+      // queue_status) AND field-state pill (current/deck/queueing
+      // from _findFieldThreeUp). The two are distinct signals: the
+      // queue-pill reflects what Nexus reports for this specific
+      // match's staging state; the field-pill is the unified
+      // "this row is the on-field / on-deck / queueing match"
+      // marker that mirrors the row tint. Both can appear on the
+      // same row (e.g. on_field row gets both pills).
       let matchCell = (entry.isPractice ? 'P' : 'Q') + entry.matchNum;
+      if (fieldPillKind) {
+        var fpCls = 'field-pill field-pill-' + fieldPillKind;
+        if (fieldSource === 'scheduled') fpCls += ' estimated';
+        var fpLabel = fieldPillKind === 'on-field' ? 'On field'
+                    : fieldPillKind === 'on-deck'  ? 'On deck'
+                    :                                'Queueing';
+        matchCell += ' <span class="' + fpCls + '">' + fpLabel + '</span>';
+      }
       if (queue && queue.status && status !== 'completed') {
         const pillCls = 'queue-pill queue-' + queue.status;
         matchCell += ' <span class="' + pillCls + '">' + formatQueueStatus(queue.status) + '</span>';
@@ -3587,6 +3908,31 @@ function rerender() {
   });
 
   tbody.innerHTML = html;
+
+  // Live status source banner — visible only when there's at least
+  // one row marked current/upcoming/queueing. Three modes:
+  //   nexus     → "Live status from Nexus / TBA"
+  //   scheduled → "Status estimated from the schedule (no live data)"
+  //   null      → hidden entirely
+  (function() {
+    var banner = document.getElementById('statusSourceBanner');
+    var text   = document.getElementById('statusSourceText');
+    if (!banner || !text) return;
+    var anyRow = (currentFieldMatchNum != null) || (upcomingFieldMatchNum != null) || (queueingFieldMatchNum != null);
+    if (!anyRow || !fieldSource) {
+      banner.style.display = 'none';
+      return;
+    }
+    banner.style.display = 'flex';
+    banner.classList.remove('live', 'estimated');
+    if (fieldSource === 'scheduled') {
+      banner.classList.add('estimated');
+      text.innerHTML = '<strong>Status estimated</strong> from the schedule \u2014 no live data from Nexus or TBA yet.';
+    } else {
+      banner.classList.add('live');
+      text.innerHTML = '<strong>Live status</strong> from Nexus / TBA \u2014 on-field, on-deck, queueing rows are confirmed by the upstream feed.';
+    }
+  })();
 
   // Counts + freshness
   document.getElementById('tableCount').textContent =
@@ -4016,11 +4362,11 @@ function renderAgendaFitView() {
           single_elim: 'Single elim',
           double_elim: 'Double elim',
         })[seg.format] || seg.format || 'Playoff';
-        var pInline = segDur >= 60 ? ('Playoff · ' + (seg.teams || 8) + 'T')
+        var pInline = segDur >= 60 ? ('Playoff \u00b7 ' + (seg.teams || 8) + 'A')
                     : segDur >= 25 ? 'Playoff'
                     :                '';
-        var pTipV = 'Playoff: ' + pfFmt + ' · ' + (seg.teams || 8) + ' teams — ' +
-                    fmtT(seg.start) + '–' + fmtT(seg.end) +
+        var pTipV = 'Playoff: ' + pfFmt + ' \u00b7 ' + (seg.teams || 8) + ' alliances \u2014 ' +
+                    fmtT(seg.start) + '\u2013' + fmtT(seg.end) +
                     ' (' + Math.round(segDur) + ' min)';
         return '<div class="agenda-seg agenda-seg-playoff" ' +
                'style="width:' + widthPct.toFixed(2) + '%;" ' +
@@ -4030,35 +4376,61 @@ function renderAgendaFitView() {
       }
       // matches segment
       var segColor = seg.isPractice ? 'var(--secondary)' : 'var(--blue-alliance)';
+      // Cycle-time progression — distinct cycleTime values walked in
+      // order from the segment's match entries. Each entry's cycle
+      // is endMin - startMin. Mirrors the editor's "9→8 min" label.
+      // Single-cycle segments collapse to "9 min".
+      var ctProgression = [];
+      (seg.entries || []).forEach(function(e) {
+        if (e.startMin == null || e.endMin == null) return;
+        var ct = e.endMin - e.startMin;
+        if (ct <= 0) return;
+        var rounded = Math.round(ct * 10) / 10;
+        if (ctProgression.length === 0 || ctProgression[ctProgression.length - 1] !== rounded) {
+          ctProgression.push(rounded);
+        }
+      });
+      var fmtCt = function(n) {
+        return (n === Math.floor(n)) ? String(n) : n.toFixed(1).replace(/\.0$/, '');
+      };
+      var ctList = (ctProgression.length ? ctProgression.map(fmtCt).join('\u2192') : fmtCt(seg.committed / Math.max(1, seg.matchCount))) + ' min';
       var line1 = seg.matchCount + ' match' + (seg.matchCount !== 1 ? 'es' : '');
       var idleTailMin = Math.max(0, seg.end - seg.matchEnd);
+      var line2 = Math.round(seg.committed) + '/' + Math.round(seg.end - seg.start) + ' min'
+                + (idleTailMin >= 1 ? ' \u00b7 ' + Math.round(idleTailMin) + ' min idle' : '')
+                + ' \u00b7 ' + ctList;
       var tipM = (seg.isPractice ? 'Practice' : 'Qualification') +
-                 ' — ' + fmtT(seg.start) + '–' + fmtT(seg.end) +
+                 ' \u2014 ' + fmtT(seg.start) + '\u2013' + fmtT(seg.end) +
                  '\n' + line1 +
                  (seg.firstMatchNum ? ' (starting ' + (seg.isPractice ? 'P' : 'Q') + seg.firstMatchNum + ')' : '') +
                  '\n' + Math.round(seg.committed) + ' min scheduled / ' +
                  Math.round(seg.end - seg.start) + ' min available' +
-                 (idleTailMin >= 1 ? '\nIdle tail: ' + Math.round(idleTailMin) + ' min' : '');
+                 (idleTailMin >= 1 ? '\nIdle tail: ' + Math.round(idleTailMin) + ' min' : '') +
+                 '\nCycle: ' + ctList;
       var inner;
-      // The text labels go inside <span class="agenda-seg-label">
-      // so the .agenda-seg-label CSS rule (z-index above team marks)
-      // keeps the labels visible on top of any team-mark strips
-      // that overlap them.
-      var labelHtml = (widthPct >= 8) ? '<span class="agenda-seg-label">' + line1 + '</span>' : '';
+      // Two-line label inside agenda-seg-matches-inner — line1 always
+      // shows; line2 reveals when the segment is wide enough (>= 14%).
+      // Same threshold the editor uses so segments behave identically
+      // across both pages.
+      var labelHtml =
+        '<div class="agenda-seg-line1">' + line1 + '</div>'
+        + (widthPct >= 14 ? '<div class="agenda-seg-line2">' + line2 + '</div>' : '');
       if (idleTailMin >= 1 && segDur > 0) {
         var commPct = ((seg.matchEnd - seg.start) / segDur) * 100;
         var tailPct = 100 - commPct;
         inner =
-          '<div style="display:flex;align-items:center;justify-content:center;height:100%;width:' + commPct.toFixed(2) + '%;background:' + segColor + ';">' +
-            labelHtml +
+          '<div class="agenda-seg-matches-inner" style="width:' + commPct.toFixed(2) + '%;background:' + segColor + ';">' +
+            (widthPct >= 8 ? labelHtml : '') +
           '</div>' +
           '<div style="height:100%;width:' + tailPct.toFixed(2) + '%;background:' +
             (seg.isPractice ? 'rgba(93,175,120,0.25)' : 'rgba(9,105,218,0.25)') +
             ';background-image:repeating-linear-gradient(135deg,rgba(255,255,255,0.10),rgba(255,255,255,0.10) 5px,rgba(255,255,255,0.22) 5px,rgba(255,255,255,0.22) 10px);"></div>';
       } else {
-        inner = labelHtml;
+        inner = '<div class="agenda-seg-matches-inner" style="width:100%;background:' + segColor + ';">' +
+                  (widthPct >= 8 ? labelHtml : '') +
+                '</div>';
       }
-      var bg = (idleTailMin >= 1) ? 'transparent' : segColor;
+      var bg = (idleTailMin >= 1) ? 'transparent' : 'transparent';  // inner div carries the color now
       var click = seg.firstMatchNum
         ? 'onclick="agendaScrollToMatch(' + seg.firstMatchNum + (seg.isPractice ? ',true' : ',false') + ')"'
         : '';
@@ -5066,14 +5438,23 @@ function _findFieldThreeUp() {
 // stage shows the match number plus a meta line — team rosters or
 // "in N min". Hidden entirely when no upcoming matches exist.
 function _renderFieldThreeUp() {
+  var wrap = document.getElementById('statusThreeUpWrap');
   var grid = document.getElementById('statusThreeUp');
   if (!grid) return;
   var t = _findFieldThreeUp();
   if (!t.field && !t.deck && !t.queueing) {
-    grid.style.display = 'none';
+    if (wrap) wrap.style.display = 'none';
     return;
   }
-  grid.style.display = '';
+  if (wrap) wrap.style.display = '';
+  // Layout mode: 'linear' (existing alliance-line, blue-vs-red horizontal)
+  // or 'field' (rotated top-down field layout). Persisted in localStorage
+  // so the preference survives reloads. Default 'linear' for back-compat
+  // with how the page rendered before this option existed.
+  var layoutMode = 'linear';
+  try { layoutMode = localStorage.getItem('frc_field_view_mode') || 'linear'; } catch(e) {}
+  grid.classList.toggle('field-view',  layoutMode === 'field');
+  grid.classList.toggle('linear-view', layoutMode !== 'field');
   var muted = (t.source === 'scheduled');
   var stages = [
     { match: t.field,    matchEl: 'stageFieldMatch',    metaEl: 'stageFieldMeta',    fallback: 'Awaiting match' },
@@ -5101,7 +5482,15 @@ function _renderFieldThreeUp() {
       // cells are ~110px wide each.
       var meta = '';
       if (!muted && s.match.red && s.match.blue && s.match.red.length === 3) {
-        meta = _buildAllianceLineHtml(s.match, { compact: true });
+        // Layout mode picks which alliance HTML helper to use:
+        //   field  → rotated top-down field view (vertical stacks,
+        //            scoring-table line at bottom)
+        //   linear → existing horizontal blue-vs-red alliance-line
+        if (layoutMode === 'field' && typeof _buildAllianceFieldHtml === 'function') {
+          meta = _buildAllianceFieldHtml(s.match, { compact: true });
+        } else {
+          meta = _buildAllianceLineHtml(s.match, { compact: true });
+        }
       } else {
         var ts = _resolveMatchTimestamp(s.match);
         if (ts != null) {
@@ -5642,6 +6031,101 @@ function _renderNextOnly() {
 //   * _renderFieldThreeUp (3-up Nexus stages — compact variant
 //     shares the same DOM structure but the parent .alliance-line.compact
 //     class shrinks padding and font for the smaller boxes)
+// Field-position alliance HTML — top-down view with the scoring
+// table at the bottom. Blue stack on the left wall (B1 top → B3
+// bottom = closest to table); red stack on the right wall (R3 top
+// → R1 bottom = closest to table). Stations follow the "1, 2, 3
+// left to right from the driver's POV" rule, which mirrors blue
+// across the centerline (red driver faces left, so 1→2→3 reads
+// bottom-to-top in the layout).
+//
+// Companion to _buildAllianceLineHtml — same data, different
+// visual mapping. Picked at render time based on the user's
+// field-view preference (localStorage 'frc_field_view_mode').
+function _buildAllianceFieldHtml(entry, opts) {
+  if (!entry || !entry.red || !entry.blue ||
+      entry.red.length === 0 || entry.blue.length === 0) return '';
+  var compact = !!(opts && opts.compact);
+  function cellHtml(alliance, teamN, stationNum) {
+    teamN = Number(teamN);
+    var inMine = STATE.myTeams && (
+      STATE.myTeams.has(teamN) || STATE.myTeams.has(String(teamN))
+    );
+    var cls = 'field-cell ' + (alliance === 'Blue' ? 'blue' : 'red');
+    if (inMine) cls += ' my-team';
+    var titleAttr = ' title="' + alliance + ' ' + stationNum +
+                    ' \u2014 click to ' + (inMine ? 'remove from' : 'add to') + ' your selection"';
+    var onclickAttr = ' onclick="toggleTeamSelection(' + teamN + ')"';
+    var styleAttr = inMine ? ' style="--team-color:' + _teamColor(teamN) + ';"' : '';
+    // Station label = digit-only superscript (Option A). Alliance
+    // letter is implied by the cell's alliance class / color, so
+    // emitting just "1" keeps the chip uncluttered.
+    return '<span class="' + cls + '"' + styleAttr + titleAttr + onclickAttr + '>' +
+           '<span class="station">' + stationNum + '</span>' +
+           '<span class="num">' + teamN + '</span>' +
+           '</span>';
+  }
+  // Blue side: stations 1,2,3 top-to-bottom (driver's left-to-right
+  // when facing the field from behind the wall).
+  var blueHtml = '<div class="field-stack blue">' +
+    cellHtml('Blue', entry.blue[0], 1) +
+    cellHtml('Blue', entry.blue[1], 2) +
+    cellHtml('Blue', entry.blue[2], 3) +
+    '</div>';
+  // Red side: stations 3,2,1 top-to-bottom (driver faces left, so
+  // their left-to-right reads bottom-to-top in the layout — R1 ends
+  // up next to the scoring table, mirroring B3).
+  var redHtml = '<div class="field-stack red">' +
+    cellHtml('Red', entry.red[2], 3) +
+    cellHtml('Red', entry.red[1], 2) +
+    cellHtml('Red', entry.red[0], 1) +
+    '</div>';
+  var rootCls = 'alliance-field' + (compact ? ' compact' : '');
+  return '<div class="' + rootCls + '">' +
+           '<div class="field-row">' +
+             blueHtml +
+             '<div class="field-center"><span class="field-center-label">field</span></div>' +
+             redHtml +
+           '</div>' +
+           '<div class="field-table-line"><span>scoring table</span></div>' +
+         '</div>';
+}
+
+// Toggle handler for the field/linear view button on the 3-up
+// status grid. Persists the choice in localStorage so it survives
+// page reloads + applies to both the 3-up cells and (later) any
+// next-match card variant. Re-renders by calling _renderFieldThreeUp
+// directly so the meta lines pick up the new layout.
+function toggleFieldView() {
+  var current = 'linear';
+  try { current = localStorage.getItem('frc_field_view_mode') || 'linear'; } catch(e) {}
+  var next = (current === 'field') ? 'linear' : 'field';
+  try { localStorage.setItem('frc_field_view_mode', next); } catch(e) {}
+  _updateFieldViewToggleLabel();
+  // Re-render every surface that emits an alliance line:
+  //   - 3-up status grid cells (compact field-position layout)
+  //   - team-card "Next match" alliance roster
+  //   - next-only fallback alliance line
+  // The simplest way to refresh all three at once is the full
+  // rerender path; it's cheap relative to the user's interaction.
+  if (typeof rerender === 'function') {
+    try { rerender(); return; } catch(_) {}
+  }
+  if (typeof _renderFieldThreeUp === 'function') _renderFieldThreeUp();
+}
+
+// Sync the button label with the current preference. Called from
+// toggleFieldView() and from page bootstrap so the initial label
+// matches what's saved.
+function _updateFieldViewToggleLabel() {
+  var mode = 'linear';
+  try { mode = localStorage.getItem('frc_field_view_mode') || 'linear'; } catch(e) {}
+  var iconEl  = document.getElementById('fieldViewToggleIcon');
+  var labelEl = document.getElementById('fieldViewToggleLabel');
+  if (labelEl) labelEl.textContent = (mode === 'field') ? 'Linear view' : 'Field view';
+  if (iconEl)  iconEl.innerHTML    = (mode === 'field') ? '&#8596;' : '&#9783;';
+}
+
 function _buildAllianceLineHtml(entry, opts) {
   if (!entry || !entry.red || !entry.blue ||
       entry.red.length === 0 || entry.blue.length === 0) return '';
@@ -5695,11 +6179,23 @@ function _buildAllianceLineHtml(entry, opts) {
 
 // Render the full Blue/Red alliance roster for a match entry,
 // returning an HTML string for the meta block of updateNextMatch.
-// Thin wrapper around _buildAllianceLineHtml — kept as a separate
-// function so the callsite reads as intent ("render alliance
-// roster") rather than implementation ("build line html").
+// Helper: pick which alliance HTML builder runs based on the user's
+// layout preference (linear vs field). Centralizes the localStorage
+// read so all four call sites (3-up cells, team-card next-match,
+// next-only fallback, and any future caller) follow the same mode.
+function _allianceHtmlForMode(entry, opts) {
+  var mode = 'linear';
+  try { mode = localStorage.getItem('frc_field_view_mode') || 'linear'; } catch(e) {}
+  if (mode === 'field' && typeof _buildAllianceFieldHtml === 'function') {
+    return _buildAllianceFieldHtml(entry, opts);
+  }
+  return _buildAllianceLineHtml(entry, opts);
+}
+
+// Thin wrapper — kept as a separate function so the callsite reads
+// as intent ("render alliance roster") rather than implementation.
 function _renderAllianceRoster(entry) {
-  return _buildAllianceLineHtml(entry);
+  return _allianceHtmlForMode(entry);
 }
 
 function _renderNextOnlyAlliances(entry) {
@@ -5707,7 +6203,7 @@ function _renderNextOnlyAlliances(entry) {
   if (!el) return;
   // Same layout as the team-card alliance line — the host card is
   // also full-width, so no compact treatment needed here.
-  el.innerHTML = _buildAllianceLineHtml(entry);
+  el.innerHTML = _allianceHtmlForMode(entry);
 }
 
 // Returns true when at least one live source has data we can act
