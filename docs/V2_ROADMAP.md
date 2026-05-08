@@ -67,20 +67,44 @@ since migration is idempotent and back-compat reads are V2-shape.
 
 ---
 
-## Phase 2 — DB migration
+## Phase 2 — DB migration *(ready to run)*
 
 **Goal:** every row in the three day_config-bearing tables is
 `dayConfigVersion: 2`.
 
-**Work:** per [DB_V2_MIGRATION.md](DB_V2_MIGRATION.md) §3, §6.
+**Tooling:** `scripts/migrate_db_to_v2.py` (Python migration logic
+using `app.day_config_v2.migrate_v1_to_v2()`) wrapped by
+`scripts/openshift_migrate.sh` (snapshot + dry-run + confirm + apply
++ verify). See [DB_V2_MIGRATION.md](DB_V2_MIGRATION.md) §3 and §6.
+
+**Work:** per [DB_V2_MIGRATION.md](DB_V2_MIGRATION.md) §3 and §6.
+With the wrapper script, the operator runs:
+
+```bash
+./scripts/openshift_migrate.sh dryrun     # preview what would change
+./scripts/openshift_migrate.sh apply      # actually migrate
+./scripts/openshift_migrate.sh verify     # confirm post-state any time
+```
 
 **Exit criteria:**
-- Pre-migration snapshot saved (rollback path).
-- One-shot SQL migration applied; spot-checks pass.
-- Server-side fallback verified on production traffic for 7 days
-  with zero invocations.
+- Pre-migration snapshot saved (rollback path). The wrapper script
+  enforces this — it refuses to apply without first writing a
+  validated snapshot.
+- All three tables report `v1: 0` after migration. Verify command:
+  `./scripts/openshift_migrate.sh verify`.
+- Server-side fallback (`normalize_to_v2()` on read) verified on
+  production traffic for 7 days with zero invocations of the
+  V1→V2 path. *No metric exists for this yet — phase 1 added the
+  fallback but no instrumentation. Could add a counter to
+  `app/day_config_v2.normalize_to_v2()` when phase 5 cleanup
+  approaches; for now the proof is "every read of every saved
+  schedule comes back as V2 in API responses."*
 
-**Risk:** low. The migration is idempotent and reversible.
+**Risk:** low. The migration is idempotent (running twice is
+harmless), reversible (the snapshot file restores via standard
+`psql -f`), and atomic per-row (each table commits as a unit). The
+operator gets two opportunities to abort: dry-run output review,
+and explicit "type 'apply'" confirmation.
 
 ---
 
@@ -242,6 +266,22 @@ emits no matches for it. Eventually we'll generate playoff matches
 from the bracket format and alliance selection results. That's a
 separate workstream; tracked here as a marker.
 
+### Q-07 Unified event selector — view + edit page?
+
+**Open / future enhancement.** The view page currently doesn't have
+an event selector — it relies on `?key=` URL param. The edit page
+has its own event picker UI. Both should converge on a single
+component so:
+
+- A user on `/view` can switch events without manually editing the URL.
+- The same component, same backing endpoint, same behavior across pages.
+- Permissions logic (who-can-see-which-event) lives in one place.
+
+Tracked here so we don't lose it. Schedule: post-V2 migration —
+the selector touches event-data plumbing that isn't on the V2
+critical path, and slipping it in mid-phase risks scope creep.
+Revisit after phase 3 ships.
+
 ---
 
 ## Status tracker
@@ -250,7 +290,7 @@ separate workstream; tracked here as a marker.
 |-------|-------------|-------|---------------------------------------------|
 | 0     | ✓ Done      | claude| Specs ratified, doc reviews complete        |
 | 1     | ✓ Done (pending review) | claude | Backend V2 in place — see phase 1 notes  |
-| 2     | Not started |       | One-shot SQL migration                      |
+| 2     | ⏳ Ready to run | you | Run `./scripts/openshift_migrate.sh apply`  |
 | 3     | Not started |       | Frontend cleanup; mostly deletion           |
 | 4     | Not started |       | URL format change with back-compat          |
 | 5     | Not started |       | Cleanup; 6 months after phase 4            |

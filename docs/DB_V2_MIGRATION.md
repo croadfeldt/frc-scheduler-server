@@ -41,63 +41,44 @@ slipped through.
 
 ### 3.1 The migration script
 
-`migrate_day_config_to_v2.sql` (to be authored) — runs the V1→V2
-reconstruction in PL/pgSQL, mirroring the JS `migrateLegacyDayConfig`
-logic. The PG version preserves type metadata (`subtype`,
-`ceremonyKind`, `breakKind`) when V1 break entries carry them; falls
-back to heuristic classification when they don't.
+`scripts/migrate_db_to_v2.py` is the authoritative migration tool.
+It uses `app.day_config_v2.migrate_v1_to_v2()` — the same Python
+function exercised by `tests/test_day_config_v2.py` (31 passing tests)
+— wrapped in SQLAlchemy plumbing that walks each `day_config`-bearing
+table and rewrites V1 rows to V2.
 
-Pseudocode:
+Choice of Python over PL/pgSQL: keeps the migration logic in one
+place. The V1→V2 reconstruction has nuance (subtype detection,
+ceremony-kind heuristics, alliance-selection hoisting) that's
+already battle-tested in Python. Porting it to PL/pgSQL would
+duplicate the logic and add a drift risk.
 
-```sql
-UPDATE abstract_schedules
-SET day_config = migrate_v1_to_v2(day_config)
-WHERE day_config IS NOT NULL
-  AND COALESCE((day_config->>'dayConfigVersion')::int, 1) < 2;
+The script supports three modes:
+- **Default (dry run):** reports what would change without writing.
+- `--apply`: actually rewrites V1 rows. Idempotent — V2 rows skip,
+  null rows skip.
+- `--verify`: prints the version distribution without modifying anything.
 
-UPDATE assigned_schedules        SET day_config = migrate_v1_to_v2(day_config) WHERE …;
-UPDATE assigned_schedule_history SET day_config = migrate_v1_to_v2(day_config) WHERE …;
-```
-
-`migrate_v1_to_v2(jsonb)` is a PL/pgSQL function that:
-
-1. Returns the input unchanged if `dayConfigVersion = 2`.
-2. Constructs a V2 root with `dayConfigVersion: 2`, `cycleTime`,
-   `breakBuffer` from the V1 input.
-3. For each V1 day, builds a single V2 day with:
-   - One `qualification` block for `(start, end)` carrying the V1
-     `cycleTime` and `cycleChanges[].afterMatch` translated to local.
-   - Tier-3 children for V1 break entries:
-     - If the break has `subtype` field (post-fix-3 saves), routes
-       by subtype: `alliance_selection | awards | ceremony` → day
-       level; `break` → into the qual block.
-     - Else (pre-subtype legacy data), all breaks go into the qual
-       block. Loses no information that the V1 row had.
-4. For each V1 `practiceDay` (when enabled), builds a separate day
-   with one `practice` block.
-5. For each V1 `playoffBlocks[]` entry, attaches a `playoff` block
-   to the day at `dayIndex`.
+`scripts/openshift_migrate.sh` wraps this script with the snapshot
+workflow described in §5 and §6, so the operator runs one command
+rather than orchestrating snapshot + copy + exec by hand.
 
 ### 3.2 Server-side fallback
 
-`app/main.py` GET handlers (B-04 in
-[V1_RETIREMENT.md](V1_RETIREMENT.md)) run the migrator on read for
-any row that's still V1-shape. After the one-shot SQL migration,
-this should never fire — but it's a safety net for any row that
-escapes (e.g. created by an older client during deploy).
+The fallback already exists. `app/main.py` GET handlers route
+all stored `day_config` values through `app.day_config_v2.normalize_to_v2()`
+before returning them. Pre-migration rows return as V2 transparently.
 
-This fallback gets removed in phase 5 (after a confidence period
-where the metric stays at zero invocations).
+After phase 2 completes, the fallback is no longer load-bearing
+(every row is V2 in storage) but stays in place as a safety net
+through phase 5.
 
 ### 3.3 Validation on write
 
-`app/main.py` POST/PATCH handlers (B-01, B-02, B-03 in
-[V1_RETIREMENT.md](V1_RETIREMENT.md)) validate incoming `day_config`
-against the V2 Pydantic model. Rejects with 400 if non-conforming.
-
-During the transition, the server can auto-migrate V1 input on
-write — but this masks client-side bugs. Better to fail loud and
-make the editor fix its emit.
+`app/main.py` POST/PATCH handlers route incoming `day_config`
+through `_normalize_dc()`, which validates against `DayConfigV2`
+(per [V2_SPEC.md](V2_SPEC.md) §8) and rejects malformed input
+with HTTP 400. V1-shape input is auto-migrated.
 
 ## 4. Schema changes (none required)
 
@@ -154,15 +135,35 @@ data — store accordingly.
 
 ### Apply the migration (OpenShift)
 
+The full flow is wrapped in `scripts/openshift_migrate.sh apply` (see §6).
+The lower-level commands it runs:
+
 ```bash
-# Copy the migration SQL to the pod, run it, verify, clean up.
-oc cp ./migrate_day_config_to_v2.sql "$PG_POD":/tmp/migration.sql
+APP_POD=$(oc get pod -l app=frc-scheduler-server-git -o jsonpath='{.items[0].metadata.name}')
 
-oc exec -it "$PG_POD" -- \
-  psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-       -f /tmp/migration.sql
+# Copy the migration script to the scheduler pod (where Python deps
+# are installed; postgres pod doesn't have Python dependencies).
+oc cp scripts/migrate_db_to_v2.py "$APP_POD":/tmp/migrate_db_to_v2.py
 
-# Spot-check: every row should now report version 2.
+# Dry-run to preview. Reports version distribution + per-table
+# counts of "would write" / "skipped" / "errors". No writes.
+oc exec "$APP_POD" -- python /tmp/migrate_db_to_v2.py
+
+# Apply. Idempotent — V2 rows skip; only V1 rows are rewritten.
+oc exec "$APP_POD" -- python /tmp/migrate_db_to_v2.py --apply
+
+# Verify post-migration state. Every row should report v2; v1 count
+# should be 0. Null is fine (some rows legitimately have no day_config).
+oc exec "$APP_POD" -- python /tmp/migrate_db_to_v2.py --verify
+
+# Tidy up the script from the pod.
+oc exec "$APP_POD" -- rm -f /tmp/migrate_db_to_v2.py
+```
+
+Spot-check directly via psql if you want a second confirmation:
+
+```bash
+PG_POD=$(oc get pod -l app=frc-postgres -o jsonpath='{.items[0].metadata.name}')
 oc exec "$PG_POD" -- \
   psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
        -c "SELECT 'abstract' AS tbl, day_config->>'dayConfigVersion' AS v, COUNT(*) FROM abstract_schedules WHERE day_config IS NOT NULL GROUP BY 2
@@ -170,13 +171,9 @@ oc exec "$PG_POD" -- \
            SELECT 'assigned', day_config->>'dayConfigVersion', COUNT(*) FROM assigned_schedules WHERE day_config IS NOT NULL GROUP BY 2
            UNION ALL
            SELECT 'history',  day_config->>'dayConfigVersion', COUNT(*) FROM assigned_schedule_history WHERE day_config IS NOT NULL GROUP BY 2;"
-
-# Tidy up the pod.
-oc exec "$PG_POD" -- rm -f /tmp/migration.sql
 ```
 
-Expected output: every row in the `v` column should be `2` after
-migration.
+Expected output: every row in the `v` column should be `2` after migration.
 
 ### Rollback procedure (OpenShift)
 
@@ -186,7 +183,7 @@ Only required if phase 1-2 surfaces a blocker that can't be hot-fixed.
 PG_POD=$(oc get pod -l app=frc-postgres -o jsonpath='{.items[0].metadata.name}')
 
 # 1. Stop the application pods to prevent concurrent writes.
-oc scale deployment/frc-scheduler --replicas=0
+oc scale deployment/frc-scheduler-server --replicas=0
 
 # 2. Truncate the affected tables. CASCADE because of FK relationships
 #    (assigned_schedules -> abstract_schedules, history -> assigned).
@@ -201,10 +198,10 @@ oc exec -it "$PG_POD" -- \
        -f /tmp/restore.sql
 
 # 4. Redeploy the prior application image.
-oc rollout undo deployment/frc-scheduler
+oc rollout undo deployment/frc-scheduler-server
 
 # 5. Bring traffic back.
-oc scale deployment/frc-scheduler --replicas=1
+oc scale deployment/frc-scheduler-server --replicas=1
 
 # 6. Verify the app responds and old schedules load correctly.
 curl -sf https://frc-scheduler.roadfeldt.com/healthz
@@ -251,31 +248,96 @@ is restorable.
 
 ## 6. Migration window
 
-The migration runs during a planned maintenance window. Steps:
+The migration runs during a planned maintenance window. With the
+wrapper script (`scripts/openshift_migrate.sh`), the steps collapse to:
 
 1. Announce maintenance.
-2. Snapshot the three tables (per §5 "Snapshot before migrating").
-3. Verify the snapshot is restorable (per §5 "Verifying a backup").
-4. Stop write traffic:
+2. (Optional) Stop write traffic if you want a frozen snapshot:
    ```bash
-   oc scale deployment/frc-scheduler --replicas=0
+   oc scale deployment/frc-scheduler-server --replicas=0
    ```
-5. Apply the migration (per §5 "Apply the migration"). Should take
-   seconds for typical workloads (a few hundred rows).
-6. Spot-check 5-10 rows: query `day_config->>'dayConfigVersion'`
-   should return `'2'`; full V2 validation passes (§5 has the
-   one-shot SQL for this).
-7. Resume traffic:
+   *Strictly speaking the migration is safe with traffic running —
+   it's idempotent and atomic per row — but a quiescent window
+   makes the snapshot match the post-migration state exactly.*
+3. Dry-run first to preview:
    ```bash
-   oc scale deployment/frc-scheduler --replicas=1
-   oc rollout status deployment/frc-scheduler
+   ./scripts/openshift_migrate.sh dryrun
    ```
-8. Watch the server-side fallback metric for 30 days. If zero, drop
+   This snapshots, then runs the migration in dry-run mode. The
+   snapshot is preserved either way. Output shows version
+   distribution before, list of would-write per row, and summary.
+4. Review the dry-run output. The would-write count should match
+   what `--verify` reports as `v1` rows (modulo any null rows).
+5. Apply for real:
+   ```bash
+   ./scripts/openshift_migrate.sh apply
+   ```
+   Same flow — fresh snapshot first, then dry-run preview, then
+   prompts for confirmation, then applies, then verifies.
+6. Resume traffic if you stopped it:
+   ```bash
+   oc scale deployment/frc-scheduler-server --replicas=1
+   oc rollout status deployment/frc-scheduler-server
+   ```
+7. Watch the server-side fallback metric for 30 days. If zero, drop
    the fallback in a phase-5 cleanup pass.
 
-Total expected downtime: under 5 minutes for current data volumes
-(the snapshot + migration + verification all run in seconds; the
-bulk of the window is application restart and smoke-testing).
+Total expected downtime: **zero** if you skip step 2 (the migration
+is safe with traffic), or under 5 minutes if you stop the app first.
+The migration itself runs in seconds for current data volumes.
+
+### 6.1 What the operator sees
+
+```
+$ ./scripts/openshift_migrate.sh apply
+Postgres pod:  frc-postgres-58ddc5cd7-6v56s
+Scheduler pod: frc-scheduler-server-7b44ff96c6-zcrt9
+Mode:          apply
+
+── snapshotting three day_config tables to pre_v2_migration_backup_20260507_211523.sql ──
+Backup size: 84321 bytes
+Snapshot looks valid.
+
+── copying migration script to frc-scheduler-server-7b44ff96c6-zcrt9:/tmp/migrate_db_to_v2.py ──
+
+── dry-run preview ──
+Connecting to: postgresql+asyncpg://***:***@frc-postgres:5432/frc_scheduler
+Mode: DRY RUN (no writes)
+
+── version distribution before ──
+table                              total   null     v1     v2  other
+----------------------------------------------------------------------
+abstract_schedules                    47      2     38      7      0
+assigned_schedules                    62      0     51     11      0
+assigned_schedule_history            148      0    121     27      0
+
+── dry run — nothing will be written ──
+abstract_schedules: 38 would write, 9 skipped, 0 errors
+assigned_schedules: 51 would write, 11 skipped, 0 errors
+assigned_schedule_history: 121 would write, 27 skipped, 0 errors
+
+summary: 210 migrated, 47 skipped, 0 errors
+
+── about to APPLY migration to the live database ──
+Backup file: pre_v2_migration_backup_20260507_211523.sql
+Type 'apply' (without quotes) to proceed, or anything else to abort:
+apply
+
+── applying migration ──
+[...same numbers, with "wrote" instead of "would write"...]
+
+── post-migration verification ──
+[...table now shows all v2 / null counts; v1 should be 0...]
+
+Migration complete.
+Backup retained at: pre_v2_migration_backup_20260507_211523.sql
+```
+
+The "verify" command can be run at any time afterwards to spot-check:
+
+```
+$ ./scripts/openshift_migrate.sh verify
+```
 
 ## 7. Adjacent considerations
 

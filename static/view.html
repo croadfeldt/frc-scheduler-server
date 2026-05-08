@@ -2606,7 +2606,178 @@ function showSchedulePicker(eventKey, data) {
 // Common post-load handling: stash data on STATE, apply branding, compute
 // times, render, and trigger live polling. Called by both loadAssigned and
 // loadByEventKey to keep the post-fetch path consistent.
+// ── Day-config V2 → V1 downgrade for the view page ────────────────────
+// Phase 1 of the V2 migration made the API return V2-shape day_config
+// (per docs/V2_SPEC.md). The view page's computeMatchTimes() and a
+// handful of agenda/playoff rendering paths still read V1-shape fields
+// (day.start, day.end, day.breaks, day.cycleChanges, cfg.practiceDay).
+//
+// Rather than rewrite all of those at once, we run incoming day_configs
+// through this lightweight downgrader on load, which lets view.html
+// keep using V1 shape internally until phase 3 makes it V2-aware.
+//
+// Mirror of app/day_config_v2.py:downgrade_v2_to_v1 — the canonical
+// V2→V1 conversion. Lossy on type info (subtype, ceremonyKind,
+// per-block cycle times) which V1 wire format can't represent;
+// view.html doesn't use those fields today, so the loss is invisible.
+function _v2DowngradeToV1ForView(dc) {
+  if (!dc || typeof dc !== 'object') return dc;
+  if (dc.dayConfigVersion !== 2) return dc;  // already V1, pass through
+
+  const out = {
+    cycleTime:   dc.cycleTime,
+    breakBuffer: dc.breakBuffer,
+    days: [],
+    playoffBlocks: [],
+  };
+  // Side-channel fields the editor piggybacks on day_config — preserve
+  // through the downgrade rather than dropping silently.
+  for (const k of ['autoPopulate', 'autoMaxCycles', 'autoAssign', 'timeline_blocks']) {
+    if (k in dc) out[k] = dc[k];
+  }
+
+  // Helper: tier-3 V2 block → V1 break entry. Synthesizes a name when
+  // label is missing so the V1 consumer always gets a non-empty name.
+  const _v2BlockToV1Break = (b) => {
+    let name = b.label;
+    if (!name) {
+      const t = b.type || 'break';
+      if (t === 'ceremony') {
+        const kind = b.ceremonyKind || 'opening';
+        name = kind.charAt(0).toUpperCase() + kind.slice(1) + ' ceremony';
+      } else if (t === 'alliance_selection') name = 'Alliance selection';
+      else if (t === 'awards')               name = 'Awards';
+      else                                    name = (b.breakKind === 'lunch') ? 'Lunch' : 'Break';
+    }
+    return { name, start: b.start, end: b.end };
+  };
+
+  let practiceEmitted = false;
+  (dc.days || []).forEach((day, di) => {
+    const blocks    = day.blocks || [];
+    const practices = blocks.filter(b => b.type === 'practice');
+    const quals     = blocks.filter(b => b.type === 'qualification');
+    const playoffs  = blocks.filter(b => b.type === 'playoff');
+    const tier3s    = blocks.filter(b =>
+      b.type === 'break' || b.type === 'awards' ||
+      b.type === 'alliance_selection' || b.type === 'ceremony'
+    );
+
+    // First practice-only V2 day → V1 practiceDay slot.
+    if (practices.length && !quals.length && !practiceEmitted) {
+      const p = practices[0];
+      const v1pcc = [];
+      if (p.cycleTime) v1pcc.push({ isStart: true, time: parseFloat(p.cycleTime) });
+      (p.changes || []).forEach(cc => {
+        if (cc.afterMatch && cc.cycleTime) {
+          v1pcc.push({ isStart: false, afterMatch: parseInt(cc.afterMatch, 10),
+                       time: parseFloat(cc.cycleTime) });
+        }
+      });
+      out.practiceDay = {
+        enabled:      true,
+        start:        p.start || '',
+        end:          p.end   || '',
+        ct:           p.cycleTime || dc.cycleTime || 11,
+        guaranteed:   p.guaranteed != null ? p.guaranteed : 1,
+        filler:       p.maxFiller  != null ? p.maxFiller  : 99,
+        breaks:       (p.breaks || []).map(_v2BlockToV1Break),
+        cycleChanges: v1pcc,
+        earlyEnd:     null,
+        date:         day.date || '',
+        label:        day.label || 'Practice',
+      };
+      practiceEmitted = true;
+      return;
+    }
+
+    // Otherwise this V2 day → a regular V1 day. Use qual block (or first
+    // practice if no qual) as the primary window.
+    const primary = quals[0] || practices[0] || null;
+    let dayStart = '', dayEnd = '', dayCt = out.cycleTime;
+    if (primary) {
+      dayStart = primary.start || '';
+      dayEnd   = primary.end || '';
+      dayCt    = primary.cycleTime || out.cycleTime;
+    } else if (blocks.length) {
+      // Tier-3-only day — synthesize window from min/max of all blocks.
+      const starts = blocks.map(b => timeStrToMin(b.start)).filter(v => v != null);
+      const ends   = blocks.map(b => timeStrToMin(b.end)).filter(v => v != null);
+      if (starts.length && ends.length) {
+        const s = Math.min(...starts), e = Math.max(...ends);
+        dayStart = String(Math.floor(s / 60)).padStart(2, '0') + ':' +
+                   String(s % 60).padStart(2, '0');
+        dayEnd   = String(Math.floor(e / 60)).padStart(2, '0') + ':' +
+                   String(e % 60).padStart(2, '0');
+      }
+    }
+
+    // Flatten breaks: nested children of primary + hoisted tier-3 → V1 breaks.
+    const v1Breaks = [];
+    if (primary) (primary.breaks || []).forEach(nb => v1Breaks.push(_v2BlockToV1Break(nb)));
+    tier3s.forEach(t3 => v1Breaks.push(_v2BlockToV1Break(t3)));
+    v1Breaks.sort((a, b) => (timeStrToMin(a.start) || 0) - (timeStrToMin(b.start) || 0));
+
+    // Cycle changes from primary block. afterMatch in V2 is block-local;
+    // V1 expects globals. Computing the running offset properly here
+    // requires knowing match counts per prior block — view.html doesn't
+    // need that level of fidelity (it just uses cycleChanges to pick a
+    // current cycle time at render-time, so the local indices work).
+    const v1Cc = [];
+    if (primary) {
+      if (primary.cycleTime &&
+          Math.abs(parseFloat(primary.cycleTime) - parseFloat(out.cycleTime || dc.cycleTime || 0)) > 0.001) {
+        v1Cc.push({ isStart: true, time: parseFloat(primary.cycleTime) });
+      }
+      (primary.changes || []).forEach(cc => {
+        if (cc.afterMatch && cc.cycleTime) {
+          v1Cc.push({
+            isStart:    false,
+            afterMatch: parseInt(cc.afterMatch, 10),
+            time:       parseFloat(cc.cycleTime),
+          });
+        }
+      });
+    }
+
+    out.days.push({
+      start:        dayStart,
+      end:          dayEnd,
+      cycleTime:    dayCt,
+      breaks:       v1Breaks,
+      cycleChanges: v1Cc,
+      earlyEnd:     null,
+      label:        day.labelOverride || day.label || ('Day ' + (di + 1)),
+      date:         day.date || '',
+    });
+
+    // Playoff blocks → V1 side-channel.
+    playoffs.forEach(pb => {
+      out.playoffBlocks.push({
+        dayIndex:  out.days.length - 1,
+        start:     pb.start,
+        end:       pb.end,
+        format:    pb.playoffFormat    || 'double_elim',
+        alliances: pb.playoffAlliances || pb.playoffTeams || 8,
+        cycleTime: pb.cycleTime        || 11,
+      });
+    });
+  });
+
+  if (!practiceEmitted) {
+    out.practiceDay = { enabled: false, start: '', end: '', ct: out.cycleTime || 11, guaranteed: 1 };
+  }
+
+  return out;
+}
+
 async function _applyLoadedSchedule(data, source) {
+  // Downgrade incoming V2 day_config to V1 shape for view-page consumption.
+  // No-op when day_config is already V1 (pre-phase-1 saved schedules) or
+  // null. Phase 3 will make view.html V2-aware and remove this shim.
+  if (data && data.day_config) {
+    data.day_config = _v2DowngradeToV1ForView(data.day_config);
+  }
   STATE.schedule = data;
   STATE.scheduleSource = source;  // 'local' | 'tba'
   if (data.event) {
@@ -2633,7 +2804,10 @@ async function loadAbstract(id) {
     const data = await r.json();
     // Treat as schedule with slot-numbers as team numbers
     STATE.schedule = {
-      id: data.id, matches: data.matches, day_config: data.day_config,
+      id: data.id, matches: data.matches,
+      // Downgrade V2 day_config to V1 shape for view-page consumption.
+      // Same shim as in _applyLoadedSchedule; phase 3 will retire both.
+      day_config: _v2DowngradeToV1ForView(data.day_config),
       num_teams: data.num_teams, matches_per_team: data.matches_per_team,
       event: null, _isAbstract: true,
     };
