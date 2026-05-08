@@ -134,36 +134,52 @@ fallbacks; stage 2 (after phase 4) handles the V1 markup itself.
    declaration, zero callers post-cleanup.
 5. Net deletion: ~60 lines of dead V1 code.
 
-### Stage 2 *(blocked on phase 4)*
+### Stage 2 *(✓ mostly done; helpers retire in phase 5)*
 
-What remains is dead-code-but-still-rendered:
+What we did:
 
-1. The V1 form markup (`.day-row`, practice-day form fields,
-   `#numDays`) — hidden via `display:none` since V2 went live, but
-   still in the DOM. The V1 URL parser (lifecycle: phase 4) writes
-   to these as a stepping stone to V2 rendering. Once phase 4 swaps
-   to V2-native URL params, the markup truly has no users.
-2. The V1 form rendering functions (`buildDaysUI`, `addDayRow`,
-   `applyDayConfigToUI` V1 branches). Same lifecycle.
-3. The V1 read helpers (`getCycleTimeChanges`, `getDayStartCycleTime`,
-   `getDayForMatch`, `addDayCycleChange`). Same lifecycle.
-4. `migrateLegacyDayConfig` (the JS one) — still called defensively
-   from `applyDayConfigToUI` for legacy URL data. Server-side
-   `app.day_config_v2.migrate_v1_to_v2` already handles API-loaded
-   data; the JS migrator stays until V1 URLs retire.
-5. `downgradeToV1` — still called by `buildShareUrl` and
-   `collectDayConfig` to produce V1-shape output for the wire
-   format. Phase 4 ditches V1 URL params; this function retires
-   alongside.
+1. ✓ V1 day-config wrapper (`#v1DaysWrapper`) deleted from DOM. The
+   ~60 lines of V1 form markup (practice section, days container,
+   add-day button, error msg) are gone.
+2. ✓ Visible "Number of Days" field removed; `#numDays` retained as
+   a hidden input so JS readers don't crash. Phase 5 deletes the
+   element when the readers go.
+3. ✓ V1 URL → V1 dc converter (`_assembleV1DcFromUrlParams`) added.
+   V1 URLs now flow: parse → assemble V1 dc → migrate to V2 →
+   `renderDayConfigV2`. No form-field detour.
+4. ✓ `applyUrlParams` simplified — V1 day_config form-field writes
+   removed. Still handles top-level fields (numTeams, MPT, cd,
+   cycleTime, breakBuffer, weights, autoFlags, seed).
+5. ✓ `applyDayConfigToUI` simplified to V2-only. Was ~140 lines of
+   form-field write code; now ~25 lines (V2 render + top-level
+   field syncs + dates side-channel + auto flags).
+6. ✓ `buildDaysUI`, `togglePracticeDay` made defensive (early
+   return on missing markup). The other V1 helpers (`addBreak`,
+   `addDay`, `addDayCycleChange`, etc.) naturally no-op because
+   their DOM queries return empty NodeLists once the markup is gone.
 
-**Exit criteria for stage 2:** the grep walkthrough returns only
-doc-comment matches for `\.day-row`, `day-cc-row`, `practiceStart`,
-`migrateLegacyDayConfig`, `downgradeToV1`, etc.
+What's left for phase 5:
 
-**Risk:** stage 1 was low (deletion of unreachable code only).
-Stage 2 lands during/after phase 4 with the same ratchet:
-phase 4 makes V1 URL parsing the only V1-using path, then deletes
-that, then stage 2's deletions become safe.
+- Delete the V1 helper *functions* outright. They're dormant now
+  but still occupy ~600 lines (`buildDaysUI`, `addDay`, `addBreak`,
+  `addDayCycleChange`, `addDayEarlyEnd`, `removeDay`,
+  `applyDayEndTimes`, `renumberDays`, `togglePracticeDay`,
+  `addPracticeBreak`, `addPracticeCycleChange`, `addPracticeEarlyEnd`,
+  `getCycleTimeChanges`, `getDayStartCycleTime`, `getDayForMatch`,
+  `getDayEarlyEnd`).
+- Delete the surviving callers in non-V1 paths that still reference
+  these functions defensively (PDF import dayplan-apply, agenda
+  fetch handler).
+- Delete `migrateLegacyDayConfig` (JS) once V1 URL back-compat is
+  retired (or kept indefinitely if the cost is small).
+- Delete `downgradeToV1` once `finishGeneration` is rewritten
+  V2-native.
+- Remove the `#numDays` hidden input.
+
+**Risk:** stage 2 was deletion-heavy with surface-area-aware
+defensive guards. The V2 path handles all current code flows; V1
+URL back-compat is preserved via the new converter. Net: ~250 lines
+deleted from index.html, no functional regressions.
 
 ---
 
@@ -328,6 +344,6 @@ Revisit after phase 3 ships.
 | 0     | ✓ Done      | claude| Specs ratified, doc reviews complete        |
 | 1     | ✓ Done      | claude| Backend V2 in place; deployed                |
 | 2     | ✓ Done      | you   | DB migration applied                        |
-| 3     | ⏳ Stage 1 done | claude | Stage 2 ready to run (next turn)        |
-| 4     | ✓ Done (pending review) | claude | V2 URL emit/parse + 36 round-trip tests |
-| 5     | Not started |       | Cleanup; 6 months after phase 4            |
+| 3     | ✓ Mostly done | claude | V1 markup gone; helper deletion in phase 5 |
+| 4     | ✓ Done      | claude| V2 URL emit/parse + 36 round-trip tests    |
+| 5     | Not started |       | Helper function deletion + final cleanup    |
