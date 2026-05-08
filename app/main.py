@@ -417,7 +417,11 @@ async def get_or_create_adhoc_event(db: AsyncSession = Depends(get_session)):
 
 
 @app.post("/api/events", status_code=201)
-async def create_event(body: EventCreate, db: AsyncSession = Depends(get_session)):
+async def create_event(
+    body: EventCreate,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
     existing = await db.execute(select(Event).where(Event.key == body.key))
     if existing.scalar_one_or_none():
         raise HTTPException(409, f"Event '{body.key}' already exists")
@@ -453,6 +457,7 @@ async def patch_event_branding(
     event_id: int,
     branding: dict,
     db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
 ):
     """Update the event's branding payload for the /view page.
 
@@ -467,10 +472,19 @@ async def patch_event_branding(
       footer:          str  — footer line (sponsor credits etc.)
 
     Pass an empty object {} or null fields to clear branding.
+
+    Authorization: auth required (Phase A); event freeze respected
+    (only freezer or admin can change branding on a frozen event).
     """
     event = await db.get(Event, event_id)
     if not event:
         raise HTTPException(404, "Event not found")
+    if _is_event_frozen(event, user):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
+                   "— only the freezer or an admin can change branding.",
+        )
     # Replace, don't merge — caller has the full object. Use empty dict to clear.
     event.branding = branding if isinstance(branding, dict) else {}
     await db.commit()
@@ -478,10 +492,30 @@ async def patch_event_branding(
 
 
 @app.delete("/api/events/{event_id}", status_code=204)
-async def delete_event(event_id: int, db: AsyncSession = Depends(get_session)):
+async def delete_event(
+    event_id: int,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
+    """Delete an event and everything under it.
+
+    Authorization layering:
+      - Auth required (Phase A; was missing pre-fix)
+      - Event freeze respected — frozen events can only be deleted
+        by the freezer or an admin (Part 13)
+      - Cascade deletion handles abstract_schedules,
+        assigned_schedules, event_teams, etc. via FK ON DELETE
+        CASCADE in the schema
+    """
     event = await db.get(Event, event_id)
     if not event:
         raise HTTPException(404, "Event not found")
+    if _is_event_frozen(event, user):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
+                   "— only the freezer or an admin can delete it.",
+        )
     await db.delete(event)
     await db.commit()
 
@@ -540,8 +574,11 @@ async def tba_search_index():
 
 
 @app.post("/api/tba/import/{event_key}", status_code=201)
-async def tba_import_event(event_key: str = Path(..., max_length=64),
-                           db: AsyncSession = Depends(get_session)):
+async def tba_import_event(
+    event_key: str = Path(..., max_length=64),
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
     try:
         tba_event = await tba_client.get_event(event_key)
         tba_teams = await tba_client.get_event_teams(event_key)
@@ -561,6 +598,17 @@ async def tba_import_event(event_key: str = Path(..., max_length=64),
 
     existing = await db.execute(select(Event).where(Event.key == event_key))
     event = existing.scalar_one_or_none()
+    # Freeze check — only apply when an existing event would be
+    # mutated (a fresh event create from import is permitted for
+    # any authenticated user). Refresh-imports against a frozen
+    # event by anyone except freezer/admin: 423.
+    if event is not None and _is_event_frozen(event, user):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
+                   "— TBA refresh-import would mutate event metadata and team "
+                   "roster. Only the freezer or an admin can re-import.",
+        )
     event_data = tba_client.normalise_event(tba_event)
     if event:
         for k, v in event_data.items():
@@ -622,8 +670,12 @@ async def frc_events_list(year: int = Path(..., ge=1992, le=2100),
 
 
 @app.post("/api/frc/import/{year}/{event_code}", status_code=201)
-async def frc_import_event(year: int = Path(..., ge=1992, le=2100), event_code: str = Path(..., max_length=32),
-                           db: AsyncSession = Depends(get_session)):
+async def frc_import_event(
+    year: int = Path(..., ge=1992, le=2100),
+    event_code: str = Path(..., max_length=32),
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
     try:
         frc_event = await frc_client.get_event(year, event_code)
         if not frc_event:
@@ -649,6 +701,16 @@ async def frc_import_event(year: int = Path(..., ge=1992, le=2100), event_code: 
 
     existing = await db.execute(select(Event).where(Event.key == key))
     event = existing.scalar_one_or_none()
+    # Freeze check — only apply when an existing event would be
+    # mutated. Refresh-imports against a frozen event by anyone
+    # except freezer/admin: 423.
+    if event is not None and _is_event_frozen(event, user):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
+                   "— FRC Events refresh-import would mutate event metadata and "
+                   "team roster. Only the freezer or an admin can re-import.",
+        )
     if event:
         for k, v in event_data.items():
             setattr(event, k, v)
@@ -698,10 +760,21 @@ async def list_event_teams(event_id: int, db: AsyncSession = Depends(get_session
 
 
 @app.post("/api/events/{event_id}/teams", status_code=201)
-async def add_team_to_event(event_id: int, body: TeamIn, db: AsyncSession = Depends(get_session)):
+async def add_team_to_event(
+    event_id: int,
+    body: TeamIn,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
     event = await db.get(Event, event_id)
     if not event:
         raise HTTPException(404, "Event not found")
+    if _is_event_frozen(event, user):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
+                   "— team roster cannot change.",
+        )
     t_result = await db.execute(select(Team).where(Team.number == body.number))
     team = t_result.scalar_one_or_none()
     if team:
@@ -722,7 +795,21 @@ async def add_team_to_event(event_id: int, body: TeamIn, db: AsyncSession = Depe
 
 
 @app.delete("/api/events/{event_id}/teams/{team_number}", status_code=204)
-async def remove_team(event_id: int, team_number: int, db: AsyncSession = Depends(get_session)):
+async def remove_team(
+    event_id: int,
+    team_number: int,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
+    event = await db.get(Event, event_id)
+    if not event:
+        raise HTTPException(404, "Event not found")
+    if _is_event_frozen(event, user):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
+                   "— team roster cannot change.",
+        )
     t = await db.execute(select(Team).where(Team.number == team_number))
     team = t.scalar_one_or_none()
     if not team:
@@ -738,8 +825,22 @@ async def remove_team(event_id: int, team_number: int, db: AsyncSession = Depend
 
 
 @app.patch("/api/events/{event_id}/teams/{team_number}", status_code=200)
-async def enrich_team(event_id: int, team_number: int, body: dict,
-                      db: AsyncSession = Depends(get_session)):
+async def enrich_team(
+    event_id: int,
+    team_number: int,
+    body: dict,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
+    """Update team metadata (nickname, name).
+
+    The Team row is shared across events, so freeze on event_id
+    is informational only — editing a team's nickname doesn't
+    affect the frozen event's snapshot. We still require auth and
+    an existing event match for routing/audit purposes, but don't
+    block on freeze (the same team in another active event would
+    be unfairly blocked).
+    """
     t = await db.execute(select(Team).where(Team.number == team_number))
     team = t.scalar_one_or_none()
     if not team:
@@ -1026,7 +1127,8 @@ async def list_assigned_schedules(event_id: int, db: AsyncSession = Depends(get_
          "locked_by_name": s.locked_by_name,
          "is_official":      s.is_official,
          "official_at":      s.official_at.isoformat() if s.official_at else None,
-         "official_by_name": s.official_by_name}
+         "official_by_name": s.official_by_name,
+         "forked_from_id":   s.forked_from_id}
         for s in result.scalars()
     ]
 
@@ -1100,6 +1202,10 @@ async def _build_assigned_schedule_response(assigned: AssignedSchedule, db: Asyn
         "official_at":        assigned.official_at.isoformat() if assigned.official_at else None,
         "official_by_user_id": assigned.official_by_user_id,
         "official_by_name":   assigned.official_by_name,
+        # Lineage — NULL on originals, parent id on forks. Editor
+        # uses this to render "Forked from {parent.name}" hint and
+        # to show a lineage chain for once-official ancestors.
+        "forked_from_id":     assigned.forked_from_id,
     }
 
 
@@ -1285,6 +1391,38 @@ def _schedule_protected_by_event_freeze(
     return True
 
 
+async def _was_ever_official(
+    db: AsyncSession, assigned: AssignedSchedule
+) -> bool:
+    """Return True if this schedule has ever been marked official.
+
+    Per docs/SCHEDULE_LIFECYCLE.md Part 4: structural immutability
+    is permanent. Once a schedule has been marked official, its
+    structural fields (slot_map, day_config, practice_matches,
+    name) are frozen forever — even after unmark-official. The
+    only path forward for changes is to fork (POST /duplicate).
+
+    Implementation: query the history table for any row with
+    action='mark-official'. Two-step check (currently is_official
+    OR ever was) is required because the spec specifies that
+    unmarking does NOT restore mutability.
+
+    Why this matters: an admin who unmarks a schedule cannot then
+    "fix" something on it — they must fork. Reasoning about "is
+    this safe to edit" reduces to one question: was this schedule
+    ever official?
+    """
+    if assigned.is_official:
+        return True
+    result = await db.execute(
+        select(AssignedScheduleHistory.id)
+        .where(AssignedScheduleHistory.assigned_schedule_id == assigned.id)
+        .where(AssignedScheduleHistory.action == "mark-official")
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 @app.get("/api/assigned-schedules/{schedule_id}")
 async def get_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get_session)):
     result = await db.execute(
@@ -1340,16 +1478,30 @@ async def patch_assigned_schedule(
                    "— this schedule was frozen at that point. "
                    "Unfreeze the event, or duplicate this schedule to edit a sandbox copy.",
         )
-    # 2. Official → permanent commitment. PATCH refused while
-    #    is_official=True even by the official-marker; the user
-    #    must unmark official first to make changes. Prevents
-    #    quick-edit-then-relock cycles from quietly drifting away
-    #    from "the schedule we ran the event on".
-    if assigned.is_official:
+    # 2. Ever-official → permanent structural immutability. Per
+    #    docs/SCHEDULE_LIFECYCLE.md Part 4: once a schedule has been
+    #    marked official, even once, its structural fields are
+    #    frozen forever. Unmarking does NOT restore mutability.
+    #    Forking is the only path forward.
+    #
+    #    Why "ever" not just "currently": a schedule that was the
+    #    canonical record for an event represents historical truth.
+    #    Allowing it to be unmarked-and-edited would let someone
+    #    silently rewrite history. The audit log would show the
+    #    unmark and the edit, but anyone reading the schedule later
+    #    would see the post-edit state without context.
+    #
+    #    Returns 409 Conflict (not 423 Locked) because forking is
+    #    a different action from unlocking, and the frontend
+    #    handles 409 differently (offers "Fork this schedule"
+    #    affordance rather than "Unlock to edit").
+    if await _was_ever_official(db, assigned):
         raise HTTPException(
-            status_code=423,
-            detail=f"Schedule is marked official by {assigned.official_by_name or 'another user'} "
-                   "— unmark official before editing.",
+            status_code=409,
+            detail=f"This schedule was marked official by "
+                   f"{assigned.official_by_name or 'a previous user'} and is "
+                   "structurally immutable. Fork it (POST /duplicate) to make changes.",
+            headers={"X-Fork-Hint": f"/api/assigned-schedules/{assigned.id}/duplicate"},
         )
     # 3. Lock guard — refuse PATCH on a locked schedule unless the
     #    request is coming from the locker themselves. Returns HTTP
@@ -1521,10 +1673,94 @@ async def unlock_assigned_schedule(
 
 
 @app.post("/api/assigned-schedules/{schedule_id}/activate", status_code=200)
-async def activate_assigned_schedule(schedule_id: int, db: AsyncSession = Depends(get_session)):
+async def activate_assigned_schedule(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
+    """Promote a schedule to active.
+
+    Active schedule is the one users see on /view, the one live
+    data overlays onto, the one tournament officials are running.
+    A high-stakes operation — the per-event uniqueness of
+    is_active=true means promoting one demotes the previous.
+
+    Authorization layering:
+      - Auth required (Phase A)
+      - Event freeze respected — only the freezer or admin can
+        change the active schedule in a frozen event (Part 13)
+      - Schedule lock respected — only the locker or admin can
+        promote a locked schedule (consistent with PATCH semantics
+        on a locked schedule)
+      - Demote ownership — if there's a CURRENTLY active schedule
+        on this event and it was promoted by someone else, only
+        that someone (or an admin) can demote it. This means
+        promoting schedule X over schedule Y requires either
+        being the user who originally promoted Y, or being an
+        admin. Prevents quiet promotion-snatching during an event.
+      - Once-official schedules can still be promoted (officiality
+        is structural-immutability, not is_active gating)
+
+    Limitation: the initial promote (no current active to demote)
+    has no per-event ownership gate today — any authenticated user
+    can do it. RBAC closes that gap when role grants ship.
+    """
     assigned = await db.get(AssignedSchedule, schedule_id)
     if not assigned:
         raise HTTPException(404, "Assigned schedule not found")
+
+    event = await db.get(Event, assigned.event_id) if assigned.event_id else None
+    if _schedule_protected_by_event_freeze(event, assigned, user):
+        raise HTTPException(
+            status_code=423,
+            detail=f"Event is frozen by {event.locked_by_name or 'another user'} "
+                   "— only the freezer or an admin can promote a schedule.",
+        )
+
+    # Working-lock check: if the SOURCE schedule (the one being
+    # promoted) is locked by someone other than the requester and
+    # the requester isn't admin, refuse. This mirrors PATCH lock
+    # semantics — taking the lock asserts ownership of mutations.
+    if assigned.locked_at is not None and assigned.locked_by_user_id != user.get("uid"):
+        if not _is_admin(user):
+            raise HTTPException(
+                status_code=423,
+                detail=f"Schedule is locked by {assigned.locked_by_name or 'another user'}. "
+                       "Only the locker or an admin can promote it.",
+            )
+
+    # Look up the currently active schedule for demote-ownership
+    # check. We track the promoter as the schedule's locker on its
+    # transition into active, but is_active doesn't have a dedicated
+    # promoter_user_id column today. Heuristic: the current locker
+    # is the most-recent-actor on the schedule, which is good enough
+    # for this gate. RBAC supersedes this with a clean Manager check.
+    current_active = await db.execute(
+        select(AssignedSchedule)
+        .where(AssignedSchedule.event_id == assigned.event_id)
+        .where(AssignedSchedule.is_active == True)  # noqa: E712
+    )
+    previous_active = current_active.scalar_one_or_none()
+
+    if (
+        previous_active is not None
+        and previous_active.id != schedule_id
+        and previous_active.locked_by_user_id is not None
+        and previous_active.locked_by_user_id != user.get("uid")
+        and not _is_admin(user)
+    ):
+        # Someone else owns the current active schedule. Refuse the
+        # promote — the demote-as-side-effect would override their
+        # ownership without their consent.
+        raise HTTPException(
+            status_code=423,
+            detail=f"The currently active schedule (\"{previous_active.name}\") "
+                   f"is held by {previous_active.locked_by_name or 'another user'}. "
+                   "Only that user or an admin can change which schedule is active.",
+        )
+
+    previous_active_id = previous_active.id if previous_active is not None else None
+
     await db.execute(
         update(AssignedSchedule)
         .where(AssignedSchedule.event_id == assigned.event_id)
@@ -1532,7 +1768,10 @@ async def activate_assigned_schedule(schedule_id: int, db: AsyncSession = Depend
     )
     assigned.is_active = True
     await db.commit()
-    return {"activated": schedule_id}
+    return {
+        "activated": schedule_id,
+        "previous_active_id": previous_active_id,
+    }
 
 
 # ─── History + audit endpoints ──────────────────────────────────────
@@ -1597,11 +1836,12 @@ async def restore_schedule_from_history(
 
     Lock state and is_official are NOT touched by restore — they're
     operational metadata, not content. A locked schedule can be
-    restored (by the locker); an official one cannot be restored
-    (must unmark first).
+    restored (by the locker); a once-official schedule cannot be
+    restored (structural immutability — fork instead).
 
     Same guard pattern as PATCH: refuses if event is frozen, if
-    is_official, or if locked by someone other than the requester.
+    schedule was ever official, or if locked by someone other
+    than the requester.
     """
     assigned = await db.get(AssignedSchedule, schedule_id)
     if not assigned:
@@ -1610,8 +1850,20 @@ async def restore_schedule_from_history(
     event = await db.get(Event, assigned.event_id) if assigned.event_id else None
     if _schedule_protected_by_event_freeze(event, assigned, user):
         raise HTTPException(423, f"Event is frozen by {event.locked_by_name or 'another user'}.")
-    if assigned.is_official:
-        raise HTTPException(423, "Schedule is marked official — unmark first.")
+    # Structural immutability — once-official schedules cannot be
+    # restored. The state in history is a snapshot of when this
+    # schedule was canonical; restoring it would let someone
+    # rewrite "what we ran the event on." Fork via /duplicate
+    # if a derivative schedule starting from a historical state
+    # is needed.
+    if await _was_ever_official(db, assigned):
+        raise HTTPException(
+            status_code=409,
+            detail="This schedule was marked official and is structurally "
+                   "immutable. Fork it (POST /duplicate) to create an "
+                   "editable copy, then restore on the fork.",
+            headers={"X-Fork-Hint": f"/api/assigned-schedules/{assigned.id}/duplicate"},
+        )
     if assigned.locked_at is not None:
         if not user or assigned.locked_by_user_id != user.get("uid"):
             raise HTTPException(423,
@@ -1752,6 +2004,15 @@ async def mark_schedule_official(
         assigned.locked_by_name   = display_name[:256]
         await _record_lock_event(db, schedule_id, action="lock", user=user)
 
+    # History snapshot with action='mark-official'. This row is the
+    # permanent fingerprint that lets _was_ever_official() know this
+    # schedule has been promoted at least once. Even after unmark,
+    # this row persists, and the ever-official check returns True.
+    # That preserves the structural-immutability guarantee: once a
+    # schedule has been THE schedule, it can never be silently
+    # mutated — fork is the only path forward.
+    await _snapshot_schedule_history(db, assigned, action="mark-official", user=user)
+
     await db.commit()
     await db.refresh(assigned)
     return await _build_assigned_schedule_response(assigned, db)
@@ -1767,7 +2028,17 @@ async def unmark_schedule_official(
 
     Lock state is preserved — unmarking official doesn't auto-unlock
     (the user explicitly unlocks via /unlock if they want to edit).
-    Only the original marker can unmark, mirroring the unlock policy.
+    Only the original marker or an admin can unmark, mirroring the
+    unlock policy.
+
+    Note that unmarking does NOT make the schedule editable —
+    structural immutability is forever (see _was_ever_official).
+    The fork escape hatch is the only path to changes after
+    mark-official has been issued, even after unmark. The unmark
+    primarily serves to (a) clear the visible "official" indicator,
+    (b) free the auto-lock so a different schedule can be promoted
+    to active, and (c) let a different schedule be marked official
+    in its place.
     """
     assigned = await db.get(AssignedSchedule, schedule_id)
     if not assigned:
@@ -1781,10 +2052,11 @@ async def unmark_schedule_official(
         # Idempotent.
         return await _build_assigned_schedule_response(assigned, db)
 
-    if assigned.official_by_user_id != user.get("uid"):
+    if assigned.official_by_user_id != user.get("uid") and not _is_admin(user):
         raise HTTPException(
             status_code=423,
-            detail=f"Only {assigned.official_by_name or 'the original marker'} can unmark this schedule.",
+            detail=f"Only {assigned.official_by_name or 'the original marker'} "
+                   "or an admin can unmark this schedule.",
         )
 
     assigned.is_official = False
@@ -1976,6 +2248,12 @@ async def duplicate_assigned_schedule(
         slot_map=src.slot_map, day_config=src.day_config,
         practice_matches=src.practice_matches,
         assign_seed=src.assign_seed,
+        # Lineage pointer — see docs/SCHEDULE_LIFECYCLE.md Part 5.
+        # Set unconditionally for any duplicate so the lineage chain
+        # exists for both "casual copy" and "fork from once-official"
+        # use cases. Walking the chain backward via forked_from_id
+        # reaches the original schedule (NULL forked_from_id).
+        forked_from_id=src.id,
         created_by=user["sub"] if user else None,
     )
     db.add(new_asgn)
@@ -2428,6 +2706,7 @@ async def start_event_simulation(
     event_id: int,
     speedup: float = Query(60.0, gt=0, le=3600, description="1.0 = real-time, 60 = 1 sec per sim minute"),
     db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
 ):
     """Begin simulating event progress for testing live mode. Generates fake
     match results based on the active assigned schedule. Replaces TBA as the
@@ -2439,7 +2718,11 @@ async def start_event_simulation(
 
 
 @app.post("/api/events/{event_id}/simulate/stop")
-async def stop_event_simulation(event_id: int, db: AsyncSession = Depends(get_session)):
+async def stop_event_simulation(
+    event_id: int,
+    db: AsyncSession = Depends(get_session),
+    user: dict = Depends(require_auth),
+):
     """End simulation and clear simulated data."""
     event = await db.get(Event, event_id)
     if not event:

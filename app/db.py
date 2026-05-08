@@ -180,6 +180,21 @@ class AssignedSchedule(Base):
     name:                 Mapped[str]  = mapped_column(String(128), default="Schedule")
     is_active:            Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Lineage pointer for forks. NULL = original schedule (not a fork).
+    # Set when this schedule was created by /duplicate from another
+    # schedule. ON DELETE SET NULL preserves the fork as an orphan
+    # if the parent is somehow deleted (normal flow prevents this
+    # since deleting a parent that's been forked from is forbidden,
+    # but the FK is defensive).
+    #
+    # Lineage chains are allowed: fork-of-fork-of-original. The chain
+    # is reconstructable by walking forked_from_id pointers backward
+    # until NULL. Per docs/SCHEDULE_LIFECYCLE.md Part 5.
+    forked_from_id: Mapped[int|None] = mapped_column(
+        BigInteger, ForeignKey("assigned_schedules.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+
     slot_map:     Mapped[Any]      = mapped_column(JSON)
     day_config:   Mapped[Any|None] = mapped_column(JSON, nullable=True)
     # Practice matches generated client-side at schedule-creation time.
@@ -255,7 +270,12 @@ class AssignedScheduleHistory(Base):
     slot_map:         Mapped[Any]      = mapped_column(JSON)
     practice_matches: Mapped[Any|None] = mapped_column(JSON, nullable=True)
 
-    # 'create' | 'patch' | 'rename' | 'restore'
+    # 'create' | 'patch' | 'rename' | 'restore' | 'mark-official'
+    # The 'mark-official' value is the permanent fingerprint that
+    # _was_ever_official() in main.py looks for. Once any row with
+    # action='mark-official' exists for a schedule, that schedule
+    # is structurally immutable forever — even after unmark-official.
+    # Per docs/SCHEDULE_LIFECYCLE.md Part 4.
     action:        Mapped[str]      = mapped_column(String(16))
     actor_user_id: Mapped[int|None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     actor_name:    Mapped[str|None] = mapped_column(String(256), nullable=True)
@@ -510,6 +530,21 @@ async def init_db(retries: int = 10, delay: float = 2.0) -> None:
                 # login or by direct DB UPDATE.
                 await conn.execute(text(
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+                # Lineage pointer for forks (docs/SCHEDULE_LIFECYCLE.md
+                # Part 5). NULL on existing rows means "original";
+                # forks set this to the parent schedule's id.
+                await conn.execute(text(
+                    "ALTER TABLE assigned_schedules "
+                    "ADD COLUMN IF NOT EXISTS forked_from_id BIGINT "
+                    "REFERENCES assigned_schedules(id) ON DELETE SET NULL"
+                ))
+                # Index for "find all forks of schedule X" queries.
+                # Partial index — most rows are NULL (originals).
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS assigned_schedules_forked_from_idx "
+                    "ON assigned_schedules(forked_from_id) "
+                    "WHERE forked_from_id IS NOT NULL"
                 ))
             return
         except Exception as e:
