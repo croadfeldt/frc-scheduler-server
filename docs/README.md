@@ -11,6 +11,29 @@ we get from here to there.
 | [HANDOFF.md](HANDOFF.md)                          | Current state, open items, code locations, operational quirks. Read first when picking up the project. |
 | [REPRODUCTION_PROMPT.md](REPRODUCTION_PROMPT.md)  | Standard onboarding context for an AI / new contributor. |
 
+## Scheduler quality workstream *(proposals — paused)*
+
+> **Change-freeze in effect.** A live event is using a generated
+> schedule. To avoid any risk of altering schedule generation
+> behavior mid-event, no scheduler code changes ship until the event
+> concludes. The proposals below remain valid working documents and
+> the technical content is sound; they are not active workstreams.
+
+Strategic planning for evolving the team-placement scheduler beyond
+its current SA-only Stage 2. Three documents — read in this order:
+
+| Document                                                                                   | What it covers                                                                                                                                                        |
+|--------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [scheduler/SCHEDULER_QUALITY_ROADMAP.md](scheduler/SCHEDULER_QUALITY_ROADMAP.md)            | Six-phase plan to act on identified opportunities. Phases 0–5: hard cooldown, R/B post-pass, station post-pass, quality presets, comparison harness, algorithm plugin model. |
+| [scheduler/THREE_LAYER_ARCHITECTURE_DESIGN.md](scheduler/THREE_LAYER_ARCHITECTURE_DESIGN.md) | Broader architectural proposal — Criteria Suites (sanctioning body) × Goal Suites (organizer prefs) × Algorithm Suites (search strategy). The roadmap's phases slot naturally under this design. |
+| [scheduler/PHASE_0_HARD_COOLDOWN_BRIEF.md](scheduler/PHASE_0_HARD_COOLDOWN_BRIEF.md)        | Implementation-ready brief for Phase 0: convert match-separation cooldown from soft penalty to structural rejection in `delta_swap` + initial-state generators. 2–4 hour PR. Layer-independent. |
+
+Phase 0 is implementation-ready and would land on `main`
+independent of the broader architectural decisions, but is held
+during the freeze. Phases 1+ are paused pending discussion of
+whether to follow the six-phase plan as-is or adopt the three-layer
+architecture as the framing for the work.
+
 ## V2 day_config workstream *(active)*
 
 | Document                                  | What it covers                                     |

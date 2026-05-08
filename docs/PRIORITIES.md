@@ -7,10 +7,11 @@
 - **Stage 2** assigns real team numbers to those slots by trying many random permutations
   and picking the one that best satisfies the placement criteria.
 
-The scheduler's defaults are aligned with the official FIRST/MatchMaker
-algorithm (Saxton/Idle Loop, used by FMS). Where we go beyond FIRST, it's
-additive — better diversity, more flexibility — never contradictory. See
-the **FIRST Alignment** section below for the line-by-line comparison.
+The scheduler's defaults are aligned with the FRC manual's six
+§13.6.2 criteria (formerly §10.5.2). Where we go beyond the manual,
+it's additive — better diversity, more flexibility — never
+contradictory. See the **FIRST Alignment** section below for the
+line-by-line comparison.
 
 ---
 
@@ -221,12 +222,11 @@ when they differ from FIRST defaults — the common case keeps URLs short.
 
 ## FIRST Alignment
 
-This scheduler's defaults match what FIRST's MatchMaker algorithm (used
-by FMS at all official events) produces. Source documents:
+This scheduler's defaults satisfy the six criteria specified in the
+FRC Game Manual for qualification match scheduling. Source documents:
 
-- [Idle Loop / Saxton — MatchMaker Algorithm](https://idleloop.com/matchmaker/)
-- FRC Game Manual §10.5.2 (or §11.6.2 in some years) — Match Assignment
-- FMS Manual — Run Match Maker
+- FRC Game Manual §13.6.2 (current) / §10.5.2 (historical) — Match Assignment
+- FMS Manual — official scheduling reference
 
 ### Criteria comparison
 
@@ -243,12 +243,12 @@ by FMS at all official events) produces. Source documents:
 ### Where we go beyond FIRST
 
 - **Configurable cooldown** — FIRST uses a fixed minimum based on team count. We expose this as a parameter so events can prioritize separation more heavily if needed.
-- **Configurable weights** — FIRST's MatchMaker is fixed; ours are tunable via the editor. Defaults match FIRST.
+- **Configurable weights** — the FIRST scheduler is fixed; ours are tunable via the editor. Defaults match the FIRST manual's stated priorities.
 - **Multi-day events** with breaks, cycle-time changes, and day breaks.
 - **Practice match scheduling** with separate constraints.
 - **Diversity Report panel** — visible per-pair distribution, station balance, surrogate placement so users can see whether a generated schedule meets their expectations.
-- **Quadratic penalty for repeats** — FIRST uses a doubling penalty per duplicate. Our quadratic version provides stronger pressure to spread repeats evenly. Still produces FIRST-compatible schedules at default weights; just optimizes harder.
-- **Stage 2 separate from Stage 1** — FIRST's MatchMaker conflates them. Splitting lets us regenerate team-to-slot assignments without disrupting the underlying structure.
+- **Quadratic penalty for repeats** — the FIRST scheduler uses a doubling penalty per duplicate. Our quadratic version provides stronger pressure to spread repeats evenly. Still produces FIRST-compatible schedules at default weights; just optimizes harder.
+- **Stage 2 separate from Stage 1** — the FIRST scheduler conflates them. Splitting lets us regenerate team-to-slot assignments without disrupting the underlying structure.
 
 None of these contradict FIRST; they are all additive.
 
