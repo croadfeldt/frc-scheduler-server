@@ -34,6 +34,19 @@ spec:
         - name: tls-certs
           secret:
             secretName: frc-scheduler-tls
+        # Apple Sign-In domain-association file. The ConfigMap
+        # `frc-apple-domain-association` is OPTIONAL — when Apple
+        # sign-in isn't being used, the ConfigMap doesn't need to
+        # exist. The `optional: true` flag prevents the deployment
+        # from failing when the resource is absent. Apple's
+        # verifier reads this file at:
+        #   https://YOUR_HOST/.well-known/apple-developer-domain-association
+        # See docs/OAUTH_SETUP.md for how to obtain the file from
+        # Apple's developer portal and create the ConfigMap.
+        - name: apple-domain-association
+          configMap:
+            name: frc-apple-domain-association
+            optional: true
       initContainers:
         - name: wait-for-postgres
           image: postgres:16-alpine
@@ -70,6 +83,18 @@ spec:
           volumeMounts:
             - name: tls-certs
               mountPath: /certs
+              readOnly: true
+            # Apple domain-association file mount. When the
+            # ConfigMap exists, the file is mounted at
+            # /etc/apple-domain-association/apple-developer-domain-association
+            # and APPLE_DOMAIN_ASSOCIATION_FILE points the server at it.
+            # When the ConfigMap is absent (most deployments), the
+            # mount is empty and the env var still points to a
+            # nonexistent file — the route returns 404, which is
+            # the correct behavior for a server not using Apple
+            # sign-in.
+            - name: apple-domain-association
+              mountPath: /etc/apple-domain-association
               readOnly: true
           env:
             - name: POSTGRES_USER
@@ -171,6 +196,39 @@ spec:
                 secretKeyRef:
                   name: frc-auth-secret
                   key: GOOGLE_CLIENT_SECRET
+            # Apple Sign-In — all four vars must be set together.
+            # Empty strings are tolerated (auth.py treats Apple as
+            # disabled when APPLE_PRIVATE_KEY is empty), so leaving
+            # the secret keys at "" disables Apple sign-in without
+            # breaking startup. The .p8 private key supports both
+            # literal newlines and escaped \n sequences in the
+            # secret value — auth.py normalizes both.
+            - name: APPLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: frc-auth-secret
+                  key: APPLE_CLIENT_ID
+            - name: APPLE_TEAM_ID
+              valueFrom:
+                secretKeyRef:
+                  name: frc-auth-secret
+                  key: APPLE_TEAM_ID
+            - name: APPLE_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: frc-auth-secret
+                  key: APPLE_KEY_ID
+            - name: APPLE_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: frc-auth-secret
+                  key: APPLE_PRIVATE_KEY
+            # Path the server reads to serve Apple's domain-association
+            # file. Always set; when the ConfigMap is absent the file
+            # doesn't exist and the route returns 404. Match this path
+            # to the volumeMount above plus the ConfigMap key name.
+            - name: APPLE_DOMAIN_ASSOCIATION_FILE
+              value: "/etc/apple-domain-association/apple-developer-domain-association"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

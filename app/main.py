@@ -279,6 +279,45 @@ async def view_page():
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+# ── Apple Sign-In domain verification ─────────────────────────────────────────
+# Apple requires the server to host an "association file" at a well-known
+# URL before it will issue Sign In with Apple credentials for the domain.
+# When the operator has configured Apple sign-in, they download the file
+# from Apple's developer portal and place it on disk; we serve it from a
+# configurable path via APPLE_DOMAIN_ASSOCIATION_FILE.
+#
+# When the env var is unset OR the file doesn't exist, the route returns
+# 404. Apple's verifier reads this file once during Service-ID setup to
+# confirm domain ownership. After verification succeeds, the file isn't
+# strictly required to remain in place — but leaving it served is harmless
+# and lets re-verification (e.g. after rotating credentials) succeed
+# without redeploying.
+#
+# The file MUST be served as Content-Type text/plain or
+# application/octet-stream — Apple's verifier rejects HTML.
+APPLE_DOMAIN_ASSOCIATION_FILE = os.getenv("APPLE_DOMAIN_ASSOCIATION_FILE", "")
+
+
+@app.get("/.well-known/apple-developer-domain-association",
+         include_in_schema=False)
+async def apple_domain_association():
+    """Serve the Apple domain-association file when configured.
+
+    Returns 404 when APPLE_DOMAIN_ASSOCIATION_FILE is unset or points at
+    a missing file. Apple's verifier follows the GET, expects 200 with
+    text/plain content matching what the developer portal generated.
+    """
+    if not APPLE_DOMAIN_ASSOCIATION_FILE:
+        raise HTTPException(404, "Apple domain association not configured")
+    if not os.path.isfile(APPLE_DOMAIN_ASSOCIATION_FILE):
+        raise HTTPException(404, "Apple domain association file not found")
+    # Serve as text/plain — Apple's verifier rejects HTML responses
+    return FileResponse(
+        APPLE_DOMAIN_ASSOCIATION_FILE,
+        media_type="text/plain",
+    )
+
+
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
 
 class EventCreate(BaseModel):
@@ -720,7 +759,7 @@ async def enrich_team(event_id: int, team_number: int, body: dict,
 async def generate_abstract(
     request: Request,
     body: AbstractGenerateRequest,
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     loop = asyncio.get_event_loop()
     pool = get_pool()
@@ -756,7 +795,7 @@ async def generate_abstract(
                     num_teams=body.num_teams, matches_per_team=body.matches_per_team,
                     cooldown=body.cooldown, seed=body.seed,
                     iterations_run=1, best_iteration=0, score=result["score"],
-                    created_by=current_user["sub"] if current_user else None,
+                    created_by=user["sub"] if user else None,
                     matches=result["matches"], surrogate_count=result["surrogate_count"],
                     round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
                     day_config=body.day_config,
@@ -831,7 +870,7 @@ async def assign_teams_endpoint(
     request: Request,
     abstract_id: int,
     body: AssignRequest,
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     # Normalize day_config to V2 shape + validate. Same rationale as
     # generate_abstract: fail fast on malformed input rather than
@@ -933,7 +972,7 @@ async def assign_teams_endpoint(
                 slot_map=best_result["slot_map"], day_config=body.day_config,
                 practice_matches=body.practice_matches,
                 assign_seed=body.assign_seed,
-                created_by=current_user["sub"] if current_user else None,
+                created_by=user["sub"] if user else None,
             )
             db.add(assigned)
             await db.flush()
@@ -952,7 +991,7 @@ async def assign_teams_endpoint(
             # Without this, history view would be empty until the
             # first PATCH lands. Action='create' so the UI can
             # distinguish "this is the original".
-            await _snapshot_schedule_history(db, assigned, action="create", current_user=current_user)
+            await _snapshot_schedule_history(db, assigned, action="create", user=user)
             await db.commit()
 
         yield f"data: {json.dumps({'type':'done','assigned_schedule_id':assigned.id,'score':best_result['score'],'pct':100})}\n\n"
@@ -1070,22 +1109,22 @@ async def _build_assigned_schedule_response(assigned: AssignedSchedule, db: Asyn
 # transaction owns the commit so a failed mutation rolls back the
 # history row alongside it.
 
-async def _resolve_actor_display_name(db: AsyncSession, current_user: dict | None) -> tuple[int | None, str | None]:
+async def _resolve_actor_display_name(db: AsyncSession, user: dict | None) -> tuple[int | None, str | None]:
     """Return (user_id, display_name) for an audit row.
 
     Pulls the canonical name from the User row when possible (JWT
     email could be stale if the user changed providers). Returns
     (None, None) when the request is anonymous.
     """
-    if not current_user:
+    if not user:
         return (None, None)
-    uid = current_user.get("id")
+    uid = user.get("id")
     if not uid:
-        return (None, current_user.get("email"))
+        return (None, user.get("email"))
     user_row = await db.get(User, uid)
     name = (user_row.name if user_row and user_row.name else None) \
            or (user_row.email if user_row else None) \
-           or current_user.get("email") \
+           or user.get("email") \
            or f"user#{uid}"
     return (uid, name[:256])
 
@@ -1094,7 +1133,7 @@ async def _snapshot_schedule_history(
     db: AsyncSession,
     assigned: AssignedSchedule,
     action: str,
-    current_user: dict | None,
+    user: dict | None,
 ) -> AssignedScheduleHistory:
     """Insert a history row carrying the schedule's current state.
 
@@ -1103,7 +1142,7 @@ async def _snapshot_schedule_history(
     insert for action='create' (so the row matches the just-created
     schedule).
     """
-    actor_id, actor_name = await _resolve_actor_display_name(db, current_user)
+    actor_id, actor_name = await _resolve_actor_display_name(db, user)
     row = AssignedScheduleHistory(
         assigned_schedule_id=assigned.id,
         name=assigned.name,
@@ -1122,7 +1161,7 @@ async def _record_lock_event(
     db: AsyncSession,
     schedule_id: int,
     action: str,        # 'lock' | 'unlock'
-    current_user: dict | None,
+    user: dict | None,
 ) -> AssignedScheduleLockEvent:
     """Append an audit row for a lock/unlock action.
 
@@ -1131,7 +1170,7 @@ async def _record_lock_event(
     every change so a future lock_events GET can answer "when was
     this unlocked, by whom" after the fact.
     """
-    actor_id, actor_name = await _resolve_actor_display_name(db, current_user)
+    actor_id, actor_name = await _resolve_actor_display_name(db, user)
     row = AssignedScheduleLockEvent(
         assigned_schedule_id=schedule_id,
         action=action,
@@ -1203,7 +1242,7 @@ async def patch_assigned_schedule(
     schedule_id: int,
     payload: dict,
     db: AsyncSession = Depends(get_session),
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     """Update day_config (and other safe metadata) on an assigned schedule
     WITHOUT touching slot_map or matches[].
@@ -1259,7 +1298,7 @@ async def patch_assigned_schedule(
     #    by their own lock — they explicitly chose to lock, so they
     #    retain edit rights.
     if assigned.locked_at is not None:
-        if not current_user or assigned.locked_by_user_id != current_user.get("id"):
+        if not user or assigned.locked_by_user_id != user.get("id"):
             raise HTTPException(
                 status_code=423,
                 detail=f"Schedule is locked by {assigned.locked_by_name or 'another user'}.",
@@ -1270,7 +1309,7 @@ async def patch_assigned_schedule(
     # with the rest of the transaction — no orphaned snapshots.
     has_changes = "day_config" in payload
     if has_changes:
-        await _snapshot_schedule_history(db, assigned, action="patch", current_user=current_user)
+        await _snapshot_schedule_history(db, assigned, action="patch", user=user)
 
     if "day_config" in payload:
         new_dc = payload["day_config"]
@@ -1356,7 +1395,7 @@ async def lock_assigned_schedule(
     # Audit row — preserves history even after this lock is later
     # cleared (locked_at reset to NULL). Without this, "when was
     # this unlocked" would be unanswerable.
-    await _record_lock_event(db, schedule_id, action="lock", current_user=user)
+    await _record_lock_event(db, schedule_id, action="lock", user=user)
     await db.commit()
     await db.refresh(assigned)
     return await _build_assigned_schedule_response(assigned, db)
@@ -1414,7 +1453,7 @@ async def unlock_assigned_schedule(
     assigned.locked_by_name = None
     # Audit row — captures who unlocked when. Pairs with the lock
     # row inserted by /lock.
-    await _record_lock_event(db, schedule_id, action="unlock", current_user=user)
+    await _record_lock_event(db, schedule_id, action="unlock", user=user)
     await db.commit()
     await db.refresh(assigned)
     return await _build_assigned_schedule_response(assigned, db)
@@ -1484,7 +1523,7 @@ async def restore_schedule_from_history(
     schedule_id: int,
     history_id: int,
     db: AsyncSession = Depends(get_session),
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     """Restore a schedule to a previous version from a history row.
 
@@ -1513,7 +1552,7 @@ async def restore_schedule_from_history(
     if assigned.is_official:
         raise HTTPException(423, "Schedule is marked official — unmark first.")
     if assigned.locked_at is not None:
-        if not current_user or assigned.locked_by_user_id != current_user.get("id"):
+        if not user or assigned.locked_by_user_id != user.get("id"):
             raise HTTPException(423,
                 f"Schedule is locked by {assigned.locked_by_name or 'another user'}.")
 
@@ -1523,7 +1562,7 @@ async def restore_schedule_from_history(
 
     # Snapshot the current state BEFORE applying the restore so we
     # can roll forward again if the user changes their mind.
-    await _snapshot_schedule_history(db, assigned, action="restore", current_user=current_user)
+    await _snapshot_schedule_history(db, assigned, action="restore", user=user)
 
     # Apply the historical snapshot back to the live row.
     assigned.name             = history_row.name
@@ -1650,7 +1689,7 @@ async def mark_schedule_official(
         assigned.locked_at         = now
         assigned.locked_by_user_id = user.get("id")
         assigned.locked_by_name   = display_name[:256]
-        await _record_lock_event(db, schedule_id, action="lock", current_user=user)
+        await _record_lock_event(db, schedule_id, action="lock", user=user)
 
     await db.commit()
     await db.refresh(assigned)
@@ -1787,7 +1826,7 @@ def _event_freeze_payload(event: Event) -> dict:
 @app.delete("/api/assigned-schedules/{schedule_id}", status_code=204)
 async def delete_assigned_schedule(
     schedule_id: int, db: AsyncSession = Depends(get_session),
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     """Delete an assigned schedule. Refuses on:
       - Schedules marked official (must unmark first).
@@ -1819,12 +1858,12 @@ async def delete_assigned_schedule(
     # Locker bypass: their own lock shouldn't block their own delete
     # (consistent with the PATCH locker bypass).
     if assigned.locked_at is not None:
-        if not current_user or assigned.locked_by_user_id != current_user.get("id"):
+        if not user or assigned.locked_by_user_id != user.get("id"):
             raise HTTPException(
                 status_code=423,
                 detail=f"Schedule is locked by {assigned.locked_by_name or 'another user'}.",
             )
-    if assigned.created_by and (not current_user or current_user.get("sub") != assigned.created_by):
+    if assigned.created_by and (not user or user.get("sub") != assigned.created_by):
         raise HTTPException(403, "You do not own this schedule")
     await db.delete(assigned)
     await db.commit()
@@ -1833,7 +1872,7 @@ async def delete_assigned_schedule(
 @app.post("/api/assigned-schedules/{schedule_id}/duplicate", status_code=201)
 async def duplicate_assigned_schedule(
     schedule_id: int, db: AsyncSession = Depends(get_session),
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     result = await db.execute(
         select(AssignedSchedule)
@@ -1864,7 +1903,7 @@ async def duplicate_assigned_schedule(
         surrogate_count=abs_src.surrogate_count, round_boundaries=abs_src.round_boundaries,
         day_config=abs_src.day_config,
         weights=abs_src.weights,
-        created_by=current_user["sub"] if current_user else None,
+        created_by=user["sub"] if user else None,
     )
     db.add(new_abs)
     await db.flush()
@@ -1874,7 +1913,7 @@ async def duplicate_assigned_schedule(
         slot_map=src.slot_map, day_config=src.day_config,
         practice_matches=src.practice_matches,
         assign_seed=src.assign_seed,
-        created_by=current_user["sub"] if current_user else None,
+        created_by=user["sub"] if user else None,
     )
     db.add(new_asgn)
     await db.flush()
@@ -1891,7 +1930,7 @@ async def duplicate_assigned_schedule(
         ))
     # Initial 'create' history row for the duplicate. Captures the
     # state-as-duplicated; subsequent edits will land on top.
-    await _snapshot_schedule_history(db, new_asgn, action="create", current_user=current_user)
+    await _snapshot_schedule_history(db, new_asgn, action="create", user=user)
     await db.commit()
     return {"id": new_asgn.id, "abstract_schedule_id": new_abs.id, "name": new_asgn.name}
 
@@ -2658,7 +2697,7 @@ async def import_pdf(
     file: UploadFile = File(...),
     event_id: int | None = Query(None),
     nocache: bool = Query(False, description="Bypass content-hash cache; force re-extraction"),
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     """Parse a schedule PDF using the configured LLM. Returns a preview
     that the user confirms (or edits) before committing via /commit.
@@ -3036,7 +3075,7 @@ async def import_xlsx(
     file: UploadFile = File(...),
     event_id: int | None = Query(None),
     nocache: bool = Query(False, description="Bypass content-hash cache"),
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     """Parse an FMS-style schedule XLSX file. Reliable round-trip path
     for xlsx files exported by this app (or any FMS-compatible export).
@@ -3195,7 +3234,7 @@ async def import_csv_endpoint(
     file: UploadFile = File(...),
     event_id: int | None = Query(None),
     nocache: bool = Query(False, description="Bypass content-hash cache"),
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     """Parse a schedule CSV. Accepts both the flat layout we export
     (Match,Time,Type,Blue 1-3,Red 1-3) and the FMS layout (Time,
@@ -3325,7 +3364,7 @@ async def import_csv_endpoint(
 async def render_schedule_pdf_endpoint(
     body: dict,
     format: str = "pdf",
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     """Render a schedule to PDF or HTML.
 
@@ -3411,7 +3450,7 @@ async def render_schedule_pdf_endpoint(
 @app.post("/api/schedules/import-pdf/commit")
 async def commit_pdf_import(
     body: PdfImportCommitRequest,
-    current_user: dict | None = Depends(get_current_user),
+    user: dict = Depends(require_auth),
 ):
     """Commit a previewed PDF import as a real AssignedSchedule.
 
@@ -3505,7 +3544,7 @@ async def commit_pdf_import(
             num_teams=N, matches_per_team=MPT,
             cooldown=1, seed=None,  # imported — no seed
             iterations_run=0, best_iteration=0, score=0.0,
-            created_by=current_user["sub"] if current_user else None,
+            created_by=user["sub"] if user else None,
             matches=abstract_matches, surrogate_count=surrogate_count,
             round_boundaries=round_boundaries, day_config=body.day_config,
             weights=None,
@@ -3525,7 +3564,7 @@ async def commit_pdf_import(
             slot_map=slot_map, day_config=body.day_config,
             practice_matches=[],   # imports don't include practice
             assign_seed=None,
-            created_by=current_user["sub"] if current_user else None,
+            created_by=user["sub"] if user else None,
         )
         db.add(assigned)
         await db.flush()
@@ -3543,7 +3582,7 @@ async def commit_pdf_import(
         # so the user can later compare against subsequent edits and
         # see which differences came from their own changes vs the
         # original PDF import.
-        await _snapshot_schedule_history(db, assigned, action="create", current_user=current_user)
+        await _snapshot_schedule_history(db, assigned, action="create", user=user)
         await db.commit()
 
         return {
@@ -3664,10 +3703,10 @@ class CommitLogEntry(BaseModel):
 
 @app.post("/api/log-commit", status_code=204)
 async def log_commit(body: CommitLogEntry,
-                     current_user: dict | None = Depends(get_current_user)):
+                     user: dict = Depends(require_auth)):
     log.info(
         "SCHEDULE_COMMITTED user=%s event=%s teams=%d matches=%s",
-        (current_user or {}).get("sub", "anonymous"),
+        (user or {}).get("sub", "anonymous"),
         body.event_info.get("key") if body.event_info else "none",
         len(body.teams), body.match_count,
     )
