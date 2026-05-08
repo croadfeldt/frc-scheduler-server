@@ -3961,7 +3961,13 @@ async function confirmPdfImport() {
         event_id:      parseInt(_currentEventId),
         name:          'PDF Import ' + new Date().toLocaleString(),
         matches:       _pdfImportState.matches,
-        day_config:    collectDayConfig(),
+        // Send V2 day_config natively — backend accepts both shapes
+        // (server-side normalize handles V1 input) but emitting V2
+        // direct skips a redundant migration round-trip and matches
+        // the API's canonical shape.
+        day_config:    (typeof collectDayConfigV2 === 'function')
+                         ? collectDayConfigV2()
+                         : collectDayConfig(),
       }),
     });
     if (!r.ok) {
@@ -5389,58 +5395,6 @@ function buildShareUrl() {
     }
   }
 
-  // Practice day URL params. Mirrors what we encode for qual days:
-  //   pday=1                     — practice day enabled
-  //   pd=HH:MM-HH:MM             — practice window (already existed)
-  //   pmpt, pfill, pct           — guaranteed/filler/cycle-time (already existed)
-  //   pdb=name|HH:MM|HH:MM,...   — practice breaks (NEW; pipe-delimited like d{N}b)
-  //   pdcc=after|time;...        — practice cycle changes (NEW); start-of-day uses 'start' as after
-  //   pde=N                      — practice early-end after match N (NEW)
-  // Practice day URL fields — pulled from the collectDayConfig
-  // snapshot so V2 edits flow through. _urlPdc points at the same
-  // V1-shape object the day loop below uses; it's computed once
-  // here and reused. When V2 is active and there's no practice
-  // day, _urlPdc.practiceDay is null and the whole block is
-  // skipped. When V1 is active, the V1 form fields are the source
-  // of truth for both editors anyway, so this still reflects
-  // them.
-  var _urlPdcEarly = (typeof collectDayConfig === 'function') ? collectDayConfig() : null;
-  var _urlPd = _urlPdcEarly && _urlPdcEarly.practiceDay;
-  if (_urlPd && _urlPd.enabled) {
-    params.set('pday', '1');
-    if (_urlPd.start && _urlPd.end) params.set('pd', _urlPd.start + '-' + _urlPd.end);
-    if (_urlPd.guaranteed != null) params.set('pmpt', String(_urlPd.guaranteed));
-    if (_urlPd.filler != null && parseInt(_urlPd.filler) !== 99) params.set('pfill', String(_urlPd.filler));
-    if (_urlPd.ct != null) params.set('pct', String(_urlPd.ct));
-
-    // Practice breaks — note the | separator must not appear in
-    // names, so strip it before encoding (downgradeToV1 set name
-    // from b.label which the user types freely).
-    var _pdBreaks = (_urlPd.breaks || []).map(function(b) {
-      var name = (b.name || 'Break').replace(/[|,]/g, '');
-      return (b.start && b.end) ? (name + '|' + b.start + '|' + b.end) : null;
-    }).filter(Boolean);
-    if (_pdBreaks.length) params.set('pdb', _pdBreaks.join(','));
-
-    // Practice cycle changes — encoded the same way as qual cc:
-    //   "start|<time>" for the start-of-day cycle time
-    //   "<N>|<time>"   for after-match #N changes
-    var _pdCcs = (_urlPd.cycleChanges || []).map(function(cc) {
-      var t = parseFloat(cc.time);
-      if (!t || t <= 0) return null;
-      if (cc.after === 'start' || cc.after === 0) return 'start|' + t;
-      var n = parseInt(cc.after);
-      return (n >= 1) ? (n + '|' + t) : null;
-    }).filter(Boolean);
-    if (_pdCcs.length) params.set('pdcc', _pdCcs.join(';'));
-
-    // Practice early-end — V1-only concept. Read from the V1 form
-    // input if present (no analog in V2 day_config yet).
-    var _pdEeInp = document.querySelector('#pdayEarlyEndList .earlyend-after');
-    if (_pdEeInp && _pdEeInp.value && parseInt(_pdEeInp.value) >= 1) {
-      params.set('pde', String(parseInt(_pdEeInp.value)));
-    }
-  }
   const bb = document.getElementById('breakBuffer').value;
   if (bb) params.set('bb', bb);
   // Encode auto flags — only include a param when it differs from its default (all on)
@@ -5449,7 +5403,7 @@ function buildShareUrl() {
   var urlAS = document.getElementById('autoAssign');
   if (urlAP && !urlAP.checked) params.set('autoPopulate',    '0');
   if (urlAM && !urlAM.checked) params.set('autoMaxCycles',   '0');
-  if (urlAS &&  urlAS.checked) params.set('autoAssign',      '1');  // default off \u2014 store when on
+  if (urlAS &&  urlAS.checked) params.set('autoAssign',      '1');  // default off — store when on
   if (_currentSeed)                params.set('seed',  _currentSeed);
   if (_currentAssignSeed)          params.set('aseed', _currentAssignSeed);
   if (_currentAbstractScheduleId)  params.set('sid',   _currentAbstractScheduleId);
@@ -5458,88 +5412,43 @@ function buildShareUrl() {
   // lock so users coming back via shared link see the same state.
   if (window._frcLocked) params.set('locked', '1');
 
-  // Encode per-day schedule: d1=HH:MM-HH:MM, d1b=Name|HH:MM|HH:MM,...
+  // ── Day config ─────────────────────────────────────────────────
   //
-  // Source of truth: collectDayConfig() returns a V1-shape object
-  // regardless of which editor is active. When V2 is active, this
-  // is the downgraded snapshot of the live V2 day blocks; when V1
-  // is active, it's the same thing the form fields hold. Either
-  // way the URL encoding stays V1-compatible (which is the wire
-  // format the URL was designed for) without going stale on V2
-  // edits — the previous implementation walked .day-row directly
-  // and missed all V2 edits because those rows live in hidden V1
-  // markup.
+  // Phase 4: emit V2-native URL params per docs/V2_SPEC.md §9.2.
+  // The V2 day_config is read directly from collectDayConfigV2()
+  // (no downgrade step) and written by _v2WriteUrlParams. Sets:
+  //   dcv=2     — version sentinel
+  //   dN=...    — day metadata (date|label)
+  //   dNbM=...  — block (type|start|end|...type-specific...)
+  //   dNbMcc    — cycle changes for that block (after:time;...)
+  //   dNbMcK    — children of block (tier-3 nested)
   //
-  // Tier-3 blocks the user adds in V2 (ceremonies, awards,
-  // alliance selection) round-trip through this URL as named
-  // breaks via downgradeToV1's sibling-breaks flattening. Type
-  // info (subtype, ceremonyKind) is lost in the URL — that's a
-  // V1-shape limitation, not a regression. For full fidelity the
-  // user saves to the backend and the URL just carries sid=.
-  var _urlDc = (typeof collectDayConfig === 'function') ? collectDayConfig() : null;
-  var _urlDays = (_urlDc && Array.isArray(_urlDc.days)) ? _urlDc.days : [];
-  _urlDays.forEach(function(day, i) {
-    var dayNum = i + 1;
-    if (day.start && day.end) params.set('d' + dayNum, day.start + '-' + day.end);
-    var brks = (day.breaks || []).map(function(b) {
-      var bname = (b.name || 'Break').replace(/[|,]/g, ' ');
-      return (b.start && b.end) ? bname + '|' + b.start + '|' + b.end : null;
-    }).filter(Boolean);
-    if (brks.length) params.set('d' + dayNum + 'b', brks.join(','));
-    // Early-end is a V1-only concept; not represented in V2. Read
-    // from the matching .day-row if present (V1 mode), otherwise
-    // omit. getDayEarlyEnd handles a missing row by returning null.
-    var _row = document.querySelectorAll('.day-row')[i];
-    if (_row) {
-      var ee = getDayEarlyEnd(_row);
-      if (ee !== null) params.set('d' + dayNum + 'e', ee);
-    }
-  });
+  // Compact fallback: if the resulting URL exceeds 2000 chars (rare
+  // for typical events but possible for many-day, many-block
+  // configs), emit a single dc= param with base64(JSON.stringify)
+  // and strip the structured params. Same lossless contract.
+  var _v2dcForUrl = (typeof collectDayConfigV2 === 'function') ? collectDayConfigV2() : null;
+  if (_v2dcForUrl) {
+    _v2WriteUrlParams(_v2dcForUrl, params);
 
-  // Encode cycle time changes: cc=Day:AfterMatch:Time,...
-  //
-  // _urlDc carries per-day cycleChanges arrays from downgradeToV1
-  // (V2-aware via collectDayConfig). afterMatch in those arrays is
-  // GLOBAL (post-offset, set by _v2blockChangesToV1). We store back
-  // to URL in per-day local form so the parser can route by day
-  // and addDayCycleChange's input matches what the user typed.
-  // Subtracting the day's match-offset turns global → local.
-  //
-  // Reading from getCycleTimeChanges() (V1 form fields) like
-  // before would miss V2 cc edits because those V1 rows are
-  // hidden when V2 is the active editor and don't auto-sync.
-  var _urlCcParts = [];
-  var _ccOffset = 0;
-  (_urlDays).forEach(function(day, i) {
-    var dayNum = i + 1;
-    (day.cycleChanges || []).forEach(function(cc) {
-      if (cc.isStart) return;          // start-of-day ct lives in d{N} window, not cc
-      var localAfter = (cc.afterMatch || 0) - _ccOffset;
-      if (localAfter < 1) return;
-      _urlCcParts.push(dayNum + ':' + localAfter + ':' + cc.time);
-    });
-    // Estimate this day's match count for the next day's offset.
-    // Mirrors downgradeToV1's globalMatchOffset accumulation —
-    // floor((day window minus break overlap) / start-of-day ct).
-    // Approximate: take the start-of-day ct from cycleChanges or
-    // fall back to the day's cycleTime field.
-    var startCt = day.cycleTime || 9;
-    (day.cycleChanges || []).forEach(function(cc) {
-      if (cc.isStart) startCt = cc.time;
-    });
-    var dStart = timeStrToMin ? timeStrToMin(day.start) : null;
-    var dEnd   = timeStrToMin ? timeStrToMin(day.end)   : null;
-    if (dStart != null && dEnd != null && dEnd > dStart && startCt > 0) {
-      var brkMin = (day.breaks || []).reduce(function(s, b) {
-        var bs = timeStrToMin(b.start), be = timeStrToMin(b.end);
-        if (bs == null || be == null) return s;
-        var ovS = Math.max(dStart, bs), ovE = Math.min(dEnd, be);
-        return s + Math.max(0, ovE - ovS);
-      }, 0);
-      _ccOffset += Math.max(0, Math.floor((dEnd - dStart - brkMin) / startCt));
+    // Length check. URL = pathname + ? + serialized. Rough threshold
+    // 2000 chars per V2_SPEC §9.2.2. We don't include the host part
+    // since that's outside our control and stays roughly constant.
+    var _projected = window.location.pathname + '?' + params.toString();
+    if (_projected.length > 2000) {
+      // Strip the structured per-block params; keep root fields,
+      // weights, lock, sid/aid, etc. (Anything outside the dN /
+      // dNbM / dNbMcc / dNbMc namespace is preserved.)
+      var _keysToStrip = [];
+      params.forEach(function(_v, k) {
+        if (/^d\d+(b\d+(cc|c\d+)?)?$/.test(k)) _keysToStrip.push(k);
+      });
+      _keysToStrip.forEach(function(k) { params.delete(k); });
+      // Re-set dcv (was kept by the regex, but defensively).
+      params.set('dcv', '2');
+      params.set('dc', btoa(JSON.stringify(_v2dcForUrl)));
     }
-  });
-  if (_urlCcParts.length) params.set('cc', _urlCcParts.join(','));
+  }
 
   // Encode team numbers from slot_map if we have an assigned schedule
   if (_currentSlotMap && Object.keys(_currentSlotMap).length > 0) {
@@ -5939,7 +5848,15 @@ async function autoRunFromUrl() {
   if (params.locked && typeof applyLockState === 'function') {
     applyLockState(true);
   }
-  if (!params.seed && !params.n && !params.days && !params.sid && !params.aid) return;
+  // V2 URL detection (phase 4): `dcv=2` signals the new format.
+  // When present, _v2ReadUrlParams returns the canonical V2 dc;
+  // we render it directly via renderDayConfigV2 instead of going
+  // through the V1 form-field pipeline. The dN-derived flag here
+  // also tells the early-return guard below not to bail when only
+  // V2 day params (and no V1 ?days=) are present.
+  var _spForDcv = new URLSearchParams(window.location.search);
+  var _hasV2Dc  = _spForDcv.get('dcv') === '2';
+  if (!params.seed && !params.n && !_hasV2Dc && !params.days && !params.sid && !params.aid) return;
   // Set the loading guard BEFORE applyUrlParams, which populates
   // form fields via the same oninput-triggering path that
   // loadAssignedSchedule uses. Without the guard, every numTeams /
@@ -5952,6 +5869,37 @@ async function autoRunFromUrl() {
   clearTimeout(_autoPopulateTimeout); _autoPopulateTimeout = null;
   clearTimeout(_cycleTimeChangeTimeout); _cycleTimeChangeTimeout = null;
   applyUrlParams(params);
+
+  // V2 URL day_config render. When _hasV2Dc is set, _v2ReadUrlParams
+  // returns the canonical V2 dc (or null on parse failure, in which
+  // case we fall through to whatever applyUrlParams already wrote
+  // via the legacy V1 path — though with dcv=2 there are no V1 day
+  // params for it to consume, so the result is the editor's
+  // built-in defaults). _hasV2Dc + valid parse is the happy path.
+  if (_hasV2Dc) {
+    try {
+      var _urlV2dc = _v2ReadUrlParams(_spForDcv);
+      if (_urlV2dc && typeof renderDayConfigV2 === 'function') {
+        renderDayConfigV2(_urlV2dc);
+        // Stash dates side-channel so getPracticeConfig + per-day
+        // date displays read them back consistently. Mirrors what
+        // applyDayConfigToUI does for V1 input.
+        var _dates = {};
+        (_urlV2dc.days || []).forEach(function(d, i) {
+          if (d.date) {
+            // First practice block on a day → 'practice' key for
+            // back-compat with the existing dates side-channel.
+            var hasPractice = (d.blocks || []).some(function(b) { return b.type === 'practice'; });
+            if (hasPractice) _dates.practice = d.date;
+            else             _dates['day' + (i + 1)] = d.date;
+          }
+        });
+        window._frcPreservedDayDates = _dates;
+      }
+    } catch (e) {
+      console.warn('V2 URL parse failed:', e);
+    }
+  }
 
   // If we have a server-side ID, load directly from DB (faster, exact match)
   if (params.aid) {
@@ -12371,6 +12319,303 @@ function _v2normalizeTimeStr(raw) {
 function _v2detectBreakKind(name) {
   if (/lunch/i.test(name || '')) return 'lunch';
   return 'break';
+}
+
+// ── V2 URL encoding / decoding ──────────────────────────────────────────
+//
+// Phase 4 of the V2 migration introduces URL params that match the V2
+// model directly per docs/V2_SPEC.md §9.2. The default is a flat,
+// scannable namespace:
+//
+//   ?dcv=2
+//   &n=12&mpt=23&cd=3&ct=8&bb=5
+//   &d1=2026-04-04|Day%201
+//   &d1b1=qual|09:00|17:00|9
+//   &d1b1cc=4:8;15:10
+//   &d1b1c1=ceremony|08:30|09:00|Opening%20ceremony|opening
+//   &d1b1c2=break|12:00|13:00|Lunch|lunch
+//   &d1b2=playoff|17:30|20:30|double_elim|8|11
+//
+// `dcv=2` is the version sentinel — its presence tells the parser
+// to use the V2 path. Without it, the legacy V1 parser runs (only
+// for back-compat with the one V1 URL ever published — phase 5
+// can drop the V1 parser entirely).
+//
+// For oversized URLs (>2000 chars) the writer falls back to a
+// compact form: `dc=base64(JSON.stringify(day_config))`. The
+// reader detects `dc=` and skips the structured parse.
+
+// Encode one V2 block to its dNbM= or dNbMcK= value string. Pipe is
+// the field separator inside the value; pipes in user-visible labels
+// get scrubbed to spaces so the structural separator stays unambiguous.
+function _v2EncodeBlockValue(block) {
+  if (!block || !block.type) return null;
+  var s = block.start || '', e = block.end || '';
+  var label = (block.label || '').replace(/\|/g, ' ');
+  switch (block.type) {
+    case 'qualification':
+      return ['qual', s, e,
+              block.cycleTime || 9].join('|');
+    case 'practice':
+      return ['practice', s, e,
+              block.cycleTime || 11,
+              block.guaranteed != null ? block.guaranteed : 1,
+              block.maxFiller  != null ? block.maxFiller  : 99].join('|');
+    case 'playoff':
+      return ['playoff', s, e,
+              block.playoffFormat    || 'double_elim',
+              block.playoffAlliances != null ? block.playoffAlliances :
+                (block.playoffTeams != null ? block.playoffTeams : 8),
+              block.cycleTime || 11].join('|');
+    case 'break':
+      return ['break', s, e, label, block.breakKind || 'break'].join('|');
+    case 'ceremony':
+      return ['ceremony', s, e, label, block.ceremonyKind || 'opening'].join('|');
+    case 'awards':
+      return ['awards', s, e, label].join('|');
+    case 'alliance_selection':
+      // Short token "alliance" — saves bytes vs the full type name
+      // since it appears everywhere alliance selection blocks live.
+      return ['alliance', s, e, label].join('|');
+    default:
+      return null;
+  }
+}
+
+// Decode a dNbM= / dNbMcK= value to a V2 block. Returns null on
+// malformed input — caller skips such entries rather than failing
+// the whole URL parse.
+function _v2DecodeBlockValue(value) {
+  if (!value || typeof value !== 'string') return null;
+  var parts = value.split('|');
+  if (parts.length < 3) return null;
+  var t = parts[0], s = parts[1], e = parts[2];
+  switch (t) {
+    case 'qual':
+      return {
+        type: 'qualification', start: s, end: e,
+        cycleTime: parseFloat(parts[3]) || 9,
+        changes: [], breaks: [],
+      };
+    case 'practice':
+      return {
+        type: 'practice', start: s, end: e,
+        cycleTime: parseFloat(parts[3]) || 11,
+        guaranteed: parseInt(parts[4]) || 1,
+        maxFiller:  parseInt(parts[5]) || 99,
+        changes: [], breaks: [],
+      };
+    case 'playoff':
+      return {
+        type: 'playoff', start: s, end: e,
+        playoffFormat:    parts[3] || 'double_elim',
+        playoffAlliances: parseInt(parts[4]) || 8,
+        cycleTime:        parseFloat(parts[5]) || 11,
+        changes: [], breaks: [], alliances: [], matches: [],
+      };
+    case 'break':
+      return {
+        type: 'break', start: s, end: e,
+        label:     parts[3] || 'Break',
+        breakKind: parts[4] || 'break',
+      };
+    case 'ceremony':
+      return {
+        type: 'ceremony', start: s, end: e,
+        label:        parts[3] || 'Ceremony',
+        ceremonyKind: parts[4] || 'opening',
+      };
+    case 'awards':
+      return {
+        type: 'awards', start: s, end: e,
+        label: parts[3] || 'Awards',
+      };
+    case 'alliance':
+      // Short token expanded back to canonical type name on decode.
+      return {
+        type: 'alliance_selection', start: s, end: e,
+        label: parts[3] || 'Alliance selection',
+      };
+    default:
+      return null;
+  }
+}
+
+// Write a V2 day_config into a URLSearchParams. Mutates the params
+// in place; root fields (n, mpt, etc.) are written by the caller.
+//
+// The encoder always sets dcv=2, so a downstream parser can route
+// by version cleanly. Per-block keys are dNbM= and child keys are
+// dNbMcK=. Cycle changes ride on dNbMcc=.
+function _v2WriteUrlParams(dc, params) {
+  if (!dc || dc.dayConfigVersion !== 2 || !params) return false;
+  params.set('dcv', '2');
+  if (dc.cycleTime   != null) params.set('ct', String(dc.cycleTime));
+  if (dc.breakBuffer != null) params.set('bb', String(dc.breakBuffer));
+
+  (dc.days || []).forEach(function(day, i) {
+    var dN = i + 1;
+    // Day metadata: date|label. Both optional, but emit if either
+    // is set so a sparse day still gets a dN= placeholder for the
+    // decoder to see (otherwise blocks with no parent dN would
+    // attach to a synthesized "Day N" with no date).
+    var date  = day.date || '';
+    var label = (day.labelOverride || day.label || '').replace(/\|/g, ' ');
+    if (date || (label && label !== 'Day ' + dN)) {
+      params.set('d' + dN, date + '|' + label);
+    }
+
+    (day.blocks || []).forEach(function(block, j) {
+      var bN = j + 1;
+      var v = _v2EncodeBlockValue(block);
+      if (!v) return;
+      params.set('d' + dN + 'b' + bN, v);
+
+      // Cycle changes — "after:time;after:time"
+      if (block.changes && block.changes.length) {
+        var ccStr = block.changes.map(function(cc) {
+          return (cc.afterMatch || 0) + ':' + (cc.cycleTime || 0);
+        }).filter(function(s) { return s !== '0:0'; }).join(';');
+        if (ccStr) params.set('d' + dN + 'b' + bN + 'cc', ccStr);
+      }
+
+      // Children (tier-3 nested under this block)
+      (block.breaks || []).forEach(function(child, k) {
+        var cv = _v2EncodeBlockValue(child);
+        if (!cv) return;
+        params.set('d' + dN + 'b' + bN + 'c' + (k + 1), cv);
+      });
+    });
+  });
+  return true;
+}
+
+// Read V2 URL params and assemble a V2 day_config. Returns null when
+// no V2 params are present (caller should fall back to V1 parsing
+// for back-compat). Compact form (`dc=` with base64 JSON) is also
+// detected here — if present, the structured params are ignored
+// and the JSON wins.
+function _v2ReadUrlParams(searchParams) {
+  if (!searchParams || searchParams.get('dcv') !== '2') return null;
+
+  // Compact form takes precedence. base64 → JSON parse → return
+  // straight through. Caller still validates shape via the editor's
+  // existing render path.
+  var compact = searchParams.get('dc');
+  if (compact) {
+    try {
+      var decoded = JSON.parse(atob(compact));
+      if (decoded && decoded.dayConfigVersion === 2) return decoded;
+    } catch (e) {
+      console.warn('V2 URL: compact dc= failed to decode:', e);
+    }
+  }
+
+  var dc = {
+    dayConfigVersion: 2,
+    cycleTime:   parseFloat(searchParams.get('ct')) || 9,
+    breakBuffer: parseFloat(searchParams.get('bb')) || 5,
+    days: [],
+  };
+
+  // Two-pass: first build dN map (day metadata + container), then
+  // walk dNbM (blocks), then dNbMcc (cycle changes), then dNbMcK
+  // (children). Doing it in one pass would require ordering
+  // assumptions about URLSearchParams iteration order, which
+  // varies across browsers (technically defined by the original
+  // string order, but parsing tools may not preserve it).
+  var dayMeta = {};   // dayNum → { label, date, labelOverride }
+  var blockMap = {};  // "dN.bM" → block object
+  var maxDay = 0;
+
+  searchParams.forEach(function(value, key) {
+    var m = key.match(/^d(\d+)$/);
+    if (!m) return;
+    var dN = parseInt(m[1]);
+    var parts = String(value).split('|');
+    var date  = parts[0] || '';
+    var label = parts[1] || '';
+    dayMeta[dN] = {
+      date:          date,
+      label:         label || ('Day ' + dN),
+      labelOverride: label || null,
+    };
+    if (dN > maxDay) maxDay = dN;
+  });
+
+  searchParams.forEach(function(value, key) {
+    var m = key.match(/^d(\d+)b(\d+)$/);
+    if (!m) return;
+    var dN = parseInt(m[1]), bN = parseInt(m[2]);
+    var block = _v2DecodeBlockValue(value);
+    if (!block) return;
+    blockMap[dN + '.' + bN] = block;
+    if (dN > maxDay) maxDay = dN;
+  });
+
+  searchParams.forEach(function(value, key) {
+    var m = key.match(/^d(\d+)b(\d+)cc$/);
+    if (!m) return;
+    var dN = parseInt(m[1]), bN = parseInt(m[2]);
+    var block = blockMap[dN + '.' + bN];
+    if (!block) return;
+    block.changes = String(value).split(';').map(function(s) {
+      var bits = s.split(':');
+      if (bits.length !== 2) return null;
+      var after = parseInt(bits[0]);
+      var time  = parseFloat(bits[1]);
+      if (!after || !time || after < 1 || time <= 0) return null;
+      return { afterMatch: after, cycleTime: time };
+    }).filter(Boolean);
+  });
+
+  // Children: dNbMcK → block.breaks[K-1]. Stored sparsely by index
+  // and assembled in order at the end so K=2 doesn't clobber K=1
+  // even if URL params arrive out of order.
+  var childMap = {};  // "dN.bM" → array of {idx, child}
+  searchParams.forEach(function(value, key) {
+    var m = key.match(/^d(\d+)b(\d+)c(\d+)$/);
+    if (!m) return;
+    var dN = parseInt(m[1]), bN = parseInt(m[2]), cN = parseInt(m[3]);
+    var child = _v2DecodeBlockValue(value);
+    if (!child) return;
+    var k = dN + '.' + bN;
+    if (!childMap[k]) childMap[k] = [];
+    childMap[k].push({ idx: cN, child: child });
+  });
+  Object.keys(childMap).forEach(function(k) {
+    var block = blockMap[k];
+    if (!block) return;
+    block.breaks = childMap[k]
+      .sort(function(a, b) { return a.idx - b.idx; })
+      .map(function(e) { return e.child; });
+  });
+
+  // Assemble days in order, including any holes (a URL with d1 and
+  // d3 but no d2 still produces three days; the missing one gets
+  // a synthesized empty day rather than collapsing to two).
+  for (var i = 1; i <= maxDay; i++) {
+    var meta = dayMeta[i] || {
+      date: '', label: 'Day ' + i, labelOverride: null,
+    };
+    // Find blocks for this day, preserve URL order via block index
+    var blocks = [];
+    Object.keys(blockMap).forEach(function(k) {
+      var p = k.split('.');
+      if (parseInt(p[0]) === i) {
+        blocks.push({ idx: parseInt(p[1]), block: blockMap[k] });
+      }
+    });
+    blocks.sort(function(a, b) { return a.idx - b.idx; });
+
+    dc.days.push({
+      label:         meta.label,
+      labelOverride: meta.labelOverride,
+      date:          meta.date,
+      blocks:        blocks.map(function(e) { return e.block; }),
+    });
+  }
+  return dc;
 }
 
 // Given a list of v1-style breaks and a list of v1-style match-time

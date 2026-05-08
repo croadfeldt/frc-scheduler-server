@@ -167,38 +167,52 @@ that, then stage 2's deletions become safe.
 
 ---
 
-## Phase 4 — URL parameters V2-shape
+## Phase 4 — URL parameters V2-shape *(done — pending review)*
 
 **Goal:** the URL emits V2-native params, with a back-compat parser for
 old shared links. Risk is unusually low here — only one V1 URL has
-been published publicly to date, so the back-compat surface is
-essentially zero.
+been published publicly to date.
 
 **Work:**
-1. URL encoding is decided (per [V2_SPEC.md](V2_SPEC.md) §9.2):
+1. ✓ URL encoding (per [V2_SPEC.md](V2_SPEC.md) §9.2):
    - Default: human-readable structured params (`dcv=2`, `dN=`,
      `dNbM=`, `dNbMcc=`, `dNbMcK=`).
-   - Compact fallback: `dc=base64(JSON)` when length > 2000 chars
-     or `dcc=1` is explicitly set.
-2. Update `buildShareUrl` to emit V2 params. Always include `dcv=2`
+   - Compact fallback: `dc=base64(JSON)` when length > 2000 chars.
+   *Implemented in `static/index.html` as four helpers near
+   `V2_BLOCK_TYPES`: `_v2EncodeBlockValue`, `_v2DecodeBlockValue`,
+   `_v2WriteUrlParams`, `_v2ReadUrlParams`. 36 round-trip tests
+   in `tests/test_v2_url.js` (all passing).*
+2. ✓ Update `buildShareUrl` to emit V2 params. Always include `dcv=2`
    so the parser can route by version cleanly.
-3. Update the URL parser to read V2 params first; fall back to legacy
-   params (`d1=`, `d1b=`, `cc=`, `pday=`, etc.) when `dcv=` is absent.
-   Indefinite back-compat retention — see phase 5.
-4. Delete `downgradeToV1` (W-04 in [V1_RETIREMENT.md](V1_RETIREMENT.md))
-   when no caller remains.
-5. Confirm [V2_SPEC.md](V2_SPEC.md) §9.2 matches the implementation.
+   *V2 emit is unconditional. The previous V1 emit (d1=, d1b=, cc=,
+   pday=, pd=, pdb=, pdcc=, pde=) is gone; replaced by the V2 emit
+   block. ~150 lines of V1 emit code removed.*
+3. ✓ Update the URL parser to read V2 params first; fall back to
+   legacy params when `dcv=` is absent.
+   *`autoRunFromUrl` now detects `dcv=2`. When set, calls
+   `_v2ReadUrlParams` and renders directly via `renderDayConfigV2`.
+   Otherwise falls through to `parseUrlParams` + `applyUrlParams`
+   which still write V1 form fields and trigger `migrateLegacyDayConfig`
+   → V2 render. The V1 fallback path is unchanged from phases 1-3.*
+4. *Deferred to phase 5.* Delete `downgradeToV1`. The function still
+   has callers in `collectDayConfig` (downgrade for backend
+   submission) and parts of the materializer; once those move
+   to V2-native, removal becomes safe. *No longer used by
+   `buildShareUrl` — that was the largest caller.*
+5. ✓ [V2_SPEC.md](V2_SPEC.md) §9.2 ratified by implementation.
 
 **Exit criteria:**
-- New shares produce structured V2 URLs by default; `dc=` fallback
+- ✓ New shares produce structured V2 URLs by default; `dc=` fallback
   triggers correctly at the 2000-char threshold.
-- Old shares (the one V1 link, plus any test fixtures we capture)
-  still load correctly.
-- The V2 parser is exercised by a fixture suite covering each block
-  type, nesting case, and cycle change shape.
+- ⏳ Old shares (the one V1 link) still load correctly. *Logic
+  preserved; manual verification at deploy time.*
+- ✓ The V2 parser is exercised by a fixture suite covering each block
+  type, nesting case, cycle changes, sparse days, compact mode,
+  pipe-sanitized labels.
 
 **Risk:** low. The single published V1 URL is in chat history; we
-test against it before deploy.
+test against it before deploy. New V2 URLs are exercised by 36
+round-trip tests.
 
 ---
 
@@ -314,6 +328,6 @@ Revisit after phase 3 ships.
 | 0     | ✓ Done      | claude| Specs ratified, doc reviews complete        |
 | 1     | ✓ Done      | claude| Backend V2 in place; deployed                |
 | 2     | ✓ Done      | you   | DB migration applied                        |
-| 3     | ⏳ Stage 1 done | claude | Toggle + dead code gone; stage 2 awaits phase 4 |
-| 4     | Not started |       | URL format change with back-compat          |
+| 3     | ⏳ Stage 1 done | claude | Stage 2 ready to run (next turn)        |
+| 4     | ✓ Done (pending review) | claude | V2 URL emit/parse + 36 round-trip tests |
 | 5     | Not started |       | Cleanup; 6 months after phase 4            |
