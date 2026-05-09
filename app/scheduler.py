@@ -114,7 +114,8 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                      weights: dict | None = None,
                      team_numbers: list[int] | None = None,
                      n_sa_iterations: int = 0,
-                     rb_post_pass: bool = True) -> ScheduleResult:
+                     rb_post_pass: bool = True,
+                     station_post_pass: bool = True) -> ScheduleResult:
     """Generate one schedule iteration.
 
     Args:
@@ -749,6 +750,18 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         # check (sub-millisecond per iteration). Total cost <100ms typical.
         matches, _rb_stats = rb_balance_sa(matches, n_iterations=5000, seed=seed)
 
+    # ── Phase 2: Sykes-style station balance post-pass ─────────────────────
+    # After R/B balance settles, run within-alliance station permutations
+    # to drive the per-team station distribution toward the optimal floor.
+    # Provably commutative with all other criteria: doesn't change which
+    # teams play in which match, doesn't change red-vs-blue alliance
+    # composition, doesn't change match-index list per team. Only changes
+    # which station number each team plays (R1/R2/R3 within red, etc.).
+    # See app/post_passes/station_balance.py for the commutativity proof.
+    if station_post_pass and len(matches) > 0:
+        from app.post_passes.station_balance import station_balance_sa
+        matches, _st_stats = station_balance_sa(matches, n_iterations=5000, seed=seed)
+
     return ScheduleResult(
         matches=matches,
         surrogate_count=sc,
@@ -758,29 +771,41 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
 
 
 def score_schedule(matches: list[Match], num_teams: int) -> float:
-    """Score a complete schedule — used to pick the best of N iterations.
+    """Score a complete schedule as a single float (backward-compat API).
 
-    This is the canonical score formula for the project. ``assign_teams``'s
-    inner SA loop tracks the same components incrementally and computes
-    deltas matching this formula exactly.
+    Returns the summary float derived from the canonical lex tuple. This
+    float is for display, DB columns, CSV exports — it's NOT used for SA
+    accept/reject inside the scheduler.
 
-    Penalties (negative score):
-      - back-to-back appearances: 1000 per occurrence (effectively hard)
-      - max red/blue imbalance per team: 500 per imbalance unit
-      - surrogate count: 200 per surrogate (constant per abstract schedule)
-      - opponent repeats: sum of count² × W_OPPONENT — quadratic, so a 2nd
-        repeat for the same pair is 4× as costly as the 1st
-      - partner repeats: sum of count² × W_PARTNER — same shape, weighted
-        higher (FIRST: partner duplication is more costly than opponent
-        because there are only 2 partners but 3 opponents per match)
-      - station imbalance: sum across teams of (max_station - min_station)
-        × W_STATION — pushes each team to appear roughly equally at all 6
-        positions (R1, R2, R3, B1, B2, B3)
+    Use ``score_tuple_for_schedule()`` to get the authoritative lex tuple.
+
+    Per FRC §10.5.2 paramount priorities, the schedule is compared using
+    the lex tuple: cooldown_violations, par_quad, opp_quad,
+    surrogate_count, rb_metric, station_pen, surrogate_spread,
+    match_equity. Comparison is lexicographic (first differing element
+    wins). The float returned here is a summary that's monotone with
+    respect to lex order on small neighborhoods but NOT a substitute for
+    tuple comparison when ordering matters.
     """
     if not matches:
         return -float('inf')
 
     state = _build_state_from_matches(matches, num_teams)
+    return _summary_score_from_tuple(_score_from_state(state))
+
+
+def score_tuple_for_schedule(matches: list[Match], num_teams: int,
+                             ideal_gap: int = 3) -> tuple:
+    """Authoritative lex tuple for a schedule, per FRC §10.5.2.
+
+    Use this for comparing schedules. ``score_schedule`` returns a float
+    derived from this tuple, but float comparison is lossy — two
+    schedules with identical par_quad but different opp_quad get the
+    same float in some encodings.
+    """
+    if not matches:
+        return (float('inf'),) * 8
+    state = _build_state_from_matches(matches, num_teams, ideal_gap=ideal_gap)
     return _score_from_state(state)
 
 
@@ -818,6 +843,12 @@ def _build_state_from_matches(matches: list[Match], num_teams: int,
     opp: dict[tuple[int, int], int] = {}
     par: dict[tuple[int, int], int] = {}
     team_matches: dict[int, list[int]] = {t: [] for t in team_set}
+    # Per-team-per-match color tracking — needed for the <24-team R/B
+    # swap-count metric (FRC §10.5.2 #5 variant). Indexed by team and
+    # match-index, storing 'R' or 'B'.
+    team_match_color: dict[int, dict[int, str]] = {t: {} for t in team_set}
+    # Per-team surrogate count (for surrogate_spread tie-breaker).
+    team_surrogate_count: dict[int, int] = {t: 0 for t in team_set}
 
     def pair(a: int, b: int) -> tuple[int, int]:
         return (a, b) if a < b else (b, a)
@@ -827,15 +858,22 @@ def _build_state_from_matches(matches: list[Match], num_teams: int,
             prev = set(matches[i - 1].red + matches[i - 1].blue)
             if any(t in prev for t in m.red + m.blue):
                 b2b += 1
-        surrogates += sum(m.red_surrogate) + sum(m.blue_surrogate)
-        for sta_idx, t in enumerate(m.red):
+        for sta_idx, (t, sur) in enumerate(zip(m.red, m.red_surrogate)):
             rc[t] += 1
             station_counts[t][sta_idx] += 1
             team_matches[t].append(i)
-        for sta_idx, t in enumerate(m.blue):
+            team_match_color[t][i] = 'R'
+            if sur:
+                surrogates += 1
+                team_surrogate_count[t] += 1
+        for sta_idx, (t, sur) in enumerate(zip(m.blue, m.blue_surrogate)):
             bc[t] += 1
             station_counts[t][3 + sta_idx] += 1
             team_matches[t].append(i)
+            team_match_color[t][i] = 'B'
+            if sur:
+                surrogates += 1
+                team_surrogate_count[t] += 1
         for r in m.red:
             for b in m.blue:
                 p = pair(r, b)
@@ -850,73 +888,249 @@ def _build_state_from_matches(matches: list[Match], num_teams: int,
                 p = pair(bl[a], bl[b])
                 par[p] = par.get(p, 0) + 1
 
-    # Cooldown deficit: sum of (ideal_gap - actual_gap) for all team appearances
-    # where the gap is less than ideal_gap.
+    # FRC #1: cooldown violations — count of team-gap pairs where actual gap
+    # is below ideal_gap. With cooldown structurally enforced, this should
+    # always be 0 for valid schedules. Non-zero indicates a bug or external
+    # input violating cooldown. Sum-of-deficits is preserved for diagnostic
+    # detail in the deficit field.
+    cooldown_violations = 0
     cooldown_deficit = 0
     for t, ms in team_matches.items():
-        # ms is in match-order since we appended during iteration
         for j in range(1, len(ms)):
             gap = ms[j] - ms[j - 1]
             if gap < ideal_gap:
+                cooldown_violations += 1
                 cooldown_deficit += ideal_gap - gap
 
+    # FRC #5 (small-event variant): count color swaps for the <24 team
+    # case. Always computed; the lex tuple uses it only when num_teams < 24.
+    color_swaps = 0
+    for t, color_map in team_match_color.items():
+        if len(color_map) < 2:
+            continue
+        sorted_idxs = sorted(color_map.keys())
+        prev_color = color_map[sorted_idxs[0]]
+        for idx in sorted_idxs[1:]:
+            if color_map[idx] != prev_color:
+                color_swaps += 1
+            prev_color = color_map[idx]
+
+    # P11 (#7): surrogate spread — variance proxy. Sum of |count - mean|
+    # which is robust and easy to update. With 3rd-match-as-surrogate
+    # invariant, surrogate_count per team is in {0, 1}, so spread is the
+    # number of teams carrying a surrogate (which is structurally fixed) —
+    # the *spread* element of the tuple matters when surrogates can differ
+    # per team (legacy code path or pathological inputs).
+    if team_surrogate_count:
+        total_sur = sum(team_surrogate_count.values())
+        n_teams = len(team_surrogate_count)
+        mean_sur = total_sur / n_teams if n_teams else 0
+        # Use sum-of-squared-deviations × 100 to keep it integer-ish for
+        # consistent tuple comparison.
+        surrogate_spread = int(round(
+            sum((c - mean_sur) ** 2 for c in team_surrogate_count.values()) * 100
+        ))
+    else:
+        surrogate_spread = 0
+
     return {
-        'b2b':              b2b,
-        'surrogates':       surrogates,
-        'rc':               rc,
-        'bc':               bc,
-        'station_counts':   station_counts,
-        'opp':              opp,
-        'par':              par,
-        'num_teams':        num_teams,
-        'cooldown_deficit': cooldown_deficit,
-        'ideal_gap':        ideal_gap,
+        'b2b':                  b2b,
+        'surrogates':           surrogates,
+        'rc':                   rc,
+        'bc':                   bc,
+        'station_counts':       station_counts,
+        'opp':                  opp,
+        'par':                  par,
+        'team_matches':         team_matches,
+        'team_match_color':     team_match_color,
+        'team_surrogate_count': team_surrogate_count,
+        'num_teams':            num_teams,
+        'cooldown_violations':  cooldown_violations,
+        'cooldown_deficit':     cooldown_deficit,
+        'color_swaps':          color_swaps,
+        'surrogate_spread':     surrogate_spread,
+        'ideal_gap':            ideal_gap,
     }
 
 
-def _score_from_state(state: dict) -> float:
+def _rb_metric(state: dict, num_teams: int) -> int:
+    """Compute the FRC criterion #5 metric.
+
+    Per FRC §10.5.2:
+      - Events with 24+ teams: even distribution of red/blue alliance
+        appearances per team. Metric: max |rc - bc| over teams.
+      - Events with <24 teams: minimize the number of times a team swaps
+        between blue and red ALLIANCE. Metric: total color-swap count
+        across all teams (a swap is a transition R→B or B→R between
+        consecutive matches the team plays in).
+    """
+    rc = state['rc']
+    bc = state['bc']
+    if not rc:
+        return 0
+    if num_teams >= 24:
+        return max(abs(rc[t] - bc[t]) for t in rc)
+    # Small-event variant: count color swaps. Requires team_color_history
+    # which is stored in state when team_matches is being maintained.
+    swaps = state.get('color_swaps', None)
+    if swaps is not None:
+        return swaps
+    # Fallback when state was built without color tracking — recompute
+    # from team_matches. Slower but correct.
+    swaps = 0
+    team_matches = state.get('team_matches', {})
+    team_match_color = state.get('team_match_color', {})
+    for t, ms in team_matches.items():
+        if t not in team_match_color:
+            continue
+        # ms might not be sorted; sort to traverse in match order
+        sorted_ms = sorted(ms)
+        prev_color = None
+        for m_idx in sorted_ms:
+            color = team_match_color[t].get(m_idx)
+            if color is None:
+                continue
+            if prev_color is not None and color != prev_color:
+                swaps += 1
+            prev_color = color
+    return swaps
+
+
+def _score_from_state(state: dict) -> tuple:
     """Canonical score formula — single source of truth.
 
-    Both ``score_schedule`` and ``assign_teams``'s SA loop use this. The
-    incremental delta computation in ``assign_teams`` is derived from
-    this exact formula; deltas match ``_score_from_state(state_after) -
-    _score_from_state(state_before)`` exactly for any swap (verified
-    by the property tests in ``tests/test_scheduler_score_consistency.py``).
+    Returns a lexicographic tuple ordered by FRC §10.5.2 priority:
+
+    Index 0: cooldown_violations (FRC #1, paramount)
+            Always zero in any valid schedule the algorithm produces.
+            Cooldown is enforced structurally by the move generator;
+            this is included for safety/verification only.
+    Index 1: par_quad — sum of partner-pair count² (FRC #2)
+            Lower is better. Penalty grows quadratically with repeats.
+    Index 2: opp_quad — sum of opponent-pair count² (FRC #3)
+            Lower is better. Same shape as partner.
+    Index 3: surrogate_count — total surrogate appearances (FRC #4)
+            Structural minimum; included for completeness.
+    Index 4: rb_metric — even R/B distribution metric (FRC #5)
+            For events ≥24 teams: max |rc - bc|.
+            For events <24 teams: total color-swap count.
+    Index 5: station_pen — sum of station-spread per team (FRC #6)
+            Lower is better.
+    Index 6: surrogate_spread (P11, our extension #7)
+            Tie-breaker. FRC doesn't list it; we keep it under FRC's
+            criteria. Lower is better — surrogates spread evenly.
+    Index 7: match_equity (P5, our extension #8)
+            Construction-phase tie-breaker. Always 0 in finalized
+            schedules so it doesn't affect SA accept/reject.
+
+    Tuple comparison is lexicographic: a swap is accepted iff the
+    post-state tuple is ≤ pre-state tuple. Score is "lower is better"
+    consistently across all elements.
+
+    For the user-facing score (DB column, CSV export, UI display) see
+    ``_summary_score_from_tuple()`` which converts this tuple to a
+    single float that's monotone with respect to lex order.
     """
     rc = state['rc']
     bc = state['bc']
     station_counts = state['station_counts']
     if not rc:
-        return -float('inf')
+        return (float('inf'),) * 8
 
-    max_imbalance = max(abs(rc[t] - bc[t]) for t in rc)
+    # FRC #1: cooldown violations. Recompute from team_matches when
+    # available (the SA-mutated state path) — that's the authoritative
+    # source of truth. State.cooldown_violations is a cache used by
+    # _build_state_from_matches (the from-scratch entry point); we
+    # ignore it here to avoid stale-cache bugs.
+    ideal_gap = state.get('ideal_gap', 3)
+    team_matches = state.get('team_matches', {})
+    cooldown_violations = 0
+    if team_matches:
+        for t, ms in team_matches.items():
+            sorted_ms = sorted(ms)
+            for j in range(1, len(sorted_ms)):
+                if sorted_ms[j] - sorted_ms[j - 1] < ideal_gap:
+                    cooldown_violations += 1
+    else:
+        cooldown_violations = state.get('cooldown_violations', 0)
 
-    # Quadratic penalty for repeats — encourages spreading repeats across
-    # many pairs rather than concentrating them on a few unlucky pairs.
-    opp_quad = sum(v * v for v in state['opp'].values())
+    # FRC #2 + #3: partner and opponent quadratic penalties
     par_quad = sum(v * v for v in state['par'].values())
+    opp_quad = sum(v * v for v in state['opp'].values())
 
-    # Station imbalance — sum across teams of (max - min) station counts.
+    # FRC #4: surrogate count (structural minimum)
+    surrogate_count = state.get('surrogates', 0)
+
+    # FRC #5: R/B metric — switches based on event size
+    num_teams = state.get('num_teams', len(rc))
+    rb_metric_val = _rb_metric(state, num_teams)
+
+    # FRC #6: station spread
     station_pen = 0
     for t in rc:
         sc_t = station_counts[t]
         if any(sc_t):
             station_pen += max(sc_t) - min(sc_t)
 
-    # Cooldown deficit (P4 in PRIORITIES.md) — sum of (ideal_gap - actual_gap)
-    # for all gap < ideal_gap across all team appearances. Reads from state
-    # if present (Match-based SA), else computes from team_matches.
-    # Hardcoded to ideal_gap=3 since that's what production uses; if events
-    # need to vary this, plumb through.
-    cooldown_deficit = state.get('cooldown_deficit', 0)
+    # P11 (#7): surrogate spread — recompute from team_surrogate_count when
+    # available so it's always fresh under SA mutation.
+    team_surrogate_count = state.get('team_surrogate_count', {})
+    if team_surrogate_count:
+        total_sur = sum(team_surrogate_count.values())
+        n_t = len(team_surrogate_count)
+        mean_sur = total_sur / n_t if n_t else 0
+        surrogate_spread = int(round(
+            sum((c - mean_sur) ** 2 for c in team_surrogate_count.values()) * 100
+        ))
+    else:
+        surrogate_spread = state.get('surrogate_spread', 0)
 
-    return -(state['b2b']        * 1000
-             + max_imbalance     *  500
-             + state['surrogates'] * 200
-             + opp_quad          * W_OPPONENT
-             + par_quad          * W_PARTNER
-             + station_pen       * W_STATION
-             + cooldown_deficit  * 1000)
+    # P5 (#8): match equity — 0 in finalized schedules. Construction-only
+    # tie-breaker; not maintained in SA state.
+    match_equity = 0
+
+    return (
+        cooldown_violations,
+        par_quad,
+        opp_quad,
+        surrogate_count,
+        rb_metric_val,
+        station_pen,
+        surrogate_spread,
+        match_equity,
+    )
+
+
+def _summary_score_from_tuple(score_tuple: tuple) -> float:
+    """Convert lex tuple to a single float for display / DB / CSV.
+
+    The float is for user-facing summary only; it's NOT used for SA
+    accept/reject or best-tracking. Those use the tuple directly.
+
+    Encoding: weighted sum where weights are chosen so two tuples with
+    the same first-N elements but different N+1 element produce floats
+    that differ proportional to that element's magnitude. This makes
+    the float useful for "improving over time" UX while not being
+    authoritative for comparison.
+
+    Negative-of-penalty convention preserved (higher float = better)
+    for backward compat with existing UI.
+    """
+    if not score_tuple or score_tuple[0] == float('inf'):
+        return float('-inf')
+
+    cooldown, par_q, opp_q, surr, rb, sta, sur_sp, eq = score_tuple
+    # Weights chosen for visual scale — NOT for comparison authority.
+    return -(
+        cooldown      * 1_000_000
+        + par_q       * 80
+        + opp_q       * 60
+        + surr        * 200
+        + rb          * 500
+        + sta         * 30
+        + sur_sp      * 10
+        + eq          * 1
+    )
 
 
 def run_iterations_worker(args: tuple) -> dict:
@@ -989,6 +1203,8 @@ def _build_match_state(matches: list[Match], ideal_gap: int = 3) -> dict:
     opp: dict[tuple[int, int], int] = {}
     par: dict[tuple[int, int], int] = {}
     team_matches: dict[int, list[int]] = {t: [] for t in team_set}
+    team_match_color: dict[int, dict[int, str]] = {t: {} for t in team_set}
+    team_surrogate_count: dict[int, int] = {t: 0 for t in team_set}
     tbm: list[set[int]] = []
 
     def pair(a: int, b: int) -> tuple[int, int]:
@@ -999,15 +1215,22 @@ def _build_match_state(matches: list[Match], ideal_gap: int = 3) -> dict:
         tbm.append(cur)
         if i > 0 and cur & tbm[i - 1]:
             b2b += 1
-        surrogates += sum(m.red_surrogate) + sum(m.blue_surrogate)
-        for sta_idx, t in enumerate(m.red):
+        for sta_idx, (t, sur) in enumerate(zip(m.red, m.red_surrogate)):
             rc[t] += 1
             station_counts[t][sta_idx] += 1
             team_matches[t].append(i)
-        for sta_idx, t in enumerate(m.blue):
+            team_match_color[t][i] = 'R'
+            if sur:
+                surrogates += 1
+                team_surrogate_count[t] += 1
+        for sta_idx, (t, sur) in enumerate(zip(m.blue, m.blue_surrogate)):
             bc[t] += 1
             station_counts[t][3 + sta_idx] += 1
             team_matches[t].append(i)
+            team_match_color[t][i] = 'B'
+            if sur:
+                surrogates += 1
+                team_surrogate_count[t] += 1
         for r in m.red:
             for b in m.blue:
                 p = pair(r, b)
@@ -1022,8 +1245,8 @@ def _build_match_state(matches: list[Match], ideal_gap: int = 3) -> dict:
                 p = pair(bl[a], bl[b])
                 par[p] = par.get(p, 0) + 1
 
-    # Cooldown deficit: sum of (ideal_gap - actual_gap) for gap < ideal_gap.
-    # team_matches is sorted by match index since we append in order.
+    # Cooldown deficit cached for diagnostics; the canonical cooldown_violations
+    # field used by _score_from_state is recomputed from team_matches there.
     cooldown_deficit = 0
     for t, ms in team_matches.items():
         for j in range(1, len(ms)):
@@ -1032,18 +1255,21 @@ def _build_match_state(matches: list[Match], ideal_gap: int = 3) -> dict:
                 cooldown_deficit += ideal_gap - gap
 
     return {
-        'b2b':              b2b,
-        'surrogates':       surrogates,
-        'rc':               rc,
-        'bc':               bc,
-        'station_counts':   station_counts,
-        'opp':              opp,
-        'par':              par,
-        'team_matches':     team_matches,
-        'tbm':              tbm,
-        'n_matches':        n,
-        'cooldown_deficit': cooldown_deficit,
-        'ideal_gap':        ideal_gap,
+        'b2b':                  b2b,
+        'surrogates':           surrogates,
+        'rc':                   rc,
+        'bc':                   bc,
+        'station_counts':       station_counts,
+        'opp':                  opp,
+        'par':                  par,
+        'team_matches':         team_matches,
+        'team_match_color':     team_match_color,
+        'team_surrogate_count': team_surrogate_count,
+        'tbm':                  tbm,
+        'n_matches':            n,
+        'num_teams':            len(team_set),
+        'cooldown_deficit':     cooldown_deficit,
+        'ideal_gap':            ideal_gap,
     }
 
 
@@ -1248,6 +1474,11 @@ def _match_swap_apply_delta(state: dict, matches: list[Match],
     src_sur_a = ma.red_surrogate[idx_a] if side_a == "red" else ma.blue_surrogate[idx_a]
     src_sur_b = mb.red_surrogate[idx_b] if side_b == "red" else mb.blue_surrogate[idx_b]
 
+    # State fields that need maintenance on swap (may not exist in older
+    # state dicts — defensive)
+    team_match_color = state.get('team_match_color')
+    team_surrogate_count = state.get('team_surrogate_count')
+
     if m_a == m_b:
         # Single-match swap: ta and tb swap positions within the match
         new_red, new_blue, new_red_sur, new_blue_sur = process_match(
@@ -1269,6 +1500,22 @@ def _match_swap_apply_delta(state: dict, matches: list[Match],
             blue_surrogate=tuple(new_blue_sur),
         )
         # tbm is unchanged for single-match swap (same team set)
+
+        # Within-match: team_match_color may change if R↔B swap
+        if team_match_color is not None:
+            # ta is now at side_b's color in match m_a
+            new_color_a = 'R' if side_b == 'red' else 'B'
+            new_color_b = 'R' if side_a == 'red' else 'B'
+            team_match_color[ta][m_a] = new_color_a
+            team_match_color[tb][m_a] = new_color_b
+        # team_surrogate_count: surrogate flags may have moved between teams.
+        # ta's old surrogate-status was src_sur_a; new status (after swap) is
+        # src_sur_b. Net change: +(src_sur_b - src_sur_a) for ta, opposite for tb.
+        if team_surrogate_count is not None:
+            ta_delta = (1 if src_sur_b else 0) - (1 if src_sur_a else 0)
+            tb_delta = (1 if src_sur_a else 0) - (1 if src_sur_b else 0)
+            team_surrogate_count[ta] += ta_delta
+            team_surrogate_count[tb] += tb_delta
     else:
         # Cross-match swap: ta moves to match B (taking its surrogate flag),
         # tb moves to match A (taking its surrogate flag)
@@ -1301,16 +1548,32 @@ def _match_swap_apply_delta(state: dict, matches: list[Match],
         # Update tbm and team_matches for the affected matches
         tbm[m_a] = set(matches[m_a].red + matches[m_a].blue)
         tbm[m_b] = set(matches[m_b].red + matches[m_b].blue)
-        # ta's match list: remove m_a, add m_b. tb's: remove m_b, add m_a.
-        # Matches are ordered arbitrarily in team_matches, so just rebuild.
-        # We could be cleverer, but team_matches is rebuilt every move when
-        # cross-match swap happens, which is rare; the cost is O(MPT) per swap.
         ta_ml = team_matches[ta]
         ta_ml.remove(m_a)
         ta_ml.append(m_b)
         tb_ml = team_matches[tb]
         tb_ml.remove(m_b)
         tb_ml.append(m_a)
+
+        # Cross-match: team_match_color and team_surrogate_count both change.
+        # ta was at (m_a, side_a's color); is now at (m_b, side_b's color).
+        # tb was at (m_b, side_b's color); is now at (m_a, side_a's color).
+        if team_match_color is not None:
+            new_color_for_ta = 'R' if side_b == 'red' else 'B'
+            new_color_for_tb = 'R' if side_a == 'red' else 'B'
+            del team_match_color[ta][m_a]
+            del team_match_color[tb][m_b]
+            team_match_color[ta][m_b] = new_color_for_ta
+            team_match_color[tb][m_a] = new_color_for_tb
+        # ta's surrogate-status was src_sur_a in m_a; now ta carries src_sur_a
+        # to m_b (surrogate flags travel with teams in cross-match swaps —
+        # except: at the new position, ta inherits the slot's flag pattern,
+        # which we set above to src_sur_a). So ta's per-team surrogate count
+        # is unchanged. Same for tb. The total surrogate count is also
+        # unchanged. team_surrogate_count needs no update here.
+        # (Verified: process_match writes surrogate flags such that
+        # ta gets src_sur_a at m_b, tb gets src_sur_b at m_a — flags travel
+        # with teams. So per-team surrogate counts are preserved.)
 
     # ── Compute b2b delta from affected edges ────────────────────────────
     b2b_delta = 0
@@ -1357,7 +1620,8 @@ def _is_valid_swap(matches: list[Match],
     """Check whether swapping these two team positions would produce a
     valid schedule (no team appears twice in the same match).
 
-    Cooldown is NOT checked here — that's added in Phase 3.
+    This is a structural check on the matches list only; cooldown is
+    a separate check via ``_swap_preserves_cooldown``.
     """
     if m_a == m_b:
         # Within-match swap: always valid (just rearranging existing teams)
@@ -1376,33 +1640,122 @@ def _is_valid_swap(matches: list[Match],
     return True
 
 
+def _swap_preserves_cooldown(state: dict, matches: list[Match],
+                             m_a: int, idx_a: int, side_a: str,
+                             m_b: int, idx_b: int, side_b: str) -> bool:
+    """Phase 0b: check whether a proposed swap would create cooldown violations.
+
+    Returns True if the swap is cooldown-safe (preserves or improves
+    cooldown_violations; never increases them). For within-match swaps
+    (m_a == m_b), team_matches doesn't change so cooldown can't change —
+    always returns True.
+
+    Reads ``team_matches`` and ``ideal_gap`` from state. Called by the
+    SA loop after _is_valid_swap to filter out cooldown-violating moves
+    before computing tuple deltas.
+
+    The check simulates the post-swap match-list for both teams and
+    counts violations. Cost: O(MPT log MPT) per swap (sort + traverse).
+    """
+    if m_a == m_b:
+        return True
+
+    ma = matches[m_a]
+    mb = matches[m_b]
+    ta = ma.red[idx_a] if side_a == "red" else ma.blue[idx_a]
+    tb = mb.red[idx_b] if side_b == "red" else mb.blue[idx_b]
+
+    team_matches = state.get('team_matches')
+    ideal_gap = state.get('ideal_gap', 3)
+    if team_matches is None:
+        return True  # state lacks tracking; defer to scoring stage
+
+    # Pre-swap violation counts for ta and tb (only these two teams change).
+    def violations_for_ms(ms):
+        sorted_ms = sorted(ms)
+        v = 0
+        for j in range(1, len(sorted_ms)):
+            if sorted_ms[j] - sorted_ms[j - 1] < ideal_gap:
+                v += 1
+        return v
+
+    pre_v = (violations_for_ms(team_matches[ta])
+             + violations_for_ms(team_matches[tb]))
+
+    # Simulate post-swap match lists
+    new_ta_ms = list(team_matches[ta])
+    new_ta_ms.remove(m_a)
+    new_ta_ms.append(m_b)
+    new_tb_ms = list(team_matches[tb])
+    new_tb_ms.remove(m_b)
+    new_tb_ms.append(m_a)
+
+    post_v = violations_for_ms(new_ta_ms) + violations_for_ms(new_tb_ms)
+
+    # Cooldown-safe = swap doesn't INCREASE the count of violations.
+    # Swaps that improve (post < pre) or hold steady (post == pre) pass.
+    return post_v <= pre_v
+
+
+def _lex_compare(a: tuple, b: tuple) -> int:
+    """Lexicographic comparison: -1 if a < b, 0 if equal, +1 if a > b."""
+    for x, y in zip(a, b):
+        if x < y:
+            return -1
+        if x > y:
+            return 1
+    return 0
+
+
+def _lex_first_diff_index(a: tuple, b: tuple) -> int:
+    """Index of the first element where a and b differ, or -1 if equal."""
+    for i, (x, y) in enumerate(zip(a, b)):
+        if x != y:
+            return i
+    return -1
+
+
 def _sa_optimize(matches: list[Match], n_iterations: int,
                  rng: random.Random) -> list[Match]:
-    """Run simulated annealing on a feasible Match list.
+    """Run simulated annealing on a feasible Match list (FRC-paramount).
 
     Move generator: pick two random match positions (each is a (match, side, idx)
     triple); attempt to swap the teams at those positions. Reject swap if it
     would produce an invalid schedule (team duplicated within a match).
 
-    The full canonical-score delta is computed for each accepted move; the
-    SA's accept/reject is driven by that delta.
+    Accept/reject uses LEXICOGRAPHIC comparison on the score tuple per
+    FRC §10.5.2 priority order:
 
-    Returns the best-scoring schedule encountered (best may be the input if
-    no improvement was found).
+      Index 0: cooldown_violations  (paramount — never trade up)
+      Index 1: par_quad             (FRC #2: partner)
+      Index 2: opp_quad             (FRC #3: opponent)
+      Index 3: surrogate_count      (FRC #4)
+      Index 4: rb_metric            (FRC #5)
+      Index 5: station_pen          (FRC #6)
+      Index 6: surrogate_spread     (P11, our extension #7)
+      Index 7: match_equity         (P5, our extension #8)
+
+    Acceptance rules:
+      - Strict improvement (post < pre): always accept
+      - Equal: always accept (random walk on plateau, common at convergence)
+      - Strict worsening (post > pre): SA stochastic acceptance, but ONLY
+        when the worsening is at the LOWEST PRIORITY where they differ.
+        i.e., the move is neutral on all higher priorities and worse only
+        at the least-significant differing element. This honors FRC's
+        "listed in order of priority" guarantee.
+
+    Returns the best-tuple schedule encountered.
     """
     if not matches or n_iterations <= 0:
         return matches[:]
 
-    # Operate on a working copy
     work = list(matches)
     state = _build_match_state(work)
-    score = _score_from_state(state)
-    best_score = score
+    cur_tuple = _score_from_state(state)
+    best_tuple = cur_tuple
     best_snapshot = list(work)
 
     n = len(work)
-    # Each match has 6 positions. Generate (match, side, idx) tuples.
-    # Pre-allocate the position list to avoid recomputing each step.
     positions: list[tuple[int, str, int]] = []
     for mi in range(n):
         for k in range(3):
@@ -1413,11 +1766,14 @@ def _sa_optimize(matches: list[Match], n_iterations: int,
     if n_positions < 2:
         return matches[:]
 
-    T0 = 500.0
+    # SA temperature applied only to the lowest-priority criterion that
+    # differs. T0 chosen to scale with typical par_quad/opp_quad magnitudes
+    # at SA's working point.
+    T0 = 50.0
+
     for step in range(n_iterations):
         T = T0 * (1.0 - step / n_iterations)
 
-        # Pick two random distinct positions
         i, j = rng.sample(range(n_positions), 2)
         m_a, side_a, idx_a = positions[i]
         m_b, side_b, idx_b = positions[j]
@@ -1425,18 +1781,70 @@ def _sa_optimize(matches: list[Match], n_iterations: int,
         if not _is_valid_swap(work, m_a, idx_a, side_a, m_b, idx_b, side_b):
             continue
 
-        delta = _match_swap_apply_delta(state, work,
+        # Phase 0b: hard cooldown filter. Reject swaps that would create
+        # cooldown violations BEFORE mutating state. Saves the cost of
+        # apply+score+revert on dead-end moves and provides the structural
+        # guarantee that cooldown_violations only decreases under SA.
+        # If the input schedule has pre-existing cooldown violations
+        # (a construction-phase bug), the filter still permits swaps that
+        # don't WORSEN cooldown — including swaps that improve it — so
+        # the SA self-heals to cooldown_violations = 0.
+        if not _swap_preserves_cooldown(state, work,
                                         m_a, idx_a, side_a,
-                                        m_b, idx_b, side_b)
-        accept = (delta >= 0) or (T > 0 and (delta / T) > -10
-                                  and rng.random() < math.exp(delta / T))
-        if accept:
-            score += delta
-            if score > best_score:
-                best_score = score
+                                        m_b, idx_b, side_b):
+            continue
+
+        # Apply swap; mutates state and work in place.
+        _match_swap_apply_delta(state, work,
+                                m_a, idx_a, side_a,
+                                m_b, idx_b, side_b)
+        new_tuple = _score_from_state(state)
+
+        cmp = _lex_compare(new_tuple, cur_tuple)
+
+        if cmp <= 0:
+            # Strict improvement or equal — always accept
+            cur_tuple = new_tuple
+            if _lex_compare(new_tuple, best_tuple) < 0:
+                best_tuple = new_tuple
                 best_snapshot = list(work)
         else:
-            # Revert: same swap call is self-inverse
+            # Strict worsening. Allow stochastic uphill ONLY if the worsening
+            # is at the lowest-priority differing element AND that element
+            # is not criterion #1 (cooldown — paramount, never traded).
+            diff_idx = _lex_first_diff_index(cur_tuple, new_tuple)
+            n_elems = len(cur_tuple)
+            # Are all higher-priority criteria equal? They are by construction
+            # of diff_idx. Are all even-lower-priority criteria equal too?
+            # If yes, it's a "single-criterion worsening" at diff_idx.
+            higher_match = all(
+                cur_tuple[k] == new_tuple[k] for k in range(diff_idx)
+            )
+            # Check that worsening at this criterion isn't compensated by
+            # an improvement at a lower criterion — if it were, we wouldn't
+            # be at "strict worsening" yet, so no need to check.
+
+            # FRC paramount: never accept a swap that worsens criterion #1.
+            if diff_idx == 0:
+                # Worsened cooldown. Always reject.
+                _match_swap_apply_delta(state, work,
+                                        m_a, idx_a, side_a,
+                                        m_b, idx_b, side_b)
+                continue
+
+            # Allow stochastic uphill on lower-priority criterion only.
+            if higher_match and T > 0:
+                delta_at_diff = new_tuple[diff_idx] - cur_tuple[diff_idx]
+                # Probability scales with magnitude of worsening; reject
+                # large jumps. delta is positive (worsening).
+                if (delta_at_diff / T) < 10:
+                    p_accept = math.exp(-delta_at_diff / T)
+                    if rng.random() < p_accept:
+                        cur_tuple = new_tuple
+                        # Don't update best; this is a stochastic uphill move.
+                        continue
+
+            # Reject — revert.
             _match_swap_apply_delta(state, work,
                                     m_a, idx_a, side_a,
                                     m_b, idx_b, side_b)
@@ -1495,13 +1903,14 @@ def _assign_unified(abstract_matches: list[dict],
                     ideal_gap: int,
                     sa_iterations: int,
                     seed: int | None,
-                    rb_post_pass: bool = True) -> dict:
-    """Run Phase 0+1 unified assignment.
+                    rb_post_pass: bool = True,
+                    station_post_pass: bool = True) -> dict:
+    """Run Phase 0+1+2 unified assignment.
 
     Takes a saved abstract schedule (slot indices), relabels with real
-    teams, runs SA optimization, runs the Phase 1 R/B post-pass. Returns
-    a dict with the same shape as the legacy assign_teams output:
-    {'slot_map': {...}, 'score': float, 'matches': [...]}.
+    teams, runs SA optimization, runs the R/B post-pass (Phase 1) and
+    station balance post-pass (Phase 2). Returns a dict with the same
+    shape as the legacy assign_teams output.
     """
     if len(team_numbers) != num_teams:
         raise ValueError(
@@ -1519,6 +1928,12 @@ def _assign_unified(abstract_matches: list[dict],
     if rb_post_pass and len(matches) > 0:
         from app.post_passes.rb_balance import rb_balance_sa
         matches, _stats = rb_balance_sa(matches, n_iterations=5000, seed=seed)
+
+    # Phase 2: Sykes-style station balance post-pass (commutative with R/B,
+    # partner, opponent, cooldown, surrogate)
+    if station_post_pass and len(matches) > 0:
+        from app.post_passes.station_balance import station_balance_sa
+        matches, _stats = station_balance_sa(matches, n_iterations=5000, seed=seed)
 
     score = score_schedule(matches, num_teams)
     slot_map = _matches_to_slot_map(matches, team_numbers, num_teams)

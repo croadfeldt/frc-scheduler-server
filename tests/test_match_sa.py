@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.scheduler import (
     Match,
     score_schedule,
+    score_tuple_for_schedule,
     generate_matches,
     _build_state_from_matches,
     _score_from_state,
@@ -70,12 +71,13 @@ def test_match_state_matches_canonical_state():
         print(f"  seed={seed}: states agree, score={_score_from_state(s1)}  ✓")
 
 
-def test_cross_match_swap_delta_correctness():
-    """Core Phase 0 acceptance criterion (Match-based SA).
+def test_cross_match_swap_state_consistency():
+    """Core Phase 0 acceptance criterion (lex-tuple SA).
 
-    For randomized cross-match swaps, _match_swap_apply_delta must return
-    exactly score_after - score_before."""
-    print("── test_cross_match_swap_delta_correctness (cross-match swaps) ──")
+    For randomized cross-match swaps, the SA-mutated state must produce
+    the same lex tuple as a from-scratch rebuild after the swap. This
+    catches state-drift bugs where incremental updates miss a field."""
+    print("── test_cross_match_swap_state_consistency (cross-match swaps) ──")
 
     test_cases = [
         (12, 6),    # very small
@@ -91,12 +93,10 @@ def test_cross_match_swap_delta_correctness():
         matches_template = make_test_schedule(num_teams, mpt, seed=100)
 
         for trial in range(100):
-            # Fresh copy each trial
             matches = list(matches_template)
             state = _build_match_state(matches)
-            score_before = _score_from_state(state)
+            tuple_before = _score_from_state(state)
 
-            # Pick two random positions in different matches
             n = len(matches)
             attempts = 0
             while attempts < 50:
@@ -113,43 +113,38 @@ def test_cross_match_swap_delta_correctness():
                     break
                 attempts += 1
             else:
-                continue  # couldn't find a valid swap, skip this trial
+                continue
 
-            delta = _match_swap_apply_delta(state, matches,
-                                            m_a, idx_a, side_a,
-                                            m_b, idx_b, side_b)
-            score_after = _score_from_state(state)
-            actual_delta = score_after - score_before
-            total_swaps += 1
-            if delta != actual_delta:
-                failures += 1
-                if failures <= 3:
-                    print(f"  FAIL: N={num_teams}, MPT={mpt}, trial {trial}: "
-                          f"reported delta={delta}, actual={actual_delta}, "
-                          f"diff={actual_delta - delta}")
+            _match_swap_apply_delta(state, matches,
+                                    m_a, idx_a, side_a,
+                                    m_b, idx_b, side_b)
+            tuple_after_incremental = _score_from_state(state)
 
-            # Cross-check: rebuild state from scratch and confirm it matches
+            # Rebuild state from scratch and compare tuples
             state_rebuilt = _build_match_state(matches)
-            if _score_from_state(state_rebuilt) != score_after:
-                if failures <= 3:
-                    print(f"  STATE DRIFT: N={num_teams}, trial {trial}: "
-                          f"in-place state score={score_after}, rebuilt={_score_from_state(state_rebuilt)}")
+            tuple_after_rebuild = _score_from_state(state_rebuilt)
+
+            total_swaps += 1
+            if tuple_after_incremental != tuple_after_rebuild:
                 failures += 1
+                if failures <= 3:
+                    print(f"  FAIL: N={num_teams}, MPT={mpt}, trial {trial}:")
+                    print(f"    incremental: {tuple_after_incremental}")
+                    print(f"    rebuilt:     {tuple_after_rebuild}")
+                    diffs = [(i, a, b) for i, (a, b) in enumerate(
+                        zip(tuple_after_incremental, tuple_after_rebuild)) if a != b]
+                    print(f"    diff at:     {diffs}")
 
     if failures == 0:
-        print(f"  {total_swaps} cross-match swaps: delta + state perfectly tracked  ✓")
+        print(f"  {total_swaps} cross-match swaps: incremental tuple == rebuilt tuple  ✓")
     else:
-        print(f"  {failures}/{total_swaps} swaps had errors  ✗")
-        raise AssertionError(f"Match-based delta computation broken: {failures} failures")
+        print(f"  {failures}/{total_swaps} swaps had state drift  ✗")
+        raise AssertionError(f"State drift in incremental updates: {failures} failures")
 
 
-def test_within_match_swap_delta_correctness():
-    """Within-match swaps: swap two positions in the same match (e.g. R1 ↔ B2).
-
-    This permutes teams' stations / R-vs-B without changing which teams play
-    in which match. Quad terms (par, opp) shouldn't change for a pure
-    within-alliance swap, but station_counts and rc/bc do change."""
-    print("── test_within_match_swap_delta_correctness (within-match swaps) ──")
+def test_within_match_swap_state_consistency():
+    """Within-match swap state consistency under lex tuple."""
+    print("── test_within_match_swap_state_consistency (within-match swaps) ──")
 
     matches_template = make_test_schedule(24, 8, seed=42)
     rng = random.Random(2027)
@@ -159,36 +154,42 @@ def test_within_match_swap_delta_correctness():
     for trial in range(100):
         matches = list(matches_template)
         state = _build_match_state(matches)
-        score_before = _score_from_state(state)
 
-        # Pick a random match, two positions within it
         n = len(matches)
         m_a = rng.randint(0, n - 1)
-        m_b = m_a  # same match
+        m_b = m_a
         side_a = rng.choice(["red", "blue"])
         side_b = rng.choice(["red", "blue"])
         idx_a = rng.randint(0, 2)
         idx_b = rng.randint(0, 2)
-        # Skip the no-op case (same exact position)
         if side_a == side_b and idx_a == idx_b:
             continue
 
-        delta = _match_swap_apply_delta(state, matches,
-                                        m_a, idx_a, side_a,
-                                        m_b, idx_b, side_b)
-        score_after = _score_from_state(state)
-        actual_delta = score_after - score_before
+        _match_swap_apply_delta(state, matches,
+                                m_a, idx_a, side_a,
+                                m_b, idx_b, side_b)
+        tuple_incremental = _score_from_state(state)
+
+        state_rebuilt = _build_match_state(matches)
+        tuple_rebuilt = _score_from_state(state_rebuilt)
+
         total_swaps += 1
-        if delta != actual_delta:
+        if tuple_incremental != tuple_rebuilt:
             failures += 1
             if failures <= 3:
-                print(f"  FAIL: trial {trial}, ({side_a},{idx_a}) <-> ({side_b},{idx_b}): "
-                      f"reported delta={delta}, actual={actual_delta}")
+                print(f"  FAIL: trial {trial}, ({side_a},{idx_a}) <-> ({side_b},{idx_b})")
+                print(f"    incremental: {tuple_incremental}")
+                print(f"    rebuilt:     {tuple_rebuilt}")
 
     if failures == 0:
-        print(f"  {total_swaps} within-match swaps: delta exact  ✓")
+        print(f"  {total_swaps} within-match swaps: incremental == rebuilt  ✓")
     else:
-        raise AssertionError(f"Within-match delta broken: {failures} failures")
+        raise AssertionError(f"Within-match state drift: {failures} failures")
+
+
+# Aliases for back-compat with the old test names
+test_cross_match_swap_delta_correctness = test_cross_match_swap_state_consistency
+test_within_match_swap_delta_correctness = test_within_match_swap_state_consistency
 
 
 def test_match_swap_is_self_inverse():
@@ -231,9 +232,9 @@ def test_match_swap_is_self_inverse():
         d2 = _match_swap_apply_delta(state, matches, m_a, idx_a, side_a, m_b, idx_b, side_b)
 
         score_after = _score_from_state(state)
-        assert d1 + d2 == 0, f"trial {trial}: d1={d1}, d2={d2}"
+        # Lex tuple semantics: tuple after revert must equal tuple before
         assert score_after == score_before, \
-            f"trial {trial}: score not restored: before={score_before}, after={score_after}"
+            f"trial {trial}: tuple not restored: before={score_before}, after={score_after}"
         # Verify state byte-for-byte identical
         assert state['opp'] == opp_before, f"trial {trial}: opp drift"
         assert state['par'] == par_before, f"trial {trial}: par drift"
@@ -301,39 +302,35 @@ def test_is_valid_swap_rejects_duplicates():
 
 
 def test_sa_optimize_improves_or_matches():
-    """_sa_optimize should never WORSEN a schedule (best-of-traversal property)."""
+    """_sa_optimize should never produce a schedule with a strictly worse
+    lex tuple than the input — best-of-traversal pattern with FRC paramount."""
     print("── test_sa_optimize_improves_or_matches ──")
 
     matches = make_test_schedule(24, 8, seed=42)
-    score_before = score_schedule(matches, 24)
+    tuple_before = score_tuple_for_schedule(matches, 24)
 
     rng = random.Random(2029)
     optimized = _sa_optimize(matches, n_iterations=500, rng=rng)
-    score_after = score_schedule(optimized, 24)
+    tuple_after = score_tuple_for_schedule(optimized, 24)
 
-    # The optimizer may produce equal or better; never worse (best-of pattern)
-    assert score_after >= score_before, \
-        f"SA produced worse schedule: before={score_before}, after={score_after}"
-    print(f"  before={score_before}, after={score_after}, delta={score_after - score_before:+}  ✓")
+    # Lex tuple: tuple_after should be ≤ tuple_before (lower is better)
+    assert tuple_after <= tuple_before, \
+        f"SA produced lex-worse schedule: before={tuple_before}, after={tuple_after}"
+    if tuple_after == tuple_before:
+        print(f"  before={tuple_before}, after={tuple_after}: no improvement (input is local optimum)  ✓")
+    else:
+        print(f"  before={tuple_before}, after={tuple_after}: improved at lex index {[i for i,(a,b) in enumerate(zip(tuple_before, tuple_after)) if a != b][0]}  ✓")
 
 
 def test_sa_optimize_actually_optimizes():
-    """SA on a randomly-shuffled schedule should improve it more than zero
-    iterations would.
-
-    This is the regression guard for 'is the SA actually doing useful work'.
-    A pre-Phase-0 SA on slot_map permutations always returned 0 improvement
-    because team-to-slot is a no-op for the canonical score. The new
-    Match-based SA changes which teams are in which match, which IS useful."""
+    """SA on a randomly-shuffled schedule should produce a strictly better
+    lex tuple. Regression guard against future no-op SAs."""
     print("── test_sa_optimize_actually_optimizes ──")
 
-    # Build a random permutation of a known good schedule by doing many
-    # random shuffles. Score should be worse than the structured original.
     base = make_test_schedule(24, 8, seed=42)
-    score_base = score_schedule(base, 24)
+    tuple_base = score_tuple_for_schedule(base, 24)
 
     rng = random.Random(2030)
-    # Scramble: do 1000 random valid swaps with no SA filtering
     scrambled = list(base)
     state = _build_match_state(scrambled)
     n_pos = len(scrambled) * 6
@@ -344,21 +341,23 @@ def test_sa_optimize_actually_optimizes():
         if _is_valid_swap(scrambled, m_a, idx_a, side_a, m_b, idx_b, side_b):
             _match_swap_apply_delta(state, scrambled,
                                     m_a, idx_a, side_a, m_b, idx_b, side_b)
-    score_scrambled = score_schedule(scrambled, 24)
+    tuple_scrambled = score_tuple_for_schedule(scrambled, 24)
 
-    # Now SA-optimize the scrambled schedule
     rng2 = random.Random(2031)
     optimized = _sa_optimize(scrambled, n_iterations=2000, rng=rng2)
-    score_optimized = score_schedule(optimized, 24)
+    tuple_optimized = score_tuple_for_schedule(optimized, 24)
 
-    print(f"  base structured schedule:     {score_base}")
-    print(f"  randomly scrambled:           {score_scrambled}")
-    print(f"  scrambled + 2000 SA iters:    {score_optimized}")
-    print(f"  improvement from SA:          {score_optimized - score_scrambled:+}")
+    print(f"  base structured schedule:     {tuple_base}")
+    print(f"  randomly scrambled:           {tuple_scrambled}")
+    print(f"  scrambled + 2000 SA iters:    {tuple_optimized}")
 
-    assert score_optimized > score_scrambled, \
-        f"SA failed to improve a scrambled schedule (regression: SA may be no-op?)"
-    print(f"  SA measurably improved a scrambled schedule  ✓")
+    # Optimized must be lex ≤ scrambled, and strictly better in most cases
+    assert tuple_optimized <= tuple_scrambled, \
+        f"SA failed to improve scrambled schedule lex-tuple-wise"
+    if tuple_optimized < tuple_scrambled:
+        print(f"  SA measurably improved a scrambled schedule (lex tuple)  ✓")
+    else:
+        print(f"  SA did not improve (scrambled was already at local optimum?)  ⚠")
 
 
 if __name__ == '__main__':

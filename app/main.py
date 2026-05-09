@@ -367,12 +367,13 @@ class AbstractGenerateRequest(BaseModel):
 class AssignRequest(BaseModel):
     event_id:             int
     abstract_schedule_id: int
-    iterations:           int        = Field(1000, ge=1, le=100000)
+    # Phase 0 (FRC paramount): SA iteration budget. Capped at 5,000,000
+    # so quality presets can find the ceiling. Default 50000 is the
+    # current "Good" preset; "Best" is 5M, "Fair" is 10000.
+    iterations:           int        = Field(50_000, ge=1, le=5_000_000)
     assign_seed:          str | None = Field(None, max_length=16)
     name:                 str        = Field("Schedule", max_length=128)
     day_config:           Any        = None
-    # Optional: practice match list, generated client-side. Same shape as
-    # AbstractSchedule.matches but with already-resolved team numbers.
     practice_matches:     Any        = None
 
 
