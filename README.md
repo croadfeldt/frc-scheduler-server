@@ -24,6 +24,11 @@ GNU General Public License v3.0 — see [LICENSE](LICENSE).
 
 Copyright (C) 2025 FRC Match Scheduler Contributors.
 
+For third-party software acknowledgments, algorithm attribution, and
+the project's posture toward external services (TBA, FRC Events API)
+and proprietary tools (Idle Loop's MatchMaker — evaluation only, not
+bundled), see [NOTICE](NOTICE.md).
+
 ---
 
 ## Deployment
@@ -279,12 +284,19 @@ Stage 2 — Team Assignment
           reproducible: same assign_seed → identical mapping
 ```
 
-> 📐 **Placement criteria & FIRST alignment:** the scheduler's defaults match
-> the official FIRST/MatchMaker algorithm used by FMS, including station-position
-> balancing and partner-weighted-higher-than-opponent diversity. Weights are
-> tunable via the editor's Advanced Criteria panel with a "⊕ Match FIRST defaults"
-> reset button. See [`docs/PRIORITIES.md`](docs/PRIORITIES.md) for the full
-> criteria table, configurability details, and the FIRST alignment matrix.
+> 📐 **FIRST alignment:** the scheduler's defaults follow FRC's published
+> placement criteria from the Game Manual (§13.6.2 in 2025), including
+> partner/opponent diversity, station-position balancing, and surrogate
+> handling. Weights are tunable via the editor's Advanced Criteria panel
+> with a "⊕ Match FIRST defaults" reset button.
+>
+> The scheduler is an independent implementation of FRC's published
+> criteria — see [`NOTICE.md`](NOTICE.md) for algorithm attribution,
+> third-party software acknowledgments, and the licensing posture toward
+> Idle Loop's MatchMaker (which we evaluate against but do not bundle
+> or invoke from the running app). See [`docs/PRIORITIES.md`](docs/PRIORITIES.md)
+> for the full criteria table, configurability details, and the FIRST
+> alignment matrix.
 
 ### System components
 

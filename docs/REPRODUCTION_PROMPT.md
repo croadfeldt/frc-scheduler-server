@@ -6,6 +6,27 @@ OpenShift-deployable via Containerfile. GNU GPL v3. AI-generated with human revi
 
 ---
 
+## Licensing & IP Posture (READ FIRST)
+
+This project is GPL v3, with third-party software acknowledgments in `NOTICE.md`. Any AI-assisted work on this codebase must respect these non-negotiable constraints:
+
+- **Idle Loop's MatchMaker is "evaluation only"** — do not bundle, redistribute, auto-download, or invoke MatchMaker from production code paths or CI. The harness in `scripts/scheduler_eval/` may wrap a user-installed copy for personal evaluation only. Full constraints in `docs/scheduler/MATCHMAKER_LICENSING_BRIEF.md`.
+- **Algorithms vs. binaries** — published algorithm descriptions (Saxton MatchMaker white paper at idleloop.com/matchmaker/, Sykes station-balancing description at idleloop.com/matchmaker/stations.php) may be independently implemented from the published prose. MatchMaker source code, decompiled output, and the binary itself may not.
+- **Algorithm naming** — do not name shipped algorithm suites "MatchMaker"; use descriptive names like `sa-saxton-sykes` and `sa-saxton-sykes-extended`. Credit Saxton/Sykes in suite documentation and provenance metadata.
+- **Validation strategy** — primary validation surface is the TBA-fetched `actual` adapter (public FRC event data). The `matchmaker` adapter in the harness is for occasional manual evaluation only, not the validation backbone.
+- **TBA usage** — read-only via `app/tba.py` which sets identifying headers; reuse that client rather than rolling new ones.
+- **AI-attribution comments** — files originated with AI assistance carry a GPL+AI-disclosure header (see `app/scheduler.py`, `app/db.py`, `app/frc_events.py`, `app/tba.py` for the canonical format).
+
+**Pre-merge checklist for algorithm or comparison code:**
+- [ ] No MatchMaker code, binary, or output reproduced verbatim.
+- [ ] No MatchMaker invocation in production / CI / hosted services.
+- [ ] No suite named "MatchMaker"; descriptive names with attribution.
+- [ ] If implementing from published Saxton/Sykes work, attribution present in code comments and suite metadata.
+- [ ] TBA queries reuse `app/tba.py`.
+- [ ] New file has GPL+AI-disclosure header.
+
+---
+
 ## STAGE 1 — ABSTRACT SCHEDULE (slot indices 1..N, no real team numbers)
 
 ### Match Count (pure math — Step 1)

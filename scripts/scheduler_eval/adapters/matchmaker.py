@@ -33,28 +33,25 @@ every flag. The adapter has a `--help` probe mode that runs
 flags for verification. Adjust the flag names below if reality differs
 from this guess.
 
-Output format (verified against Saxton matchmaker 1.6.1 Linux on
-2026-05-09):
+Output format (verified against the Saxton MatchMaker 1.6.1 Linux
+binary on 2026-05-09; format described abstractly below for
+interoperability — no literal output reproduced):
 
-    Create schedule for N teams playing R rounds in M matches
-    with a minimum match separation of S running 100000 iterations.
+  - A header section announcing schedule parameters (team count,
+    rounds, total match count, minimum match separation, iteration
+    target).
+  - A progress section with timestamped percent-complete updates
+    while the simulated annealing runs.
+  - A "Results" line restating the parameters once complete.
+  - A "Match Schedule" header followed by a dashed separator.
+  - One line per match in the form
+    `<match_num>: <slot_1> <slot_2> ... <slot_N>` where N is
+    `2 * teams_per_alliance` and slots are 1-indexed integer
+    positions in the fixture's team list.
+  - Optional team-repeats summary if `-D` was passed.
 
-       0:00   N.NN% complete (... updates) ...
-       ...
-
-    Results for N teams playing R rounds in M matches
-    with a minimum match separation of S.
-
-    Match Schedule
-    --------------
-      1:   29    24     3    14    31    27
-      2:    7     5    15    17    35    18
-      ...
-
-    [team-repeats summary if -D was passed]
-
-The parser ignores everything except match rows ("<num>: <slots>")
-and is robust to leading/trailing whitespace.
+The parser ignores everything except match rows and is robust to
+leading/trailing whitespace.
 
 Determinism: the 1.0.3 release notes say "new method for seeding the
 match generation should reduce clumping" but no `-s seed` flag is
@@ -226,31 +223,26 @@ class MatchMakerAdapter(Adapter):
     def _parse_output(self, stdout: str, fixture: Fixture) -> list[Match]:
         """Parse MatchMaker's stdout into Match objects.
 
-        VERIFIED format (from a Stark run on 2026-05-09 against the
-        Saxton matchmaker 1.6.1 Linux binary):
-
-            Match Schedule
-            --------------
-              1:   29    24     3    14    31    27
-              2:    7     5    15    17    35    18
-              ...
-
-        Each match line is "<match_num>: <slot1> <slot2> ... <slot6>"
-        with whitespace between every column. The match number is
-        followed by a colon. Slot numbers are 1..N integers referring
-        to the fixture's team list (translated via _slot_to_team).
+        Format is described in the module docstring at the top of this
+        file. Briefly: each match line has the form
+        "<match_num>: <slot1> <slot2> ... <slotN>" where N equals
+        2 × teams_per_alliance, with whitespace between columns and a
+        colon after the match number. Slot numbers are 1-indexed
+        positions in the fixture's team list (translated via
+        _slot_to_team).
 
         Lines without a match-number prefix (header text, "Match
         Schedule" / "----" / progress lines / statistics) are
         ignored — the regex only matches well-formed match rows.
 
-        Surrogate marking: empirical capture didn't include any runs
-        with surrogates, so the form is unconfirmed. Existing parser
-        code preserves the trailing `*` convention from the release
-        notes; if MatchMaker actually marks them differently (e.g.
-        with an `s` suffix or a separate column), the regex will
-        fail to match those rows and we'll see a "got N matches,
-        expected M" error pointing us at the issue.
+        Surrogate marking: when surrogates appear, the convention from
+        the MatchMaker 1.0.2b1 release notes is a trailing `*` after
+        the slot number. Empirical capture during initial parser
+        verification didn't include surrogate runs, so this is
+        retained from the release-notes spec rather than empirically
+        confirmed. If MatchMaker uses a different marker (e.g. `s`
+        suffix, separate column), the regex will fail to match those
+        rows and surface as a "got N matches, expected M" error.
         """
         matches: list[Match] = []
         # Pattern: integer match number, optional colon and whitespace,
