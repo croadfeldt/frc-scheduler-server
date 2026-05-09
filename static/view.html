@@ -2536,6 +2536,11 @@
           <input type="radio" name="exportFormat" value="fms" onchange="onExportFormatChange()">
           <span>FMS Match Maker</span>
         </label>
+        <label class="export-format-radio"
+               title="Plain-text team list for FIRST FMS Team Selection 'Import Teams from File'. One team number per line.">
+          <input type="radio" name="exportFormat" value="fms_teams" onchange="onExportFormatChange()">
+          <span>FMS Team List</span>
+        </label>
       </div>
 
       <!-- ── Right: format-specific options ───────────────────── -->
@@ -2620,6 +2625,30 @@
           <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap;">
             <button class="btn" onclick="closeModal('exportModal'); exportFms('qual');">⬇ Qualification</button>
             <button class="btn btn-secondary" onclick="closeModal('exportModal'); exportFms('practice');">⬇ Practice</button>
+          </div>
+        </div>
+
+        <!-- FMS Team List panel — single-column file for FMS
+             Team Selection's "Import Teams from File" button.
+             Format empirically confirmed: plain text, one team
+             number per line, no header, sorted ascending. -->
+        <div class="export-panel" id="exportPanel-fms_teams" style="display:none;">
+          <div style="font-size:14px;line-height:1.45;">
+            Plain-text file for the FIRST FMS Off-Season "Import
+            Teams from File" button on the Team Selection step
+            of the Event Wizard. One team number per line,
+            sorted ascending. Also accepted by TBA Event Wizard,
+            Nexus, and most other FRC community tools.
+          </div>
+          <div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted, #555);line-height:1.45;">
+            Note: each team number must already be registered in
+            FMS's team list. If FMS rejects the import with
+            "could not be read, or does not exist", at least one
+            team in your roster isn't in FMS — fix the team
+            roster and re-export.
+          </div>
+          <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap;">
+            <button class="btn" onclick="closeModal('exportModal'); exportFmsTeamList();">⬇ Team List</button>
           </div>
         </div>
       </div>
@@ -7339,6 +7368,33 @@ function exportFms(scope) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// FMS Team List export
+//
+// Triggers download of the event's team roster in the format accepted
+// by FMS Off-Season's "Import Teams from File" button on the Team
+// Selection step (Event Wizard). Format: plain text, one team number
+// per line, sorted ascending. Server handles the formatting via
+// /api/events/{id}/teams/export — we just navigate to the URL and
+// let the browser handle the download via Content-Disposition.
+// ─────────────────────────────────────────────────────────────────────
+function exportFmsTeamList() {
+  const eventId = STATE.schedule && STATE.schedule.event_id;
+  if (!eventId) {
+    alert('No event selected — cannot export team list');
+    return;
+  }
+  // Direct anchor click rather than fetch+blob — same content arrives
+  // either way, and an anchor preserves the server-supplied filename
+  // from Content-Disposition: attachment without extra plumbing.
+  const a = document.createElement('a');
+  a.href     = '/api/events/' + encodeURIComponent(eventId) + '/teams/export';
+  a.download = '';  // empty download attr lets server's filename win
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // XLSX export
 //
 // Three scopes available via the #xlsxScope dropdown:
@@ -7572,8 +7628,8 @@ function onExportFormatChange() {
   if (fmt === 'print_pdf') {
     if (btnPrint) btnPrint.style.display = '';
     if (btnPdf)   btnPdf.style.display   = '';
-  } else if (fmt === 'fms') {
-    // FMS panel has its own inline Qualification/Practice buttons.
+  } else if (fmt === 'fms' || fmt === 'fms_teams') {
+    // FMS panels have their own inline download buttons.
     // Bottom Download button stays hidden.
   } else {
     if (btnDownload) btnDownload.style.display = '';

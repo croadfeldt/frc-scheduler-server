@@ -17,7 +17,7 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import Any, AsyncGenerator
 
 import httpx
-from fastapi import Depends, FastAPI, File, HTTPException, Path, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Path, Query, Request, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -757,6 +757,67 @@ async def list_event_teams(event_id: int, db: AsyncSession = Depends(get_session
          "name": et.team.name, "city": et.team.city, "state": et.team.state}
         for et in sorted(result.scalars(), key=lambda x: x.team.number)
     ]
+
+
+@app.get("/api/events/{event_id}/teams/export")
+async def export_event_teams(event_id: int,
+                             db: AsyncSession = Depends(get_session)):
+    """Export the event's team list in FMS-import format.
+
+    Returns a plain-text file with one team number per line, sorted
+    ascending. This is the format accepted by FRC's FMS Off-Season
+    "Import Teams from File" button — confirmed empirically. The
+    same format is also accepted by TBA Event Wizard, Nexus, and
+    most other community tools.
+
+    Format notes:
+      - One team number per line, no header
+      - Plain integers; no padding, no commas, no quoting
+      - Unix LF line endings; no trailing blank line
+      - Sorted ascending so the file is human-scannable
+
+    The file extension is .csv even though there are no commas:
+      - FMS file picker filters typically include *.csv
+      - The single-column shape is degenerate-CSV-compatible
+      - Confirmed working against FMS Off-Season
+
+    No auth required — this is a read-only export of data already
+    visible on the event's public surfaces.
+    """
+    event = await db.get(Event, event_id)
+    if not event:
+        raise HTTPException(404, "Event not found")
+
+    result = await db.execute(
+        select(EventTeam).options(selectinload(EventTeam.team))
+        .where(EventTeam.event_id == event_id)
+    )
+    team_numbers = sorted(et.team.number for et in result.scalars())
+
+    body = "\n".join(str(n) for n in team_numbers)
+    if team_numbers:
+        # No trailing newline — FMS validates each line and an empty
+        # final line could be parsed as a missing team number.
+        pass
+
+    # Filename: "<event-key>-teams.csv" if the event has a key
+    # (e.g. "2026mnst-teams.csv"); otherwise fall back to the event
+    # id. Quotes around the filename in Content-Disposition handle
+    # any spaces or special characters defensively.
+    safe_key = (event.key or f"event-{event.id}").replace('"', '')
+    filename = f"{safe_key}-teams.csv"
+
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            # Cache-Control is short — team list can change as
+            # rosters are added/removed pre-event. 60s is enough to
+            # absorb a double-click but not stale enough to hurt.
+            "Cache-Control": "private, max-age=60",
+        },
+    )
 
 
 @app.post("/api/events/{event_id}/teams", status_code=201)

@@ -2135,6 +2135,11 @@
             <span>FMS Match Maker</span>
           </label>
           <label class="export-format-radio" style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;padding:0.4rem 0.5rem;border-radius:4px;cursor:pointer;"
+                 title="Plain-text team list for FIRST FMS Team Selection 'Import Teams from File'. One team number per line.">
+            <input type="radio" name="exportFormat" value="fms_teams" onchange="onExportFormatChange()">
+            <span>FMS Team List</span>
+          </label>
+          <label class="export-format-radio" style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;padding:0.4rem 0.5rem;border-radius:4px;cursor:pointer;"
                  title="Printable setup sheet for FMS Build Schedule with all timing settings, breaks, cycle changes, and a QR code.">
             <input type="radio" name="exportFormat" value="fms_setup" onchange="onExportFormatChange()">
             <span>FMS Setup Sheet</span>
@@ -2242,6 +2247,34 @@
               </button>
               <button class="btn-sm" onclick="closeModal('modalExport'); downloadFMS('practice');">
                 &#11015; Practice
+              </button>
+            </div>
+          </div>
+
+          <!-- FMS Team List panel — single-column file for FMS
+               Team Selection's "Import Teams from File" button.
+               Format is empirically confirmed: plain text, one
+               team number per line, no header, sorted ascending,
+               .csv extension to match FMS file picker filters. -->
+          <div class="export-panel" id="exportPanel-fms_teams" style="display:none;">
+            <div class="modal-section-label">FMS Team List</div>
+            <div style="margin-top:0.5rem;font-size:0.85rem;line-height:1.45;">
+              Plain-text file for the FIRST FMS Off-Season "Import
+              Teams from File" button on the Team Selection step
+              of the Event Wizard. One team number per line,
+              sorted ascending. Also accepted by TBA Event Wizard,
+              Nexus, and most other FRC community tools.
+            </div>
+            <div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-secondary);line-height:1.45;">
+              Note: each team number must already be registered in
+              FMS's team list. If FMS rejects the import with
+              "could not be read, or does not exist", at least one
+              team in your roster isn't in FMS — fix the team
+              roster and re-export.
+            </div>
+            <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap;">
+              <button class="btn-sm btn-accent" onclick="closeModal('modalExport'); downloadFMSTeamList();">
+                &#11015; Team List
               </button>
             </div>
           </div>
@@ -15817,6 +15850,36 @@ function downloadFMS(scope) {
 }
 
 
+// ── FMS Team List export ──────────────────────────────────────────────────────
+//
+// Triggers a download of the event's team roster in the format accepted by
+// FMS Off-Season's "Import Teams from File" button (Team Selection step of
+// the Event Wizard). Format: plain text, one team number per line, sorted
+// ascending, .csv extension.
+//
+// The endpoint serves the file with proper Content-Disposition so the browser
+// triggers a Save dialog. We don't read the body in JS — just navigate to the
+// URL. This is simpler than fetch+blob and works the same in every browser.
+function downloadFMSTeamList() {
+  if (!_currentEventId) {
+    showApiStatus('No event selected — pick an event before exporting', true);
+    return;
+  }
+  // Direct navigation to the export endpoint. The browser handles the
+  // download via Content-Disposition: attachment from the response.
+  // Open via a temporary anchor click to avoid navigating away from the
+  // current editor view.
+  var url = API + '/api/events/' + encodeURIComponent(_currentEventId) + '/teams/export';
+  var a = document.createElement('a');
+  a.href     = url;
+  a.download = '';  // empty download attr lets the server's filename win
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  showApiStatus('✓ FMS team list downloaded — paste into FMS Team Selection');
+}
+
+
 
 // ── FMS Build Schedule Setup Sheet ────────────────────────────────────────────
 //
@@ -16200,8 +16263,8 @@ function onExportFormatChange() {
     if (btnPdf)   btnPdf.style.display   = '';
   } else if (fmt === 'fms_setup') {
     if (btnOpen) btnOpen.style.display = '';
-  } else if (fmt === 'fms') {
-    // FMS panel has its own inline Qualification/Practice buttons —
+  } else if (fmt === 'fms' || fmt === 'fms_teams') {
+    // FMS panels have their own inline download buttons —
     // bottom action button stays hidden.
   } else {
     if (btnDownload) btnDownload.style.display = '';
