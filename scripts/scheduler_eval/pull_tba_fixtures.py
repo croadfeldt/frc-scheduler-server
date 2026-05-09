@@ -225,9 +225,15 @@ def _resolve_event_keys(args) -> list[str]:
     if args.keys_file:
         with open(args.keys_file) as f:
             for line in f:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    keys.append(line)
+                # Strip inline comments first ('#' anywhere on the line),
+                # then trim whitespace. Take only the first whitespace-
+                # separated token so trailing notes like "2024mnst extra
+                # context" don't end up in the key.
+                line = line.split("#", 1)[0].strip()
+                if not line:
+                    continue
+                key = line.split()[0]
+                keys.append(key)
     if args.year:
         keys.extend(_keys_for_year(args.year, state_filter=args.state))
     # Dedupe preserving order

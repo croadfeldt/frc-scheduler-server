@@ -1,54 +1,52 @@
 # Suggested TBA event keys for the eval inventory.
 #
-# Curated to cover variation that stresses scheduling algorithms
-# differently. See README.md for the rationale on each grouping.
+# Lines starting with '#' are ignored. Inline comments after a key are
+# also stripped (the key is the first whitespace-separated token).
 #
-# Pull all of these:
-#   python -m scripts.scheduler_eval.pull_tba_fixtures --keys-file scripts/scheduler_eval/event_keys.txt
+# For broader coverage, prefer the year+state expansion which queries
+# TBA for the actual event list (no guesswork on key spelling):
 #
-# Lines starting with '#' are ignored. Blank lines OK.
+#   python -m scripts.scheduler_eval.pull_tba_fixtures --year 2024 --state MN
+#   python -m scripts.scheduler_eval.pull_tba_fixtures --year 2025 --state MN
+#   python -m scripts.scheduler_eval.pull_tba_fixtures --year 2026 --state MN
+#
+# This file is for hand-curated additions or for events outside the
+# year+state bracket. Only keys verified-existing on TBA are listed.
 
 # ── Minnesota events (closest analog to 2026mnst) ─────────────────────
-# Multi-year MN State + Northern Lights + 10000 Lakes — same population
-# of teams, varied venue/structure year-over-year.
+# State Tournament 2023-2026
 2023mnst
 2024mnst
 2025mnst
-2024mnnl
-2025mnnl
-2024mn10k
-2025mn10k
+2026mnst
 
-# ── Mid-size FRC regionals (typical 36-50 team field) ────────────────
-# Mix of geographies and structures. Standard 2-day quals format.
-2024mndu      # Duluth
+# Northern Lights regional (Duluth)
+2023mndu
+2024mndu
 2025mndu
-2024iacf      # Cedar Falls
-2024ilch      # Chicago
-2024txhou     # Houston
-2024canorth   # Northern Quebec
+2026mndu
 
-# ── Larger fields (60+ teams) ────────────────────────────────────────
+# 10000 Lakes regional (Minneapolis area)
+2023mnmi
+2024mnmi
+2025mnmi
+
+# ── Larger fields (60+ teams) — Michigan state championships ─────────
 # These stress the algorithm differently — more team pairs to
 # diversify across, more matches to sequence.
-2024ohcl      # Cleveland
-2024micmp4    # MI championship div
-2024mil       # Michigan state champs
-2024necmp     # New England champs
+# Michigan splits its state championship into divisions; use the
+# divisional keys (2024micmp1-4), not a non-existent umbrella key.
+2024micmp1
+2024micmp2
+2024micmp3
+2024micmp4
 
-# ── Small fields (24-32 teams, often offseason) ──────────────────────
-# Off-season events sometimes have unusual structures or fewer matches
-# per team. Useful boundary cases.
-2024mibel      # Belleville offseason
+# ── Mid-size offseason events ────────────────────────────────────────
+# Verified-existing weeks-zero / off-season events.
 2024week0
 
-# ── District championships ───────────────────────────────────────────
-# Different tier of event with selected high-EPA teams; tests whether
-# the algorithm handles a top-heavy field differently.
-2024micmp     # Michigan combined
-2024necmp1    # New England div 1
-2024necmp2    # New England div 2
+# ── Add your own below ───────────────────────────────────────────────
+# To check if a key is valid on TBA before adding it:
+#   curl -H "X-TBA-Auth-Key: $TBA_API_KEY" \
+#        https://www.thebluealliance.com/api/v3/event/<KEY>/simple
 
-# ── 2026 pre-State events for context ────────────────────────────────
-# If TBA has 2026 data; will be skipped if not yet posted.
-2026mndu
