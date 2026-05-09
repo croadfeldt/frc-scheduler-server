@@ -121,7 +121,7 @@ event tiers.
 | actual (CSV)           | ✓ working | reviewer-format CSV import |
 | actual (TBA)           | ✓ working | uses app.tba client; needs TBA_API_KEY env var |
 | frc-scheduler-server   | ✓ working | wraps app/scheduler.py; tested on 2026mnst |
-| matchmaker             | ⚠ untested on real binary | CLI flags + parser are best-guess from release notes; will need adjustment on first run |
+| matchmaker             | ✓ parser verified, surrogate handling pending | Output parser confirmed against Saxton 1.6.1 binary on Stark. Even-team-count fixtures work; odd-team-count fixtures (e.g. 51, 55, 61 teams) fail because the surrogate_round value passed via -u is currently a match number, not a round number. See the comment in pull_tba_fixtures.py and matchmaker.py for the fix path. |
 | cp-sat                 | ⏸ Phase 3 | not built yet |
 
 The MatchMaker adapter should work but the exact CLI flag names and

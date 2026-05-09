@@ -33,10 +33,28 @@ every flag. The adapter has a `--help` probe mode that runs
 flags for verification. Adjust the flag names below if reality differs
 from this guess.
 
-Output format guess: plain text, line-per-match, columns for blue/red
-team slots. Real format will be confirmed when MatchMaker is run on
-Stark; if it differs from this guess, _parse_output() needs to change
-but the adapter shape stays the same.
+Output format (verified against Saxton matchmaker 1.6.1 Linux on
+2026-05-09):
+
+    Create schedule for N teams playing R rounds in M matches
+    with a minimum match separation of S running 100000 iterations.
+
+       0:00   N.NN% complete (... updates) ...
+       ...
+
+    Results for N teams playing R rounds in M matches
+    with a minimum match separation of S.
+
+    Match Schedule
+    --------------
+      1:   29    24     3    14    31    27
+      2:    7     5    15    17    35    18
+      ...
+
+    [team-repeats summary if -D was passed]
+
+The parser ignores everything except match rows ("<num>: <slots>")
+and is robust to leading/trailing whitespace.
 
 Determinism: the 1.0.3 release notes say "new method for seeding the
 match generation should reduce clumping" but no `-s seed` flag is
@@ -202,34 +220,42 @@ class MatchMakerAdapter(Adapter):
     def _parse_output(self, stdout: str, fixture: Fixture) -> list[Match]:
         """Parse MatchMaker's stdout into Match objects.
 
-        Format varies by MatchMaker version. The 1.6.1 binary's output
-        is presumed to be one match per line, with columns. Until we
-        run MatchMaker on Stark and capture a real sample, this parser
-        handles the most-common shape:
+        VERIFIED format (from a Stark run on 2026-05-09 against the
+        Saxton matchmaker 1.6.1 Linux binary):
 
-            Match  Red1  Red2  Red3  Blue1  Blue2  Blue3  [* if surrogate]
+            Match Schedule
+            --------------
+              1:   29    24     3    14    31    27
+              2:    7     5    15    17    35    18
+              ...
 
-        Or a similar columnar layout. The parser is liberal about
-        whitespace — splits on runs of spaces. Lines that don't parse
-        as match rows are ignored (header lines, statistics, blank
-        lines).
+        Each match line is "<match_num>: <slot1> <slot2> ... <slot6>"
+        with whitespace between every column. The match number is
+        followed by a colon. Slot numbers are 1..N integers referring
+        to the fixture's team list (translated via _slot_to_team).
 
-        IMPORTANT: this parser is a best-guess until validated on real
-        MatchMaker output. When you run the adapter for the first time
-        and it produces a parse error or wrong-looking matches, capture
-        a sample of stdout and update _parse_output to match.
+        Lines without a match-number prefix (header text, "Match
+        Schedule" / "----" / progress lines / statistics) are
+        ignored — the regex only matches well-formed match rows.
 
-        The returned matches have team-number entries mapped through
-        the fixture's team list — MatchMaker outputs schedule positions
-        (1..N) which we translate to actual team numbers.
+        Surrogate marking: empirical capture didn't include any runs
+        with surrogates, so the form is unconfirmed. Existing parser
+        code preserves the trailing `*` convention from the release
+        notes; if MatchMaker actually marks them differently (e.g.
+        with an `s` suffix or a separate column), the regex will
+        fail to match those rows and we'll see a "got N matches,
+        expected M" error pointing us at the issue.
         """
         matches: list[Match] = []
-        # Pattern: integer match number followed by 6 (or 2*teams_per_alliance)
-        # integers, optionally with '*' marking surrogates.
+        # Pattern: integer match number, optional colon and whitespace,
+        # then teams_per_alliance × 2 integers (each optionally followed
+        # by '*' marking surrogate). The colon between match number and
+        # team columns is what tripped the previous parser — earlier
+        # versions assumed bare whitespace separation.
         team_count_per_match = 2 * fixture.teams_per_alliance
         slot_pattern = r"(\d+)(\*)?"
         line_re = re.compile(
-            r"^\s*(\d+)\s+" + r"\s+".join([slot_pattern] * team_count_per_match)
+            r"^\s*(\d+)[:\s]+" + r"\s+".join([slot_pattern] * team_count_per_match)
             + r"\s*$"
         )
 
@@ -263,16 +289,20 @@ class MatchMakerAdapter(Adapter):
             ))
 
         if not matches:
+            # On parse failure, surface more output than we used to —
+            # the prior 1000-char limit was too short to cover the
+            # header + first few match rows in many real outputs.
             raise ValueError(
                 "MatchMaker output produced 0 matches — parser may be "
-                "wrong for this MatchMaker version. Sample of output:\n"
-                + stdout[:1000]
+                "wrong for this MatchMaker version. Full output (up to 3KB):\n"
+                + stdout[:3000]
             )
         if len(matches) != fixture.total_matches:
             raise ValueError(
                 f"MatchMaker output has {len(matches)} matches; fixture "
                 f"expects {fixture.total_matches}. Parser may be missing "
-                f"rows or fixture parameters are wrong."
+                f"rows or fixture parameters are wrong. First 3KB of output:\n"
+                + stdout[:3000]
             )
         return matches
 
