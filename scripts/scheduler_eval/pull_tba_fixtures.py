@@ -171,16 +171,15 @@ async def _fetch_event(event_key: str) -> tuple[Fixture, Schedule] | None:
         matches_per_team = appearance_distribution[0]
         outlier_note = ""
 
-    # Detect surrogate round if surrogates were used
-    surrogate_round = None
+    # Surrogate metadata is descriptive — we record where surrogates
+    # appear in the played schedule for reporting purposes, but we
+    # don't pass anything to scheduling adapters about it. MatchMaker
+    # handles surrogate placement itself (default round 3 since 2008).
+    surrogate_first_match = None
     if surrogate_total > 0:
-        # The round in which surrogates appear — first match where any
-        # surrogate flag is true. TBA's "surrogate round" is 1-indexed
-        # in matchmaker terminology, but here we just record the match
-        # number for descriptive purposes.
         for m in parsed_matches:
             if any(m.red_surrogate) or any(m.blue_surrogate):
-                surrogate_round = m.match_num
+                surrogate_first_match = m.match_num
                 break
 
     fixture_id = event_key  # use the TBA event key as the fixture ID
@@ -190,7 +189,8 @@ async def _fetch_event(event_key: str) -> tuple[Fixture, Schedule] | None:
         teams=playing_teams,
         matches_per_team=matches_per_team,
         teams_per_alliance=teams_per_alliance,
-        surrogate_round=surrogate_round,
+        surrogate_first_match=surrogate_first_match,
+        surrogate_count=surrogate_total,
         source="tba",
         year=evt.get("year"),
         event_key=event_key,

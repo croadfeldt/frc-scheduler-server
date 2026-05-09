@@ -208,12 +208,18 @@ class MatchMakerAdapter(Adapter):
         )
 
     def _build_command(self, fixture: Fixture) -> list[str]:
+        # Note: no -u flag passed. MatchMaker defaults to placing
+        # surrogates in round 3 since 2008 per FIRST's convention,
+        # which is correct for every modern FRC event. Earlier
+        # versions of this adapter passed fixture.surrogate_round
+        # (then named that, actually a match number) as -u, which
+        # caused exit-255 errors on odd-team-count fixtures because
+        # MatchMaker rejected nonsensical round numbers like 22 in
+        # a 9-round event.
         cmd = [self.binary,
                "-t", str(fixture.num_teams),
                "-r", str(fixture.matches_per_team),
                "-a", str(fixture.teams_per_alliance)]
-        if fixture.surrogate_round is not None:
-            cmd.extend(["-u", str(fixture.surrogate_round)])
         cmd.extend(self.extra_args)
         return cmd
 

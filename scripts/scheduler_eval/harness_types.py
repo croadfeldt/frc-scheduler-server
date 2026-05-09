@@ -43,9 +43,20 @@ class Fixture:
     branding are out of scope — this is purely the input to scheduling
     algorithms, not a UI-facing event description.
 
-    `surrogate_round` follows the MatchMaker convention: the round
-    number (1-indexed) in which surrogate matches occur. None means no
-    surrogate round needed (when teams divide evenly into the schedule).
+    `surrogate_first_match` is the match number (1-indexed) where the
+    first surrogate appearance occurs in the actual played schedule.
+    Descriptive only — the harness DOES NOT pass this to MatchMaker as
+    a `-u` round flag (that was a previous bug). MatchMaker handles
+    surrogate placement itself, defaulting to round 3 since 2008
+    per FIRST's convention.
+
+    `surrogate_count` is the total number of surrogate slot-fills in
+    the actual played schedule. Per Idle Loop's white paper, this is
+    at most 5 for FRC events.
+
+    Both surrogate fields are descriptive metadata about the actual
+    schedule we pulled from TBA, not configuration for the schedulers
+    we're evaluating.
 
     `breaks` is a list of break specifications using MatchMaker's -k
     syntax conceptually — match number after which to insert a break.
@@ -56,7 +67,11 @@ class Fixture:
     teams:             list[int]       # team numbers — order doesn't matter
     matches_per_team:  int             # qual matches each team plays
     teams_per_alliance: int = 3        # FRC standard is 3; configurable for non-FIRST
-    surrogate_round:   int | None = None  # 1-indexed round; None for none
+
+    # Surrogate metadata describes the played schedule (descriptive),
+    # NOT a configuration knob for schedulers (they handle this themselves)
+    surrogate_first_match: int | None = None  # 1-indexed match number
+    surrogate_count:       int = 0            # total slot-fills (≤5 per FRC convention)
 
     # Optional metadata — useful for fixture provenance and reports
     source:            str = "synthetic"   # 'tba', 'mnhsl', 'synthetic', 'live'
@@ -96,6 +111,13 @@ class Fixture:
 
     @classmethod
     def from_json_dict(cls, data: dict[str, Any]) -> Fixture:
+        # Backward compat: older fixtures used `surrogate_round` (which
+        # was always populated with a match number despite the name) —
+        # accept it under the new name. The semantic content is the
+        # same; only the label was wrong before.
+        if "surrogate_round" in data and "surrogate_first_match" not in data:
+            data = dict(data)
+            data["surrogate_first_match"] = data.pop("surrogate_round")
         return cls(**data)
 
     @classmethod
