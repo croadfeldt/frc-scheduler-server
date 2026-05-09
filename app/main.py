@@ -1111,25 +1111,71 @@ async def list_assigned_schedules(event_id: int, db: AsyncSession = Depends(get_
         .where(AssignedSchedule.event_id == event_id)
         .order_by(AssignedSchedule.created_at.desc())
     )
+    schedules = list(result.scalars())
+
+    # Compute "has been edited" reliably from history rows rather
+    # than via an updated_at-vs-created_at heuristic. Rationale: a
+    # schedule's updated_at bumps every time ANY column changes —
+    # including is_official, is_active, and is_locked transitions.
+    # Marking a schedule official, promoting it to active, or
+    # locking it via the auto-lock-on-mark-official path all fire
+    # `onupdate=utcnow` and trip the heuristic. The result is the
+    # active schedule (which gets is_active=true bumped on
+    # promotion) showing "edited" even when nothing about its
+    # content was changed.
+    #
+    # Ground truth: the history table only writes a 'patch' row
+    # when content changes via PATCH endpoint, plus 'restore' for
+    # restore actions. 'create', 'mark-official', and 'rename'
+    # don't count as content edits. Aggregating these per schedule
+    # in one query gives us a clean, accurate edited indicator.
+    if schedules:
+        ids = [s.id for s in schedules]
+        from sqlalchemy import func
+        hist_q = await db.execute(
+            select(
+                AssignedScheduleHistory.assigned_schedule_id,
+                func.count(AssignedScheduleHistory.id),
+            )
+            .where(AssignedScheduleHistory.assigned_schedule_id.in_(ids))
+            .where(AssignedScheduleHistory.action.in_(("patch", "restore")))
+            .group_by(AssignedScheduleHistory.assigned_schedule_id)
+        )
+        edit_counts = dict(hist_q.all())
+    else:
+        edit_counts = {}
+
     # Include lock + official fields so the saved-schedules modal
     # can render indicators (🔒 ⭐ "edited") without a per-row GET.
     # `is_official` is the permanent commitment marker (one per
-    # event), `updated_at` tells the UI whether a schedule has been
-    # edited since creation.
+    # event), `content_edit_count` counts genuine content edits
+    # since creation (excluding marker/lock/rename transitions).
     return [
         {"id": s.id, "name": s.name, "is_active": s.is_active,
          "abstract_schedule_id": s.abstract_schedule_id,
          "num_teams": s.abstract_schedule.num_teams,
          "matches_per_team": s.abstract_schedule.matches_per_team,
+         # Cooldown is rendered in the saved-schedules header
+         # ("36 teams · 8 mpt · cooldown 3 — 2 versions"). It lives
+         # on AbstractSchedule, so we surface it here for the UI
+         # to read without a second fetch. Same reasoning for
+         # surrogate_count and score — readers occasionally need
+         # them and the joined query is already loaded.
+         "cooldown":          s.abstract_schedule.cooldown,
+         "surrogate_count":   s.abstract_schedule.surrogate_count,
+         "score":             s.abstract_schedule.score,
          "created_at": s.created_at.isoformat(),
          "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+         # Number of content-changing history rows ('patch' or
+         # 'restore'). 0 = pristine since creation; ≥1 = edited.
+         "content_edit_count": int(edit_counts.get(s.id, 0)),
          "locked_at":      s.locked_at.isoformat() if s.locked_at else None,
          "locked_by_name": s.locked_by_name,
          "is_official":      s.is_official,
          "official_at":      s.official_at.isoformat() if s.official_at else None,
          "official_by_name": s.official_by_name,
          "forked_from_id":   s.forked_from_id}
-        for s in result.scalars()
+        for s in schedules
     ]
 
 

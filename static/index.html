@@ -10517,11 +10517,19 @@ async function loadSavedSchedules() {
         row.className = 'saved-schedule-row' + (s.is_active ? ' active-sched' : '');
         const dt = new Date(s.created_at).toLocaleString();
         const isLatest = idx === 0;
-        // "EDITED" badge — true when updated_at is meaningfully
-        // after created_at (1-second buffer protects against
-        // sub-second clock skew at insert time).
+        // "EDITED" badge — true when the schedule has at least one
+        // content-changing history row (action='patch' or 'restore').
+        // Backend computes this in content_edit_count; frontend just
+        // checks the integer. Marker transitions (mark-official,
+        // promote-active, lock/unlock) do NOT count, so the active
+        // schedule no longer reads "edited" simply because it was
+        // promoted. Falls back to the legacy updated-vs-created
+        // heuristic for backward compat with older API responses
+        // that lack content_edit_count.
         var hasBeenEdited = false;
-        if (s.updated_at && s.created_at) {
+        if (typeof s.content_edit_count === 'number') {
+          hasBeenEdited = s.content_edit_count > 0;
+        } else if (s.updated_at && s.created_at) {
           var dCreated = new Date(s.created_at).getTime();
           var dUpdated = new Date(s.updated_at).getTime();
           hasBeenEdited = (dUpdated - dCreated) > 1000;
