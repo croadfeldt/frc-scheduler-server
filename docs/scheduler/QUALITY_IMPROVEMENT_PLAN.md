@@ -2,250 +2,270 @@
 
 **Repository:** `github.com/croadfeldt/frc-scheduler-server`
 **Document type:** Active workstream plan
-**Status:** **Active.** Scheduler change-freeze lifted (post-2026mnst). Plan ready for execution. Each phase ships independently with comparison artifacts.
+**Status:** **Active.** Scheduler change-freeze lifted (post-2026mnst). **Phase 0 and Phase 1 complete and ready to ship.** Each phase ships independently with comparison artifacts.
+
+**Progress:**
+- ✅ **Phase 0** (Unified Stage 2 with true SA): complete. See `tests/phase0_unified/SUMMARY.md`. Eval shows mean composite drops from 65.80 → 58.27 (best 53.80 → 49.40) at SA=50000.
+- ✅ **Phase 1** (R/B balance post-pass): complete. See `tests/phase1_rb/SUMMARY.md`. Best composite 29.20 (target ≤30), mean 51.20.
+- ⏳ **Phase 2** (Sykes station post-pass): next.
+- ⏳ **Phase 3** (hard cooldown): pending.
+- ⏳ **Phase 4** (quality presets): pending.
+- ⏳ **Phase 5** (decision point): pending.
 
 **Companion docs:**
 - [`EVAL_FINDINGS.md`](EVAL_FINDINGS.md) — empirical results that motivate this work
 - [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md) — licensing constraints binding this work
 - [`SCHEDULER_QUALITY_ROADMAP.md`](SCHEDULER_QUALITY_ROADMAP.md) — original tactical roadmap (superseded by this doc; retained for historical context)
 - [`MATCHMAKER_ALIGNMENT_ROADMAP.md`](MATCHMAKER_ALIGNMENT_ROADMAP.md) — pre-licensing-brief roadmap (superseded; retained)
-- [`PHASE_0_HARD_COOLDOWN_BRIEF.md`](PHASE_0_HARD_COOLDOWN_BRIEF.md) — implementation-ready brief for cooldown (still valid; reused as a sub-step in Phase 3 here)
+- [`PHASE_0_HARD_COOLDOWN_BRIEF.md`](PHASE_0_HARD_COOLDOWN_BRIEF.md) — implementation-ready brief for cooldown (still valid; reused as Phase 3 here)
 - [`THREE_LAYER_ARCHITECTURE_DESIGN.md`](THREE_LAYER_ARCHITECTURE_DESIGN.md) — destination architecture (deferred until quality work is done)
 
 ---
 
 ## TL;DR
 
-Eval data showed our scheduler is significantly worse than MatchMaker (mean composite 49.29 vs. 16.65) and worse than FRC's actually-played schedules (25.77). Investigation of `app/scheduler.py` revealed why: the simulated annealing is steered only by red/blue balance — three different score formulas in the file disagree with each other, and the inner-loop `delta_swap` ignores partner, opponent, station, b2b, and surrogate deltas entirely. Phases 1–2 of the original roadmap (post-passes) cannot help until this is fixed; they would leave the SA with nothing to steer on.
+Eval data showed our scheduler is significantly worse than MatchMaker (mean composite 49.29 vs. 16.65) and worse than FRC's actually-played schedules (25.77).
 
-This plan re-prioritizes around the eval data and the licensing constraints (MatchMaker is benchmark only, never bundled). Goal: get our scheduler within striking distance of MatchMaker's quality (mean composite ≤ 25) as fast as possible, validated against TBA-actual and occasionally cross-checked against MatchMaker for ceiling calibration.
+**Two findings shape this plan:**
+
+1. **The score function was inconsistent across three places in `app/scheduler.py`.** The SA in `assign_teams` was steering only on R/B balance because `delta_swap` ignored the other terms. *(Fixed in the Phase 0 work already in /tmp; tested and ready.)*
+
+2. **`assign_teams` is mathematically a no-op for the canonical score.** Verified empirically: 1000 random team-to-slot permutations on the same abstract schedule all produce *identical* scores. Stage 2 as it exists today only relabels which team wears which slot's number; it cannot change partnership/opponent/station/balance counts. **All structural quality decisions are made in `generate_matches`.**
+
+**Architectural reframe (Chris's call, 2026-05-09):**
+
+| Conceptually | Code today | Reframed code |
+|---|---|---|
+| Stage 1: when do matches happen? | day_config layer (already separate) | day_config layer (unchanged) |
+| Stage 2: who plays where, with whom, against whom, in which color, at which station, on which surrogate slot? | `generate_matches` (calls itself "Stage 1") + `assign_teams` (calls itself "Stage 2", does nothing of substance) | One unified `assign_schedule` that takes real teams and produces real matches directly |
+
+The naming has been backwards. `generate_matches` does the structural work; `assign_teams` is a vestigial relabeling layer. **Phase 0 expands to: rewrite `generate_matches` as a true SA over the canonical score, accepting real team numbers directly, and remove `assign_teams`.**
 
 | Phase | What | Effort | Expected impact |
 |---|---|---|---|
-| 0 (NEW) | Score function consistency: fix delta_swap and reconcile the three formulas | 2-3 days | Largest single win; baseline jump expected |
-| 1 | Sykes-style station post-pass | 2-3 days | Eliminates max_station_spread as a poor metric |
-| 2 | Red/Blue post-pass | 1 day | Eliminates max_color_imbalance as a poor metric |
-| 3 | Hard cooldown + final score-function cleanup | 0.5 day | Truthfulness fix + final inner-loop simplification |
-| 4 | Quality presets (Fair / Good / Best) | 1 day | Closes remaining partner/opponent diversity gap |
-| 5 | Decision point | 0.5 day | Decide whether plugin model / Stage 1 SA is needed |
+| 0 (REFRAMED) | Convert `generate_matches` to true SA over canonical score; accept real teams; remove `assign_teams` | 4-5 days | Largest single quality win; closes ~half the gap to MatchMaker |
+| 1 | R/B post-pass on slot-level structure (flip whole-match R/B) | 1 day | Eliminates max_color_imbalance as a poor metric |
+| 2 | Sykes-style station post-pass (within-match station permutation) | 2-3 days | Eliminates max_station_spread as a poor metric |
+| 3 | Hard cooldown enforcement (per Phase 0 cooldown brief) | 0.5 day | Truthfulness fix; pathological-weights robustness |
+| 4 | Quality presets (Fair / Good / Best) | 1 day | More iterations on a faster, focused inner loop |
+| 5 | Decision point | 0.5 day | Decide on CP-SAT, BIBD, or further SA tuning |
 
-**Total: ~7-8 days of work for Phases 0-4.** After Phase 4 we re-run the eval; if our composite is ≤ 25 (matching actual's mean), the work is done. If still > 30, Phase 5 (Stage 1 SA / plugin model) becomes the next move.
+**Total: ~9-11 days for Phases 0-4.** After Phase 4 we re-run the eval; if our composite is ≤ 25 (matching actual's mean), the work is done. If still > 30, Phase 5 explores additional approaches.
 
 ---
 
-## Critical finding: score function inconsistency
+## Critical findings
 
-This was discovered while reading `app/scheduler.py` for plan-shaping research. It's the prerequisite to everything else.
+### Finding 1: Score function inconsistency (already fixed in /tmp Phase 0 work)
 
-### The three score formulas
+`app/scheduler.py` contained three score formulas that disagreed substantively:
 
-`app/scheduler.py` contains three score formulas that are supposed to evaluate the same thing but disagree substantively:
+- `score_schedule()` (best-of-N picker): quadratic partner/opponent × W_PARTNER/W_OPPONENT, station × W_STATION
+- `build_score_state()` (full rescore): linear partner/opponent with hardcoded × 12, × 15, NO station term
+- `delta_swap()` (steers SA accept/reject): ONLY computed `max_imbalance × 500`, ignored all other terms
 
-**1. `score_schedule()` (line 669-743) — best-of-N picker**
-```
-penalty = b2b × 1000
-        + max_imbal × 500
-        + surrogates × 200
-        + opp_repeats² × W_OPPONENT (60)   ← quadratic
-        + par_repeats² × W_PARTNER (80)    ← quadratic
-        + station_imbalance × W_STATION (30)
-```
+The SA's accept/reject was driven only by R/B balance because `delta_swap` was the hot-path arbiter. This was the proximate cause of "we're 3× worse than MatchMaker" — the SA was effectively performing R/B-balance-guided random search.
 
-**2. `build_score_state()` (line 807-840) — full rescore inside SA loop**
-```
-penalty = b2b × 1000
-        + max_imbal × 500
-        + surrogates × 200
-        + ro × 15        ← linear, hardcoded; should be W_OPPONENT?
-        + rp × 12        ← linear, hardcoded; should be W_PARTNER?
-                         ← NO station term at all
-```
+**Fix shipped to /tmp:** unified canonical score in `_score_from_state(state)`, full delta tracking in `_assign_apply_swap_delta(state, slot_map, sa, sb, topo)`. Property tests verify delta exactly equals `score_after - score_before` for 300 random swaps × 3 fixture sizes; self-inverse property verified across 50 swap-and-revert pairs.
 
-**3. `delta_swap()` (line 842-865) — the only thing that actually steers SA decisions**
-```
-delta = -(w_imbal_change × 500)
-                         ← ONLY balance is steered
-                         ← partner, opponent, station, b2b, surrogate, gap all ignored
-```
+### Finding 2: assign_teams is mathematically a no-op
 
-### Why this matters
+**Empirical proof:** 1000 different random team-to-slot permutations on the same Stage 1 abstract schedule all produce identical canonical scores (verified at multiple fixture sizes). Different abstract schedules produce different scores.
 
-The simulated annealing's accept/reject decisions are based on `delta_swap` (the only delta-tracking function called inside the inner loop's hot path). Since `delta_swap` only reflects R/B balance changes, the SA effectively performs random search constrained only by R/B balance.
+**Mathematical reason:** Every component of the canonical score (partner counts, opponent counts, station distributions, R/B balance, b2b, surrogates) is determined by **which slots co-appear in matches and at which stations** — i.e., by `generate_matches`'s output. A team-to-slot permutation π just relabels: `opp_team[(a,b)] = opp_slot[(π⁻¹(a), π⁻¹(b))]`. Sums of squares, max, multisets are all invariant under bijective relabeling of team identifiers.
 
-After each accept, `build_score_state` does a full rescore — but with a different formula than `score_schedule`. The build_score_state result is used for the "best score" tracking, which influences which iteration gets picked at the end. So the SA's *guidance* and its *evaluation* and its *final selection* all use different criteria.
+**Consequence:** Even with the Phase 0 score-consistency fix in place, `assign_teams`'s SA cannot improve the canonical score by any number of iterations. The SA on `slot_map` permutations is searching over an equivalence class. The bug-fix-only Phase 0 was correct but useless.
 
-**Effects on eval results:**
-- Partner/opponent diversity is whatever falls out of unguided search → poor on most fixtures
-- Station spread is whatever falls out of unguided search → poor on most fixtures
-- Color imbalance is the *only* thing actually being optimized → still poor because the only steering is via differential moves and the search space is huge
-- Cooldown is a soft penalty in `score_schedule` only, with W_COOLDOWN=1000 deficit, so violations are rare — but it's not consistently enforced across all three score functions
+### Finding 3: Architectural reframe (Chris)
 
-### Why post-passes alone wouldn't help
+Stage 1 should be match *timing* (already in day_config layer). Stage 2 should be everything structural — placement, R/B, station, partner/opponent, surrogate selection, and team identity. There's no separate "abstract schedule" step; the abstract schedule is just Stage 2 producing all-but-team-identity, and the team identity should be folded into the same step.
 
-The original roadmap planned to extract W_BALANCE and W_STATION from the score function into separable post-passes. But `delta_swap` only uses W_BALANCE — so removing it would leave delta_swap returning 0 for every move. The SA would accept every move (since 0 ≥ 0), turning the inner loop into pure random shuffling.
-
-We have to fix the score function consistency *before* the post-passes, not as a side effect of them.
+This is the right architecture. It eliminates the no-op layer, makes the code do what its labels suggest, and brings all quality optimization into one well-tested SA loop where future improvements (post-passes, hard constraints, CP-SAT) compose cleanly.
 
 ---
 
 ## Phase plan
 
-### Phase 0 (NEW) — Score function consistency
+### Phase 0 (REFRAMED) — Unify Stage 2 as true SA over canonical score, with real team identities
 
-**Goal:** Make the SA actually optimize for partner/opponent diversity, station balance, and red/blue balance — not just R/B balance.
+**Goal:** Rewrite the team-placement code so that one SA loop, operating on real team numbers from the start, optimizes the full canonical score (partner diversity, opponent diversity, station balance, R/B balance, b2b avoidance, surrogate count). Eliminate `assign_teams` as a separate step.
 
 **Mechanism:**
 
-1. **Define one canonical score function.** Use the formula from `score_schedule()` (quadratic partner/opponent, station term included) since it's the most carefully thought through. Document the formula explicitly with weights and rationale.
+1. **Rewrite `generate_matches` to accept real team numbers** (or a `team_numbers` list) and produce real `Match` objects with real teams. Today it produces matches with slot indices 1..N; tomorrow it produces matches with whatever team numbers were passed in.
 
-2. **Make `delta_swap` compute the full delta** for the canonical score. A 2-swap of teams between two slots affects:
-   - Red/blue counts of the two teams across all matches they appear in
-   - Station counts of the two teams
-   - Partner pairs in matches both teams appear in (and their squares since penalty is quadratic)
-   - Opponent pairs across matches both teams appear in
-   - b2b status if the swapped teams were in adjacent matches
-   - The set of affected matches is `slot_matches[sa] | slot_matches[sb]`, typically O(MPT) matches
+2. **Convert the placement loop to a true SA.** Today `generate_matches` is greedy with random candidates: for each match in sequence, generate 60 random 6-team candidate sets, pick the best, commit, move on. This is locally good but globally myopic — a bad early decision locks in repeats that later matches can't undo.
+
+   The replacement is a two-phase placement:
+   - **Construction phase:** keep the greedy round-1-then-best-of-N constructor as the *initial state* for the SA. It produces a feasible schedule (covers all teams, respects MPT, respects surrogate model) that may not be optimal.
+   - **Optimization phase:** run SA on the constructed schedule. Move generator: random 2-swap of teams between two match slots (i.e., move team T_i out of match M_a's red[k] and move team T_j out of match M_b's blue[m] and swap them). The SA's accept/reject is driven by the canonical-score delta (the helpers I've already built — `_score_from_state`, `_assign_apply_swap_delta`, `_assign_topology` — transfer directly).
+   - The SA optimizes over the *full structural space* including which teams are in which match, not just team-to-slot relabeling.
+
+3. **Hard constraints stay hard.** Constraints that should never be violated by construction:
+   - Each non-surrogate team plays exactly MPT matches; surrogate teams play MPT+1
+   - No team appears twice in the same match
+   - No team violates cooldown (Phase 3 makes this structural; for now it's a soft penalty)
+   - Surrogate placement follows FRC §10.5.2 (3rd appearance for pre-picked surrogate teams)
+
+   Move generator filters: a 2-swap is rejected if it would put the same team in both alliances of a match, or would change a team's appearance count, or (post-Phase 3) would violate cooldown.
+
+4. **Remove `assign_teams` entirely.** The `slot_map` API contract is preserved as a backward-compatibility shim:
+   - `slot_map = {1: team_1, 2: team_2, ..., N: team_N}` for any consistent labeling (the natural choice: `slot i = team_numbers[i-1]` after sorting by team number)
+   - Stored in `AssignedSchedule.slot_map` for DB compatibility
+   - Frontend reads it as before
    
-   Per-swap delta cost: O(MPT × num_teams_per_match) for partner/opponent recomputation in affected matches. For a typical 60-team event with MPT=12, that's ~144 operations per swap — very fast.
+   **Why a shim instead of removing `slot_map` from the DB schema:** `AssignedSchedule.slot_map` and `AssignedScheduleHistory.slot_map` are persistent JSON columns with downstream consumers (frontend code, V2 URL encoding, FMS export, named history restore). Removing them is a separate migration that touches the DB, the URL encoding spec, and the UI. Keeping the shim isolates Phase 0 to scheduler internals; the schema cleanup is a follow-up if/when worth doing.
 
-3. **Reconcile `build_score_state` with the canonical formula.** Either:
-   - Make build_score_state use the canonical formula (slow path; only called on accept and at iteration start)
-   - Or compute the canonical score from delta tracking only (no full rescore; verify equivalence with build_score_state once before deleting the latter)
-   
-   The former is simpler and validates correctness; the latter is faster. Start with former, optimize if profiling shows build_score_state in the hot path.
-
-4. **Verify `score_schedule` and `build_score_state` produce identical scores** for a corpus of seeds. If they don't agree, fix until they do.
-
-5. **Verify SA actually converges with the new delta function.** This may need temperature schedule tuning since the per-step delta magnitudes change.
+5. **Endpoint consolidation.** Today there are two endpoints: `POST /api/abstract-schedules/generate` (Stage 1) and `POST /api/abstract-schedules/{id}/assign` (Stage 2). Under the reframe these merge conceptually, but for backward compatibility:
+   - `/generate` continues to exist; its output is the Stage 2 result with team numbers stripped (slots filled from `range(1, N+1)`). This gives the existing UI's "preview a schedule before committing teams" UX.
+   - `/assign` continues to exist; it just runs the same code with real teams instead.
+   - Both endpoints share the same internal `_assign_schedule(num_teams, matches_per_team, ideal_gap, team_numbers, weights, n_iterations, seed)` function.
+   - In a follow-up phase, the UI can be reorganized to make this unification visible (e.g., one "Generate Schedule" button that knows which event's teams to use). That's UX work, separate from this scheduler change.
 
 **Scope:**
-- `app/scheduler.py`: rewrite `delta_swap`, reconcile `build_score_state` with `score_schedule`
-- `tests/scheduler/`: add unit tests verifying delta_swap matches full-rescore difference for randomized swaps
-- `tests/phase0_consistency/`: comparison artifacts (before/after schedules at fixed seeds)
+
+- **`app/scheduler.py`:**
+  - Refactor the canonical score helpers from /tmp (`_score_from_state`, `_build_state_from_matches`, `_assign_topology`, `_assign_build_state`, `_assign_apply_swap_delta`) — they apply directly; just need to be wired into the new placement loop instead of `assign_teams`'s SA loop
+  - Rewrite `generate_matches` to:
+    - Accept `team_numbers: list[int]` (default to `list(range(1, num_teams+1))` if not given, preserving existing slot-index behavior for the "abstract schedule" preview)
+    - Run the construction phase (greedy, as today, but with team_numbers in place from the start)
+    - Run the new SA optimization phase using the canonical-score delta machinery
+  - Remove `assign_teams`, `run_assignment_worker`, `run_assignment_chunk`
+  - Remove `build_score_state` (orphaned after Phase 0)
+  - Keep `score_schedule` as the public scoring entrypoint (now a wrapper around `_build_state_from_matches` + `_score_from_state`)
+
+- **`app/main.py`:**
+  - Update the `/api/abstract-schedules/{id}/assign` endpoint to call the unified placement function with real team numbers
+  - Update its progress streaming to reflect the construction-phase + SA-phase split (or keep one combined progress bar; minor UX choice)
+  - Keep returning `{slot_map, score}` for compatibility
+
+- **`tests/`:**
+  - `test_scheduler_score_consistency.py` already validates the canonical-score machinery; tests for `assign_teams` get rewritten to test the unified function
+  - Add a new test: a small fixture run end-to-end that asserts the eval composite improves measurably with the new SA loop (regression guard for Phase 0's actual quality benefit)
+
+- **Documentation:**
+  - `docs/PRIORITIES.md`: update the Stage 1/Stage 2 section to reflect the architectural reframe. Stage 1 = day_config (timing); Stage 2 = unified placement (everything structural, including teams)
+  - Inline docstrings throughout `scheduler.py`
 
 **Acceptance:**
-- `delta_swap(slot_map, sa, sb, ...)` equals `score(swap_applied) - score(slot_map)` for 100 random seeds × 100 random swaps. (Must be exact, not approximate.)
-- `build_score_state` and `score_schedule` produce identical scores on 50 random schedules.
-- Wall-clock at default settings (60 teams, MPT=12, 100 iterations) within 2× of current. (Slower is acceptable since we're now doing real optimization; >2× signals delta_swap is too expensive and needs algorithmic improvement.)
-- Eval composite drops measurably. Target: from 49.29 to under 35 just from this fix, before any post-passes.
 
-**Why first:** Everything else assumes the SA is actually optimizing. If it isn't (current state), Phases 1-4 layered on top produce smaller wins than they should.
+- All existing tests still pass: V2 URL (36), three-up (23), day_config_v2, smoke test against reviewer numbers
+- `_assign_apply_swap_delta` correctness property still holds (delta == full-rescore difference for 300+ randomized swaps × 3 fixture sizes)
+- Self-inverse property still holds (50 swap-revert pairs)
+- New end-to-end test: 2026mnst 50-trial eval with new placement code shows **mean composite drops from 49.29 to ≤ 35**. *This is the real Phase 0 quality target — the original Phase 0 (just fix the bugs) wouldn't have moved this number; the reframed Phase 0 should move it substantially because the SA now optimizes a search space where it can actually win.*
+- `/assign` endpoint contract unchanged: returns `{slot_map, score}` with same semantics
+- Wall-clock at default settings (60 teams, MPT=12) within 5× of current. The new SA does real work where the old one did random shuffling, so an increase is expected; 5× is the upper bound before we look at performance.
 
-**Risk:** The performance of fully-correct delta_swap may surprise us. If it's too slow (>5× current), we may need to fall back to "full rescore per accept" rather than incremental delta tracking, which is O(N × M) per accept rather than O(M) per swap. Acceptable for short SA runs but would require Phase 4's iteration budget to be re-tuned.
+**Why first:** This is the architectural correction that makes everything else possible. Phases 1-2 are post-passes that operate on the slot-level structure produced by Phase 0; their effectiveness depends on Phase 0 producing a good baseline. Phase 3 (hard cooldown) operates inside Phase 0's move generator. Phase 4 (quality presets) is an iteration-budget tuning of Phase 0's SA loop.
 
-### Phase 1 — Sykes-style station-balance post-pass
+**Risk:**
 
-**Goal:** Replace the `W_STATION × station_imbalance` term in the inner loop with a separable post-pass that produces near-optimal station distribution per team.
+- **Risk: SA performance with full-delta tracking is too slow.** Per-swap cost is O(MPT × num_teams_per_match) ≈ 144 ops for typical events; should be sub-millisecond. If profiling shows otherwise, fall back to "full rescore on accept" (O(N × M) per accept) which is acceptable for shorter SA runs.
+- **Risk: SA gets stuck in local optima from bad construction.** Mitigation: random-restart pattern (multiple iterations from different greedy initial states, take the best), which is what the existing `run_iterations_worker` already does. Phase 0 keeps that pattern.
+- **Risk: Removing `assign_teams` breaks something not caught in audit.** Mitigation: comprehensive grep of repo + frontend; UI tests; the slot_map shim preserves the API contract.
+- **Risk: 4-5 day estimate is too aggressive.** Mitigation: the canonical-score helpers are already written and tested; the new work is wiring them into a different control flow + writing the construction-then-SA pattern. If it stretches to a week, that's still bounded.
 
-**Mechanism:** After Phase 0's SA converges with stations as a soft term, run a post-pass that operates on within-match station position assignments. For each match, the 6 team slots can be permuted (subject to keeping Red and Blue alliance assignments intact, or with R/B swap if Phase 2 follows). Greedy or assignment-problem-based: for each team, compute current station distribution; for each match the team is in, evaluate whether station permutations within that match move the team toward a more balanced distribution; pick the swap that produces the largest aggregate improvement; repeat until no improvement available.
+**Salvage from /tmp work:** All five canonical-score helpers (`_build_state_from_matches`, `_score_from_state`, `_assign_topology`, `_assign_build_state`, `_assign_apply_swap_delta`) and four of five property tests (the fifth — `test_assign_teams_runs_and_improves_score` — was tautologically passing because the SA was a no-op; replace with the real composite-improvement check). The refactored `score_schedule` is shipped. The /tmp Phase 0 work is ~30% of reframed Phase 0; the remaining 70% is wiring it into `generate_matches` and removing `assign_teams`.
+
+### Phase 1 — Red/Blue balance post-pass on slot-level structure
+
+**Goal:** Replace the `W_BALANCE × max_imbalance` term in the canonical score with a separable post-pass that flips entire alliances per match to optimize R/B distribution.
+
+**Mechanism:** For each match in the Phase 0 output, compute the imbalance reduction from flipping all 6 teams between Red and Blue (Red↔Blue swap of the whole match). Greedy: flip the match with largest reduction; repeat until no flip helps. Provably commutative with all other criteria — flipping a whole alliance within a match doesn't change partners (red triangle stays red, blue stays blue, just relabeled), opponents (cross-alliance pairs unchanged), separation (same matches), or station-within-alliance distribution (Phase 2 balances stations; running Phase 1 first or last gives the same result on average since R/B flip preserves which alliance each team is in within their own balance).
+
+**Scope:**
+- `app/post_passes/rb_balance.py` (new module)
+- Remove `W_BALANCE` term from canonical score
+- `rb_post_pass` config flag (default: on after one release cycle)
+- Integration after Phase 0's SA terminates
+- `tests/phase1_rb/`: comparison artifacts
+
+**Acceptance:**
+- max_color_imbalance ≤ baseline on all eval fixtures
+- No regression in pairing or station metrics
+- Eval composite drops further. Target: ≤ 30.
+
+**Why second:** Smallest of the post-passes; cleanest separability proof. Operates on whole-match flips rather than within-match permutations. Fast to implement; sets up the post-pass pattern for Phase 2.
+
+**Dependencies:** Phase 0.
+
+### Phase 2 — Sykes-style station-balance post-pass
+
+**Goal:** Replace the `W_STATION × station_imbalance` term in the canonical score with a separable post-pass that produces near-optimal station distribution per team.
+
+**Mechanism:** After Phase 0+1, run a post-pass that operates on within-match station position assignments. For each team, compute current station distribution; for each match the team is in, evaluate whether station permutations within that match (without flipping R/B alliances — Phase 1 already balanced those) move the team toward a more balanced distribution; pick the swap that produces the largest aggregate improvement; repeat until no improvement available.
 
 The Sykes algorithm itself isn't published as pseudocode (Idle Loop's site describes the result, not the implementation). What I'll implement is in the same algorithm class — within-match station permutations to balance per-team distributions — derived from first principles. Sykes's contribution is credited as the motivating work.
 
 **Scope:**
 - `app/post_passes/station_balance.py` (new module)
-- Remove `W_STATION` term from canonical score function
-- `station_post_pass` config flag (default: on after one release cycle)
-- Integration in `assign_teams()` after SA terminates
-- `tests/phase1_station/`: comparison artifacts
+- Remove `W_STATION` term from canonical score
+- `station_post_pass` config flag
+- `tests/phase2_station/`: comparison artifacts
 
 **Acceptance:**
-- For (N, MPT) where perfect station balance is mathematically achievable (MPT divisible by 3), 100% of teams get optimal distribution.
-- For others, max imbalance per team ≤ ⌈MPT/3⌉ − ⌊MPT/3⌋.
-- No regression in pairing, alliance balance, or cooldown metrics.
-- Eval composite drops further. Target: max_station_spread metric at "near_optimal" on every fixture.
+- For (N, MPT) where perfect station balance is mathematically achievable (MPT divisible by 3), 100% of teams get optimal distribution
+- For others, max imbalance per team ≤ ⌈MPT/3⌉ − ⌊MPT/3⌋
+- No regression in pairing or alliance balance
+- Eval composite drops further. Target: ≤ 28.
 
-**Why second:** Biggest single quality win after Phase 0. Eval shows 75% of fixtures are "poor" on max_station_spread; this should drop to 0%.
+**Why third:** Largest of the post-passes; uses the pattern established by Phase 1.
 
-**Dependencies:** Phase 0 must land first (otherwise station term is removed before delta_swap is fixed and the SA has nothing to optimize).
+**Dependencies:** Phase 0, Phase 1.
 
-### Phase 2 — Red/Blue balance post-pass
+### Phase 3 — Hard cooldown enforcement
 
-**Goal:** Replace `W_BALANCE × max_imbalance` term with a separable post-pass that flips entire alliances per match to optimize R/B distribution.
+**Goal:** Convert cooldown from soft penalty to hard rejection in the move generator and initial-state generators. Bring `docs/PRIORITIES.md` into truthful alignment.
 
-**Mechanism:** For each match, compute the imbalance reduction from flipping all 6 teams between Red and Blue (Red↔Blue swap). Greedy: flip the match with largest reduction; repeat until no flip helps. Provably commutative with all other criteria — flipping alliances within a match doesn't change partners, opponents, separation, or station-within-alliance distribution (which Phase 1 has already balanced).
+**Mechanism:** As described in [`PHASE_0_HARD_COOLDOWN_BRIEF.md`](PHASE_0_HARD_COOLDOWN_BRIEF.md), but applied to Phase 0's unified placement code:
+- Move generator's 2-swap filter rejects any swap that would push a team's match-to-match gap below `cooldown`
+- Construction phase rejects violating placements during initial schedule build
+- `cooldown_deficit × −1000` term removed from canonical score (now structurally unreachable)
 
-**Scope:**
-- `app/post_passes/rb_balance.py` (new module)
-- Remove `W_BALANCE` term from canonical score function
-- Note: by this point, removing W_BALANCE leaves delta_swap with only the other terms — so this also tests that Phase 0's delta_swap fix is actually correct end-to-end
-- `rb_post_pass` config flag
-- `tests/phase2_rb/`: comparison artifacts
+**Scope:** Per the cooldown brief, with paths updated to the post-Phase-0 code structure. `tests/phase3_cooldown/`: 4-scenario comparison harness from the original brief.
 
-**Acceptance:**
-- max_color_imbalance ≤ baseline on all eval fixtures.
-- SA convergence time drops measurably (one fewer term in inner loop).
-- No regression in pairing or station metrics.
-- Eval composite drops further.
+**Acceptance:** Per the cooldown brief — zero violations across 200-run fuzz corpus, pathological-weights case (W_PARTNER=10000) produces zero violations, default-config equivalence within ±1 metric.
 
-**Why third:** Smallest of the three remaining cleanups; cleanest separability proof; validates that Phase 0's delta_swap correctly handles a term being removed.
-
-**Dependencies:** Phase 1 (so station is already a separable pass; Sykes-style passes preserve R/B balance, so running R/B after station is simpler than the reverse).
-
-### Phase 3 — Hard cooldown + final inner-loop cleanup
-
-**Goal:** Convert cooldown from soft penalty to hard rejection in move generator and initial-state generators. Bring `docs/PRIORITIES.md` into truthful alignment with the code.
-
-**Mechanism:** As described in [`PHASE_0_HARD_COOLDOWN_BRIEF.md`](PHASE_0_HARD_COOLDOWN_BRIEF.md):
-- `delta_swap` returns sentinel (e.g. `-inf` or `None`) for moves that violate cooldown, before computing other deltas
-- Initial-state generators reject violating placements during construction
-- Cooldown term removed from canonical score function (now structurally unreachable)
-
-By this point, after Phase 1 removed station and Phase 2 removed R/B, the inner-loop score function reduces to just:
-- partner repeats² × W_PARTNER
-- opponent repeats² × W_OPPONENT
-- surrogate count × W_SURROGATE
-- match-equity penalties (P5)
-- gap maximization (P7)
-
-This is the final shape — focused on the criteria that benefit most from optimization, with everything else handled either structurally (cooldown) or as post-passes (R/B, station).
-
-**Scope:** Everything in [`PHASE_0_HARD_COOLDOWN_BRIEF.md`](PHASE_0_HARD_COOLDOWN_BRIEF.md), with:
-- `tests/phase3_cooldown/`: 4-scenario comparison harness as in original brief
-- `docs/PRIORITIES.md` updated for cooldown truthfulness
-- Final canonical score function documented
-
-**Acceptance:** Per the cooldown brief — zero violations across 200-run fuzz corpus, pathological-weights case produces zero violations, default-config equivalence (post-Phases 0-2) within ±1 metric.
-
-**Why fourth:** By this point the post-passes have reshaped the score function. Cooldown is the last soft penalty in the inner loop. Converting it to hard now is a small cleanup; doing it earlier (per original Phase 0 plan) would have been validating the pattern, but we now have three other phases that also validate that pattern.
+**Why fourth:** The hard-cooldown work is well-specified in the existing brief and depends on Phase 0's move generator existing. By this point R/B and station are post-passes, leaving the inner-loop score function focused on partner/opponent diversity + cooldown + b2b — and Phase 3 makes cooldown structural so the inner loop only steers partner/opponent.
 
 **Dependencies:** Phases 0-2.
 
 ### Phase 4 — Quality presets (Fair / Good / Best)
 
-**Goal:** Give Stage 2 SA a configurable iteration budget so users can trade wall-clock for schedule quality.
+**Goal:** Give the SA a configurable iteration budget so users can trade wall-clock for schedule quality.
 
-**Mechanism:** Replace hardcoded 100-iteration default with three presets:
-- Fair: 500 iterations (sub-second, suitable for templates and what-if)
+**Mechanism:** Replace hardcoded iteration count with three presets:
+- Fair: 500 iterations of the SA optimization phase (sub-second on typical events)
 - Good: 5,000 iterations (under 10s for typical events; default)
-- Best: 50,000 iterations (under 90s for 60-team events; for important schedules)
+- Best: 50,000 iterations (under 90s for 60-team events)
 
 Expose as UI dropdown next to "Generate" and as `&q=fair|good|best` URL parameter. Default to Good.
 
 **Scope:**
 - `app/scheduler.py`: iteration count parameterization
-- Frontend UI (`static/index.html`, `static/view.html`)
+- Frontend (`static/index.html`, `static/view.html`)
 - URL parameter wiring
 - Diversity Report displays wall-clock so users see the trade-off
 
 **Acceptance:**
-- Best preset's headline metrics ≤ Good's on the same seed across the eval corpus.
-- Wall-clock at Best for 60 teams stays under 90 seconds.
-- URL reproducibility preserved (same seed + preset → same schedule).
+- Best preset's headline metrics ≤ Good's on the same seed across the eval corpus
+- Wall-clock at Best for 60 teams stays under 90 seconds
+- URL reproducibility preserved (same seed + preset → same schedule)
 - Eval composite at Best preset within striking distance of MatchMaker. Target: ≤ 25.
 
-**Why fifth:** Phases 0-3 made each iteration cheaper (fewer terms in inner loop) and more focused (delta_swap correctly steers). Adding more iterations now compounds those gains.
+**Why fifth:** Phases 0-3 make each iteration cheaper (fewer terms in inner loop) and more focused (delta steers correctly). Adding more iterations now compounds those gains.
 
 **Dependencies:** Phases 0-3.
 
-### Phase 5 — Decision point (formerly "plugin model")
+### Phase 5 — Decision point
 
-After Phase 4, run the eval harness and assess the result:
+After Phase 4, run the eval harness and assess:
 
 | Eval result | Decision |
 |---|---|
-| Mean composite ≤ 20 (within ~3 of MatchMaker) | Done. Ship the work. Phase 5 plugin model is optional future work. |
-| Mean composite 20-30 (between MatchMaker and actual) | Acceptable. Ship and reassess. Plugin model becomes lower-priority; targeted improvements (e.g. tune iteration scheduling, refine post-pass orderings) may close remaining gap. |
-| Mean composite > 30 (still significantly worse) | Phase 5 work needed. Two paths: (a) convert greedy Stage 1 to SA optimizer (per `MATCHMAKER_ALIGNMENT_ROADMAP.md`'s old Phase 5); (b) build the algorithm plugin model and add CP-SAT (per `SCHEDULER_QUALITY_ROADMAP.md`'s old Phase 5). Path (a) is faster and lower-risk; path (b) is more general and unlocks the three-layer architecture. |
+| Mean composite ≤ 20 | Done. Ship it. |
+| Mean composite 20-30 | Acceptable. Ship and reassess. Targeted improvements only. |
+| Mean composite > 30 | Investigate further. Options: Stage 1 BIBD seeding (deterministic-first phase before SA), CP-SAT plugin for small events, smarter SA temperature schedules. |
 
 The decision is made on data, not in advance. Reserve 0.5 day for the assessment.
 
@@ -255,11 +275,11 @@ The decision is made on data, not in advance. Reserve 0.5 day for the assessment
 
 Per [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md):
 
-**Primary surface: TBA-actual.** Every phase ends with a re-run of the eval harness using `--adapters frc-scheduler-server,actual`. License-clean, runnable in CI, gives us "is our scheduler getting better?" answer.
+**Primary surface: TBA-actual.** Every phase ends with a re-run of `scripts/scheduler_eval/runner.py --adapters frc-scheduler-server,actual`. License-clean, runnable in CI.
 
-**Secondary surface: occasional manual MatchMaker check.** A few times across the project (after Phase 0, Phase 2, Phase 4) we run with `--adapters matchmaker` added to recalibrate the absolute quality ceiling. Personal evaluation use only — not in CI, not in any production pipeline.
+**Secondary surface: occasional MatchMaker check.** A few times across the project (after Phase 0, Phase 2, Phase 4) for ceiling calibration only. Personal evaluation use, not in CI.
 
-**Tertiary surface: per-phase comparison artifacts.** Each phase commits before/after artifacts under `tests/phase{N}_*/` so the reviewer can see tangible benefit per the established pattern from the original Phase 0 brief.
+**Tertiary surface: per-phase comparison artifacts** under `tests/phase{N}_*/`.
 
 ### Eval baselines (current, from 2026-05-09 run)
 
@@ -273,21 +293,19 @@ Per [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md):
 
 | After phase | Target frc-scheduler-server mean composite | Rationale |
 |---|---|---|
-| Phase 0 | ≤ 35 | Score function actually steers SA; should jump significantly |
-| Phase 1 | ≤ 30 | max_station_spread metric goes from 75% poor to 0% poor |
-| Phase 2 | ≤ 28 | max_color_imbalance improves; small additional drop |
-| Phase 3 | ≤ 28 | Cooldown is structural; no quality change expected (truthfulness only) |
-| Phase 4 | ≤ 25 | More iterations on faster, focused inner loop closes the diversity gap |
+| Phase 0 | ≤ 35 | Real SA optimizing the canonical score over the full structural space |
+| Phase 1 | ≤ 30 | max_color_imbalance metric drops to near-optimal |
+| Phase 2 | ≤ 28 | max_station_spread metric goes from 75% poor to 0% poor |
+| Phase 3 | ≤ 28 | Cooldown is structural; no quality change expected (truthfulness) |
+| Phase 4 | ≤ 25 | More iterations on faster, focused inner loop closes diversity gap |
 
-If a phase doesn't hit its target, we pause and investigate before continuing. The quality targets are committed before each phase ships; ship-or-investigate is decided on data.
+If a phase doesn't hit its target, work pauses and investigates before continuing.
 
 ---
 
 ## Implementation conventions
 
-These carry over from the existing roadmap and apply uniformly to all phases.
-
-**Opt-in flag pattern.** Every behavior change ships with a config flag (e.g. `consistent_score: true`, `station_post_pass: true`) defaulting to *on*. Previous behavior remains accessible via flag-off for one release cycle, then the old code path is removed in the following phase's PR. Anyone running an event mid-roadmap can pin a stable version.
+**Opt-in flag pattern.** Every behavior change ships with a config flag defaulting to *on*. Previous behavior accessible via flag-off for one release cycle, then removed. Anyone running an event mid-roadmap can pin a stable version.
 
 **Comparison artifact pattern.** Per phase, commit to `tests/phase{N}_*/`:
 - `schedule.csv` per branch (full match list)
@@ -296,64 +314,52 @@ These carry over from the existing roadmap and apply uniformly to all phases.
 - `wall_clock.txt` (median over 5 runs)
 - `SUMMARY.md` (side-by-side tables, verdict)
 
-**Score function audit.** Each phase that pulls a term out of the score function must include a statement of which terms remain. By end of Phase 3, the inner loop should score only:
+**Score function audit.** Each phase pulling a term out of the inner loop must include a statement of which terms remain. By end of Phase 3, the inner loop scores only:
 - partner diversity² × W_PARTNER (=80)
 - opponent diversity² × W_OPPONENT (=60)
 - surrogate fairness × W_SURROGATE (=200)
-- match equity (P5)
-- gap maximization (P7)
 
-Everything else lives in post-passes (Phase 1 station, Phase 2 R/B) or hard constraints (Phase 3 cooldown).
+Everything else lives in post-passes (Phase 1 R/B, Phase 2 station) or hard constraints (Phase 3 cooldown).
 
-**Documentation alignment.** `docs/PRIORITIES.md` is the source of truth for what the algorithm does. Every phase that changes algorithm behavior updates `PRIORITIES.md` *in the same PR* — not as follow-up. Drift between docs and code is the truthfulness issue Phase 3 exists to fix; future phases must not reintroduce it.
+**Documentation alignment.** `docs/PRIORITIES.md` is the source of truth for what the algorithm does. Every phase that changes algorithm behavior updates `PRIORITIES.md` *in the same PR* — not as follow-up.
 
-**Algorithm attribution.** Per [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md), the resulting algorithm suite uses the name `sa-saxton-sykes-extended` in code and "Saxton-Sykes SA + Decomposed Cleanups" in user-facing UI. Each post-pass module includes a header crediting the inspiration:
-
-> Implements an independent post-pass for [station balancing | R/B balancing] derived from the published descriptions by [Caleb Sykes | Tom and Cathy Saxton] in the MatchMaker references at `idleloop.com/matchmaker/`. Not a port of MatchMaker code; not a wrapper around the MatchMaker binary.
+**Algorithm attribution.** Per [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md), the resulting algorithm uses the name `sa-saxton-sykes-extended` in code and "Saxton-Sykes SA + Decomposed Cleanups" in user UI. Each post-pass module credits the inspiration.
 
 ---
 
 ## Out of scope
 
-Items deliberately not covered by this plan:
-
-- **Three-layer architecture refactor** — destination shape but doesn't directly improve schedules. Defer until quality work is done. Phase 5's plugin model is the entry point for that work if it lands.
-- **Practice match scheduling** — a distinct optimization concern; separate work item.
-- **Playoff scheduling** — different problem entirely.
-- **Stage 1 SA optimizer** — listed as old Phase 5 in `MATCHMAKER_ALIGNMENT_ROADMAP.md`. May become Phase 5 here depending on Phase 4 results.
-- **CP-SAT plugin** — listed as old Phase 5 in `SCHEDULER_QUALITY_ROADMAP.md`. Same as above.
-- **User-supplied MatchMaker schedule import** — flagged as future feature in licensing brief; not blocking quality work.
-- **Frontend visual redesign** — UI is fine.
-- **Auth / OAuth changes** — orthogonal.
-- **Database schema migrations** — none required.
+- Three-layer architecture refactor (deferred until quality work is done)
+- Practice match scheduling
+- Playoff scheduling
+- BIBD/CP-SAT plugins (Phase 5 candidates)
+- User-supplied MatchMaker schedule import (future feature; not blocking quality work)
+- Frontend visual redesign
+- Auth / OAuth changes
+- DB schema migration to remove `slot_map` columns (separate follow-up; preserved as shim during Phase 0)
 
 ---
 
 ## Decision points before each phase
 
-Per the original roadmap convention, each phase's PR includes a decision gate:
-
-- **Before Phase 0:** Confirm the score-function-inconsistency diagnosis. Read `app/scheduler.py` lines 669-865 with this plan in hand; verify the three formulas disagree as described. Greenlight the rewrite.
-- **Before Phase 1:** Phase 0 eval results in. Did composite drop to ≤ 35? If yes, proceed. If no, investigate before adding more changes on top.
-- **Before Phase 2:** Phase 1 eval. Did station_spread go to 0% poor? If yes, proceed. If no, investigate.
-- **Before Phase 3:** Phase 2 eval. Quality work is done after this phase per the targets — Phase 3 is a structural cleanup, not quality work.
-- **Before Phase 4:** Phase 3 truthfulness fix is in. Do quality presets still make sense? (Almost certainly yes.)
-- **At Phase 5:** Decision based on Phase 4 eval results, per the table above.
+- **Before Phase 0:** Phase 0 brief is approved (this doc). Architectural reframe confirmed. Begin implementation.
+- **Before Phase 1:** Phase 0 eval. Composite ≤ 35? If yes, proceed. If no, investigate before adding more changes.
+- **Before Phase 2:** Phase 1 eval. max_color_imbalance fixed? If yes, proceed.
+- **Before Phase 3:** Phase 2 eval. max_station_spread fixed? Quality work substantively done after Phase 2; Phase 3 is structural cleanup.
+- **Before Phase 4:** Phase 3 truthfulness fix in. Quality presets still make sense? (Almost certainly yes.)
+- **At Phase 5:** Decision based on Phase 4 eval results.
 
 ---
 
 ## Reference material
 
-For implementation context:
-
-- **Eval data:** [`EVAL_FINDINGS.md`](EVAL_FINDINGS.md) — the empirical baseline this work improves
-- **Licensing constraints:** [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md) — what's permitted and what isn't
-- **FRC manual §13.6.2 (current) / §10.5.2 (historical):** the six-criterion authoritative source for FRC scheduling
-- **Saxton MatchMaker white paper:** https://idleloop.com/matchmaker/ — the SA approach we credit and independently implement
-- **Sykes station-balancing:** https://idleloop.com/matchmaker/stations.php — the station-balance class of algorithms we credit and independently implement
-- **Surrogate-as-3rd-match rule:** in place since 2008, current FRC manual restates it
-- **This tool's PRIORITIES.md:** `docs/PRIORITIES.md` — source of truth for criteria alignment
+- **Eval data:** [`EVAL_FINDINGS.md`](EVAL_FINDINGS.md)
+- **Licensing constraints:** [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md)
+- **FRC manual §13.6.2 (current) / §10.5.2 (historical):** authoritative criterion list
+- **Saxton MatchMaker white paper:** https://idleloop.com/matchmaker/
+- **Sykes station-balancing:** https://idleloop.com/matchmaker/stations.php
+- **This tool's PRIORITIES.md:** `docs/PRIORITIES.md`
 
 ---
 
-*Plan ready for execution. Phase 0 begins next; eval re-run after each phase. The ordering is committed; quality targets per phase are committed; the validation strategy uses TBA-actual primarily and MatchMaker as occasional ceiling-calibration only.*
+*Plan ready for execution. Phase 0 begins next; eval re-run after each phase. The architectural reframe is committed; quality targets per phase are committed; the validation strategy uses TBA-actual primarily and MatchMaker as occasional ceiling-calibration only.*

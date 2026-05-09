@@ -1138,16 +1138,35 @@ async def assign_teams_endpoint(
             )
             db.add(assigned)
             await db.flush()
-            slot_map = {int(k): v for k, v in best_result["slot_map"].items()}
-            for i, m in enumerate(abstract_matches, start=1):
+            # Phase 0: best_result['matches'] contains the SA-optimized match
+            # list with real team numbers. Use that directly rather than
+            # re-applying slot_map to the original abstract_matches — the SA
+            # may have changed which teams are in which match (which is
+            # exactly the point: it's the optimization we want).
+            optimized_matches = best_result.get("matches")
+            if optimized_matches is None:
+                # Defensive: legacy worker output may not include matches.
+                # Fall back to slot_map-applied abstract.
+                slot_map = {int(k): v for k, v in best_result["slot_map"].items()}
+                optimized_matches = []
+                for m in abstract_matches:
+                    optimized_matches.append({
+                        "red":            [slot_map[s] for s in m["red"]],
+                        "blue":           [slot_map[s] for s in m["blue"]],
+                        "red_surrogate":  list(m["red_surrogate"]),
+                        "blue_surrogate": list(m["blue_surrogate"]),
+                    })
+            for i, om in enumerate(optimized_matches, start=1):
                 db.add(MatchRow(
                     assigned_schedule_id=assigned.id, match_num=i,
-                    red1=slot_map[m["red"][0]], red2=slot_map[m["red"][1]], red3=slot_map[m["red"][2]],
-                    blue1=slot_map[m["blue"][0]], blue2=slot_map[m["blue"][1]], blue3=slot_map[m["blue"][2]],
-                    red1_surrogate=m["red_surrogate"][0], red2_surrogate=m["red_surrogate"][1],
-                    red3_surrogate=m["red_surrogate"][2],
-                    blue1_surrogate=m["blue_surrogate"][0], blue2_surrogate=m["blue_surrogate"][1],
-                    blue3_surrogate=m["blue_surrogate"][2],
+                    red1=om["red"][0], red2=om["red"][1], red3=om["red"][2],
+                    blue1=om["blue"][0], blue2=om["blue"][1], blue3=om["blue"][2],
+                    red1_surrogate=om["red_surrogate"][0],
+                    red2_surrogate=om["red_surrogate"][1],
+                    red3_surrogate=om["red_surrogate"][2],
+                    blue1_surrogate=om["blue_surrogate"][0],
+                    blue2_surrogate=om["blue_surrogate"][1],
+                    blue3_surrogate=om["blue_surrogate"][2],
                 ))
             # Initial history row — captures the schedule as created.
             # Without this, history view would be empty until the

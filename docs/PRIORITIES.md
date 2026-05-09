@@ -2,10 +2,31 @@
 
 ## Overview: Two-Stage Scheduling
 
-- **Stage 1** produces an abstract slot-based schedule (slot indices 1..N, no real
-  team numbers). Deterministic given a seed — same seed always produces same structure.
-- **Stage 2** assigns real team numbers to those slots by trying many random permutations
-  and picking the one that best satisfies the placement criteria.
+- **Stage 1** is the **match timing layer** — when each match happens, how
+  many breaks, day boundaries. This lives in the day_config layer outside
+  `scheduler.py` and isn't covered by this document.
+- **Stage 2** is everything structural — placement (which teams play in
+  which match), color assignment (red vs blue), station assignment
+  (R1/R2/R3/B1/B2/B3), partner/opponent diversity, surrogate selection,
+  and team identity. All optimization happens here.
+
+  Stage 2 itself has two phases:
+  - **Construction phase** (greedy): produces a feasible schedule one match
+    at a time, using best-of-60-attempts with a diversity-aware scoring
+    function for each candidate match.
+  - **SA optimization phase**: simulated annealing on the constructed
+    schedule, optimizing the canonical score (see _score_from_state) via
+    random 2-swap moves between match positions. Each accepted move
+    changes which teams are in which match.
+
+  After Stage 2's two phases, separable post-passes optimize specific
+  criteria without disturbing others:
+  - **R/B balance post-pass** (Phase 1): whole-match R/B flip moves
+    that preserve partner pairs, opponent pairs, station-within-alliance
+    distribution, cooldown, b2b, and surrogate counts. SA-driven to
+    escape greedy local optima.
+  - **Station balance post-pass** (Phase 2, planned): within-match station
+    permutations to drive each team's station distribution to optimal.
 
 The scheduler's defaults are aligned with the FRC manual's six
 §13.6.2 criteria (formerly §10.5.2). Where we go beyond the manual,
@@ -151,10 +172,21 @@ Auto-generated per run, stored in DB and URL.
 
 **Input:** abstract schedule + N real team numbers + `assign_seed`
 
-**Method:** N iterations with seeded RNG. Each shuffles team numbers into slots,
-scores against P5–P11 with real numbers, returns best `slot_map {slot: team_number}`.
+**Method (Phase 0+1, 2026):** Apply the slot→team relabeling to convert the
+abstract schedule into a real-team Match list, then run SA optimization
+(default 5000 iterations) followed by the R/B balance post-pass.
 
-Default iterations: 500.
+Returns `{slot_map, score, matches}`. The `slot_map` is preserved as a
+trivial identity-shaped shim (slot index → team_numbers[index-1]) for
+backward compatibility with downstream consumers (frontend, V2 URL
+encoding, FMS export, named history). The `matches` field is the
+authoritative SA-optimized output.
+
+The legacy "N iterations of random team-to-slot permutation, pick best
+by score" approach was a no-op — verified empirically that the canonical
+score is invariant under team-to-slot permutations of the same abstract
+schedule. The new SA approach changes which teams are in which match,
+which actually optimizes the score.
 
 ---
 
