@@ -1715,6 +1715,101 @@ def _lex_first_diff_index(a: tuple, b: tuple) -> int:
     return -1
 
 
+def _propose_targeted_move(state: dict, matches: list[Match],
+                           rng: random.Random,
+                           kind: str) -> tuple | None:
+    """Propose a swap aimed at breaking a duplicate partner or opponent pair.
+
+    Phase 0c: random 2-swap is sluggish under FRC-paramount lex semantics —
+    most random moves slightly worsen par_quad and get rejected. Targeted
+    moves identify the actual problem (a duplicate pair) and propose a
+    swap that breaks it directly.
+
+    Args:
+        state: SA state with 'par' and 'opp' dicts
+        matches: current schedule
+        rng: RNG for randomization
+        kind: 'partner' or 'opponent' — which type of duplicate to target
+
+    Returns:
+        (m_a, idx_a, side_a, m_b, idx_b, side_b) — a swap proposal, or
+        None if no duplicate of this kind exists. The proposed swap may
+        still fail _is_valid_swap or _swap_preserves_cooldown; the caller
+        applies those filters as usual.
+
+    Strategy:
+        1. Pick a random pair (A, B) with count ≥ 2 in the relevant dict.
+        2. Find the matches where (A, B) appear together as the targeted
+           kind (partners or opponents).
+        3. Pick one of those matches.
+        4. Pick A or B as the team to move.
+        5. Pick a random destination position in a different match.
+
+        The destination may make things worse (creates a different
+        duplicate); that's fine — _swap_preserves_cooldown still applies,
+        and the lex compare in the SA loop will reject worsening swaps.
+        The targeted move just *biases* exploration toward the bottleneck.
+    """
+    if kind == 'partner':
+        pair_dict = state['par']
+    elif kind == 'opponent':
+        pair_dict = state['opp']
+    else:
+        return None
+
+    duplicates = [(p, c) for p, c in pair_dict.items() if c >= 2]
+    if not duplicates:
+        return None
+
+    # Weight by count so highly-duplicated pairs are picked more often.
+    # Simpler: pick uniformly among duplicates.
+    pair, _count = rng.choice(duplicates)
+    a, b = pair
+
+    # Find a match where this pair appears in the targeted relationship.
+    candidate_matches = []
+    if kind == 'partner':
+        # A and B both on the same alliance
+        for i, m in enumerate(matches):
+            if (a in m.red and b in m.red) or (a in m.blue and b in m.blue):
+                candidate_matches.append(i)
+    else:  # opponent
+        # A and B on opposite alliances
+        for i, m in enumerate(matches):
+            if (a in m.red and b in m.blue) or (a in m.blue and b in m.red):
+                candidate_matches.append(i)
+
+    if not candidate_matches:
+        return None  # state inconsistency; skip
+
+    m_a = rng.choice(candidate_matches)
+    # Pick which team to move (A or B)
+    target_team = rng.choice([a, b])
+
+    # Find target_team's position in matches[m_a]
+    ma = matches[m_a]
+    if target_team in ma.red:
+        side_a = "red"
+        idx_a = list(ma.red).index(target_team)
+    elif target_team in ma.blue:
+        side_a = "blue"
+        idx_a = list(ma.blue).index(target_team)
+    else:
+        return None  # shouldn't happen
+
+    # Pick a random destination position in a *different* match.
+    n_matches = len(matches)
+    if n_matches < 2:
+        return None
+    m_b = rng.randrange(n_matches)
+    if m_b == m_a:
+        m_b = (m_b + 1) % n_matches  # pick neighbor instead
+    side_b = rng.choice(["red", "blue"])
+    idx_b = rng.randrange(3)
+
+    return (m_a, idx_a, side_a, m_b, idx_b, side_b)
+
+
 def _sa_optimize(matches: list[Match], n_iterations: int,
                  rng: random.Random) -> list[Match]:
     """Run simulated annealing on a feasible Match list (FRC-paramount).
@@ -1774,9 +1869,26 @@ def _sa_optimize(matches: list[Match], n_iterations: int,
     for step in range(n_iterations):
         T = T0 * (1.0 - step / n_iterations)
 
-        i, j = rng.sample(range(n_positions), 2)
-        m_a, side_a, idx_a = positions[i]
-        m_b, side_b, idx_b = positions[j]
+        # Phase 0c: mixed move generator. Targeted moves bias exploration
+        # toward duplicate-pair bottlenecks. Random moves provide ergodic
+        # coverage. Mix is 1/3 partner-targeted, 1/3 opponent-targeted,
+        # 1/3 random 2-swap. Targeted moves fall through to random when
+        # the relevant duplicate pool is empty (typical after par_quad
+        # reaches floor and only opp_quad has duplicates).
+        move_kind = rng.random()
+        proposal = None
+        if move_kind < 0.33:
+            proposal = _propose_targeted_move(state, work, rng, 'partner')
+        elif move_kind < 0.66:
+            proposal = _propose_targeted_move(state, work, rng, 'opponent')
+
+        if proposal is None:
+            # Random 2-swap fallback
+            i, j = rng.sample(range(n_positions), 2)
+            m_a, side_a, idx_a = positions[i]
+            m_b, side_b, idx_b = positions[j]
+        else:
+            m_a, idx_a, side_a, m_b, idx_b, side_b = proposal
 
         if not _is_valid_swap(work, m_a, idx_a, side_a, m_b, idx_b, side_b):
             continue
