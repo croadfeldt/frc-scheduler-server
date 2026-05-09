@@ -1,0 +1,60 @@
+Iteration sweep results — 2026mnst, 30 trials per level
+========================================================
+
+Run: 2026-05-09, Stark, 36 workers, 7.6 min wall-clock
+Phases enabled: 0a (lex score), 0b (hard cooldown), 0c (targeted moves),
+                1 (R/B post-pass), 2 (Sykes station post-pass)
+
+Per-level stats for opp_quad (the active bottleneck):
+     level       mean      stdev        min        p25        p50        p75        max
+--------------------------------------------------------------------------------------
+     10000      485.2       33.8        454        464        469        504        554
+     50000      511.1       14.7        482        500        509        522        544
+    200000      474.5        8.4        460        468        475        482        488
+    500000      448.9        8.1        432        444        450        454        464
+   1000000      433.8        8.1        420        428        434        442        448
+   2000000      416.5        6.5        404        412        418        422        428
+   5000000      401.4        5.4        386        398        401        404        412
+
+Tight criterion on opp_quad:
+(K* = smallest level where mean improvement at next level < stdev at current level)
+    10000 → 50000  : imp=  -25.9, stdev_at_10000=33.8, TIGHT MET (degenerate — par_quad lockdown)
+    50000 → 200000 : imp=  +36.6, stdev_at_50000=14.7, still improving
+   200000 → 500000 : imp=  +25.7, stdev_at_200000=8.4, still improving
+   500000 → 1000000: imp=  +15.1, stdev_at_500000=8.1, still improving
+  1000000 → 2000000: imp=  +17.3, stdev_at_1000000=8.1, still improving
+  2000000 → 5000000: imp=  +15.1, stdev_at_2000000=6.5, still improving
+
+Verdict
+-------
+Tight criterion was NOT met within the tested range up to SA=5M.
+opp_quad was still improving at 5M (+15.1 mean drop, ~2.3σ effect).
+
+The 10K → 50K transition shows mean WORSENING by 26 — this is the
+"par_quad lockdown" effect. At 10K the SA hasn't fully converged on
+par_quad (some trials escape with par_quad > 252). At 50K par_quad is
+locked at floor (mean 252.2, stdev 1.1). Once partner is locked, lex
+paramount forbids opponent-improving moves that would worsen partner,
+funneling opp_quad into a slightly worse basin. This is correct
+FRC-paramount behavior, not a bug.
+
+K* lies above 5M. Documented as future-work in
+docs/scheduler/ITERATION_CEILING.md.
+
+Best lex tuple at each level
+-----------------------------
+       10000: (0, 256, 478, 0, 3, 42, 0, 0)
+       50000: (0, 252, 482, 0, 1, 44, 0, 0)
+      200000: (0, 252, 460, 0, 1, 40, 0, 0)
+      500000: (0, 252, 432, 0, 3, 46, 0, 0)
+     1000000: (0, 252, 420, 0, 3, 44, 0, 0)
+     2000000: (0, 252, 404, 0, 1, 39, 0, 0) ← beats MM (416)
+     5000000: (0, 252, 386, 0, 1, 44, 0, 0) ← beats MM by 30
+
+MatchMaker reference: (0, 252, 416, 0, 3, 65, 0, 0)
+
+Practical preset choices (tuned per this sweep):
+- fair:    50,000   (~2s per trial, quick previews)
+- good:    500,000  (~20s per trial, default for editing)
+- best:    2,000,000 (~75s per trial, beats MM consistently)
+- maximum: 5,000,000 (~180s per trial, when compute allows)

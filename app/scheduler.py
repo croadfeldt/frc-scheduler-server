@@ -135,7 +135,18 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
             to run after the construction phase. 0 = construction only
             (legacy behavior). Higher = better quality at higher wall-clock
             cost. The SA optimizes the canonical score (see
-            ``_score_from_state``) via random 2-swap moves.
+            ``_score_from_state``) via mixed targeted/random 2-swap moves.
+
+            Practical levels are defined in ``app/quality_presets.py``:
+            fair=50K, good=500K, best=2M, maximum=5M. The MAX_ITERATIONS
+            cap is 5M.
+
+            Note: tight criterion K* (mean improvement at 2K < stdev at K)
+            was NOT met within the tested 10K-5M range — opp_quad was
+            still improving at 5M with ~2σ effect size. Practical ceiling
+            chosen at 5M because single-trial wall-clock exceeds 3 minutes
+            beyond that. See docs/scheduler/ITERATION_CEILING.md to
+            revisit if compute or quality demands change.
         rb_post_pass: When True (default), run the Phase 1 Red/Blue balance
             post-pass after SA optimization. Provably commutative with
             other criteria (see app/post_passes/rb_balance.py).

@@ -232,6 +232,17 @@ class AssignedSchedule(Base):
     official_by_user_id: Mapped[int|None]     = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     official_by_name:   Mapped[str|None]      = mapped_column(String(256), nullable=True)
 
+    # ── FRC §10.5.2 competition compliance audit trail ──────────────
+    # competition_approved: NULL = pre-feature, TRUE/FALSE = post-feature.
+    # See app/frc_compliance.py for the canonical definition. The UI
+    # surfaces this as a green/yellow/gray badge per schedule.
+    #
+    # audit_trail: full forensic JSON. See build_audit_record() for shape.
+    # Includes the FRC defaults snapshot at generation time so the audit
+    # remains valid even if FRC §10.5.2 changes in the future.
+    competition_approved: Mapped[bool|None] = mapped_column(Boolean, nullable=True)
+    audit_trail:          Mapped[Any|None]  = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     # Bumped to NOW() on every meaningful mutation (PATCH, restore-
     # from-history, mark-official rename). Lock/unlock and is_active

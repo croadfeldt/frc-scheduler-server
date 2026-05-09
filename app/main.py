@@ -36,6 +36,14 @@ from app.db import (
     get_session, init_db,
 )
 from app.scheduler import run_iterations_worker, run_assignment_chunk
+from app.quality_presets import (
+    QUALITY_PRESETS, DEFAULT_PRESET, MAX_ITERATIONS,
+    iterations_for_preset, preset_for_iterations,
+)
+from app.frc_compliance import (
+    FRC_DEFAULTS, DEFAULT_COOLDOWN,
+    compute_deviations, is_competition_approved, build_audit_record,
+)
 from app import live as live_data
 from app import statbotics as statbotics_client
 from app import tba as tba_client
@@ -367,14 +375,70 @@ class AbstractGenerateRequest(BaseModel):
 class AssignRequest(BaseModel):
     event_id:             int
     abstract_schedule_id: int
-    # Phase 0 (FRC paramount): SA iteration budget. Capped at 5,000,000
-    # so quality presets can find the ceiling. Default 50000 is the
-    # current "Good" preset; "Best" is 5M, "Fair" is 10000.
-    iterations:           int        = Field(50_000, ge=1, le=5_000_000)
+    # Quality preset: 'fair' | 'good' | 'best' | 'maximum'. Resolves to
+    # an iteration count via app.quality_presets. If both quality_preset
+    # and iterations are provided, iterations takes precedence (advanced
+    # users tuning specific runs). If neither is provided, defaults to
+    # the DEFAULT_PRESET ('good').
+    #
+    # Tuned per docs/scheduler/ITERATION_CEILING.md sweep on Stark.
+    # K* (tight criterion) is documented as > 5M, not found within range.
+    quality_preset:       str | None = Field(None, pattern="^(fair|good|best|maximum)$")
+    iterations:           int | None = Field(None, ge=1, le=MAX_ITERATIONS)
     assign_seed:          str | None = Field(None, max_length=16)
     name:                 str        = Field("Schedule", max_length=128)
     day_config:           Any        = None
     practice_matches:     Any        = None
+
+    # ── FRC §10.5.2 compliance ─────────────────────────────────────
+    # competition_approved is a UI hint. The actual compliance status
+    # is computed server-side from the algorithm toggles and stored
+    # in AssignedSchedule.competition_approved + audit_trail.
+    # Default True (UI checkbox starts checked).
+    #
+    # If a user submits competition_approved=True but ALSO submits
+    # algorithm overrides that violate FRC defaults (e.g., disabling
+    # the R/B post-pass), the server detects the contradiction and
+    # records the actual deviations — competition_approved is set
+    # to False regardless of the request hint.
+    competition_approved: bool       = Field(True)
+
+    # ── Algorithm toggles (optional advanced controls) ─────────────
+    # All default to FRC-compliant values. Setting any to non-default
+    # creates a deviation in the audit trail.
+    rb_post_pass:         bool       = Field(True,
+        description="Phase 1 R/B balance post-pass (FRC #5)")
+    station_post_pass:    bool       = Field(True,
+        description="Phase 2 Sykes station balance post-pass (FRC #6)")
+    cooldown:             int        = Field(3, ge=1, le=20,
+        description="ideal_gap between matches per team (FRC: varies by event size)")
+
+    def resolved_iterations(self) -> int:
+        """Resolve the effective iteration count.
+
+        Precedence: explicit iterations > quality_preset > DEFAULT_PRESET.
+        """
+        if self.iterations is not None:
+            return self.iterations
+        preset = self.quality_preset or DEFAULT_PRESET
+        return iterations_for_preset(preset)
+
+    def settings_dict(self) -> dict:
+        """Build the settings dict for FRC compliance computation.
+
+        Returns the algorithm-level settings (NOT iteration count or
+        cooldown — those are audited separately and don't unset
+        competition_approved).
+        """
+        return {
+            'rb_post_pass':       self.rb_post_pass,
+            'station_post_pass':  self.station_post_pass,
+            'lex_score':          True,    # always on after Phase 0a
+            'hard_cooldown':      True,    # always on after Phase 0b
+            'targeted_moves':     True,    # always on after Phase 0c
+            'weights':            None,    # no custom weights in this endpoint
+            'surrogate_handling': '3rd_match_as_surrogate',
+        }
 
 
 # ── Events ────────────────────────────────────────────────────────────────────
@@ -1065,10 +1129,13 @@ async def assign_teams_endpoint(
         yield ": connected\n\n"
         await asyncio.sleep(0)
         actual_workers = CPU_WORKERS or (os.cpu_count() or 4)
-        n_workers  = min(body.iterations, actual_workers)
+        # Resolve iteration count from quality_preset or explicit iterations.
+        # See app/quality_presets.py for the preset map.
+        iterations = body.resolved_iterations()
+        n_workers  = min(iterations, actual_workers)
         _aseed_int = int(body.assign_seed, 16) if body.assign_seed else None
-        chunk_size = max(10, body.iterations // (n_workers * 20))
-        chunks_per_worker = max(1, (body.iterations // n_workers) // chunk_size)
+        chunk_size = max(10, iterations // (n_workers * 20))
+        chunks_per_worker = max(1, (iterations // n_workers) // chunk_size)
         total_chunks = n_workers * chunks_per_worker
         done_chunks  = 0
         best_result  = None
@@ -1129,6 +1196,17 @@ async def assign_teams_endpoint(
                 .where(AssignedSchedule.event_id == body.event_id)
                 .values(is_active=False)
             )
+            # Build the FRC compliance audit trail. This is server-authoritative
+            # — even if the request's competition_approved hint is True, the
+            # server detects deviations from the algorithm-level toggles and
+            # sets the actual approval bit accordingly.
+            settings = body.settings_dict()
+            audit = build_audit_record(
+                settings_used=settings,
+                cooldown_used=body.cooldown,
+                iterations_used=body.resolved_iterations(),
+                preset_used=body.quality_preset,
+            )
             assigned = AssignedSchedule(
                 abstract_schedule_id=abstract_id, event_id=body.event_id,
                 name=body.name, is_active=True,
@@ -1136,6 +1214,8 @@ async def assign_teams_endpoint(
                 practice_matches=body.practice_matches,
                 assign_seed=body.assign_seed,
                 created_by=user["sub"] if user else None,
+                competition_approved=audit['competition_approved'],
+                audit_trail=audit,
             )
             db.add(assigned)
             await db.flush()
@@ -1255,7 +1335,11 @@ async def list_assigned_schedules(event_id: int, db: AsyncSession = Depends(get_
          "is_official":      s.is_official,
          "official_at":      s.official_at.isoformat() if s.official_at else None,
          "official_by_name": s.official_by_name,
-         "forked_from_id":   s.forked_from_id}
+         "forked_from_id":   s.forked_from_id,
+         # FRC §10.5.2 compliance status. NULL → pre-feature schedule
+         # (UI renders as "approval status unknown"). True/False are
+         # post-feature deterministic values.
+         "competition_approved": s.competition_approved}
         for s in schedules
     ]
 
@@ -1333,6 +1417,12 @@ async def _build_assigned_schedule_response(assigned: AssignedSchedule, db: Asyn
         # uses this to render "Forked from {parent.name}" hint and
         # to show a lineage chain for once-official ancestors.
         "forked_from_id":     assigned.forked_from_id,
+        # FRC §10.5.2 compliance audit. competition_approved is
+        # NULL on pre-feature schedules (UI: "approval status unknown").
+        # audit_trail holds the full forensic record per
+        # app.frc_compliance.build_audit_record().
+        "competition_approved": assigned.competition_approved,
+        "audit_trail":         assigned.audit_trail,
     }
 
 
@@ -2381,6 +2471,14 @@ async def duplicate_assigned_schedule(
         # use cases. Walking the chain backward via forked_from_id
         # reaches the original schedule (NULL forked_from_id).
         forked_from_id=src.id,
+        # FRC compliance audit propagates through forks. The fork has
+        # the same algorithm-level provenance as the source: it was
+        # GENERATED by the same algorithm, even if the user later
+        # edits matches manually. (Manual edits don't unset the
+        # competition_approved bit — they're tracked separately via
+        # AssignedScheduleHistory.)
+        competition_approved=src.competition_approved,
+        audit_trail=src.audit_trail,
         created_by=user["sub"] if user else None,
     )
     db.add(new_asgn)
