@@ -1,4 +1,5 @@
-"""Smoke test — load 2026mnst CSV, run metrics, compare to reviewer's numbers.
+"""Smoke test — load 2026mnst's pre-pulled actual schedule, run metrics,
+compare to reviewer's numbers.
 
 The reviewer reported (verified independently in earlier session):
   - 9 repeat partner pairs (count_match)
@@ -8,57 +9,38 @@ The reviewer reported (verified independently in earlier session):
   - 4 teams with station spread of 3 (station_spread)
 
 If our metrics agree with these numbers we have a working baseline.
+
+Reads from scripts/scheduler_eval/fixtures/2026mnst__actual.json which
+ships in the repo. No external files or paths required — runs anywhere
+the harness is checked out.
 """
 
-import csv
 import sys
 from pathlib import Path
 
 # Allow running from the repo root or from this directory
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from scripts.scheduler_eval.harness_types   import Fixture, Match, Schedule
+from scripts.scheduler_eval.harness_types import Fixture, Schedule
 from scripts.scheduler_eval.metrics import analyze
 
 
-def load_csv(csv_path: Path, fixture_id: str) -> Schedule:
-    """Parse the reviewer-style CSV into a Schedule.
-
-    Format columns: Type, Match, Day, Time, Blue 1-3, Red 1-3, Surrogates
-    Practice rows are skipped — only Qualification rows go into the
-    Schedule (matching our metrics' qualification-only scope).
-    """
-    matches = []
-    with open(csv_path) as f:
-        for row in csv.DictReader(f):
-            if row["Type"] != "Qualification":
-                continue
-            mn = int(row["Match"].lstrip("Q"))
-            blue = [int(row[f"Blue {i}"]) for i in (1, 2, 3)]
-            red  = [int(row[f"Red {i}"])  for i in (1, 2, 3)]
-            # Surrogates column is comma-separated team numbers, may be empty
-            surr_str = (row.get("Surrogates") or "").strip()
-            surr_teams = set()
-            if surr_str:
-                surr_teams = {int(s.strip()) for s in surr_str.split(",") if s.strip()}
-            blue_surr = [t in surr_teams for t in blue]
-            red_surr  = [t in surr_teams for t in red]
-            matches.append(Match(
-                match_num=mn, blue=blue, red=red,
-                blue_surrogate=blue_surr, red_surrogate=red_surr,
-            ))
-    matches.sort(key=lambda m: m.match_num)
-    return Schedule(fixture_id=fixture_id, adapter_name="actual", matches=matches)
-
-
 def main():
-    csv_path = Path("/tmp/analysis/schedule.csv")
-    if not csv_path.exists():
-        print(f"CSV not found at {csv_path}; aborting")
+    here = Path(__file__).parent
+    fixture_path  = here / "fixtures" / "2026mnst.json"
+    schedule_path = here / "fixtures" / "2026mnst__actual.json"
+
+    if not fixture_path.exists():
+        print(f"Fixture not found: {fixture_path}", file=sys.stderr)
         sys.exit(1)
-    fixture_path = Path(__file__).parent / "fixtures" / "2026mnst.json"
-    fixture = Fixture.load(fixture_path)
-    schedule = load_csv(csv_path, "2026mnst")
+    if not schedule_path.exists():
+        print(f"Pre-pulled schedule not found: {schedule_path}", file=sys.stderr)
+        print("(This file ships in the repo; if it's missing, "
+              "your checkout is incomplete.)", file=sys.stderr)
+        sys.exit(1)
+
+    fixture  = Fixture.load(fixture_path)
+    schedule = Schedule.load(schedule_path)
 
     print(f"Loaded {len(schedule.matches)} qualification matches")
     print(f"Fixture: {fixture.num_teams} teams, {fixture.matches_per_team} matches each")
