@@ -1,0 +1,420 @@
+{
+  "fixture_id": "2024week0",
+  "adapter_name": "frc-scheduler-server",
+  "matches": [
+    {
+      "match_num": 1,
+      "blue": [
+        5813,
+        2423,
+        9443
+      ],
+      "red": [
+        8567,
+        2084,
+        166
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 2,
+      "blue": [
+        316,
+        4761,
+        3467
+      ],
+      "red": [
+        3117,
+        5687,
+        501
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 3,
+      "blue": [
+        2713,
+        58,
+        238
+      ],
+      "red": [
+        78,
+        5422,
+        2370
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 4,
+      "blue": [
+        4909,
+        157,
+        1058
+      ],
+      "red": [
+        1153,
+        131,
+        811
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 5,
+      "blue": [
+        2342,
+        9101,
+        1768
+      ],
+      "red": [
+        4041,
+        5459,
+        509
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 6,
+      "blue": [
+        88,
+        166,
+        5813
+      ],
+      "red": [
+        6153,
+        2423,
+        8567
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 7,
+      "blue": [
+        2084,
+        9443,
+        5422
+      ],
+      "red": [
+        5687,
+        2370,
+        4761
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 8,
+      "blue": [
+        58,
+        316,
+        3117
+      ],
+      "red": [
+        238,
+        157,
+        1153
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 9,
+      "blue": [
+        78,
+        1768,
+        2713
+      ],
+      "red": [
+        1058,
+        501,
+        3467
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 10,
+      "blue": [
+        6153,
+        509,
+        88
+      ],
+      "red": [
+        4909,
+        4041,
+        131
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 11,
+      "blue": [
+        811,
+        2084,
+        4761
+      ],
+      "red": [
+        2342,
+        8567,
+        5459
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 12,
+      "blue": [
+        2423,
+        5687,
+        166
+      ],
+      "red": [
+        157,
+        58,
+        9101
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 13,
+      "blue": [
+        1768,
+        501,
+        1153
+      ],
+      "red": [
+        5422,
+        5813,
+        238
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 14,
+      "blue": [
+        509,
+        1058,
+        78
+      ],
+      "red": [
+        2370,
+        316,
+        9443
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 15,
+      "blue": [
+        6153,
+        4909,
+        811
+      ],
+      "red": [
+        3467,
+        2713,
+        3117
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 16,
+      "blue": [
+        9101,
+        131,
+        5459
+      ],
+      "red": [
+        88,
+        2342,
+        4041
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    }
+  ],
+  "generation_seconds": 0.6787695689708926,
+  "seed": null,
+  "adapter_diagnostics": {
+    "stage1_score": -19410,
+    "stage1_surrogate_count": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "stage2_score": -1575,
+    "stage2_iterations": 100,
+    "ideal_gap": 3,
+    "weights": "default",
+    "trial": 26
+  },
+  "generated_at": "2026-05-09T15:41:44.319312+00:00"
+}

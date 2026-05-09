@@ -3,11 +3,20 @@
 MatchMaker is a Linux command-line tool that generates FRC-style
 schedules. It writes its schedule to stdout; we capture and parse it.
 
-Operator setup on Stark:
-  - Place the matchmaker binary at /opt/matchmaker/matchmaker (or
-    point the harness at it via MATCHMAKER_BINARY env var)
-  - chmod +x the binary
-  - Verify with `matchmaker --help` or equivalent
+Locating the binary — the adapter tries these in order:
+  1. The `binary=` argument to the adapter constructor (set by the
+     runner's `--matchmaker-binary` flag).
+  2. The MATCHMAKER_BINARY environment variable.
+  3. A `matchmaker` executable on $PATH (resolved via shutil.which).
+
+Any of the three is sufficient. A typical setup is to drop the
+binary somewhere on $PATH (e.g. /usr/local/bin/matchmaker) and let
+the default resolution handle it; no flag or env var needed. If
+the binary lives elsewhere, set MATCHMAKER_BINARY=/path/to/matchmaker
+in your shell, or pass --matchmaker-binary to the runner per-run.
+
+Verify the install works with `matchmaker --help` (or whatever the
+binary's actual name resolves to).
 
 CLI flags from the 1.6.1 release notes:
   -t N      number of teams
@@ -58,6 +67,23 @@ DEFAULT_BINARY = os.environ.get("MATCHMAKER_BINARY", "matchmaker")
 DEFAULT_TIMEOUT_SECONDS = 300.0
 
 
+def _resolve_binary(binary: str | Path) -> str | None:
+    """Resolve `binary` to an absolute path that exists, or None.
+
+    Tries, in order:
+      1. If `binary` is an absolute or relative path that exists as a
+         regular file, return it.
+      2. Otherwise treat it as a name to look up on $PATH via shutil.which.
+
+    Returns the resolved absolute path on success, None on failure.
+    """
+    p = Path(binary)
+    if p.is_file():
+        return str(p.resolve())
+    found = shutil.which(str(binary))
+    return found  # may be None
+
+
 class MatchMakerAdapter(Adapter):
     """Wraps Idle Loop's MatchMaker behind the standard adapter interface."""
 
@@ -67,16 +93,60 @@ class MatchMakerAdapter(Adapter):
                  timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
                  extra_args: list[str] | None = None):
         """`extra_args` is appended verbatim to every invocation —
-        useful for global tuning without modifying the adapter."""
-        self.binary = str(binary) if binary else DEFAULT_BINARY
+        useful for global tuning without modifying the adapter.
+
+        Binary resolution priority:
+          1. explicit `binary=` argument (set by --matchmaker-binary)
+          2. MATCHMAKER_BINARY env var (read at module load)
+          3. 'matchmaker' on $PATH (resolved via shutil.which)
+
+        On failure, raises FileNotFoundError with detailed diagnostics
+        about every candidate considered and why each was rejected.
+        """
+        # Start with the requested name, then resolve to an absolute
+        # path. Storing the absolute path means the subprocess call
+        # doesn't depend on PATH being inherited correctly into worker
+        # processes (relevant for multiprocessing.spawn on macOS, and
+        # cheap insurance on Linux too).
+        requested = str(binary) if binary else DEFAULT_BINARY
+        resolved = _resolve_binary(requested)
+        if resolved is None:
+            # Build a detailed error showing what was considered and why.
+            # This is far more useful than "binary not found: 'matchmaker'"
+            # when the caller is sure they have it installed.
+            env_var = os.environ.get("MATCHMAKER_BINARY")
+            path_env = os.environ.get("PATH", "")
+            path_dirs = path_env.split(os.pathsep) if path_env else []
+            diag_lines = [
+                f"MatchMaker binary not found.",
+                f"  Requested:           {requested!r}",
+                f"  Constructor binary:  {binary!r}",
+                f"  MATCHMAKER_BINARY:   {env_var!r}" if env_var else
+                f"  MATCHMAKER_BINARY:   <unset>",
+                f"  PATH directories ({len(path_dirs)}):",
+            ]
+            for d in path_dirs[:20]:
+                diag_lines.append(f"    {d}")
+            if len(path_dirs) > 20:
+                diag_lines.append(f"    ... and {len(path_dirs) - 20} more")
+            diag_lines.extend([
+                "",
+                "Resolution attempts:",
+                f"  - Path('{requested}').is_file() -> "
+                f"{Path(requested).is_file()}",
+                f"  - shutil.which('{requested}') -> "
+                f"{shutil.which(str(requested))!r}",
+                "",
+                "Fixes:",
+                "  - Verify with: which matchmaker",
+                "  - If installed elsewhere: export MATCHMAKER_BINARY=/full/path/to/matchmaker",
+                "  - Or pass --matchmaker-binary /full/path/to/matchmaker to the runner",
+                "  - If multiprocessing isn't inheriting PATH, prefer the absolute path forms",
+            ])
+            raise FileNotFoundError("\n".join(diag_lines))
+        self.binary = resolved
         self.timeout_seconds = timeout_seconds
         self.extra_args = list(extra_args) if extra_args else []
-        # Resolve binary path eagerly so we fail loudly if not installed
-        if shutil.which(self.binary) is None and not Path(self.binary).is_file():
-            raise FileNotFoundError(
-                f"MatchMaker binary not found: {self.binary!r}. "
-                "Install it or set MATCHMAKER_BINARY to its path."
-            )
 
     def generate(self, fixture: Fixture, *, seed: int | None = None,
                  trial: int = 0) -> Schedule:

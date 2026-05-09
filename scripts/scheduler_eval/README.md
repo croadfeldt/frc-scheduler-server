@@ -41,9 +41,12 @@ scripts/scheduler_eval/
 # 1. Set TBA API key (needed for fixture fetching)
 export TBA_API_KEY=your_key_here
 
-# 2. Install MatchMaker. The binary should be on PATH or pointed at
-#    via MATCHMAKER_BINARY env var.
-which matchmaker
+# 2. Install MatchMaker. Three ways for the harness to find it
+#    (any one is sufficient):
+#      a. Drop the binary on $PATH (e.g. /usr/local/bin/matchmaker) — preferred
+#      b. export MATCHMAKER_BINARY=/path/to/matchmaker
+#      c. pass --matchmaker-binary /path/to/matchmaker per-run
+which matchmaker      # confirms (a); silent fail is fine if using (b) or (c)
 
 # 3. Verify the metrics module is correct (compares against the
 #    reviewer's hand-verified numbers for 2026mnst):
@@ -65,11 +68,12 @@ python3 -m scripts.scheduler_eval.runner \
     --trials 50 \
     --workers 36
 
-# 6. Once MatchMaker is verified working, add it to the comparison:
+# 6. Once MatchMaker is verified working, add it to the comparison.
+#    If the binary is on $PATH or pointed at via MATCHMAKER_BINARY,
+#    no --matchmaker-binary flag is needed:
 python3 -m scripts.scheduler_eval.runner \
     --fixtures all \
     --adapters frc-scheduler-server,matchmaker,actual \
-    --matchmaker-binary /opt/matchmaker/matchmaker \
     --trials 100 \
     --workers 36
 ```
