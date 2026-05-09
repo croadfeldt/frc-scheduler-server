@@ -96,15 +96,46 @@ class FrcSchedulerServerAdapter(Adapter):
             n_iterations=self.assignment_iterations,
             seed=actual_seed,
         )
-        slot_map = assignment.get("slot_map", {})
+        # assign_teams returns slot_map with STRING keys ({str(k): v}).
+        # Stage 1's match data uses integer slot indices, so we need to
+        # bridge the type. Without this, slot_map.get(s, s) silently
+        # falls back to the slot index and produces a Schedule with
+        # placeholder integers (1..N) instead of real team numbers —
+        # invisible until the metrics surface team numbers, at which
+        # point burden analysis shows "team 28" instead of "team 2052".
+        raw_slot_map = assignment.get("slot_map") or {}
+        slot_map: dict[int, int] = {}
+        for k, v in raw_slot_map.items():
+            try:
+                slot_map[int(k)] = int(v)
+            except (TypeError, ValueError):
+                pass
+
+        # Defensive check: if the slot map is empty or doesn't cover
+        # every slot in the schedule, the schedule is unusable for
+        # downstream comparison. Fail loudly rather than silently
+        # emit slot indices.
+        all_slots = set()
+        for am in abstract_matches:
+            all_slots.update(am["red"])
+            all_slots.update(am["blue"])
+        missing_slots = all_slots - set(slot_map.keys())
+        if missing_slots:
+            raise RuntimeError(
+                f"frc-scheduler-server: assign_teams did not produce a "
+                f"slot_map covering every slot. Missing: "
+                f"{sorted(missing_slots)[:10]}{'...' if len(missing_slots) > 10 else ''}. "
+                f"Stage 2 likely failed; stage 2 score was "
+                f"{assignment.get('score')}."
+            )
 
         elapsed = time.monotonic() - t0
 
         # Build harness Match objects from the assignment result
         matches = []
         for i, am in enumerate(abstract_matches, start=1):
-            red_teams  = [slot_map.get(s, s) for s in am["red"]]
-            blue_teams = [slot_map.get(s, s) for s in am["blue"]]
+            red_teams  = [slot_map[s] for s in am["red"]]
+            blue_teams = [slot_map[s] for s in am["blue"]]
             matches.append(Match(
                 match_num=i,
                 blue=blue_teams,

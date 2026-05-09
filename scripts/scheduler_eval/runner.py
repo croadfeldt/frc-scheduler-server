@@ -160,6 +160,147 @@ def _select_best(results: list[dict]) -> dict | None:
     return min(successful, key=rank)
 
 
+def _composite_score(result: dict) -> float:
+    """Single-number summary of a result's overall quality. Lower = better.
+
+    The classification rank in `_select_best` is a tuple comparison; useful
+    for picking a winner but not for averaging across fixtures or
+    showing a distribution. This collapses the same signal into one
+    float so the cross-fixture aggregate and trial distribution can use
+    it.
+
+    Composition (chosen so each component is roughly comparable):
+      - 10 × poor count       (dominant — every poor metric counts heavily)
+      -  3 × acceptable count (acceptable still costs something vs near-optimal)
+      -  0.1 × repeat_partners (fine-grained tiebreaker for tight cases)
+      -  0.1 × max_color_imbalance
+
+    A schedule with all near-optimal metrics scores 0; one with everything
+    poor scores ~110. The middle band 5-25 is "mixed."
+    """
+    if not result or not result.get("ok"):
+        return float("inf")
+    rep = result.get("report", {})
+    counts = rep.get("counts", {})
+    metrics = rep.get("metrics", {})
+    return (
+        10.0 * counts.get("poor", 0)
+        + 3.0 * counts.get("acceptable", 0)
+        + 0.1 * metrics.get("repeat_partners", {}).get("value", 0)
+        + 0.1 * metrics.get("max_color_imbalance", {}).get("value", 0)
+    )
+
+
+def _team_burden_scores(schedule_dict: dict, fixture: Fixture) -> list[dict]:
+    """Per-team burden analysis on a single schedule.
+
+    Returns a list of {team, burden, color, station, min_gap, partner_rep,
+    opponent_rep, day_lopsidedness} dicts, sorted by burden descending.
+
+    The composition mirrors the analysis used on 2026mnst:
+      - color imbalance (red vs blue count delta)
+      - station spread (max station count - min station count)
+      - min gap below 5 (gap of 4 = 0.2 cost, gap of 3 = 0.4, etc.)
+      - partner repeats (how many distinct partners played 2+ times)
+      - opponent repeats (same, for opponents)
+      - day lopsidedness (how concentrated the team's matches are
+        in one half of the day)
+
+    Each component is normalized to [0, 1] across teams in this fixture
+    so the burden score is comparable across fixtures of different
+    sizes. A score of 0 = least burdened in this fixture; the highest
+    score gets ~1.0 per axis it tops, summing to up to 6.
+    """
+    from collections import Counter, defaultdict
+
+    matches = schedule_dict.get("matches", []) or []
+    if not matches:
+        return []
+
+    # Build per-team profiles
+    team_data: dict[int, dict] = defaultdict(lambda: {
+        "match_nums": [], "colors": [], "stations": [],
+        "partners": [], "opponents": [],
+    })
+
+    total_matches = max(m.get("match_num", 0) for m in matches)
+    midpoint = total_matches // 2 if total_matches > 0 else 0
+
+    for m in matches:
+        match_num = m.get("match_num", 0)
+        for color in ("red", "blue"):
+            alliance = m.get(color, []) or []
+            opp_color = "blue" if color == "red" else "red"
+            opponents = m.get(opp_color, []) or []
+            for pos, team in enumerate(alliance, start=1):
+                d = team_data[team]
+                d["match_nums"].append(match_num)
+                d["colors"].append(color)
+                d["stations"].append(pos)
+                # Same-alliance partners (excluding self)
+                d["partners"].extend(t for t in alliance if t != team)
+                d["opponents"].extend(opponents)
+
+    teams = sorted(team_data.keys())
+    if not teams:
+        return []
+
+    # Per-team raw metrics
+    raw = []
+    for t in teams:
+        d = team_data[t]
+        nums = sorted(d["match_nums"])
+        color_counts = Counter(d["colors"])
+        station_counts = Counter(d["stations"])
+        color_imbalance = abs(color_counts.get("blue", 0) - color_counts.get("red", 0))
+        station_vals = [station_counts.get(p, 0) for p in (1, 2, 3)]
+        station_spread = max(station_vals) - min(station_vals)
+        gaps = [nums[i+1] - nums[i] for i in range(len(nums) - 1)]
+        min_gap = min(gaps) if gaps else 0
+        partner_rep = sum(1 for c in Counter(d["partners"]).values() if c >= 2)
+        opponent_rep = sum(1 for c in Counter(d["opponents"]).values() if c >= 2)
+        # Day lopsidedness: |first-half count - second-half count|
+        first_half = sum(1 for n in nums if n <= midpoint)
+        second_half = len(nums) - first_half
+        day_lops = abs(first_half - second_half)
+
+        raw.append({
+            "team": t, "color": color_imbalance, "station": station_spread,
+            "min_gap": min_gap, "partner_rep": partner_rep,
+            "opponent_rep": opponent_rep, "day_lops": day_lops,
+        })
+
+    # Normalize each axis across teams in this schedule, then sum
+    def norm_axis(values: list[float]) -> list[float]:
+        if not values:
+            return []
+        lo, hi = min(values), max(values)
+        if hi == lo:
+            return [0.0] * len(values)
+        return [(v - lo) / (hi - lo) for v in values]
+
+    color_norm   = norm_axis([r["color"]        for r in raw])
+    station_norm = norm_axis([r["station"]      for r in raw])
+    # min_gap: lower is worse, so invert
+    gap_floor = min(r["min_gap"] for r in raw)
+    gap_ceil  = max(r["min_gap"] for r in raw)
+    if gap_ceil == gap_floor:
+        gap_norm = [0.0] * len(raw)
+    else:
+        gap_norm = [(gap_ceil - r["min_gap"]) / (gap_ceil - gap_floor) for r in raw]
+    prep_norm    = norm_axis([r["partner_rep"]  for r in raw])
+    orep_norm    = norm_axis([r["opponent_rep"] for r in raw])
+    lops_norm    = norm_axis([r["day_lops"]     for r in raw])
+
+    out = []
+    for i, r in enumerate(raw):
+        burden = (color_norm[i] + station_norm[i] + gap_norm[i]
+                  + prep_norm[i] + orep_norm[i] + lops_norm[i])
+        out.append({**r, "burden": burden})
+    out.sort(key=lambda x: -x["burden"])
+    return out
+
+
 def _format_value(v):
     if isinstance(v, float):
         return f"{v:g}"
@@ -192,6 +333,75 @@ def write_markdown_report(out_path: Path, run_id: str, fixtures: list[Fixture],
     lines.append("")
     lines.append("Markers: ✓ near-optimal · acceptable · ✗ poor · — descriptive")
     lines.append("")
+
+    # ── Cross-fixture aggregate ─────────────────────────────────────
+    # Single-table summary across all fixtures so a multi-fixture run
+    # produces a verdict at the top rather than buried in 20 per-fixture
+    # tables. For each adapter: classification roll-up across fixtures,
+    # and head-to-head against every other adapter on the composite.
+    all_adapter_names: list[str] = []
+    for (fid, an) in best_results.keys():
+        if an not in all_adapter_names:
+            all_adapter_names.append(an)
+
+    if all_adapter_names and len(fixtures) > 1:
+        lines.append("## Cross-fixture aggregate")
+        lines.append("")
+        lines.append("Composite score: lower is better. 0 = all metrics near-optimal; "
+                     "~110 = all metrics poor. The 5-25 band is mixed.")
+        lines.append("")
+        lines.append("| Adapter | Fixtures | Near-optimal | Acceptable | Poor | Mean composite |")
+        lines.append("|---|---|---|---|---|---|")
+        for an in all_adapter_names:
+            classifications = []
+            composites = []
+            for fix in fixtures:
+                r = best_results.get((fix.fixture_id, an))
+                if r and r.get("ok"):
+                    overall = r["report"].get("overall", "?")
+                    classifications.append(overall)
+                    composites.append(_composite_score(r))
+            n = len(classifications)
+            n_near = sum(1 for c in classifications if c == "near_optimal")
+            n_acc  = sum(1 for c in classifications if c == "acceptable")
+            n_poor = sum(1 for c in classifications if c == "poor")
+            mean_comp = (sum(composites) / len(composites)) if composites else float("nan")
+            lines.append(f"| {an} | {n} | {n_near} | {n_acc} | {n_poor} | {mean_comp:.2f} |")
+        lines.append("")
+
+        # Head-to-head: pairwise W-L-T per fixture on composite. T = composites
+        # within 0.01 of each other (functionally identical).
+        if len(all_adapter_names) >= 2:
+            lines.append("### Head-to-head")
+            lines.append("")
+            lines.append("Per-fixture wins on composite score. T = within 0.01.")
+            lines.append("")
+            header = "| | " + " | ".join(all_adapter_names) + " |"
+            lines.append(header)
+            lines.append("|---" + "|---" * len(all_adapter_names) + "|")
+            for an_row in all_adapter_names:
+                cells = [f"**{an_row}**"]
+                for an_col in all_adapter_names:
+                    if an_row == an_col:
+                        cells.append("—")
+                        continue
+                    wins = losses = ties = 0
+                    for fix in fixtures:
+                        r_row = best_results.get((fix.fixture_id, an_row))
+                        r_col = best_results.get((fix.fixture_id, an_col))
+                        if not (r_row and r_row.get("ok") and r_col and r_col.get("ok")):
+                            continue
+                        s_row = _composite_score(r_row)
+                        s_col = _composite_score(r_col)
+                        if abs(s_row - s_col) < 0.01:
+                            ties += 1
+                        elif s_row < s_col:
+                            wins += 1
+                        else:
+                            losses += 1
+                    cells.append(f"{wins}W-{losses}L-{ties}T")
+                lines.append("| " + " | ".join(cells) + " |")
+            lines.append("")
 
     # ── Per-fixture sections ────────────────────────────────────────
     for fix in fixtures:
@@ -248,14 +458,15 @@ def write_markdown_report(out_path: Path, run_id: str, fixtures: list[Fixture],
         # Overall classification + speed
         lines.append("**Overall + diagnostics**")
         lines.append("")
-        lines.append("| Adapter | Overall | Generation time | Notes |")
-        lines.append("|---|---|---|---|")
+        lines.append("| Adapter | Overall | Composite | Generation time | Notes |")
+        lines.append("|---|---|---|---|---|")
         for an in adapter_names:
             r = adapter_results[an]
             if r.get("ok"):
                 rep = r["report"]
                 sched = r["schedule"]
                 overall = rep.get("overall", "?")
+                composite = _composite_score(r)
                 t_sec = sched.get("generation_seconds", 0)
                 notes_list = []
                 diag = sched.get("adapter_diagnostics", {})
@@ -264,10 +475,90 @@ def write_markdown_report(out_path: Path, run_id: str, fixtures: list[Fixture],
                 if diag.get("source"):
                     notes_list.append(f"source={diag['source']}")
                 lines.append(f"| {an} | {_classification_marker(overall)} {overall} | "
-                             f"{t_sec:.2f}s | {', '.join(notes_list)} |")
+                             f"{composite:.2f} | {t_sec:.2f}s | {', '.join(notes_list)} |")
             else:
-                lines.append(f"| {an} | ERROR | — | {r.get('error', 'unknown')} |")
+                lines.append(f"| {an} | ERROR | — | — | {r.get('error', 'unknown')} |")
         lines.append("")
+
+        # ── Trial distribution ──────────────────────────────────────
+        # For each adapter that ran multiple trials, show the spread of
+        # composite + key metric values. Catches "best is fine but
+        # median is poor" — i.e., high-variance adapters that need many
+        # retries to be production-deployable.
+        per_adapter_trials: dict[str, list[dict]] = {}
+        for r in all_results:
+            if r.get("fixture") == fix.fixture_id:
+                per_adapter_trials.setdefault(r["adapter"], []).append(r)
+
+        any_distribution_shown = False
+        distribution_lines: list[str] = []
+        for an in adapter_names:
+            trials = per_adapter_trials.get(an, [])
+            successful_trials = [t for t in trials if t.get("ok")]
+            if len(successful_trials) <= 1:
+                continue  # deterministic adapter or single-trial; skip
+            any_distribution_shown = True
+            composites = sorted(_composite_score(t) for t in successful_trials)
+            n = len(composites)
+            best = composites[0]
+            worst = composites[-1]
+            median = composites[n // 2]
+            mean = sum(composites) / n
+            std = (sum((c - mean) ** 2 for c in composites) / n) ** 0.5
+
+            # Repeat partners + color imbalance distribution — the two most
+            # commonly cited fairness metrics. Show best/median/worst for each.
+            def _metric_distribution(metric_name: str) -> str:
+                vals = sorted(
+                    t["report"]["metrics"].get(metric_name, {}).get("value", 0)
+                    for t in successful_trials
+                )
+                m = len(vals)
+                return f"best {vals[0]:g}, median {vals[m//2]:g}, worst {vals[-1]:g}"
+
+            distribution_lines.append(
+                f"- **{an}** ({n} trials): composite "
+                f"best {best:.2f}, median {median:.2f}, worst {worst:.2f}, "
+                f"std {std:.2f}"
+            )
+            distribution_lines.append(
+                f"  - repeat_partners: { _metric_distribution('repeat_partners') }"
+            )
+            distribution_lines.append(
+                f"  - max_color_imbalance: { _metric_distribution('max_color_imbalance') }"
+            )
+
+        if any_distribution_shown:
+            lines.append("**Trial distribution**")
+            lines.append("")
+            lines.extend(distribution_lines)
+            lines.append("")
+
+        # ── Per-team burden in worst-case schedules ─────────────────
+        # When the best schedule is "poor" overall, surface which teams
+        # are most affected. The same fairness analysis applied manually
+        # on 2026mnst, now automatic.
+        for an in adapter_names:
+            r = adapter_results[an]
+            if not r.get("ok"):
+                continue
+            overall = r["report"].get("overall", "")
+            if overall != "poor":
+                continue
+            burden_rows = _team_burden_scores(r["schedule"], fix)
+            if not burden_rows:
+                continue
+            lines.append(f"**Most-affected teams in {an}'s best schedule**")
+            lines.append("")
+            lines.append("| # | Team | Burden | Color | Station | Min gap | Partner rep | Opp rep | Day lops |")
+            lines.append("|---|---|---|---|---|---|---|---|---|")
+            for i, br in enumerate(burden_rows[:5], start=1):
+                lines.append(
+                    f"| {i} | {br['team']} | {br['burden']:.2f} | "
+                    f"{br['color']} | {br['station']} | {br['min_gap']} | "
+                    f"{br['partner_rep']} | {br['opponent_rep']} | {br['day_lops']} |"
+                )
+            lines.append("")
 
     lines.append("---")
     lines.append("")
@@ -275,6 +566,12 @@ def write_markdown_report(out_path: Path, run_id: str, fixtures: list[Fixture],
     lines.append("")
     lines.append("- For stochastic adapters, the harness runs N trials per fixture and reports the BEST.")
     lines.append("  'Best' = fewest 'poor' metrics, then most 'near_optimal', then lowest repeat-partner count.")
+    lines.append("- Composite score collapses classifications into a single float for ranking and head-to-head:")
+    lines.append("  `10 × poor + 3 × acceptable + 0.1 × repeat_partners + 0.1 × max_color_imbalance`. Lower = better.")
+    lines.append("- Trial distribution shows variance across all N trials, not just the best — catches")
+    lines.append("  high-variance adapters whose median output isn't production-deployable.")
+    lines.append("- Per-team burden normalizes color, station, gap, repeats, and day rhythm across teams")
+    lines.append("  in a single schedule, so the most-affected teams surface automatically.")
     lines.append("- Thresholds in the metric table are calibrated from FRC community norms and the")
     lines.append("  reviewer's MatchMaker analysis (800 trials on 36-team field).")
     lines.append("- Surrogate slot-fills count toward color/station balance (team is physically there)")
