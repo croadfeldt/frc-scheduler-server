@@ -4,7 +4,7 @@
 **Target branch:** `cooldown-hard` (cut from `main`)
 **Estimated effort:** 2–4 hours implementation + comparison runs
 **Risk level:** Low — narrow, decomposable change with measurable correctness criteria
-**Status:** **Proposal — paused.** Scheduler change-freeze in effect during the live event. The brief is implementation-ready, but no scheduler code changes ship until the freeze lifts. See `docs/HANDOFF.md` for current operational guidance.
+**Status:** **Reused as Phase 3 sub-step in the active plan.** The technical content of this brief is implementation-ready and remains correct. In [`QUALITY_IMPROVEMENT_PLAN.md`](QUALITY_IMPROVEMENT_PLAN.md), this work moved from "Phase 0" to "Phase 3" because eval data showed cooldown isn't currently a quality issue (other gaps are larger). The implementation guidance, acceptance criteria, and comparison harness in this brief still apply when Phase 3 is implemented.
 
 ---
 

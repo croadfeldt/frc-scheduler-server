@@ -1,11 +1,12 @@
 # Scheduler Evaluation: Findings & Handoff
 
 **Status**: Eval complete. **Decision: improve our in-house scheduler
-to close the gap to MatchMaker.** MatchMaker is the quality benchmark;
-licensing prevents using it as part of our shipped tool, so the path
-forward is making our scheduler genuinely competitive rather than
-replacing it. This document captures the data behind the decision and
-the remaining work.
+to close the gap to MatchMaker.** Active workstream tracked in
+[`QUALITY_IMPROVEMENT_PLAN.md`](QUALITY_IMPROVEMENT_PLAN.md).
+MatchMaker is the quality benchmark; licensing prevents using it as
+part of our shipped tool, so the path forward is making our scheduler
+genuinely competitive rather than replacing it. This document captures
+the data behind the decision and the remaining work.
 
 **Licensing constraint**: Idle Loop's MatchMaker is "available for
 evaluation purposes only. For licensing, contact us at info@idleloop.com."

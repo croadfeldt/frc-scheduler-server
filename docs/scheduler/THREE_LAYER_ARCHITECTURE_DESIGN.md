@@ -2,7 +2,7 @@
 
 **Repository:** `github.com/croadfeldt/frc-scheduler-server`
 **Document type:** Architecture / design proposal
-**Status:** **Proposal — paused.** Scheduler change-freeze in effect during the live event. Broader architectural direction that the quality roadmap can slot under; not an active workstream until the freeze lifts and the architectural decision is made deliberately. See `docs/HANDOFF.md` for current operational guidance.
+**Status:** **Deferred.** Destination architecture, not active work. The active workstream in [`QUALITY_IMPROVEMENT_PLAN.md`](QUALITY_IMPROVEMENT_PLAN.md) focuses on schedule quality first; architectural reorganization comes after. The plan's Phase 5 decision point may revisit this depending on results.
 
 **Companion docs:**
 - `SCHEDULER_QUALITY_ROADMAP.md` — tactical six-phase roadmap; this document reframes that work under a broader architecture

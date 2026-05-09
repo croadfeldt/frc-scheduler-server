@@ -1,14 +1,6 @@
 # FRC Scheduler Server — MatchMaker Alignment Roadmap
 
-> ⚠ **Constrained by licensing brief** — The original framing of this
-> roadmap predates the MatchMaker licensing brief at
-> [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md).
-> The brief establishes hard rules: no bundling, no calling, no
-> redistribution of MatchMaker; independent reimplementation only;
-> TBA-based validation. Any phase work in this roadmap must comply
-> with the brief. Where this document and the brief disagree, the
-> brief governs. See also [`EVAL_FINDINGS.md`](EVAL_FINDINGS.md) for
-> empirical eval results that motivate this work.
+> ⚠ **Superseded** by [`QUALITY_IMPROVEMENT_PLAN.md`](QUALITY_IMPROVEMENT_PLAN.md). Retained for historical context. The licensing brief at [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md) constrains all work in this direction; the active plan reflects those constraints plus eval-data-driven re-prioritization.
 
 **Repository:** `github.com/croadfeldt/frc-scheduler-server`
 **Document type:** Strategic plan / phase planning
