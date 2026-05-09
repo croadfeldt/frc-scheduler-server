@@ -2351,6 +2351,22 @@
        2. Loading state while LLM processes
        3. Preview with editable matches + validation summary
        4. Confirmation -->
+
+  <!-- FRC §10.5.2 Compliance Audit modal — opens from the saved-schedules
+       list when a user clicks the FRC badge on any row. Renders the
+       audit_trail JSON in a human-readable format: approval status,
+       deviations (if any), settings actually used, FRC defaults snapshot
+       at generation time, cooldown audit, iteration count, preset. -->
+  <div class="modal-overlay" id="modalFrcAudit">
+    <div class="modal" style="width:min(720px,95vw);max-height:85vh;display:flex;flex-direction:column;">
+      <button class="modal-close" onclick="closeModal('modalFrcAudit')">&#x2715;</button>
+      <div class="modal-title">FRC §10.5.2 Compliance Audit</div>
+      <div id="frcAuditBody" style="overflow-y:auto;font-size:0.85rem;line-height:1.55;">
+        <div style="color:var(--text-muted);">Loading…</div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="modalPdfImport">
     <div class="modal" style="width:min(960px,95vw);max-height:90vh;display:flex;flex-direction:column;">
       <button class="modal-close" onclick="closePdfImportModal()">&#x2715;</button>
@@ -2607,14 +2623,81 @@
           </details>
           <details style="margin-bottom:0.5rem;">
             <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Advanced</summary>
-            <div class="field-row single" style="margin-top:0.5rem;margin-bottom:0.25rem;">
+
+            <!-- ── FRC §10.5.2 Competition Compliance ──
+                 Single source of truth for algorithm-level approval.
+                 Defaults to checked (FRC-compliant). Auto-unchecks when
+                 the user changes any algorithm toggle. Re-checking opens
+                 a confirmation modal that resets all toggles to defaults. -->
+            <div id="frcComplianceSection" style="margin-top:0.5rem;margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:rgba(122,164,240,0.06);border:1px solid var(--border);border-radius:4px;">
+              <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;user-select:none;font-size:0.78rem;font-weight:600;color:var(--text);">
+                <input type="checkbox" id="competitionApproved" checked
+                       onchange="onCompetitionApprovedToggle()"
+                       title="When checked, the schedule is generated using FRC §10.5.2 default algorithm settings.">
+                <span>Competition Approved (FRC §10.5.2 defaults)</span>
+              </label>
+              <div id="frcComplianceBanner" style="margin-top:0.4rem;font-size:0.7rem;color:var(--text-muted);line-height:1.45;">
+                Schedule will be generated with FRC §10.5.2 defaults — competition-legal output.
+              </div>
+              <div id="frcDeviationsList" style="display:none;margin-top:0.4rem;padding:0.4rem 0.55rem;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:3px;font-size:0.7rem;color:var(--amber);line-height:1.4;"></div>
+            </div>
+
+            <!-- ── Quality preset (iteration count) ──
+                 Doesn't affect FRC compliance — controls search thoroughness.
+                 Defaults to 'good' (500K, ~20s/trial). 'best' = 2M, beats
+                 MatchMaker on the reference fixture. -->
+            <div class="field-row single" style="margin-bottom:0.5rem;">
               <div class="field">
-                <label>Assignment Iterations</label>
-                <input type="number" id="assignIterations" value="1000" min="1"
+                <label>Quality Preset
+                  <span style="font-size:0.65rem;color:var(--text-muted);margin-left:0.3rem;">(higher = slower but better)</span>
+                </label>
+                <select id="qualityPreset" onchange="onQualityPresetChange()">
+                  <option value="fair">Fair (50K iters, ~2s) — quick previews</option>
+                  <option value="good" selected>Good (500K iters, ~20s) — default for editing</option>
+                  <option value="best">Best (2M iters, ~75s) — production quality, beats MatchMaker</option>
+                  <option value="maximum">Maximum (5M iters, ~3min) — when compute allows</option>
+                  <option value="custom">Custom… (advanced)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Custom iterations input — shown only when preset='custom' -->
+            <div id="customIterationsRow" class="field-row single" style="display:none;margin-bottom:0.25rem;">
+              <div class="field">
+                <label>Custom Iterations
+                  <span style="font-size:0.65rem;color:var(--text-muted);margin-left:0.3rem;">(1 to 5,000,000)</span>
+                </label>
+                <input type="number" id="assignIterations" value="500000" min="1" max="5000000"
                   oninput="updateIterationEstimate()" onchange="updateIterationEstimate()">
               </div>
             </div>
             <div id="iterationEstimate" style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
+
+            <!-- ── Algorithm toggles ──
+                 Editing any of these UNCHECKS the FRC approval box. -->
+            <div style="margin-top:0.5rem;font-size:0.7rem;color:var(--text-muted);letter-spacing:0.04em;">Algorithm settings (changing these unsets FRC approval)</div>
+            <div style="margin-top:0.4rem;">
+              <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;user-select:none;font-size:0.74rem;color:var(--text);margin-bottom:0.3rem;" title="FRC #5 — red/blue alliance distribution optimization">
+                <input type="checkbox" id="rbPostPass" checked onchange="onAlgorithmToggleChange()">
+                <span>R/B balance post-pass (Phase 1, FRC #5)</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;user-select:none;font-size:0.74rem;color:var(--text);margin-bottom:0.3rem;" title="FRC #6 — driver station distribution optimization">
+                <input type="checkbox" id="stationPostPass" checked onchange="onAlgorithmToggleChange()">
+                <span>Station balance post-pass (Phase 2, FRC #6)</span>
+              </label>
+            </div>
+
+            <!-- Cooldown — FRC says this varies by event size, so it's
+                 editable. Audited in the trail when != 3. -->
+            <div class="field-row single" style="margin-top:0.6rem;margin-bottom:0.25rem;">
+              <div class="field">
+                <label>Cooldown (matches between team appearances)
+                  <span style="font-size:0.65rem;color:var(--text-muted);margin-left:0.3rem;">(FRC: varies by event size, default 3)</span>
+                </label>
+                <input type="number" id="assignCooldown" value="3" min="1" max="20"
+                  onchange="onCooldownChange()">
+              </div>
+            </div>
           </details>
           <div class="progress-wrap" id="progressWrap2" style="display:none;">
             <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill2"></div></div>
@@ -4917,6 +5000,147 @@ function refreshIdBadges() {
 // _msPerIteration is calibrated from the most recent completed assignment.
 // Falls back to a rough estimate (0.03ms/iter/worker on modern hardware).
 window._msPerIteration = null; // ms per iteration (single-threaded equivalent)
+
+// ── FRC §10.5.2 compliance helpers ────────────────────────────────────────
+// These mirror app/frc_compliance.py FRC_DEFAULTS. UI computes deviations
+// client-side for live feedback; the server is the source of truth on save.
+
+const FRC_DEFAULTS_UI = {
+  rb_post_pass:      true,
+  station_post_pass: true,
+};
+const FRC_DEFAULT_COOLDOWN = 3;
+
+// Quality preset → iteration count map (mirrors app/quality_presets.py)
+const QUALITY_PRESET_ITERS = {
+  fair:    50000,
+  good:    500000,
+  best:    2000000,
+  maximum: 5000000,
+};
+
+// Read current algorithm settings from the form
+function getCurrentFrcSettings() {
+  return {
+    rb_post_pass:      document.getElementById('rbPostPass').checked,
+    station_post_pass: document.getElementById('stationPostPass').checked,
+  };
+}
+
+// Compute deviations from FRC defaults (mirrors compute_deviations in Python).
+// Cooldown is intentionally NOT a deviation (per FRC: "varies by event size").
+function computeFrcDeviations(settings) {
+  var deviations = [];
+  if (settings.rb_post_pass === false) {
+    deviations.push("R/B balance post-pass (Phase 1) disabled — FRC #5 (red/blue distribution) not optimized");
+  }
+  if (settings.station_post_pass === false) {
+    deviations.push("Station balance post-pass (Phase 2) disabled — FRC #6 (driver station distribution) not optimized");
+  }
+  return deviations;
+}
+
+// Update the FRC compliance banner + checkbox state based on current form.
+// Called after any algorithm-toggle change.
+function recomputeFrcCompliance() {
+  var settings = getCurrentFrcSettings();
+  var deviations = computeFrcDeviations(settings);
+  var approved = deviations.length === 0;
+  var box = document.getElementById('competitionApproved');
+  var section = document.getElementById('frcComplianceSection');
+  var banner = document.getElementById('frcComplianceBanner');
+  var devList = document.getElementById('frcDeviationsList');
+
+  // Sync checkbox state with reality (server-authoritative on save anyway).
+  // We don't fight the user by re-checking — we let it reflect actual state.
+  if (!approved && box.checked) {
+    box.checked = false;
+  }
+
+  if (approved) {
+    section.style.background = 'rgba(122,164,240,0.06)';
+    section.style.borderColor = 'var(--border)';
+    banner.style.color = 'var(--text-muted)';
+    banner.textContent = 'Schedule will be generated with FRC §10.5.2 defaults — competition-legal output.';
+    devList.style.display = 'none';
+  } else {
+    // Yellow warning — FRC compliance lost
+    section.style.background = 'rgba(200,153,42,0.10)';
+    section.style.borderColor = 'var(--amber)';
+    banner.style.color = 'var(--amber)';
+    banner.innerHTML = '<strong>Settings no longer match FRC §10.5.2.</strong> Schedule will be generated with deviations from competition defaults.';
+    devList.style.display = 'block';
+    devList.innerHTML = deviations.map(function(d) {
+      return '<div style="margin-bottom:0.2rem;">• ' + escapeHTML(d) + '</div>';
+    }).join('');
+  }
+}
+
+// ── Event handlers wired to the form ────────────────────────────────────
+function onAlgorithmToggleChange() {
+  // User changed an algorithm toggle. Recompute compliance state.
+  recomputeFrcCompliance();
+}
+
+function onCompetitionApprovedToggle() {
+  var box = document.getElementById('competitionApproved');
+  if (box.checked) {
+    // User wants to re-enable approval. Confirm reset of all toggles.
+    var settings = getCurrentFrcSettings();
+    var deviations = computeFrcDeviations(settings);
+    if (deviations.length > 0) {
+      // Reset modal — confirm before mutating user's settings
+      var msg = 'Reset all algorithm settings to FRC §10.5.2 defaults?\n\n' +
+                'Current deviations:\n' +
+                deviations.map(function(d) { return '  • ' + d; }).join('\n');
+      if (window.confirm(msg)) {
+        document.getElementById('rbPostPass').checked = FRC_DEFAULTS_UI.rb_post_pass;
+        document.getElementById('stationPostPass').checked = FRC_DEFAULTS_UI.station_post_pass;
+        recomputeFrcCompliance();
+      } else {
+        // User cancelled — revert checkbox to unchecked
+        box.checked = false;
+      }
+    }
+    // No deviations and box checked: nothing to do.
+  } else {
+    // User explicitly unchecked the box. We don't change settings on
+    // their behalf — they may have a reason. Banner reflects state.
+    recomputeFrcCompliance();
+  }
+}
+
+function onQualityPresetChange() {
+  var preset = document.getElementById('qualityPreset').value;
+  var customRow = document.getElementById('customIterationsRow');
+  if (preset === 'custom') {
+    customRow.style.display = '';
+  } else {
+    customRow.style.display = 'none';
+    // Sync the iterations field to the preset value so updateIterationEstimate
+    // shows a sensible time estimate.
+    var iters = QUALITY_PRESET_ITERS[preset];
+    if (iters && document.getElementById('assignIterations')) {
+      document.getElementById('assignIterations').value = iters;
+    }
+  }
+  updateIterationEstimate();
+}
+
+function onCooldownChange() {
+  // Cooldown is FRC-editable. Just update the estimate display.
+  // Audit logging happens server-side.
+  // (No cooldown deviation banner — per FRC, this varies by event size.)
+}
+
+// HTML-escape helper (only used if not already defined elsewhere)
+if (typeof window.escapeHTML !== 'function') {
+  window.escapeHTML = function(s) {
+    return String(s).replace(/[&<>"']/g, function(c) {
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  };
+}
 
 function updateIterationEstimate() {
   var el = document.getElementById('iterationEstimate');
@@ -10639,6 +10863,25 @@ async function loadSavedSchedules() {
           editedBadge = ' <span class="version-badge" style="background:rgba(212,167,44,0.12);color:var(--amber);border-color:rgba(212,167,44,0.3);font-weight:600;" title="' +
                         editTitle.replace(/"/g, '&quot;') + '">Edited</span>';
         }
+        // FRC §10.5.2 Competition Approved badge.
+        // - true → green check (algorithm matched FRC defaults)
+        // - false → yellow warning (deviations exist)
+        // - null → gray question mark (pre-feature or imported)
+        var frcBadge = '';
+        if (s.competition_approved === true) {
+          frcBadge = ' <span class="version-badge" style="background:rgba(120,200,140,0.18);color:#7cc88c;border-color:#7cc88c;font-weight:600;" ' +
+                     'title="Generated with FRC §10.5.2 default algorithm settings — competition-approved." ' +
+                     'onclick="openFrcAuditModal(' + s.id + ');event.stopPropagation();" style="cursor:pointer;">✓ FRC</span>';
+        } else if (s.competition_approved === false) {
+          frcBadge = ' <span class="version-badge" style="background:rgba(220,80,80,0.16);color:#e08080;border-color:#e08080;font-weight:600;cursor:pointer;" ' +
+                     'title="Settings deviate from FRC §10.5.2 — click to view audit trail" ' +
+                     'onclick="openFrcAuditModal(' + s.id + ');event.stopPropagation();">! FRC</span>';
+        } else {
+          // null / undefined — pre-feature or imported
+          frcBadge = ' <span class="version-badge" style="background:rgba(150,150,150,0.12);color:var(--text-muted);border-color:var(--border);cursor:pointer;" ' +
+                     'title="Approval status unknown (pre-feature or imported schedule) — click for details" ' +
+                     'onclick="openFrcAuditModal(' + s.id + ');event.stopPropagation();">? FRC</span>';
+        }
 
         row.innerHTML =
           '<div style="flex:1;min-width:0;">' +
@@ -10648,6 +10891,7 @@ async function loadSavedSchedules() {
               officialBadge +
               lockBadge +
               editedBadge +
+              frcBadge +
             '</div>' +
             '<div class="saved-sched-meta">' + s.name + '</div>' +
           '</div>' +
@@ -10780,6 +11024,135 @@ async function openScheduleHistory(scheduleId) {
     if (listEl) listEl.innerHTML = '<div style="color:var(--red);font-size:0.8rem;padding:0.5rem;">Failed to load history: ' +
                                    (e.message || 'unknown error') + '</div>';
   }
+}
+
+// Open the FRC §10.5.2 audit modal for a schedule. Fetches the full
+// schedule (which includes audit_trail) and renders it human-readably.
+async function openFrcAuditModal(scheduleId) {
+  openModal('modalFrcAudit');
+  var bodyEl = document.getElementById('frcAuditBody');
+  if (bodyEl) bodyEl.innerHTML = '<div style="color:var(--text-muted);">Loading…</div>';
+  try {
+    var sched = await apiFetch('/api/assigned-schedules/' + scheduleId);
+    _renderFrcAudit(sched);
+  } catch(e) {
+    if (bodyEl) bodyEl.innerHTML = '<div style="color:var(--red);">Failed to load audit: ' +
+                                    escapeHTML(e.message || 'unknown error') + '</div>';
+  }
+}
+
+function _renderFrcAudit(sched) {
+  var bodyEl = document.getElementById('frcAuditBody');
+  if (!bodyEl) return;
+  var audit = sched.audit_trail;
+  var approved = sched.competition_approved;
+
+  // Status banner — green / yellow / gray depending on state
+  var bannerHtml;
+  if (approved === true) {
+    bannerHtml = '<div style="background:rgba(120,200,140,0.15);border:1px solid #7cc88c;border-radius:4px;padding:0.7rem 0.9rem;margin-bottom:1rem;">' +
+                   '<div style="font-weight:700;color:#7cc88c;font-size:0.95rem;">✓ Competition Approved</div>' +
+                   '<div style="color:var(--text-muted);font-size:0.78rem;margin-top:0.25rem;">' +
+                     'This schedule was generated using FRC §10.5.2 default algorithm settings. It is competition-legal.' +
+                   '</div>' +
+                 '</div>';
+  } else if (approved === false) {
+    bannerHtml = '<div style="background:rgba(220,80,80,0.12);border:1px solid #e08080;border-radius:4px;padding:0.7rem 0.9rem;margin-bottom:1rem;">' +
+                   '<div style="font-weight:700;color:#e08080;font-size:0.95rem;">! Settings Deviate from FRC §10.5.2</div>' +
+                   '<div style="color:var(--text-muted);font-size:0.78rem;margin-top:0.25rem;">' +
+                     'This schedule was generated with one or more deviations from FRC competition defaults. See deviations below.' +
+                   '</div>' +
+                 '</div>';
+  } else {
+    bannerHtml = '<div style="background:rgba(150,150,150,0.10);border:1px solid var(--border);border-radius:4px;padding:0.7rem 0.9rem;margin-bottom:1rem;">' +
+                   '<div style="font-weight:700;color:var(--text-muted);font-size:0.95rem;">? Approval Status Unknown</div>' +
+                   '<div style="color:var(--text-muted);font-size:0.78rem;margin-top:0.25rem;">' +
+                     'This schedule was created before the FRC compliance feature was added, or was imported from an external tool. Approval status cannot be determined.' +
+                   '</div>' +
+                 '</div>';
+  }
+
+  if (!audit) {
+    // Pre-feature schedule — no audit_trail
+    bodyEl.innerHTML = bannerHtml +
+      '<div style="font-size:0.78rem;color:var(--text-muted);line-height:1.5;">' +
+        'No audit trail is available for this schedule. The compliance feature was added in 2026-05; schedules generated before that date carry no algorithmic provenance metadata. ' +
+        'To produce an audited schedule, regenerate using the current Generate form (the Competition Approved checkbox should be checked).' +
+      '</div>';
+    return;
+  }
+
+  // Deviations list
+  var devsHtml = '';
+  if (audit.deviations && audit.deviations.length > 0) {
+    devsHtml = '<div style="margin-bottom:1rem;">' +
+                 '<div style="font-weight:700;color:var(--text);font-size:0.82rem;margin-bottom:0.4rem;">Deviations</div>' +
+                 '<ul style="margin:0;padding-left:1.2rem;color:#e08080;font-size:0.78rem;line-height:1.5;">' +
+                   audit.deviations.map(function(d) {
+                     return '<li style="margin-bottom:0.35rem;">' + escapeHTML(d) + '</li>';
+                   }).join('') +
+                 '</ul>' +
+               '</div>';
+  }
+
+  // Settings used vs FRC defaults — side-by-side comparison
+  function settingsRow(key, used, frc) {
+    var match = JSON.stringify(used) === JSON.stringify(frc);
+    var cellStyle = match
+      ? 'color:var(--text);'
+      : 'color:#e08080;font-weight:600;';
+    return '<tr>' +
+             '<td style="padding:0.25rem 0.55rem;color:var(--text-muted);font-size:0.74rem;">' + escapeHTML(key) + '</td>' +
+             '<td style="padding:0.25rem 0.55rem;font-family:monospace;font-size:0.74rem;' + cellStyle + '">' + escapeHTML(JSON.stringify(used)) + '</td>' +
+             '<td style="padding:0.25rem 0.55rem;font-family:monospace;font-size:0.74rem;color:var(--text-muted);">' + escapeHTML(JSON.stringify(frc)) + '</td>' +
+           '</tr>';
+  }
+  var settings = audit.settings_used || {};
+  var defaults = audit.frc_defaults_at_time_of_generation || {};
+  var allKeys = Object.keys(defaults).concat(
+    Object.keys(settings).filter(function(k) { return !(k in defaults); })
+  );
+  var settingsTable = '<div style="margin-bottom:1rem;">' +
+                       '<div style="font-weight:700;color:var(--text);font-size:0.82rem;margin-bottom:0.4rem;">Settings used vs FRC defaults at generation time</div>' +
+                       '<table style="width:100%;border-collapse:collapse;border:1px solid var(--border);">' +
+                         '<thead style="background:rgba(122,164,240,0.06);">' +
+                           '<tr>' +
+                             '<th style="padding:0.3rem 0.55rem;text-align:left;font-size:0.72rem;color:var(--text-muted);font-weight:600;">Setting</th>' +
+                             '<th style="padding:0.3rem 0.55rem;text-align:left;font-size:0.72rem;color:var(--text-muted);font-weight:600;">Used</th>' +
+                             '<th style="padding:0.3rem 0.55rem;text-align:left;font-size:0.72rem;color:var(--text-muted);font-weight:600;">FRC Default</th>' +
+                           '</tr>' +
+                         '</thead>' +
+                         '<tbody>' +
+                           allKeys.map(function(k) { return settingsRow(k, settings[k], defaults[k]); }).join('') +
+                         '</tbody>' +
+                       '</table>' +
+                     '</div>';
+
+  // Cooldown audit
+  var cooldownHtml = '';
+  if (audit.cooldown) {
+    cooldownHtml = '<div style="margin-bottom:1rem;background:rgba(122,164,240,0.06);border:1px solid var(--border);border-radius:4px;padding:0.55rem 0.75rem;">' +
+                     '<div style="font-weight:600;color:var(--text);font-size:0.78rem;margin-bottom:0.25rem;">Cooldown audit</div>' +
+                     '<div style="font-size:0.74rem;color:var(--text-muted);">Used: <strong style="color:var(--text);">' + escapeHTML(String(audit.cooldown.value)) + '</strong>, FRC default: <strong>' + escapeHTML(String(audit.cooldown.frc_default)) + '</strong></div>' +
+                     '<div style="font-size:0.7rem;color:var(--text-muted);margin-top:0.25rem;font-style:italic;">' + escapeHTML(audit.cooldown.note || '') + '</div>' +
+                   '</div>';
+  }
+
+  // Iterations + preset
+  var presetLabel = audit.preset_used
+    ? escapeHTML(audit.preset_used) + ' (' + (QUALITY_PRESET_ITERS[audit.preset_used] || '?') + ' iters)'
+    : 'custom (' + escapeHTML(String(audit.iterations_used || '?')) + ' iters)';
+  var iterHtml = '<div style="margin-bottom:1rem;font-size:0.78rem;color:var(--text-muted);">' +
+                   '<strong style="color:var(--text);">Quality:</strong> ' + presetLabel +
+                 '</div>';
+
+  // Schema version footnote
+  var schemaHtml = '<div style="margin-top:1rem;padding-top:0.55rem;border-top:1px solid var(--border);font-size:0.68rem;color:var(--text-muted);">' +
+                     'Audit schema v' + escapeHTML(String(audit.schema_version || '?')) + '. ' +
+                     'For the FRC defaults at the time this schedule was generated, see the second column of the table above.' +
+                   '</div>';
+
+  bodyEl.innerHTML = bannerHtml + devsHtml + iterHtml + cooldownHtml + settingsTable + schemaHtml;
 }
 
 function _renderScheduleHistory(rows, scheduleId) {
@@ -13987,7 +14360,29 @@ async function assignTeams() {
   document.getElementById('progressWrap2').style.display = 'block';
   if (_overlay.isVisible()) _overlay.step('assign', 'Assigning teams\u2026');
 
-  const iterations  = Math.max(1, parseInt(document.getElementById('assignIterations').value) || 1000);
+  // ── Resolve quality preset → iteration count ──
+  // 'custom' uses the explicit assignIterations input. Other presets
+  // map to a fixed value via QUALITY_PRESET_ITERS. The server validates
+  // the final number against MAX_ITERATIONS = 5_000_000 anyway.
+  const presetEl = document.getElementById('qualityPreset');
+  const qualityPreset = presetEl ? presetEl.value : 'good';
+  let iterations;
+  let presetForBody = null;
+  if (qualityPreset === 'custom') {
+    iterations = Math.max(1, parseInt(document.getElementById('assignIterations').value) || 500000);
+    presetForBody = null;
+  } else {
+    iterations = QUALITY_PRESET_ITERS[qualityPreset] || QUALITY_PRESET_ITERS.good;
+    presetForBody = qualityPreset;
+  }
+
+  // FRC compliance settings — server is authoritative. UI sends what
+  // the user picked; server computes the actual approval bit and audit.
+  const competitionApproved = document.getElementById('competitionApproved').checked;
+  const rbPostPass          = document.getElementById('rbPostPass').checked;
+  const stationPostPass     = document.getElementById('stationPostPass').checked;
+  const cooldown            = Math.max(1, parseInt(document.getElementById('assignCooldown').value) || 3);
+
   const assignSeed  = randomSeed();
   _currentAssignSeed = assignSeed;
   const startTime   = performance.now();
@@ -14010,7 +14405,17 @@ async function assignTeams() {
       body: JSON.stringify({
         event_id: parseInt(_currentEventId),
         abstract_schedule_id: _currentAbstractScheduleId,
-        iterations,
+        // Quality preset (resolves server-side to an iteration count via
+        // QUALITY_PRESETS). When the user picked 'custom', presetForBody
+        // is null and `iterations` carries the explicit value.
+        quality_preset: presetForBody,
+        iterations: presetForBody ? null : iterations,
+        // FRC §10.5.2 compliance fields. Server validates and sets
+        // assigned_schedules.competition_approved + audit_trail accordingly.
+        competition_approved: competitionApproved,
+        rb_post_pass: rbPostPass,
+        station_post_pass: stationPostPass,
+        cooldown: cooldown,
         assign_seed: assignSeed,
         name: 'Schedule ' + new Date().toLocaleTimeString(),
         day_config: dayConfig,

@@ -2152,6 +2152,11 @@
   <!-- Main content -->
   <div id="mainContent" style="display:none;">
 
+    <!-- FRC §10.5.2 compliance banner — populated by renderFrcBanner()
+         from STATE.schedule.competition_approved + audit_trail. Hidden
+         on TBA-source schedules (those don't carry algorithm provenance). -->
+    <div id="frcBanner" class="no-print" style="display:none;margin:0.5rem 0 0.75rem;padding:0.55rem 0.85rem;border-radius:4px;font-size:0.78rem;cursor:pointer;" onclick="openFrcAuditFromBanner()"></div>
+
     <!-- Live status strip — visible only in ?live=1 mode -->
     <div class="live-strip no-print" id="liveStrip" style="display:none;"></div>
 
@@ -2508,6 +2513,19 @@
      is editor-specific). Format-specific option panels are siblings
      toggled by display:none. Bottom action buttons swap based on
      selected format. -->
+<!-- FRC §10.5.2 Compliance Audit modal — opens from the banner click.
+     Mirrors the modal in static/index.html. -->
+<div class="modal-overlay" id="modalFrcAudit" onclick="if(event.target===this)closeModal('modalFrcAudit')">
+  <div class="modal-card" style="max-width:720px;width:95vw;max-height:85vh;display:flex;flex-direction:column;">
+    <h2 style="margin:0 0 0.75rem 0;">FRC §10.5.2 Compliance Audit
+      <button onclick="closeModal('modalFrcAudit')" style="float:right;background:transparent;border:none;color:var(--text-muted);font-size:1.2rem;cursor:pointer;">&#x2715;</button>
+    </h2>
+    <div id="frcAuditBody" style="overflow-y:auto;font-size:0.85rem;line-height:1.55;">
+      <div style="color:var(--text-muted);">Loading…</div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="exportModal" onclick="if(event.target===this)closeModal('exportModal')">
   <div class="modal-card" style="max-width:720px;width:95vw;">
     <h2 style="margin:0 0 0.75rem 0;">⬇ Export schedule</h2>
@@ -3015,6 +3033,166 @@ function showEmptyState() {
   document.getElementById('mainContent').style.display = 'none';
 }
 
+// ── FRC §10.5.2 compliance banner / audit modal (view.html) ────────
+// Quality preset → iteration count map (mirrors app/quality_presets.py).
+// Used to label "preset: best (2,000,000 iters)" in the audit modal.
+const QUALITY_PRESET_ITERS = {
+  fair:    50000,
+  good:    500000,
+  best:    2000000,
+  maximum: 5000000,
+};
+
+// Render the FRC compliance banner at the top of mainContent.
+// Reads STATE.schedule.competition_approved + audit_trail. Hides
+// itself for TBA-source schedules and abstract schedules.
+function renderFrcBanner() {
+  var banner = document.getElementById('frcBanner');
+  if (!banner) return;
+  var sched = STATE.schedule;
+  if (!sched || sched._isAbstract || STATE.scheduleSource === 'tba') {
+    banner.style.display = 'none';
+    return;
+  }
+  var approved = sched.competition_approved;
+  var label, bg, border, color;
+  if (approved === true) {
+    label = '✓ Competition Approved (FRC §10.5.2 defaults) — click for audit details';
+    bg = 'rgba(120,200,140,0.12)'; border = '#7cc88c'; color = '#7cc88c';
+  } else if (approved === false) {
+    var devCount = sched.audit_trail && sched.audit_trail.deviations ? sched.audit_trail.deviations.length : 0;
+    label = '! Settings deviate from FRC §10.5.2 — ' + devCount + ' deviation' +
+            (devCount === 1 ? '' : 's') + ' — click for audit details';
+    bg = 'rgba(220,80,80,0.10)'; border = '#e08080'; color = '#e08080';
+  } else {
+    // null — pre-feature or imported; render gray, click still opens
+    // the audit modal which shows "approval status unknown" explainer
+    label = '? Approval status unknown (pre-feature or imported schedule) — click for details';
+    bg = 'rgba(150,150,150,0.08)'; border = 'var(--border, #888)'; color = 'var(--text-muted, #888)';
+  }
+  banner.style.display = 'block';
+  banner.style.background = bg;
+  banner.style.border = '1px solid ' + border;
+  banner.style.color = color;
+  banner.textContent = label;
+}
+
+function openFrcAuditFromBanner() {
+  var sched = STATE.schedule;
+  if (!sched) return;
+  document.getElementById('modalFrcAudit').classList.add('open');
+  _renderFrcAudit(sched);
+}
+
+function _renderFrcAudit(sched) {
+  var bodyEl = document.getElementById('frcAuditBody');
+  if (!bodyEl) return;
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  }
+  var audit = sched.audit_trail;
+  var approved = sched.competition_approved;
+
+  var bannerHtml;
+  if (approved === true) {
+    bannerHtml = '<div style="background:rgba(120,200,140,0.15);border:1px solid #7cc88c;border-radius:4px;padding:0.7rem 0.9rem;margin-bottom:1rem;">' +
+                   '<div style="font-weight:700;color:#7cc88c;font-size:0.95rem;">✓ Competition Approved</div>' +
+                   '<div style="color:var(--text-muted, #888);font-size:0.78rem;margin-top:0.25rem;">' +
+                     'This schedule was generated using FRC §10.5.2 default algorithm settings. It is competition-legal.' +
+                   '</div>' +
+                 '</div>';
+  } else if (approved === false) {
+    bannerHtml = '<div style="background:rgba(220,80,80,0.12);border:1px solid #e08080;border-radius:4px;padding:0.7rem 0.9rem;margin-bottom:1rem;">' +
+                   '<div style="font-weight:700;color:#e08080;font-size:0.95rem;">! Settings Deviate from FRC §10.5.2</div>' +
+                   '<div style="color:var(--text-muted, #888);font-size:0.78rem;margin-top:0.25rem;">' +
+                     'This schedule was generated with one or more deviations from FRC competition defaults. See deviations below.' +
+                   '</div>' +
+                 '</div>';
+  } else {
+    bannerHtml = '<div style="background:rgba(150,150,150,0.10);border:1px solid var(--border, #888);border-radius:4px;padding:0.7rem 0.9rem;margin-bottom:1rem;">' +
+                   '<div style="font-weight:700;color:var(--text-muted, #888);font-size:0.95rem;">? Approval Status Unknown</div>' +
+                   '<div style="color:var(--text-muted, #888);font-size:0.78rem;margin-top:0.25rem;">' +
+                     'This schedule was created before the FRC compliance feature was added, or was imported from an external tool. Approval status cannot be determined.' +
+                   '</div>' +
+                 '</div>';
+  }
+
+  if (!audit) {
+    bodyEl.innerHTML = bannerHtml +
+      '<div style="font-size:0.78rem;color:var(--text-muted, #888);line-height:1.5;">' +
+        'No audit trail is available for this schedule. The FRC compliance feature was added in 2026-05; ' +
+        'schedules generated before that date carry no algorithmic provenance metadata.' +
+      '</div>';
+    return;
+  }
+
+  var devsHtml = '';
+  if (audit.deviations && audit.deviations.length > 0) {
+    devsHtml = '<div style="margin-bottom:1rem;">' +
+                 '<div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Deviations</div>' +
+                 '<ul style="margin:0;padding-left:1.2rem;color:#e08080;font-size:0.78rem;line-height:1.5;">' +
+                   audit.deviations.map(function(d) {
+                     return '<li style="margin-bottom:0.35rem;">' + esc(d) + '</li>';
+                   }).join('') +
+                 '</ul>' +
+               '</div>';
+  }
+
+  function settingsRow(key, used, frc) {
+    var match = JSON.stringify(used) === JSON.stringify(frc);
+    var cellStyle = match ? '' : 'color:#e08080;font-weight:600;';
+    return '<tr>' +
+             '<td style="padding:0.25rem 0.55rem;color:var(--text-muted, #888);font-size:0.74rem;">' + esc(key) + '</td>' +
+             '<td style="padding:0.25rem 0.55rem;font-family:monospace;font-size:0.74rem;' + cellStyle + '">' + esc(JSON.stringify(used)) + '</td>' +
+             '<td style="padding:0.25rem 0.55rem;font-family:monospace;font-size:0.74rem;color:var(--text-muted, #888);">' + esc(JSON.stringify(frc)) + '</td>' +
+           '</tr>';
+  }
+  var settings = audit.settings_used || {};
+  var defaults = audit.frc_defaults_at_time_of_generation || {};
+  var allKeys = Object.keys(defaults).concat(
+    Object.keys(settings).filter(function(k) { return !(k in defaults); })
+  );
+  var settingsTable = '<div style="margin-bottom:1rem;">' +
+                       '<div style="font-weight:700;font-size:0.82rem;margin-bottom:0.4rem;">Settings used vs FRC defaults</div>' +
+                       '<table style="width:100%;border-collapse:collapse;border:1px solid var(--border, #ccc);">' +
+                         '<thead style="background:rgba(122,164,240,0.06);">' +
+                           '<tr>' +
+                             '<th style="padding:0.3rem 0.55rem;text-align:left;font-size:0.72rem;color:var(--text-muted, #888);font-weight:600;">Setting</th>' +
+                             '<th style="padding:0.3rem 0.55rem;text-align:left;font-size:0.72rem;color:var(--text-muted, #888);font-weight:600;">Used</th>' +
+                             '<th style="padding:0.3rem 0.55rem;text-align:left;font-size:0.72rem;color:var(--text-muted, #888);font-weight:600;">FRC Default</th>' +
+                           '</tr>' +
+                         '</thead>' +
+                         '<tbody>' +
+                           allKeys.map(function(k) { return settingsRow(k, settings[k], defaults[k]); }).join('') +
+                         '</tbody>' +
+                       '</table>' +
+                     '</div>';
+
+  var cooldownHtml = '';
+  if (audit.cooldown) {
+    cooldownHtml = '<div style="margin-bottom:1rem;background:rgba(122,164,240,0.06);border:1px solid var(--border, #ccc);border-radius:4px;padding:0.55rem 0.75rem;">' +
+                     '<div style="font-weight:600;font-size:0.78rem;margin-bottom:0.25rem;">Cooldown audit</div>' +
+                     '<div style="font-size:0.74rem;color:var(--text-muted, #888);">Used: <strong>' + esc(audit.cooldown.value) + '</strong>, FRC default: <strong>' + esc(audit.cooldown.frc_default) + '</strong></div>' +
+                     '<div style="font-size:0.7rem;color:var(--text-muted, #888);margin-top:0.25rem;font-style:italic;">' + esc(audit.cooldown.note || '') + '</div>' +
+                   '</div>';
+  }
+
+  var presetLabel = audit.preset_used
+    ? esc(audit.preset_used) + ' (' + (QUALITY_PRESET_ITERS[audit.preset_used] || '?') + ' iters)'
+    : 'custom (' + esc(audit.iterations_used || '?') + ' iters)';
+  var iterHtml = '<div style="margin-bottom:1rem;font-size:0.78rem;color:var(--text-muted, #888);">' +
+                   '<strong style="color:var(--text);">Quality:</strong> ' + presetLabel +
+                 '</div>';
+
+  var schemaHtml = '<div style="margin-top:1rem;padding-top:0.55rem;border-top:1px solid var(--border, #ccc);font-size:0.68rem;color:var(--text-muted, #888);">' +
+                     'Audit schema v' + esc(audit.schema_version || '?') + '.' +
+                   '</div>';
+
+  bodyEl.innerHTML = bannerHtml + devsHtml + iterHtml + cooldownHtml + settingsTable + schemaHtml;
+}
+
 async function loadAssigned(id) {
   showStatus('Loading schedule…', 'info');
   try {
@@ -3274,6 +3452,7 @@ async function _applyLoadedSchedule(data, source) {
   applyBranding();
   computeMatchTimes();
   rerender();
+  renderFrcBanner();
   clearStatus();
   document.getElementById('mainContent').style.display = '';
   // Kick off live data polling. For TBA-only events use the by-key live endpoint.
