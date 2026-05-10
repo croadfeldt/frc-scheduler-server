@@ -1782,7 +1782,7 @@ async def patch_assigned_schedule(
     # Snapshot BEFORE mutating so the history row carries the prior
     # state. If the commit later fails, the history insert rolls back
     # with the rest of the transaction — no orphaned snapshots.
-    has_changes = "day_config" in payload
+    has_changes = "day_config" in payload or "practice_matches" in payload
     if has_changes:
         await _snapshot_schedule_history(db, assigned, action="patch", user=user)
 
@@ -1798,6 +1798,36 @@ async def patch_assigned_schedule(
         # to be picked up by the dirty-tracker.
         from sqlalchemy.orm.attributes import flag_modified
         flag_modified(assigned, "day_config")
+
+    # ── practice_matches PATCH ──
+    # Allow setting/replacing the practice match list on an existing
+    # schedule. Useful for imported schedules (PDF/XLSX) which create
+    # with practice_matches=[] — the user can then PATCH a practice
+    # list separately. Accepts a list of dicts shaped like:
+    #   [{"red": [t1, t2, t3], "blue": [t4, t5, t6],
+    #     "red_surrogate": [false, ...], "blue_surrogate": [false, ...]}, ...]
+    # Team numbers are stored as-is (not slot indices) for imported
+    # schedules. _resolve_practice_matches falls through to identity
+    # mapping for slots not in slot_map, so this works correctly.
+    if "practice_matches" in payload:
+        new_pm = payload["practice_matches"]
+        if new_pm is not None and not isinstance(new_pm, list):
+            raise HTTPException(400, "practice_matches must be a list or null")
+        # Light shape validation — every entry must have red+blue arrays.
+        # We don't enforce length=3 because some practice formats may
+        # use fewer teams per alliance for early matches.
+        if isinstance(new_pm, list):
+            for i, m in enumerate(new_pm):
+                if not isinstance(m, dict):
+                    raise HTTPException(400, f"practice_matches[{i}] must be a dict")
+                if not isinstance(m.get("red"), list) or not isinstance(m.get("blue"), list):
+                    raise HTTPException(
+                        400,
+                        f"practice_matches[{i}] must have 'red' and 'blue' lists"
+                    )
+        assigned.practice_matches = new_pm
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(assigned, "practice_matches")
 
     # Bump updated_at on any meaningful change. The "EDITED" badge
     # in the saved-schedules modal compares updated_at > created_at.
@@ -4174,11 +4204,30 @@ async def commit_pdf_import(
             .where(AssignedSchedule.event_id == body.event_id)
             .values(is_active=False)
         )
+        # Practice matches — pulled from the cached parse if the source
+        # had a practice sheet (XLSX import) or the parsed PDF included
+        # them. Stored with real team numbers (not slot indices) for
+        # imported schedules; _resolve_practice_matches falls through
+        # to identity mapping for unknown slots so this round-trips.
+        practice_parsed = pdf_import.parsed.get("practice", []) or []
+        practice_for_db = []
+        for pm in practice_parsed:
+            red  = list(pm.get("red")  or [])
+            blue = list(pm.get("blue") or [])
+            if not (red and blue):
+                continue
+            practice_for_db.append({
+                "red":            red,
+                "blue":           blue,
+                "red_surrogate":  pm.get("red_surrogate")  or [False] * len(red),
+                "blue_surrogate": pm.get("blue_surrogate") or [False] * len(blue),
+            })
+
         assigned = AssignedSchedule(
             abstract_schedule_id=sched.id, event_id=body.event_id,
             name=body.name, is_active=True,
             slot_map=slot_map, day_config=body.day_config,
-            practice_matches=[],   # imports don't include practice
+            practice_matches=practice_for_db,
             assign_seed=None,
             created_by=user["sub"] if user else None,
         )
