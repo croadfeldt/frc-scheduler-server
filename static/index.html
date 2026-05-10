@@ -14399,9 +14399,16 @@ async function assignTeams() {
   let s2ReceivedDone = false;
   let doneMsg2 = null;
   try {
+    // Build headers with auth token. Mirrors apiFetch() and the dozen
+    // other call sites that use this pattern. Without this header the
+    // server returns 401 since /assign requires require_auth.
+    const _assignHeaders = { 'Content-Type': 'application/json' };
+    const _assignTok = (typeof getToken === 'function') ? getToken() : null;
+    if (_assignTok) _assignHeaders['Authorization'] = 'Bearer ' + _assignTok;
+
     const res = await fetch(API + '/api/abstract-schedules/' + _currentAbstractScheduleId + '/assign', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _assignHeaders,
       body: JSON.stringify({
         event_id: parseInt(_currentEventId),
         abstract_schedule_id: _currentAbstractScheduleId,
