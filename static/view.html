@@ -3775,13 +3775,24 @@ function computeMatchTimes() {
                               computed[0].type === 'day-divider' &&
                               !!computed[0].isPractice;
     var qBaseLabel = eventDayLabel(di + 1, false, _practiceEnabled);
-    // Preserve any user-provided custom day label (when it differs
-    // from the default "Day N") by appending it after the kind.
-    var userLabelExtra = (day.label && day.label !== ('Day ' + (di + 1)))
-      ? ' \u00b7 ' + day.label : '';
+    // Custom-label override semantics: if the user set a day label
+    // other than the auto-generated "Day N", it REPLACES the kind
+    // portion in the rendered banner — not appended after it. A
+    // qual day with label "Qualifications" renders as
+    // "Day 2 · Qualifications · <date>" rather than the previous
+    // "Day 2 · Qualification · Qualifications · <date>" which
+    // double-stamped both the default kind and the override. The
+    // "Day N" prefix uses event-day numbering (practice shifts
+    // qual day numbers by 1) so it stays consistent with whatever
+    // eventDayLabel() would have produced.
+    var hasOverride = day.label && day.label !== ('Day ' + (di + 1));
+    var qEventNum   = _practiceEnabled ? (di + 2) : (di + 1);
+    var qLabelBase  = hasOverride
+      ? ('Day ' + qEventNum + ' \u00b7 ' + day.label)
+      : qBaseLabel;
     computed.push({
       type: 'day-divider', dayNum: di + 1,
-      label: qBaseLabel + userLabelExtra + (dateLabel ? ' \u00b7 ' + dateLabel : ''),
+      label: qLabelBase + (dateLabel ? ' \u00b7 ' + dateLabel : ''),
       start: startMin, end: endMin,
       // Raw YYYY-MM-DD for the agenda-fit progress indicator (see
       // matching field on the practice divider above).
