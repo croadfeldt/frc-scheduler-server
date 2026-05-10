@@ -120,6 +120,232 @@ them.
 
 ---
 
+## Post-Phase-4 baseline — corrected (2026-05-10)
+
+Run timestamp: `20260510-103729-39b157`. Configuration:
+
+```
+python3 -m scripts.scheduler_eval.runner \
+    --fixtures all \
+    --adapters frc-scheduler-server,actual,matchmaker \
+    --trials 100 \
+    --workers 36 \
+    --quality-preset best
+```
+
+`sa_iters=2,000,000 (best)` confirmed in per-fixture diagnostics.
+Trial wall-clock 74–249 s (vs ~0.7 s in the SA-disabled run), so
+the SA was actually running. ~55 minutes wall-clock on Stark.
+
+### Headline
+
+| Adapter | Fixtures | Mean composite | Range |
+|---|---|---|---|
+| matchmaker | 13 | 17.19 | 0.10 – 23.30 |
+| actual | 16 | 25.77 | 10.30 – 74.40 |
+| **frc-scheduler-server** | **16** | **30.64** | **20.10 – 43.20** |
+
+Head-to-head on composite:
+- vs matchmaker: 1W-11L-1T (one tied at 2024week0 where both round to 20.1; one win there)
+- vs actual: 3W-13L
+
+**Improvement vs the SA-disabled baseline: 40.12 → 30.64, a 9.48-point
+drop.** That's the SA's contribution, exactly consistent with the
+single-fixture data in `ITERATION_CEILING.md` predicting the SA
+closes most of the gap to MatchMaker.
+
+**Phase 5 verdict: just into "investigate further" territory** per
+`QUALITY_IMPROVEMENT_PLAN.md` cutoffs (>30 → investigate). 30.64 is
+on the boundary; the per-metric breakdown below shows the failure
+has narrowed to two specific phenomena, not a broad gap.
+
+### Where the gap narrowed
+
+Across all 16 fixtures, partner-side metrics are now **identical to
+MatchMaker**:
+
+| Metric | fss mean | MM mean | Status |
+|---|---|---|---|
+| repeat_partners | 0.00 | 0.00 | ✓ at floor everywhere |
+| max_partner_repeats | 1.00 | 1.00 | ✓ at floor everywhere |
+
+We also do *better* than MatchMaker on three metrics:
+
+| Metric | fss mean | MM mean | Delta |
+|---|---|---|---|
+| max_color_imbalance | 1.46 | 1.92 | −0.46 |
+| max_opponent_repeats | 2.23 | 2.69 | −0.46 |
+| min_match_gap | 3.00 | 4.62 | −1.62 (MM has more headroom; both meet the threshold) |
+
+The lex SA + Phase 1 R/B post-pass are working as designed. `par_quad`
+is no longer the limiting factor.
+
+### Where the gap remains
+
+Two metrics drag the entire composite. Both are concentrated, not
+diffuse:
+
+#### `max_station_spread` — 13/13 fixtures we're worse, by ~3 stations
+
+| Metric | fss mean | MM mean | Delta |
+|---|---|---|---|
+| max_station_spread | 3.54 | 0.38 | **+3.15** |
+
+MatchMaker hits station_spread=0 on **10 of 13 fixtures** — perfect
+station rotation. We hit station_spread ≥ 2 on **all 16 fixtures**
+and ≥ 4 on five of them. Worst gaps:
+
+- 2023mndu (60×9): fss=5, mm=0
+- 2024micmp3 (40×12): fss=5, mm=0
+- 2024micmp1 (40×12): fss=4, mm=0
+
+The Phase 2 (Sykes) station post-pass works on synthetic 12–24 team
+inputs (per `tests/test_station_balance.py` invariants and
+`tests/phase2_station/SUMMARY.md` showing 2026mnst dropping from 4
+to 2) but is hitting a 2–3 floor on real 36+ team fixtures, far
+above MatchMaker's 0.
+
+#### `repeat_opponents` — Michigan-championship-shaped fixtures specifically
+
+| Metric | fss mean | MM mean | Delta |
+|---|---|---|---|
+| repeat_opponents | 66.62 | 64.92 | +1.69 (overall) |
+
+Overall delta is small. The harm is concentrated in 40-team × 12-MPT
+fixtures (the 2024micmp* family):
+
+| Fixture | fss | MM | Gap |
+|---|---|---|---|
+| 2024micmp1 (40×12) | 158 | 134 | +24 |
+| 2024micmp2 (40×12) | 141 | 131 | +10 |
+| 2024micmp3 (40×12) | 165 | 140 | +25 |
+| 2024micmp4 (40×12) | 159 | 129 | +30 |
+
+Above ~10 MPT specifically, we have ~20% more repeat-opponent
+encounters than MatchMaker. This isn't an `opp_quad` failure —
+`opp_quad` is shipped at floor on most fixtures by the SA. It's that
+sum-of-squares (what we optimize) and count-of-pairs-above-one (what
+the eval measures) reward different distributions. A schedule with
+many 2-encounter pairs and few 3-encounter pairs has lower `opp_quad`
+than one with few 2s and a 3, but more `repeat_opponents` (the
+count-above-one metric).
+
+### Pattern by fixture size
+
+Construction-only run had a clean size-scaling failure — small
+fixtures fine, large fixtures bad. The corrected run shows the same
+two-metric problem at every size, with the 40-42 team × high-MPT
+bucket the worst:
+
+| Size | Fixtures | fss mean | MM mean | Gap |
+|---|---|---|---|---|
+| 32t × 3 MPT (Week 0) | 1 | 20.10 | 20.30 | −0.20 (we win) |
+| 36t × 7-8 MPT | 4 | 26.65 | 17.40 | +9.25 |
+| 40-42t × 11-12 MPT | 5 | 42.58 | 22.62 | **+19.96** |
+| 51-62t × 9 MPT | 6 | 25.10 | 10.30 | +14.80 |
+
+The size-scaling failure was a measurement artifact of the
+construction-only run — without SA, smaller fixtures still had room
+to look "OK" on the SA-targeted metrics; with SA running, they all
+hit the partner floor and the two remaining failures dominate
+proportionally to MPT.
+
+### One genuinely encouraging data point
+
+On 2025mndu (54 × 9), MatchMaker hit **composite 0.10** in at least
+one of its 100 trials — essentially perfect. We hit 20.1 on the same
+fixture. So ~0 is reachable on a 54-team real-world fixture; whatever
+MatchMaker is doing structurally, our SA is not finding it on this
+one. Most of MM's other runs on 2025mndu landed around 10.3, so the
+0.10 is a tail outlier even for MatchMaker, but it proves the
+solution space contains it.
+
+### What changed in our understanding
+
+The story has flipped from "broadly poor" to "narrowly poor with a
+known signature":
+
+- **par_quad / repeat_partners is solved.** SA + Phase 1 work as
+  designed across all 16 fixtures.
+- **Three metrics we beat MatchMaker on.** color_imbalance,
+  max_opponent_repeats, min_match_gap.
+- **Two metrics account for essentially the entire 13.5-point
+  composite gap to MatchMaker.** `max_station_spread` (broad
+  failure of the Phase 2 post-pass at scale) and `repeat_opponents`
+  on high-MPT fixtures (lex-tuple objective doesn't penalize
+  2-encounter clustering hard enough).
+- **Size-scaling pattern was a measurement artifact** of the
+  SA-disabled run, not a real algorithm property.
+
+This is dramatically more actionable than "improve everything."
+
+### Diagnostic questions for Phase 5
+
+Two questions to answer before any structural change. Both
+designed to be cheap (≤30 minutes of compute each).
+
+1. **Is the station post-pass iteration-limited or move-set-limited?**
+   Run `app/post_passes/station_balance.py` at 50K and 500K
+   iterations on a single 60-team fixture (e.g., 2023mndu where
+   MM hit 0 and we hit 5). If composite drops with budget, the
+   answer is "raise per-pass budget at scale." If it plateaus,
+   the move set or initialization isn't reaching the basin
+   MatchMaker's reaching.
+
+2. **Does our `opp_quad` floor coexist with MM's repeat_opponents
+   on a high-MPT fixture?** Pull the lex tuple values produced by
+   the eval for 2024micmp1 — both ours and MM's. If our `opp_quad`
+   is at floor while we have 158 repeat_opp pairs and MM's
+   `opp_quad` is also at floor with 134, then the two objective
+   functions agree on `opp_quad` but differ on count-above-one.
+   That points at extending the lex tuple with a count-clustering
+   term. If our `opp_quad` is *above* floor, the SA hasn't
+   converged on that fixture and the answer is more iterations.
+
+### Phase 5 path
+
+Three options, ordered by ambition. Sequence A → (B or C) is the
+quality-first path; A is genuinely cheap and rules out the simplest
+hypotheses.
+
+- **A. Diagnose first (1 day).** Run the two experiments above.
+  Document findings. Result determines what structural change
+  makes sense. Lowest cost, highest information value.
+- **B. Targeted post-pass investment (2-3 days).** Bump the
+  station post-pass iteration budget per fixture size; rerun the
+  eval. If composite drops from 30.64 to ~22, ship it.
+  Lowest-risk change, highest probability of moving the dominant
+  metric.
+- **C. Lex tuple expansion (1 week).** Add a
+  `repeat_opponent_count` term to the lex tuple after `opp_quad`
+  to penalize 2-encounter clustering directly. Structural but
+  well-scoped — exactly the kind of refinement the lex tuple was
+  designed to accept. Reproducibility-breaking change requiring
+  a version-tag policy decision.
+
+Recommendation: **A first, unconditionally.** B and C both depend
+on whether the post-pass is iteration-limited (B helps directly) or
+the objective is wrong (C helps directly). A's two experiments
+distinguish those hypotheses in a half-day at most.
+
+### Operational notes from the run
+
+- Generation time: ~138s mean per trial, max 249s on 2023mnmi
+  (61×9). At 36 workers, 16 fixtures × 100 trials, the math says
+  ~16×100×138/36 = 6133s = ~102 min. Reported wall-clock was ~55
+  min, suggesting the timing wasn't quite linear (some workers
+  finished faster on smaller fixtures and pulled ahead).
+- Three odd-team-count fixtures still error on MatchMaker:
+  2023mnmi (61t), 2024mndu (55t), 2025mnmi (51t). Same as the
+  prior runs. The `[FIXED 2026-05-09]` claim in the
+  "Known issues / future work" section below is incorrect; the
+  errors persist. Independent of SA-iterations correction.
+- `actual` adapter mean composite (25.77) hasn't changed across
+  any of these runs — it's deterministic. The wide range (10.30
+  to 74.40) reflects real variance in published schedules.
+
+---
+
 ## TL;DR (historical — pre-correction; see methodology note above)
 
 Our in-house scheduler is significantly worse than both Idle Loop's
