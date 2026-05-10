@@ -387,14 +387,99 @@ Stark sweep results that `app/quality_presets.py` was tuned against.
 - State event: `2026mnst`, event_id 4, 36 teams
 - Stark eval: 36 cores, used for sweeps + production state schedules
 
-Deploy:
+---
+
+## Session deliverables (standard process)
+
+When a Claude session ends with code or doc changes, the deliverable
+is **two tarballs + commit-ready commands + a commit message**, every
+session. Future Claude sessions: this is the contract — produce all
+of it without being asked.
+
+### 1. Two tarballs
+
+Both written to `/mnt/user-data/outputs/` and presented via the
+`present_files` tool at the end of the session:
+
+**Full tree** — `frc-scheduler-server.tgz`. What the user extracts
+over their working tree.
+
 ```bash
-cd ~/git/frc-scheduler-server
-git pull && git add -A && git commit -m "<msg>"
-git push && ./openshift/apply.sh --build
+cd /home/claude && tar czf /mnt/user-data/outputs/frc-scheduler-server.tgz \
+  --exclude='frc-scheduler-server/.git' \
+  --exclude='*/__pycache__' \
+  --exclude='frc-scheduler-server/NOTES.md' \
+  --exclude='frc-scheduler-server/notes.md' \
+  --exclude='frc-scheduler-server/TODO.local.md' \
+  frc-scheduler-server/
 ```
 
-Hard-refresh browsers after deploy.
+**Changes-only** — `frc-scheduler-changes-only.tgz`. Just the files
+modified this session, with paths intact. Speeds up review and
+diffing without changing the deploy flow (the user can extract this
+one too — same top-level dir).
+
+```bash
+cd /home/claude && tar czf /mnt/user-data/outputs/frc-scheduler-changes-only.tgz \
+  frc-scheduler-server/<modified-file-1> \
+  frc-scheduler-server/<modified-file-2> \
+  ...
+```
+
+The exclusion list deliberately does NOT exclude `REPRODUCTION_PROMPT.md`
+or any tracked doc — those are updated alongside code and the tarball
+is how those updates reach the working tree. Local scratch files
+(`NOTES.md`, `notes.md`, `TODO.local.md`) stay excluded.
+
+### 2. Commit-ready commands
+
+After the tarballs, output the literal command sequence the user
+runs against their working tree:
+
+```bash
+cd ~/git/frc-scheduler-server
+git pull && git add -A
+git commit -m "<commit message — see §3 below>"
+git push
+./openshift/apply.sh --build       # omit for doc-only sessions
+```
+
+Then a one-line reminder: hard-refresh browsers (`⌘⇧R` /
+`Ctrl+Shift+R`) after deploy when UI changes shipped.
+
+`./openshift/apply.sh --build` is omitted when the session touched
+only docs / tests / no-deploy-impact files. When in doubt, include
+it — a redundant rebuild costs ~2 minutes; a missed rebuild leaves
+production stale.
+
+### 3. Commit message style
+
+Terse, fact-dense, code-anchored. Subject is short with an em-dash
+qualifier; body explains *why* and lists *what* with file paths
+anchored so a future reader can grep them. No emoji. Hard-wrap the
+body at ~72 columns.
+
+Canonical single-issue example:
+
+```
+Doc sync — HANDOFF, REPRODUCTION_PROMPT, PRIORITIES current
+
+End-of-session doc sweep capturing all FRC §10.5.2 paramount +
+competition-approved + import-cleanup work.
+
+- docs/HANDOFF.md: full rewrite as new 'state of the world' doc
+- PRIORITIES.md (root): replaced P1-P10 with lex tuple + paramount cooldown
+- REPRODUCTION_PROMPT.md (root): canonical AI onboarding doc, current
+- docs/REPRODUCTION_PROMPT.md: stub redirect to root
+- docs/PRIORITIES.md: overview updated for lex semantics + Phase 2 complete
+- docs/scheduler/QUALITY_IMPROVEMENT_PLAN.md: phases 0-4 marked complete
+- README.md: Architecture section updated to FRC §10.5.2 paramount framing
+```
+
+For multi-issue sessions, structure the body by issue with a brief
+header paragraph per issue, then a single trailing `Files: ...`
+line listing all touched paths. Keep file lists in `Files:` even
+when the body already mentioned them — it's the grep target.
 
 ---
 

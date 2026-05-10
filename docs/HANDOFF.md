@@ -6,9 +6,9 @@ project. Practical, terse, code-anchored — same convention as the rest of
 after a gap.
 
 Last updated: 2026-05-10, end of the practice-import-from-MatchMaker-xlsx
-debugging session. Three layered bugs on the `MatchMaker xlsx → /view`
-path: stale cache, datetime time-cells, no derived practiceDay. Details
-in §4.7 below.
+debugging session, render-pdf auth removal, and session-deliverable
+protocol documentation. Three layered xlsx-import bugs in §4.7,
+auth-removal in §4.8, doc convention in §4.9.
 
 ---
 
@@ -40,6 +40,7 @@ all surface FRC compliance state to the user.
 | MatchMaker comparison language softened                          | ✓ | Removed all "beats MatchMaker" / "OURS WINS" framing across UI + tests + docs. |
 | **Practice-from-MatchMaker-xlsx** (this session)                 | ✓ | Stale-cache invalidation + datetime time-cell handling + derived practiceDay. §4.7. |
 | **Print + export unauthenticated** (this session)                | ✓ | `render-pdf` no longer requires auth; matches `/teams/export` posture. §4.8. |
+| **Session-deliverable protocol documented** (this session)       | ✓ | Two-tarball + commit-ready-commands + commit-message-style convention canonicalised in `REPRODUCTION_PROMPT.md`. §4.9. |
 
 ---
 
@@ -254,6 +255,30 @@ already auth-free.
 
 `app/main.py:render_schedule_pdf_endpoint`.
 
+### 4.9 Session-deliverable protocol canonicalised (2026-05-10)
+
+Until this session there was no documented expectation about what a
+Claude session should produce when it ends. Each handoff was bespoke.
+Result: occasional dropped tarballs, inconsistent commit-message
+style, and one stale `REPRODUCTION_PROMPT.md` exclusion in the §9
+tarball pattern (which would have silently swallowed any doc updates
+to that file — bugged for unknown duration).
+
+Fix: `REPRODUCTION_PROMPT.md` now has a "Session deliverables
+(standard process)" section that's the single source of truth for:
+- Two-tarball convention (full + changes-only) with the corrected
+  exclusion list (no longer drops `REPRODUCTION_PROMPT.md`)
+- Commit-ready command sequence (with `apply.sh --build` omitted
+  for doc-only commits)
+- Commit-message style + canonical example
+
+This handoff's §9 is now a brief operator-cheat-sheet that points
+forward to that section. Future Claude sessions read
+`REPRODUCTION_PROMPT.md` as part of onboarding, so the convention
+propagates without per-session re-explanation.
+
+`REPRODUCTION_PROMPT.md`, `docs/HANDOFF.md`.
+
 ---
 
 ## 5 · Open items
@@ -434,22 +459,17 @@ cd ~/git/frc-scheduler-server
 git pull && git add -A
 git commit -m "<message>"
 git push
-./openshift/apply.sh --build
+./openshift/apply.sh --build       # omit for doc-only commits
 ```
 
-Hard-refresh Safari/Chrome after deploy (`⌘⇧R` / `Ctrl+Shift+R`) — UI changes from this session won't appear without it.
+Hard-refresh Safari/Chrome after deploy (`⌘⇧R` / `Ctrl+Shift+R`) — UI
+changes from this session won't appear without it.
 
-Tarball pattern (Claude session):
-```bash
-cd /tmp && tar czf /mnt/user-data/outputs/frc-scheduler-server.tgz \
-  --exclude='frc-scheduler-server/.git' \
-  --exclude='*/__pycache__' \
-  --exclude='frc-scheduler-server/REPRODUCTION_PROMPT.md' \
-  --exclude='frc-scheduler-server/NOTES.md' \
-  --exclude='frc-scheduler-server/notes.md' \
-  --exclude='frc-scheduler-server/TODO.local.md' \
-  frc-scheduler-server/
-```
+For the canonical Claude-session deliverable convention — two
+tarballs (full + changes-only), commit-ready commands, and the
+commit-message style — see `REPRODUCTION_PROMPT.md` "Session
+deliverables (standard process)". That's the source of truth;
+this section is just the operator-side cheat sheet.
 
 ---
 
