@@ -3452,6 +3452,7 @@ async def import_pdf(
                     "method":          method,
                     "format_detected": cached.format_detected,
                     "matches":         cached_parsed.get("matches", []),
+                    "practice":        cached_parsed.get("practice", []),
                     "validation":      validation,
                     "notes":           cached_parsed.get("notes", ""),
                     "_cache":          "hit",
@@ -3710,6 +3711,7 @@ async def import_pdf(
         "tried":           extracted.get("tried", []),
         "format_detected": parsed.get("format_detected"),
         "matches":         matches,
+        "practice":        parsed.get("practice", []),
         "validation":      validation,
         "notes":           parsed.get("notes", ""),
         "_cache":          "miss",
@@ -3781,6 +3783,7 @@ async def import_xlsx(
                     "method":          cached.method or "xlsx",
                     "format_detected": cached.format_detected,
                     "matches":         cached_parsed.get("matches", []),
+                    "practice":        cached_parsed.get("practice", []),
                     "validation":      validation,
                     "notes":           cached_parsed.get("notes", ""),
                     "derived":         _safe_derive(cached_parsed.get("matches", [])),
@@ -3815,7 +3818,7 @@ async def import_xlsx(
             file_name=file.filename,
             byte_size=len(content),
             page_count=parsed.get("page_count", 1),
-            parsed={"matches": matches, "notes": parsed.get("notes", "")},
+            parsed={"matches": matches, "practice": parsed.get("practice", []), "notes": parsed.get("notes", "")},
             validation=validation,
             format_detected=parsed.get("format_detected"),
             method="xlsx",
@@ -3837,7 +3840,7 @@ async def import_xlsx(
             pdf_import.file_name       = file.filename
             pdf_import.byte_size       = len(content)
             pdf_import.page_count      = parsed.get("page_count", 1)
-            pdf_import.parsed          = {"matches": matches, "notes": parsed.get("notes", "")}
+            pdf_import.parsed          = {"matches": matches, "practice": parsed.get("practice", []), "notes": parsed.get("notes", "")}
             pdf_import.validation      = validation
             pdf_import.format_detected = parsed.get("format_detected")
             pdf_import.method          = "xlsx"
@@ -3853,6 +3856,7 @@ async def import_xlsx(
         "method":          "xlsx",
         "format_detected": parsed.get("format_detected"),
         "matches":         matches,
+        "practice":        parsed.get("practice", []),
         "validation":      validation,
         "notes":           parsed.get("notes", ""),
         # Derive parameters from the match list. The XLSX export shape
@@ -3930,6 +3934,7 @@ async def import_csv_endpoint(
                     "method":          cached.method or "csv",
                     "format_detected": cached.format_detected,
                     "matches":         cached_parsed.get("matches", []),
+                    "practice":        cached_parsed.get("practice", []),
                     "validation":      validation,
                     "notes":           cached_parsed.get("notes", ""),
                     "derived":         _safe_derive(cached_parsed.get("matches", [])),
@@ -3961,7 +3966,7 @@ async def import_csv_endpoint(
             file_name=file.filename,
             byte_size=len(content),
             page_count=parsed.get("page_count", 1),
-            parsed={"matches": matches, "notes": parsed.get("notes", "")},
+            parsed={"matches": matches, "practice": parsed.get("practice", []), "notes": parsed.get("notes", "")},
             validation=validation,
             format_detected=parsed.get("format_detected"),
             method="csv",
@@ -3983,7 +3988,7 @@ async def import_csv_endpoint(
             pdf_import.file_name       = file.filename
             pdf_import.byte_size       = len(content)
             pdf_import.page_count      = parsed.get("page_count", 1)
-            pdf_import.parsed          = {"matches": matches, "notes": parsed.get("notes", "")}
+            pdf_import.parsed          = {"matches": matches, "practice": parsed.get("practice", []), "notes": parsed.get("notes", "")}
             pdf_import.validation      = validation
             pdf_import.format_detected = parsed.get("format_detected")
             pdf_import.method          = "csv"
@@ -3999,6 +4004,7 @@ async def import_csv_endpoint(
         "method":          "csv",
         "format_detected": parsed.get("format_detected"),
         "matches":         matches,
+        "practice":        parsed.get("practice", []),
         "validation":      validation,
         "notes":           parsed.get("notes", ""),
         "derived":         _safe_derive(matches),
