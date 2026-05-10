@@ -8404,6 +8404,15 @@ function calcMaxMatches() {
             // entry says "after N matches, switch to ct". Apply
             // sequentially, consuming time. Embedded-children
             // subtraction is approximated as a flat reduction.
+            // V2_SPEC §7: a change with afterMatch=N means "match N's
+            // own slot uses the new ct" (gap N→N+1 = new). Iter k
+            // consumes the slot whose duration is gap k→(k+1), so iter
+            // N must use new ct already. The check fires at the END of
+            // an iter (after consume + matchCount increment), so to
+            // be active for iter N we need to fire at end of iter N-1
+            // when matchCount=N-1 — i.e., when afterMatch <= matchCount+1.
+            // Was <= matchCount, which fired one iter too late and
+            // pushed the change to gap (N+1)→(N+2) instead.
             var remaining = qMinutes;
             var curCt = ct;
             var changesAhead = changes.slice().sort(function(a, b) {
@@ -8413,7 +8422,7 @@ function calcMaxMatches() {
             while (remaining >= curCt) {
               remaining -= curCt;
               matchCount += 1;
-              while (changesAhead.length && changesAhead[0].afterMatch <= matchCount) {
+              while (changesAhead.length && changesAhead[0].afterMatch <= matchCount + 1) {
                 curCt = changesAhead.shift().cycleTime || curCt;
               }
             }
@@ -15191,10 +15200,14 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
       var _pracCount   = 0;
 
       function _pracEffectiveCt(idx) {
+        // V2_SPEC §7: afterMatch=N means "gap N→N+1 uses new ct,"
+        // so match N's own slot (idx+1 == N) is the first to use it.
+        // Comparison must be >= (was > — off-by-one applied the
+        // change one match late). idx is 0-based.
         var ct = _pracStartCt;
         (_pracCfg.cycleChanges || []).forEach(function(cc) {
           if (cc.isStart) ct = cc.time;
-          else if (idx + 1 > cc.afterMatch) ct = cc.time;
+          else if (idx + 1 >= cc.afterMatch) ct = cc.time;
         });
         return ct;
       }
@@ -15535,11 +15548,16 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         }
 
         const dayCt = (function() {
+          // V2_SPEC §7: afterMatch=N means gap N→N+1 uses new ct, i.e.,
+          // match N's own slot is the first to use the new value.
+          // Comparison is >= against (matchIdx+1) where matchIdx is the
+          // 0-based index of the match we're about to place. Was >,
+          // which pushed the change one slot late.
           var ct = defaultCycleTime;
           for (var ci = 0; ci < day.cycleChanges.length; ci++) {
             var cc = day.cycleChanges[ci];
             if (cc.isStart) { ct = cc.time; }
-            else if (matchIdx + 1 > cc.afterMatch) { ct = cc.time; }
+            else if (matchIdx + 1 >= cc.afterMatch) { ct = cc.time; }
           }
           return ct;
         })();
@@ -15580,12 +15598,18 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
         if (day.earlyEnd !== null && day.earlyEnd !== undefined && dayMatchCount >= day.earlyEnd) break;
 
         if (matchIdx < totalMatches) {
+          // prevDayCt = ct used to place the just-incremented matchIdx (now
+          // 1-based number of just-placed match). nextDayCt = ct that will
+          // be used to place the next match. If they differ, a cycle change
+          // happened between them — emit a marker. V2_SPEC §7: change with
+          // afterMatch=N takes effect at match N (the 1-based slot N), so
+          // both comparisons are >= (were >, off-by-one).
           const prevDayCt = (function() {
             var ct = defaultCycleTime;
             for (var ci = 0; ci < day.cycleChanges.length; ci++) {
               var cc = day.cycleChanges[ci];
               if (cc.isStart) { ct = cc.time; }
-              else if (matchIdx > cc.afterMatch) { ct = cc.time; }
+              else if (matchIdx >= cc.afterMatch) { ct = cc.time; }
             }
             return ct;
           })();
@@ -15594,7 +15618,7 @@ function _finishGenerationInner(matches, roundBoundaries, surrogateCount, bestIt
             for (var ci = 0; ci < day.cycleChanges.length; ci++) {
               var cc = day.cycleChanges[ci];
               if (cc.isStart) { ct = cc.time; }
-              else if (matchIdx + 1 > cc.afterMatch) { ct = cc.time; }
+              else if (matchIdx + 1 >= cc.afterMatch) { ct = cc.time; }
             }
             return ct;
           })();

@@ -3805,11 +3805,18 @@ function computeMatchTimes() {
         next.done = true;
         continue;
       }
-      // Effective cycle time at this match index
+      // Effective cycle time for the slot at this match index. Per
+      // V2_SPEC §7: a change with afterMatch=N applies to "the gap
+      // from match N's start to match N+1's start," i.e. match N's
+      // own slot is the first to use the new ct. matchIdx is 0-based
+      // here, so the 1-based match number we're placing is matchIdx+1
+      // and the comparison must be >= (not >). The previous > was an
+      // off-by-one that pushed the change one match late — gap N+1→N+2
+      // got the new ct instead of N→N+1.
       let ct = curCt;
       ccs.forEach(c => {
         if (c.isStart && c.time) ct = c.time;
-        else if (!c.isStart && c.afterMatch != null && (matchIdx + 1) > c.afterMatch && c.time) ct = c.time;
+        else if (!c.isStart && c.afterMatch != null && (matchIdx + 1) >= c.afterMatch && c.time) ct = c.time;
       });
       const matchEnd = cursor + ct;
       // Interrupt break check

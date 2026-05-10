@@ -6,9 +6,10 @@ project. Practical, terse, code-anchored — same convention as the rest of
 after a gap.
 
 Last updated: 2026-05-10, end of the practice-import-from-MatchMaker-xlsx
-debugging session, render-pdf auth removal, and session-deliverable
-protocol documentation. Three layered xlsx-import bugs in §4.7,
-auth-removal in §4.8, doc convention in §4.9.
+debugging session, render-pdf auth removal, session-deliverable protocol
+documentation, and cycle-time-change off-by-one regression fix. Three
+layered xlsx-import bugs in §4.7, auth-removal in §4.8, doc convention
+in §4.9, cycle-change semantics in §4.10.
 
 ---
 
@@ -41,6 +42,7 @@ all surface FRC compliance state to the user.
 | **Practice-from-MatchMaker-xlsx** (this session)                 | ✓ | Stale-cache invalidation + datetime time-cell handling + derived practiceDay. §4.7. |
 | **Print + export unauthenticated** (this session)                | ✓ | `render-pdf` no longer requires auth; matches `/teams/export` posture. §4.8. |
 | **Session-deliverable protocol documented** (this session)       | ✓ | Two-tarball + commit-ready-commands + commit-message-style convention canonicalised in `REPRODUCTION_PROMPT.md`. §4.9. |
+| **Cycle-change off-by-one regression** (this session)            | ✓ | `afterMatch=N` now correctly applies new ct to gap N→N+1 per V2_SPEC §7 (was N+1→N+2). Six application sites fixed. §4.10. |
 
 ---
 
@@ -279,6 +281,47 @@ propagates without per-session re-explanation.
 
 `REPRODUCTION_PROMPT.md`, `docs/HANDOFF.md`.
 
+### 4.10 Cycle-time-change off-by-one regression (2026-05-10)
+
+User report: cycle-time changes were applying one match late. A change
+with `afterMatch=N` was changing the cycle for the gap from match N+1
+to match N+2 instead of the gap from match N to match N+1. Direct
+contradiction of `docs/V2_SPEC.md` §7, which specifies a worked
+example: `block.cycleTime=9, changes=[{afterMatch: 4, cycleTime: 8}]`
+should produce match starts at 0, 9, 18, 27, **35**, 43 — match 5
+arriving 8 min after match 4 (the new ct), not 9 min.
+
+Root cause: every cycle-change application site used `>` where it
+should have used `>=` against `(matchIdx + 1)` (or equivalently in the
+capacity counter, fired one iter too late). Six sites:
+
+  1. `static/view.html:3819` — display walker (the user-visible one)
+  2. `static/index.html:15210` — practice-day walker `_pracEffectiveCt`
+  3. `static/index.html:15560` — qual-day walker `dayCt`
+  4. `static/index.html:15612` — `prevDayCt` (used to detect when
+     to emit a cycle-change marker; bare `matchIdx >` since matchIdx
+     is post-increment / 1-based here)
+  5. `static/index.html:15621` — `nextDayCt` (same emitter)
+  6. `static/index.html:8425` — `calcMaxMatches` capacity counter,
+     where the equivalent fix is `<= matchCount + 1` instead of
+     `<= matchCount` (apply change one iter earlier in the loop)
+
+Fix: changed each comparison. The 1-based match index `matchIdx + 1`
+must be `>=` the change's `afterMatch` for the change to apply at
+this iter — match N's own slot is the first to use the new ct, per
+spec.
+
+New regression test `tests/test_cycle_change_walker.js` runs in two
+modes: substring guards on the production source pin the `>=` (and
+`<= matchCount + 1`) at every site, and a faithful walker re-
+implementation reproduces V2_SPEC §7's worked example exactly. An
+explicit anti-test runs the buggy `>` walker to confirm the two
+semantics are actually distinguishable (buggy walker puts match 5
+at 36 instead of 35; new test catches that).
+
+`static/view.html`, `static/index.html`,
+`tests/test_cycle_change_walker.js`.
+
 ---
 
 ## 5 · Open items
@@ -418,6 +461,7 @@ All green:
 - Phase 1 R/B (8 commutativity)
 - Phase 2 station (12 commutativity)
 - FRC compliance (11 tests in `tests/test_frc_compliance.py`)
+- Cycle-change walker (`tests/test_cycle_change_walker.js`) — V2_SPEC §7 semantic + source-guards on all 6 application sites
 - Inline JS in static/index.html and static/view.html parses cleanly
 
 ---
