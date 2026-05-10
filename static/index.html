@@ -3097,11 +3097,64 @@ function triggerRestoreFromFile() {
 }
 
 async function restoreFromFile(file) {
+  // ── Resolve the event BEFORE fullReset wipes _currentEventId.
+  //
+  // The old order was: fullReset → restoreFromXxxFile → ensureEventLoadedForImport,
+  // but fullReset(true) wipes _currentEventId and _currentEventInfo, so by the time
+  // ensureEventLoadedForImport runs there's nothing for it to find — it falls through
+  // to the ad-hoc dialog every time. Instead, capture the event up front, do the
+  // reset, then re-activate the captured event so the restore handler runs with
+  // the right event_id in place.
+  let preservedEvent = null;
+  try {
+    if (_currentEventId) {
+      // Pull a fresh copy from the API so we have the full event payload —
+      // we'll re-activate this after fullReset clears state.
+      preservedEvent = await apiFetch('/api/events/' + _currentEventId);
+    } else if (_currentEventInfo && _currentEventInfo.id) {
+      preservedEvent = await apiFetch('/api/events/' + _currentEventInfo.id);
+    } else {
+      // Try the typed-but-not-loaded event code path.
+      const codeInput = document.getElementById('eventCodeInput');
+      const yearInput = document.getElementById('eventYear');
+      const raw = (codeInput && codeInput.value || '').trim();
+      if (raw) {
+        const year = parseInt(yearInput && yearInput.value) || new Date().getFullYear();
+        const code = /^\d{4}/.test(raw) ? raw.toLowerCase() : year + raw.toLowerCase();
+        const events = await apiFetch('/api/events');
+        const local = events.find(e =>
+          e.key === code ||
+          e.key === raw.toLowerCase() ||
+          (e.name || '').toLowerCase() === raw.toLowerCase()
+        );
+        if (local) {
+          preservedEvent = await apiFetch('/api/events/' + local.id);
+        }
+      }
+    }
+  } catch (e) {
+    // Resolution failed; we'll fall through to the helper's ad-hoc prompt
+    // in the per-format restore handler.
+    console.warn('Event preservation during restore failed:', e);
+  }
+
   // Wipe any current schedule before pulling the file's contents.
   // The restore handlers will repopulate state from the file; this
   // ensures we don't blend in any leftovers from the active event.
   // Silent because the user-explicit action is the file pick.
   try { if (typeof fullReset === 'function') fullReset(true); } catch(_) {}
+
+  // Re-activate the preserved event so the restore handler sees it
+  // in _currentEventId / _currentEventInfo. activateEvent is idempotent
+  // and writes both.
+  if (preservedEvent) {
+    try {
+      await activateEvent(preservedEvent);
+    } catch (e) {
+      console.warn('Failed to re-activate event after fullReset:', e);
+    }
+  }
+
   var name = (file.name || '').toLowerCase();
   if (name.endsWith('.json')) {
     return restoreFromJsonFile(file);
