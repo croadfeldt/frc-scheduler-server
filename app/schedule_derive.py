@@ -71,7 +71,10 @@ def _min_to_hhmm(m: int | None) -> str:
     return f"{h:02d}:{mm:02d}"
 
 
-def derive_parameters(matches: list[dict]) -> dict[str, Any]:
+def derive_parameters(
+    matches: list[dict],
+    practice_matches: list[dict] | None = None,
+) -> dict[str, Any]:
     """Inspect a match list and return derived scheduler parameters
     plus a per-field confidence map.
 
@@ -79,6 +82,15 @@ def derive_parameters(matches: list[dict]) -> dict[str, Any]:
         matches: list of dicts with at minimum {match_num, time,
                  red[], blue[]}. Same shape as PDF/XLSX/CSV
                  importer output.
+        practice_matches: optional list of practice matches in the
+                 same shape. When supplied non-empty, the emitted
+                 V2 day_config gains a leading practice-only day
+                 with a derived practice block (start/end/cycleTime
+                 from the practice times). This is what makes /view
+                 render the practice tab — without a practiceDay in
+                 day_config, view.html silently skips practice
+                 matches even when they're present in the assigned
+                 schedule's practice_matches column.
 
     Returns:
         {
@@ -283,17 +295,42 @@ def derive_parameters(matches: list[dict]) -> dict[str, Any]:
             for b in breaks
         ],
     }
+
+    v2_days: list[dict[str, Any]] = []
+
+    # Practice day (if any). Encoded as a V2 day with a single
+    # practice block — view.html's V2→V1 downgrade promotes a
+    # practice-only day to `practiceDay`, which is what gates the
+    # practice-tab render. Without this, importing a MatchMaker
+    # workbook with a Practice sheet leaves practice matches in
+    # the DB but invisible on /view.
+    if practice_matches:
+        p_block = _derive_practice_block(practice_matches, cycle_time_min)
+        if p_block is not None:
+            v2_days.append({
+                "label":  "Practice",
+                "date":   "",
+                "blocks": [p_block],
+            })
+
+    v2_days.append({
+        "label":  "Day 1",
+        "date":   "",
+        "blocks": [qual_block],
+    })
+
+    # num_days here counts V2 days emitted (qual + optional practice).
+    # Confidence "high" when practice presence is unambiguous (the
+    # caller passed an explicit non-empty list); otherwise "medium"
+    # for the qual-only single-day default.
+    num_days = len(v2_days)
+    confidence["num_days"] = "high" if practice_matches else "medium"
+
     day_config: dict[str, Any] = {
         "dayConfigVersion": 2,
         "cycleTime":   cycle_time_min,
         "breakBuffer": 5,
-        "days": [
-            {
-                "label":  "Day 1",
-                "date":   "",
-                "blocks": [qual_block],
-            }
-        ],
+        "days":        v2_days,
         # Side-channel state preserved across the V2 wire — these
         # aren't part of the canonical V2 model but the editor
         # piggybacks them on day_config. They get stripped on full
@@ -315,4 +352,77 @@ def derive_parameters(matches: list[dict]) -> dict[str, Any]:
         "day_config": day_config,
         "confidence": confidence,
         "notes":      notes,
+    }
+
+
+def _derive_practice_block(
+    practice_matches: list[dict],
+    fallback_cycle_min: float,
+) -> dict[str, Any] | None:
+    """Build a V2 practice block from the practice match list.
+
+    Mirrors the qual derivation but on a smaller dataset. The
+    practice section is typically a handful of matches at slower
+    cadence (FRC regional convention is ~9 min/match vs 8 for
+    quals — see docs/PRACTICE_DAY.md). Returns ``None`` only when
+    the input is empty; otherwise always returns a usable block,
+    falling back to defaults for any field the times don't yield.
+
+    Args:
+        practice_matches: parsed practice matches with HH:MM times.
+        fallback_cycle_min: cycle to use when the practice deltas
+            don't yield a confident value (e.g. only one match).
+    """
+    if not practice_matches:
+        return None
+
+    # Sort by match number, just like the qual path.
+    sorted_pm = sorted(
+        practice_matches, key=lambda m: int(m.get("match_num") or 0)
+    )
+
+    times_min = [
+        t for t in (_hhmm_to_min(m.get("time")) for m in sorted_pm)
+        if t is not None
+    ]
+
+    # Cycle time: modal delta among consecutive practice match starts,
+    # filtering breaks (>30 min) and back-in-time anomalies. Practice
+    # blocks are usually short and contiguous so the simplest
+    # approach works. Fall back to the qual cycle when there's not
+    # enough data — common for 1-3 practice match blocks.
+    p_deltas: list[int] = []
+    for a, b in zip(times_min, times_min[1:]):
+        d = b - a
+        if 0 < d <= 30:
+            p_deltas.append(d)
+    if p_deltas:
+        from collections import Counter
+        p_cycle = float(Counter(p_deltas).most_common(1)[0][0])
+    else:
+        p_cycle = float(fallback_cycle_min)
+
+    # Start = earliest match. End = latest + one cycle (so the last
+    # match has time to actually run before the block ends).
+    if times_min:
+        p_start = times_min[0]
+        p_end   = times_min[-1] + int(round(p_cycle))
+    else:
+        p_start = None
+        p_end   = None
+
+    # docs/PRACTICE_DAY.md FRC convention: 3 guaranteed matches per
+    # team. We can't infer this reliably from the match list (the
+    # number of guaranteed matches isn't a function of how many
+    # matches were scheduled), so we use the documented default and
+    # let the user override it if their event is different.
+    return {
+        "type":       "practice",
+        "start":      _min_to_hhmm(p_start) or "08:30",
+        "end":        _min_to_hhmm(p_end)   or "17:00",
+        "cycleTime":  p_cycle,
+        "changes":    [],
+        "breaks":     [],
+        "guaranteed": 3,
+        "maxFiller":  99,
     }

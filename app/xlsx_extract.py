@@ -25,6 +25,7 @@ distinction is preserved in the returned dict.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import logging
 import re
 from io import BytesIO
@@ -46,6 +47,73 @@ SHEET_KIND_HEURISTICS: list[tuple[str, str]] = [
 # Matches "Qualification 12", "Practice 3", "Q12", "P3", or just "12"
 # in the Description column. Number is the only thing we actually need.
 _MATCH_NUM_RE = re.compile(r"(\d+)")
+
+# Time-string parse formats, tried in order. Covers "08:30", "08:30:00",
+# "8:30 AM", "8:30:00 AM" (the app's own xlsx export uses this last one
+# — see static/index.html:_buildXlsxWorksheet via minToTime).
+_TIME_PARSE_FMTS = ("%H:%M", "%H:%M:%S", "%I:%M %p", "%I:%M:%S %p")
+
+
+def _normalize_time(value: Any) -> str:
+    """Convert an XLSX cell value to an "HH:MM" string (24-hour).
+
+    openpyxl returns Python ``datetime`` objects for cells formatted as
+    date/time — typical for MatchMaker exports — so naïve ``str(value)``
+    yields a full ISO datetime ("2026-05-15 19:00:00") that downstream
+    derivation in ``schedule_derive._hhmm_to_min`` can't parse, falling
+    back to defaults. We extract just the time-of-day here.
+
+    Handles:
+      ``None`` / blank      → ``""``
+      ``datetime.datetime`` → "HH:MM" (date dropped)
+      ``datetime.time``     → "HH:MM"
+      "08:30"               → "08:30" (passthrough)
+      "8:30:00 AM"          → "08:30" (the app's own export shape)
+      Excel float serial    → "HH:MM" derived from the fractional part
+
+    Unparseable strings are returned as-is so the import preview still
+    shows what was in the file; only parsing for derivation is at risk.
+    """
+    if value is None or value == "":
+        return ""
+
+    # Datetime types first — these are the openpyxl-on-formatted-cell
+    # case and would otherwise stringify to ISO format.
+    if isinstance(value, _dt.datetime):
+        return f"{value.hour:02d}:{value.minute:02d}"
+    if isinstance(value, _dt.time):
+        return f"{value.hour:02d}:{value.minute:02d}"
+
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return ""
+        for fmt in _TIME_PARSE_FMTS:
+            try:
+                t = _dt.datetime.strptime(s, fmt)
+                return f"{t.hour:02d}:{t.minute:02d}"
+            except ValueError:
+                continue
+        # Unrecognised string — preserve it. Display still works; only
+        # derivation falls back to defaults.
+        return s
+
+    # Excel serial date/time: integer part is days since 1900-01-00,
+    # fractional part is fraction of a day. We only need the fraction.
+    if isinstance(value, (int, float)):
+        try:
+            f = float(value)
+            frac = f - int(f)
+            if frac < 0:
+                frac += 1.0
+            total_min = int(round(frac * 24 * 60))
+            h = (total_min // 60) % 24
+            m = total_min % 60
+            return f"{h:02d}:{m:02d}"
+        except (ValueError, OverflowError):
+            return ""
+
+    return ""
 
 
 def _coerce_team(value: Any) -> int | None:
@@ -179,7 +247,7 @@ def parse_xlsx(content: bytes) -> dict[str, Any]:
             match_num = int(m.group(1))
 
             time_val = row[c_time] if c_time < len(row) else None
-            time_str = str(time_val).strip() if time_val is not None else ""
+            time_str = _normalize_time(time_val)
 
             blue = [_coerce_team(row[i] if i < len(row) else None) for i in c_blue]
             red  = [_coerce_team(row[i] if i < len(row) else None) for i in c_red]

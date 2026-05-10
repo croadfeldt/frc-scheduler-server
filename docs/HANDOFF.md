@@ -5,8 +5,10 @@ project. Practical, terse, code-anchored — same convention as the rest of
 `docs/`. Read this first if you're new to the codebase or coming back
 after a gap.
 
-Last updated: 2026-05-09, end of the FRC §10.5.2 paramount + competition-
-approved + import-path-cleanup session.
+Last updated: 2026-05-10, end of the practice-import-from-MatchMaker-xlsx
+debugging session. Three layered bugs on the `MatchMaker xlsx → /view`
+path: stale cache, datetime time-cells, no derived practiceDay. Details
+in §4.7 below.
 
 ---
 
@@ -36,6 +38,7 @@ all surface FRC compliance state to the user.
 | Practice-import wiring (storage + UI + commit)                   | ✓ | XLSX/CSV cache stores practice; preview UI renders it; commit body sends it. |
 | Import flow event-id resolution                                  | ✓ | `ensureEventLoadedForImport` helper used by 3 import call sites. |
 | MatchMaker comparison language softened                          | ✓ | Removed all "beats MatchMaker" / "OURS WINS" framing across UI + tests + docs. |
+| **Practice-from-MatchMaker-xlsx** (this session)                 | ✓ | Stale-cache invalidation + datetime time-cell handling + derived practiceDay. §4.7. |
 
 ---
 
@@ -155,6 +158,72 @@ For post-import grafting of practice onto an existing schedule.
 Same snapshot-history pattern as day_config edits.
 
 `app/main.py:patch_assigned_schedule`.
+
+### 4.7 Practice-from-MatchMaker-xlsx — three layered bugs (2026-05-10)
+
+User report: restoring a MatchMaker-exported xlsx with a Practice sheet
+landed 42 quals but silently dropped the 6 practice matches, even though
+the import preview's `format_detected` line said "FMS xlsx (42 qual,
+6 practice)". The string came from the parser; the data was gone.
+
+Three bugs on the `xlsx → /view` path, layered such that each fix is
+needed to surface the next:
+
+**Bug A — stale cache poisoning.** `pdf_imports` is content-hash keyed.
+Entries written before §4.4's storage fix have `parsed = {"matches",
+"notes"}` — no `practice` key. Cache hit returns `practice: []`, the
+preview hides the practice section, commit body sends `practice: []`.
+`format_detected` was set at parse time so it still mentions the practice
+count even though the data is missing — that's the user-visible "it
+sees 6 [practice] but doesn't import them."
+
+Fix: in `import_xlsx` and `import_csv` cache-hit branches, check
+`"practice" not in cached_parsed` and fall through to a fresh parse.
+Cheap (no LLM call), self-healing for any similar future schema bumps.
+The dedicated PDF import path has a `?nocache=1` toggle; the restore
+path doesn't, so users couldn't bypass this manually.
+
+**Bug B — datetime time-cells.** openpyxl returns Python `datetime`
+objects for date/time-formatted cells (typical for MatchMaker exports).
+The parser was doing `str(time_val).strip()`, producing
+`"2026-05-15 19:00:00"`. Downstream `_hhmm_to_min` rejects this; cycle
+and start/end derivation falls back to defaults (8.0 min cycle,
+08:30–17:00). Pre-existing; also affects the app's own xlsx export
+which writes `"8:30:00 AM"` strings.
+
+Fix: `xlsx_extract._normalize_time(value)` handles `datetime` /
+`time` / `"08:30"` / `"8:30 AM"` / `"8:30:00 AM"` / Excel float serial
+→ `"HH:MM"`. Unparseable strings pass through (display still works,
+only derivation degrades). Six unit tests in `tests/test_day_config_v2.py
+TestXlsxTimeNormalization`.
+
+**Bug C — no derived practiceDay.** Even with practice matches in the
+DB, `view.html:3648` requires `cfg.practiceDay && cfg.practiceDay.enabled
+!== false` to render the practice tab. `derive_parameters` only
+inspected qual matches; the V2 day_config it emitted had one qual day
+and no practice block, so the V2→V1 downgrade in `_v2DowngradeToV1ForView`
+never produced an `out.practiceDay`.
+
+Fix: `derive_parameters(matches, practice_matches=None)`. New
+`_derive_practice_block` helper builds a V2 `practice` block (start =
+earliest practice time, end = latest + cycle, cycleTime = modal delta
+between consecutive practice matches, with `guaranteed=3` and
+`maxFiller=99` per `docs/PRACTICE_DAY.md`). When practice is supplied,
+a practice-only V2 day is prepended to `days[]` before the qual day.
+
+`_safe_derive(matches, practice_matches)` updated at all 4 call sites
+(xlsx hit + miss, csv hit + miss). Argument is optional and defaults
+to `None`, so the existing `test_schedule_derive_emits_v2` test keeps
+working with single-arg calls.
+
+End-to-end on the user's `2026mnst-matchmaker-with-practice.xlsx`:
+- format_detected: `FMS xlsx (42 qual, 6 practice)` (unchanged)
+- `practice.length: 6` (was 0)
+- num_days: 2, with practice as day[0] (label "Practice", 19:00–20:00, 10-min cycle) and qual as day[1]
+- All confidence flags high
+
+`app/xlsx_extract.py`, `app/main.py`, `app/schedule_derive.py`,
+`tests/test_day_config_v2.py`.
 
 ---
 

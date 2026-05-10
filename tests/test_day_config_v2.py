@@ -347,6 +347,136 @@ class TestImporterEmits:
                    for nb in qual.get("breaks", []))
 
 
+    def test_schedule_derive_emits_practice_day_when_practice_supplied(self):
+        """derive_parameters(matches, practice) prepends a V2 practice day.
+
+        Regression guard for the MatchMaker xlsx import bug: without a
+        practice day in the V2 day_config, view.html silently skips the
+        practice tab even when practice_matches is populated on the
+        assigned schedule. See app/schedule_derive.py:_derive_practice_block
+        and view.html:3648.
+        """
+        from app import schedule_derive
+        qual = [
+            {"match_num": 1, "time": "08:30", "red": [1, 2, 3], "blue": [4, 5, 6]},
+            {"match_num": 2, "time": "08:39", "red": [7, 8, 9], "blue": [10, 11, 12]},
+            {"match_num": 3, "time": "08:48", "red": [1, 4, 7], "blue": [2, 5, 8]},
+        ]
+        practice = [
+            {"match_num": 1, "time": "19:00", "red": [1, 2, 3], "blue": [4, 5, 6]},
+            {"match_num": 2, "time": "19:10", "red": [7, 8, 9], "blue": [10, 11, 12]},
+        ]
+        result = schedule_derive.derive_parameters(qual, practice)
+        dc = result["day_config"]
+        validate_v2(dc)
+
+        # Two days: practice (day 0) + qual (day 1).
+        assert len(dc["days"]) == 2
+        assert result["parameters"]["num_days"] == 2
+
+        practice_day = dc["days"][0]
+        assert practice_day["label"] == "Practice"
+        ptypes = [b["type"] for b in practice_day["blocks"]]
+        assert ptypes == ["practice"]
+        pblock = practice_day["blocks"][0]
+        # Times derived from the practice match list, not the qual one.
+        assert pblock["start"] == "19:00"
+        assert pblock["cycleTime"] == 10.0   # 19:00 → 19:10
+        # FRC convention defaults preserved (per docs/PRACTICE_DAY.md).
+        assert pblock["guaranteed"] == 3
+        assert pblock["maxFiller"] == 99
+
+        qual_day = dc["days"][1]
+        qtypes = [b["type"] for b in qual_day["blocks"]]
+        assert qtypes == ["qualification"]
+
+    def test_schedule_derive_practice_arg_is_optional(self):
+        """Existing single-arg call sites continue to work unchanged.
+
+        Belt-and-suspenders against accidental signature breakage —
+        every importer that used to call derive_parameters(matches)
+        must keep working without modification.
+        """
+        from app import schedule_derive
+        matches = [
+            {"match_num": 1, "time": "08:30", "red": [1, 2, 3], "blue": [4, 5, 6]},
+            {"match_num": 2, "time": "08:38", "red": [7, 8, 9], "blue": [10, 11, 12]},
+        ]
+        # No practice arg.
+        r1 = schedule_derive.derive_parameters(matches)
+        # Empty practice list — should behave the same as omitting it.
+        r2 = schedule_derive.derive_parameters(matches, [])
+        # Explicit None.
+        r3 = schedule_derive.derive_parameters(matches, None)
+        for r in (r1, r2, r3):
+            assert r["parameters"]["num_days"] == 1
+            assert len(r["day_config"]["days"]) == 1
+            assert r["day_config"]["days"][0]["blocks"][0]["type"] == "qualification"
+
+
+class TestXlsxTimeNormalization:
+    """xlsx_extract._normalize_time covers the cell-format zoo.
+
+    MatchMaker exports use date/time-formatted cells (openpyxl returns
+    datetime objects); the app's own export writes "8:30:00 AM"
+    strings; some other tools write "08:30" or even Excel float
+    serials. All must end up as "HH:MM" strings for downstream
+    derivation in schedule_derive._hhmm_to_min.
+    """
+
+    def test_none_and_blank(self):
+        from app.xlsx_extract import _normalize_time
+        assert _normalize_time(None) == ""
+        assert _normalize_time("") == ""
+        assert _normalize_time("   ") == ""
+
+    def test_hhmm_passthrough(self):
+        from app.xlsx_extract import _normalize_time
+        assert _normalize_time("08:30") == "08:30"
+        assert _normalize_time("13:45") == "13:45"
+
+    def test_ampm_strings_converted_to_24h(self):
+        from app.xlsx_extract import _normalize_time
+        # The app's own xlsx exporter writes this shape via minToTime().
+        assert _normalize_time("8:30:00 AM") == "08:30"
+        assert _normalize_time("1:30:00 PM") == "13:30"
+        assert _normalize_time("8:30 AM") == "08:30"
+
+    def test_datetime_objects_extract_time_of_day(self):
+        """The MatchMaker xlsx case — date/time-formatted cells.
+
+        Without normalization, str(datetime) produces full ISO format
+        like "2026-05-15 19:00:00", which _hhmm_to_min rejects, so
+        derivation falls back to defaults and the user sees a
+        single-day schedule with 08:30-17:00 even though the source
+        had different times.
+        """
+        import datetime as dt
+        from app.xlsx_extract import _normalize_time
+        assert _normalize_time(dt.datetime(2026, 5, 16, 8, 30, 0)) == "08:30"
+        assert _normalize_time(dt.datetime(2026, 5, 15, 19, 0, 0)) == "19:00"
+        assert _normalize_time(dt.time(13, 45)) == "13:45"
+
+    def test_excel_serial_floats(self):
+        """Excel serial date/time → HH:MM via the fractional part.
+
+        46157.79166666666 → 0.79166... × 24h = 19:00.
+        46158.35416666666 → 0.35416... × 24h = 08:30.
+        """
+        from app.xlsx_extract import _normalize_time
+        assert _normalize_time(46157.79166666666) == "19:00"
+        assert _normalize_time(46158.35416666666) == "08:30"
+
+    def test_unparseable_string_passes_through(self):
+        """We display whatever was in the cell; only derivation suffers.
+
+        Better to show the user a weird-but-recognisable string than
+        to silently blank a cell they'd otherwise edit and recover.
+        """
+        from app.xlsx_extract import _normalize_time
+        assert _normalize_time("garbage") == "garbage"
+
+
 class TestNormalizeToV2:
     def test_v2_passes_through(self):
         out = normalize_to_v2(V2_CANONICAL)
@@ -408,7 +538,8 @@ if __name__ == "__main__":
 
     failures = []
     test_classes = [TestValidation, TestMigrationV1ToV2, TestDowngradeV2ToV1,
-                    TestImporterEmits, TestNormalizeToV2, TestDetectors]
+                    TestImporterEmits, TestXlsxTimeNormalization,
+                    TestNormalizeToV2, TestDetectors]
 
     for cls in test_classes:
         instance = cls()

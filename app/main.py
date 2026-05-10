@@ -3768,31 +3768,52 @@ async def import_xlsx(
             cached = existing.scalar_one_or_none()
             if cached:
                 cached_parsed = cached.parsed if isinstance(cached.parsed, dict) else {}
-                log.info("XLSX cache hit: %s (%s)", pdf_hash[:8], file.filename)
-                roster = None
-                if event_id:
-                    roster_result = await db.execute(
-                        select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)
+                # Cache entries written before the §4.4 practice-storage fix
+                # (HANDOFF.md) shaped `parsed` as {"matches", "notes"} — no
+                # "practice" key. We can't distinguish "no practice in
+                # source file" from "practice was dropped at write time"
+                # from the cached dict alone, so when the key is absent we
+                # invalidate and re-parse. The parser is fast (xlsx_extract
+                # is deterministic, no LLM call) so this is cheap. Without
+                # this check, MatchMaker xlsx files with a Practice sheet
+                # silently lose their practice section through a stale-
+                # cache hit even though `format_detected` (set at parse
+                # time) still mentions the practice count.
+                if "practice" not in cached_parsed:
+                    log.info(
+                        "XLSX cache hash=%s lacks 'practice' key — pre-dates "
+                        "practice support; invalidating and re-parsing",
+                        pdf_hash[:8],
                     )
-                    roster = [r[0] for r in roster_result.all()] or None
-                validation = pdf_validate.validate_schedule(
-                    cached_parsed.get("matches", []), roster,
-                )
-                return {
-                    "kind":            "matches",
-                    "pdf_import_id":   cached.id,
-                    "pdf_hash":        pdf_hash,
-                    "file_name":       cached.file_name,
-                    "page_count":      cached.page_count,
-                    "method":          cached.method or "xlsx",
-                    "format_detected": cached.format_detected,
-                    "matches":         cached_parsed.get("matches", []),
-                    "practice":        cached_parsed.get("practice", []),
-                    "validation":      validation,
-                    "notes":           cached_parsed.get("notes", ""),
-                    "derived":         _safe_derive(cached_parsed.get("matches", [])),
-                    "_cache":          "hit",
-                }
+                else:
+                    log.info("XLSX cache hit: %s (%s)", pdf_hash[:8], file.filename)
+                    roster = None
+                    if event_id:
+                        roster_result = await db.execute(
+                            select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)
+                        )
+                        roster = [r[0] for r in roster_result.all()] or None
+                    validation = pdf_validate.validate_schedule(
+                        cached_parsed.get("matches", []), roster,
+                    )
+                    return {
+                        "kind":            "matches",
+                        "pdf_import_id":   cached.id,
+                        "pdf_hash":        pdf_hash,
+                        "file_name":       cached.file_name,
+                        "page_count":      cached.page_count,
+                        "method":          cached.method or "xlsx",
+                        "format_detected": cached.format_detected,
+                        "matches":         cached_parsed.get("matches", []),
+                        "practice":        cached_parsed.get("practice", []),
+                        "validation":      validation,
+                        "notes":           cached_parsed.get("notes", ""),
+                        "derived":         _safe_derive(
+                            cached_parsed.get("matches", []),
+                            cached_parsed.get("practice", []),
+                        ),
+                        "_cache":          "hit",
+                    }
 
     # Parse fresh.
     try:
@@ -3868,16 +3889,22 @@ async def import_xlsx(
         # we re-create them from the data. The frontend pre-fills the
         # form fields with these so the user doesn't have to retype
         # known values. Confidence flags let the UI flag uncertain
-        # values for the user to verify.
-        "derived":         _safe_derive(matches),
+        # values for the user to verify. When practice matches are
+        # present we also synthesise a practice day in the V2
+        # day_config so /view renders the practice tab without the
+        # user having to manually configure it.
+        "derived":         _safe_derive(matches, parsed.get("practice", [])),
         "_cache":          "miss",
     }
 
 
-def _safe_derive(matches: list[dict]) -> dict | None:
+def _safe_derive(
+    matches: list[dict],
+    practice_matches: list[dict] | None = None,
+) -> dict | None:
     """Wrap derivation so a bad match list doesn't break the import."""
     try:
-        return schedule_derive.derive_parameters(matches)
+        return schedule_derive.derive_parameters(matches, practice_matches)
     except Exception as e:
         log.warning("Parameter derivation failed: %s", e)
         return None
@@ -3919,31 +3946,43 @@ async def import_csv_endpoint(
             cached = existing.scalar_one_or_none()
             if cached:
                 cached_parsed = cached.parsed if isinstance(cached.parsed, dict) else {}
-                log.info("CSV cache hit: %s (%s)", pdf_hash[:8], file.filename)
-                roster = None
-                if event_id:
-                    roster_result = await db.execute(
-                        select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)
+                # See import_xlsx for rationale: pre-§4.4 cache entries
+                # have no "practice" key, and we'd silently swallow it.
+                if "practice" not in cached_parsed:
+                    log.info(
+                        "CSV cache hash=%s lacks 'practice' key — pre-dates "
+                        "practice support; invalidating and re-parsing",
+                        pdf_hash[:8],
                     )
-                    roster = [r[0] for r in roster_result.all()] or None
-                validation = pdf_validate.validate_schedule(
-                    cached_parsed.get("matches", []), roster,
-                )
-                return {
-                    "kind":            "matches",
-                    "pdf_import_id":   cached.id,
-                    "pdf_hash":        pdf_hash,
-                    "file_name":       cached.file_name,
-                    "page_count":      cached.page_count,
-                    "method":          cached.method or "csv",
-                    "format_detected": cached.format_detected,
-                    "matches":         cached_parsed.get("matches", []),
-                    "practice":        cached_parsed.get("practice", []),
-                    "validation":      validation,
-                    "notes":           cached_parsed.get("notes", ""),
-                    "derived":         _safe_derive(cached_parsed.get("matches", [])),
-                    "_cache":          "hit",
-                }
+                else:
+                    log.info("CSV cache hit: %s (%s)", pdf_hash[:8], file.filename)
+                    roster = None
+                    if event_id:
+                        roster_result = await db.execute(
+                            select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)
+                        )
+                        roster = [r[0] for r in roster_result.all()] or None
+                    validation = pdf_validate.validate_schedule(
+                        cached_parsed.get("matches", []), roster,
+                    )
+                    return {
+                        "kind":            "matches",
+                        "pdf_import_id":   cached.id,
+                        "pdf_hash":        pdf_hash,
+                        "file_name":       cached.file_name,
+                        "page_count":      cached.page_count,
+                        "method":          cached.method or "csv",
+                        "format_detected": cached.format_detected,
+                        "matches":         cached_parsed.get("matches", []),
+                        "practice":        cached_parsed.get("practice", []),
+                        "validation":      validation,
+                        "notes":           cached_parsed.get("notes", ""),
+                        "derived":         _safe_derive(
+                            cached_parsed.get("matches", []),
+                            cached_parsed.get("practice", []),
+                        ),
+                        "_cache":          "hit",
+                    }
 
     try:
         parsed = csv_extract.parse_csv(content)
@@ -4011,7 +4050,7 @@ async def import_csv_endpoint(
         "practice":        parsed.get("practice", []),
         "validation":      validation,
         "notes":           parsed.get("notes", ""),
-        "derived":         _safe_derive(matches),
+        "derived":         _safe_derive(matches, parsed.get("practice", [])),
         "_cache":          "miss",
     }
 
