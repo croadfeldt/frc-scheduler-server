@@ -2,7 +2,7 @@
 
 **Repository:** `github.com/croadfeldt/frc-scheduler-server`
 **Document type:** Architecture / design proposal
-**Status:** **Deferred.** Destination architecture, not active work. The active workstream in [`QUALITY_IMPROVEMENT_PLAN.md`](QUALITY_IMPROVEMENT_PLAN.md) focuses on schedule quality first; architectural reorganization comes after. The plan's Phase 5 decision point may revisit this depending on results.
+**Status:** **Deferred.** Destination architecture, not active work. The active workstream in [`../workstreams/scheduler-quality.md`](../workstreams/scheduler-quality.md) focuses on schedule quality first; architectural reorganization comes after. The plan's Phase 5 decision point may revisit this depending on results.
 
 **Companion docs:**
 - `SCHEDULER_QUALITY_ROADMAP.md` — tactical six-phase roadmap; this document reframes that work under a broader architecture

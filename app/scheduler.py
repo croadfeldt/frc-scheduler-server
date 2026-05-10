@@ -1189,7 +1189,7 @@ def run_iterations_worker(args: tuple) -> dict:
 #
 # Contrast with the slot-based SA in assign_teams: that one only relabels
 # which team wears which slot's identity, which is provably a no-op for the
-# canonical score (verified empirically — see QUALITY_IMPROVEMENT_PLAN.md
+# canonical score (verified empirically — see docs/workstreams/scheduler-quality.md
 # Finding 2). The Match-based SA below is the real optimization.
 
 def _build_match_state(matches: list[Match], ideal_gap: int = 3) -> dict:

@@ -53,7 +53,7 @@ BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").strip().rstrip("/")
 
 # Interim admin allow-list: comma-separated email addresses that are
 # automatically promoted to is_admin=true at login time. Replaced
-# by RBAC role grants when docs/RBAC_MODEL.md ships. Whitespace and
+# by RBAC role grants when docs/workstreams/rbac.md ships. Whitespace and
 # case are normalized; an empty value disables the allow-list (no
 # auto-promotion happens, and only manually-set is_admin survives).
 #

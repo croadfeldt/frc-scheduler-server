@@ -2,7 +2,7 @@
 
 **Repository:** `github.com/croadfeldt/frc-scheduler-server`
 **Document type:** Strategic plan / phase planning
-**Status:** **Superseded** by [`QUALITY_IMPROVEMENT_PLAN.md`](QUALITY_IMPROVEMENT_PLAN.md). Retained for historical context. The structural ideas (decompose-then-budget, post-pass pattern, opt-in flags, comparison artifacts) carry forward; the phase ordering and content have been re-prioritized in the active plan based on eval data and a critical finding about the score function consistency in `app/scheduler.py`.
+**Status:** **Superseded** by [`../workstreams/scheduler-quality.md`](../workstreams/scheduler-quality.md). Retained for historical context. The structural ideas (decompose-then-budget, post-pass pattern, opt-in flags, comparison artifacts) carry forward; the phase ordering and content have been re-prioritized in the active plan based on eval data and a critical finding about the score function consistency in `app/scheduler.py`.
 
 **Companion docs:**
 - `PHASE_0_HARD_COOLDOWN_BRIEF.md` — implementation-ready brief for Phase 0 (already drafted; layer-independent and remains valid under any future architectural direction)

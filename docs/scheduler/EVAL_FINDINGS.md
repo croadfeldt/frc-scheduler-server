@@ -2,7 +2,7 @@
 
 **Status**: Eval complete. **Decision: improve our in-house scheduler
 to close the gap to MatchMaker.** Active workstream tracked in
-[`QUALITY_IMPROVEMENT_PLAN.md`](QUALITY_IMPROVEMENT_PLAN.md).
+[`../workstreams/scheduler-quality.md`](../workstreams/scheduler-quality.md).
 MatchMaker is the quality benchmark; licensing prevents using it as
 part of our shipped tool, so the path forward is making our scheduler
 genuinely competitive rather than replacing it. This document captures
@@ -155,7 +155,7 @@ single-fixture data in `ITERATION_CEILING.md` predicting the SA
 closes most of the gap to MatchMaker.
 
 **Phase 5 verdict: just into "investigate further" territory** per
-`QUALITY_IMPROVEMENT_PLAN.md` cutoffs (>30 → investigate). 30.64 is
+`../workstreams/scheduler-quality.md` cutoffs (>30 → investigate). 30.64 is
 on the boundary; the per-metric breakdown below shows the failure
 has narrowed to two specific phenomena, not a broad gap.
 

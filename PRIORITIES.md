@@ -207,7 +207,7 @@ the browser scheduler is tracked in `docs/HANDOFF.md` §5.1.
 
 - `docs/scheduler/FRC_COMPLIANCE.md` — full audit trail spec
 - `docs/scheduler/ITERATION_CEILING.md` — iteration sweep + K* analysis
-- `docs/scheduler/QUALITY_IMPROVEMENT_PLAN.md` — phase-by-phase plan
+- `docs/workstreams/scheduler-quality.md` — phase-by-phase plan
 - `tests/phase0a_lex/SUMMARY.md` — lex score conversion
 - `tests/phase0b_cooldown/SUMMARY.md` — hard cooldown filter
 - `tests/phase0c_targeted/SUMMARY.md` — targeted move generator

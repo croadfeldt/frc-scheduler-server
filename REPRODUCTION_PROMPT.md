@@ -472,7 +472,7 @@ competition-approved + import-cleanup work.
 - REPRODUCTION_PROMPT.md (root): canonical AI onboarding doc, current
 - docs/REPRODUCTION_PROMPT.md: stub redirect to root
 - docs/PRIORITIES.md: overview updated for lex semantics + Phase 2 complete
-- docs/scheduler/QUALITY_IMPROVEMENT_PLAN.md: phases 0-4 marked complete
+- docs/workstreams/scheduler-quality.md: phases 0-4 marked complete
 - README.md: Architecture section updated to FRC §10.5.2 paramount framing
 ```
 
@@ -485,12 +485,15 @@ when the body already mentioned them — it's the grep target.
 
 ## Reading order for new contributors
 
-1. **README.md** — what is this thing, install, run
-2. **`PRIORITIES.md`** (root, this directory) — what the algorithm does
-3. **`docs/HANDOFF.md`** — what's in flight, what's done, what's next
-4. **`docs/PRIORITIES.md`** — algorithmic deep dive (Stage 1/2 details)
-5. **`docs/scheduler/`** — phase-by-phase implementation history
-6. **`tests/phase0a_lex/SUMMARY.md` through `tests/phase2_station/SUMMARY.md`**
-   — per-phase summaries with concrete numbers
+1. **`README.md`** — what is this thing, install, run.
+2. **`PRIORITIES.md`** (root, this directory) — what the algorithm does, the lex tuple semantics.
+3. **`docs/ROADMAP.md`** — where the project is going. v1.0/1.1/1.2/2.0 buckets pointing at design docs.
+4. **`docs/HANDOFF.md`** — per-session log. What just shipped, what's in flight.
+5. **`docs/decisions/`** — Architecture Decision Records (5 to start). Significant choices with reasoning.
+6. **`docs/workstreams/`** — design docs for individual planned workstreams (RBAC, lifecycle phases, UI quality exposure, scheduler quality plan).
+7. **`docs/PRIORITIES.md`** — algorithmic deep dive (Stage 1/2 implementation details).
+8. **`docs/scheduler/`** — algorithm-specific reference and investigation docs.
+9. **`tests/phase0a_lex/SUMMARY.md` through `tests/phase2_station/SUMMARY.md`** — per-phase summaries with concrete numbers.
+10. **`CONTRIBUTING.md`** (root) — commit conventions, test requirements, session-deliverable protocol.
 
 That should be enough to pick up the codebase and contribute.

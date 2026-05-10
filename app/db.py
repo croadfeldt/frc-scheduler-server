@@ -189,7 +189,7 @@ class AssignedSchedule(Base):
     #
     # Lineage chains are allowed: fork-of-fork-of-original. The chain
     # is reconstructable by walking forked_from_id pointers backward
-    # until NULL. Per docs/SCHEDULE_LIFECYCLE.md Part 5.
+    # until NULL. Per docs/workstreams/schedule-lifecycle.md Part 5.
     forked_from_id: Mapped[int|None] = mapped_column(
         BigInteger, ForeignKey("assigned_schedules.id", ondelete="SET NULL"),
         nullable=True, index=True,
@@ -286,7 +286,7 @@ class AssignedScheduleHistory(Base):
     # _was_ever_official() in main.py looks for. Once any row with
     # action='mark-official' exists for a schedule, that schedule
     # is structurally immutable forever — even after unmark-official.
-    # Per docs/SCHEDULE_LIFECYCLE.md Part 4.
+    # Per docs/workstreams/schedule-lifecycle.md Part 4.
     action:        Mapped[str]      = mapped_column(String(16))
     actor_user_id: Mapped[int|None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     actor_name:    Mapped[str|None] = mapped_column(String(256), nullable=True)
@@ -328,7 +328,7 @@ class User(Base):
     email:      Mapped[str|None] = mapped_column(String(256), nullable=True)
     name:       Mapped[str|None] = mapped_column(String(256), nullable=True)
     # Interim admin flag — replaced by RBAC role grants when that
-    # workstream lands (see docs/RBAC_MODEL.md). For now: a single
+    # workstream lands (see docs/workstreams/rbac.md). For now: a single
     # boolean granting cross-event override authority. Set via the
     # ADMIN_EMAILS env-var allow-list at login time, or directly
     # via DB. Capabilities gated on this flag:
@@ -338,7 +338,7 @@ class User(Base):
     #     remains for now; admin override can be added later if
     #     operationally needed)
     #   - Future: unmark-official, force-unlock, etc. (per
-    #     SCHEDULE_LIFECYCLE.md Phase E)
+    #     docs/workstreams/schedule-lifecycle.md Phase E)
     is_admin:   Mapped[bool]     = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -535,14 +535,14 @@ async def init_db(retries: int = 10, delay: float = 2.0) -> None:
                     "ALTER TABLE abstract_schedules ADD COLUMN IF NOT EXISTS weights JSONB"
                 ))
                 # Interim admin flag — replaced by RBAC role grants
-                # (docs/RBAC_MODEL.md) when that workstream lands.
+                # (docs/workstreams/rbac.md) when that workstream lands.
                 # Default false for all existing users; promotion
                 # happens via ADMIN_EMAILS env-var allow-list at
                 # login or by direct DB UPDATE.
                 await conn.execute(text(
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"
                 ))
-                # Lineage pointer for forks (docs/SCHEDULE_LIFECYCLE.md
+                # Lineage pointer for forks (docs/workstreams/schedule-lifecycle.md
                 # Part 5). NULL on existing rows means "original";
                 # forks set this to the parent schedule's id.
                 await conn.execute(text(

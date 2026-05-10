@@ -5,7 +5,7 @@
 **Audience:** Whoever deploys or maintains the server
 **Companion docs:**
 - `AUTH_DESIGN.md` — authentication model + endpoint enforcement
-- `SCHEDULE_LIFECYCLE.md` — what authentication enables (audit, locks, freeze)
+- `workstreams/schedule-lifecycle.md` — what authentication enables (audit, locks, freeze)
 
 This document is the step-by-step for configuring Google and Apple
 sign-in. The codebase already implements both providers in
@@ -441,7 +441,7 @@ oc set env deployment/frc-scheduler-server --from=secret/frc-scheduler-jwt
 
 ### `ADMIN_EMAILS` (when shipping `is_admin` Phase E)
 
-Once Phase E of `SCHEDULE_LIFECYCLE.md` ships, this env var
+Once Phase E of `workstreams/schedule-lifecycle.md` ships, this env var
 designates which users get the `is_admin=true` flag set on login.
 
 ```

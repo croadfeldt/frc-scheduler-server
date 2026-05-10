@@ -1658,7 +1658,7 @@ async def _was_ever_official(
 ) -> bool:
     """Return True if this schedule has ever been marked official.
 
-    Per docs/SCHEDULE_LIFECYCLE.md Part 4: structural immutability
+    Per docs/workstreams/schedule-lifecycle.md Part 4: structural immutability
     is permanent. Once a schedule has been marked official, its
     structural fields (slot_map, day_config, practice_matches,
     name) are frozen forever — even after unmark-official. The
@@ -1741,7 +1741,7 @@ async def patch_assigned_schedule(
                    "Unfreeze the event, or duplicate this schedule to edit a sandbox copy.",
         )
     # 2. Ever-official → permanent structural immutability. Per
-    #    docs/SCHEDULE_LIFECYCLE.md Part 4: once a schedule has been
+    #    docs/workstreams/schedule-lifecycle.md Part 4: once a schedule has been
     #    marked official, even once, its structural fields are
     #    frozen forever. Unmarking does NOT restore mutability.
     #    Forking is the only path forward.
@@ -2540,7 +2540,7 @@ async def duplicate_assigned_schedule(
         slot_map=src.slot_map, day_config=src.day_config,
         practice_matches=src.practice_matches,
         assign_seed=src.assign_seed,
-        # Lineage pointer — see docs/SCHEDULE_LIFECYCLE.md Part 5.
+        # Lineage pointer — see docs/workstreams/schedule-lifecycle.md Part 5.
         # Set unconditionally for any duplicate so the lineage chain
         # exists for both "casual copy" and "fork from once-official"
         # use cases. Walking the chain backward via forked_from_id

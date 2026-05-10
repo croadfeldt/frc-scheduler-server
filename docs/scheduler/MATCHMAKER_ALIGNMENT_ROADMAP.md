@@ -1,6 +1,6 @@
 # FRC Scheduler Server — MatchMaker Alignment Roadmap
 
-> ⚠ **Superseded** by [`QUALITY_IMPROVEMENT_PLAN.md`](QUALITY_IMPROVEMENT_PLAN.md). Retained for historical context. The licensing brief at [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md) constrains all work in this direction; the active plan reflects those constraints plus eval-data-driven re-prioritization.
+> ⚠ **Superseded** by [`../workstreams/scheduler-quality.md`](../workstreams/scheduler-quality.md). Retained for historical context. The licensing brief at [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md) constrains all work in this direction; the active plan reflects those constraints plus eval-data-driven re-prioritization.
 
 **Repository:** `github.com/croadfeldt/frc-scheduler-server`
 **Document type:** Strategic plan / phase planning

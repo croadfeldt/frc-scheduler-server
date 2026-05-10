@@ -12,15 +12,14 @@ cycle-time-change off-by-one regression fix, documentation-status
 sweep surfacing the RBAC + lifecycle workstreams, a UI quality-tools
 audit producing a four-tier exposure roadmap, the day-banner override
 double-stamp fix, eval-harness methodology correction (adapter was
-running `sa_iterations=0`), and the corrected re-run landing at
-mean composite 30.64 (down from 40.12 SA-disabled baseline) with
-the failure narrowed to two specific phenomena. Three layered
-xlsx-import bugs in §4.7, auth-removal in §4.8, doc convention in
-§4.9, cycle-change semantics in §4.10. Tracked workstreams in §5.6
-(RBAC), §5.7 (lifecycle phases D/F/G), §5.8 (UI exposure of harness
-quality data), and §5.9 (Phase 5 active — Plan A diagnose-first is
-the gate for whether Plan B post-pass-budget bump or Plan C
-lex-tuple-expansion is the right next investment).
+running `sa_iterations=0`), the corrected re-run landing at mean
+composite 30.64 (down from 40.12 SA-disabled baseline) with the
+failure narrowed to two specific phenomena, a Phase 5 Plan A
+diagnostic script kicked off on Stark, and a doc-structure
+reorganization producing `docs/ROADMAP.md` as the canonical "where
+we're going," `docs/decisions/` for ADRs (5 to start), and
+`docs/workstreams/` for per-workstream design docs (renamed from
+the prior scatter at `docs/`).
 
 ---
 
@@ -55,9 +54,10 @@ all surface FRC compliance state to the user.
 | **Session-deliverable protocol documented** (this session)       | ✓ | Two-tarball + commit-ready-commands + commit-message-style convention canonicalised in `REPRODUCTION_PROMPT.md`. §4.9. |
 | **Cycle-change off-by-one regression** (this session)            | ✓ | `afterMatch=N` now correctly applies new ct to gap N→N+1 per V2_SPEC §7 (was N+1→N+2). Six application sites fixed. §4.10. |
 | **Eval-harness SA path measurement** (this session)              | ✓ | Adapter was defaulting `sa_iterations=0` since Phase 0; both historical baselines reflected SA-disabled config. Default corrected, CLI flags added, regression test landed. **Re-run completed: mean composite 30.64** (vs 40.12 SA-disabled baseline). Phase 5 active; failure narrowed to `max_station_spread` + `repeat_opponents` on high-MPT fixtures. §5.9. |
-| Schedule lifecycle (Phases A/B/C/E shipped; D/F/G open)          | ◐ | Auth-mandatory + fork + structural-immutability + is_admin shipped. `event_audit_events` table, lock TTL/heartbeat, lifecycle response field deferred. See `docs/SCHEDULE_LIFECYCLE.md` and §5.7. |
-| RBAC (proper roles + permissions)                                | ☐ | Designed in `docs/RBAC_MODEL.md` (5 roles, 7 phases R-1..R-7); zero implementation. Current model is interim `is_admin` flag. Paused pending change-freeze lift + open-question decisions. §5.6. |
-| UI exposure of `scheduler_eval` quality data                     | ☐ | Designed in `docs/UI_QUALITY_EXPOSURE.md` — 4-tier plan to surface per-pair / per-team / lex-tuple / reference-comparison detail in the editor + viewer. Today only the headline diversity card is shown. §5.8. |
+| **Doc structure reorganization** (this session)                  | ✓ | New `docs/ROADMAP.md` as single source of truth for "where we're going"; new `docs/decisions/` with ADRs 001–005 capturing lex tuple, FRC paramount, three-layer architecture, no-reproducibility-guarantee, and MatchMaker-as-peer; renamed `docs/RBAC_MODEL.md` → `docs/workstreams/rbac.md`, `docs/SCHEDULE_LIFECYCLE.md` → `docs/workstreams/schedule-lifecycle.md`, `docs/UI_QUALITY_EXPOSURE.md` → `docs/workstreams/ui-quality-exposure.md`, `docs/scheduler/QUALITY_IMPROVEMENT_PLAN.md` → `docs/workstreams/scheduler-quality.md`, `docs/SCHEDULE_COMPARISON_AND_NAMED_HISTORY.md` → `docs/workstreams/schedule-comparison.md`. New `CONTRIBUTING.md` extracts the session-deliverable protocol. README updated to reflect the no-reproducibility-guarantee policy. All cross-references updated. |
+| Schedule lifecycle (Phases A/B/C/E shipped; D/F/G open)          | ◐ | Auth-mandatory + fork + structural-immutability + is_admin shipped. `event_audit_events` table, lock TTL/heartbeat, lifecycle response field deferred. See `docs/workstreams/schedule-lifecycle.md` and §5.7. |
+| RBAC (proper roles + permissions)                                | ☐ | Designed in `docs/workstreams/rbac.md` (5 roles, 7 phases R-1..R-7); zero implementation. Current model is interim `is_admin` flag. Paused pending change-freeze lift + open-question decisions. §5.6. |
+| UI exposure of `scheduler_eval` quality data                     | ☐ | Designed in `docs/workstreams/ui-quality-exposure.md` — 4-tier plan to surface per-pair / per-team / lex-tuple / reference-comparison detail in the editor + viewer. Today only the headline diversity card is shown. §5.8. |
 
 ---
 
@@ -403,7 +403,7 @@ in hand for the first time.
 
 **Headline result:** mean composite 30.64 (down from the SA-disabled
 40.12), 16/16 fixtures comparable. Just over the 30-cutoff that
-triggers "investigate further" per `QUALITY_IMPROVEMENT_PLAN.md`,
+triggers "investigate further" per `workstreams/scheduler-quality.md`,
 but the failure has narrowed to two specific phenomena rather than
 broad poor performance.
 
@@ -460,7 +460,7 @@ python3 -m scripts.scheduler_eval.runner \
 
 ### 5.6 RBAC (proper roles + permissions) — designed, paused
 
-Full design lives in `docs/RBAC_MODEL.md` (~935 lines, status:
+Full design lives in `docs/workstreams/rbac.md` (~935 lines, status:
 "Proposal — paused"). Five roles: Admin / Support (global) and
 Owner / Manager / Viewer (event-scoped), with implicit Public for
 read-only `/view`. Capability matrix, delegation rules ("you can
@@ -473,7 +473,7 @@ is the `is_admin` interim flag (see §5.7). No `role_grants` /
 `role_requests` / `notifications` tables exist; no `can(user,
 capability)` checker. The doc is explicit that all 7 phases (R-1..
 R-7) are paused pending change-freeze lift + decisions on the seven
-open design questions in `RBAC_MODEL.md` "Open design questions."
+open design questions in `workstreams/rbac.md` "Open design questions."
 
 R-1 is the foundation everything else builds on (schema +
 authorization checker, replacing `is_admin` references). Doc
@@ -485,7 +485,7 @@ the tool starts being shared beyond a single team's internal use.
 
 ### 5.7 Schedule-lifecycle phases D / F / G — partially shipped
 
-Full design lives in `docs/SCHEDULE_LIFECYCLE.md` (~1019 lines,
+Full design lives in `docs/workstreams/schedule-lifecycle.md` (~1019 lines,
 status: "Draft for implementation"). 7 phases (A–G) plus Part 13's
 layered authorization rules.
 
@@ -519,7 +519,7 @@ layered authorization rules.
   the event freeze flag. Schema changes: none required; pure
   read-side enrichment.
 
-Each is independently shippable per `SCHEDULE_LIFECYCLE.md` Part 11.
+Each is independently shippable per `workstreams/schedule-lifecycle.md` Part 11.
 F is the highest-immediate-UX-value (kills the "dead lock from
 closed tab" papercut); G removes a class of frontend bugs by
 centralising the layering check; D unblocks the audit-log UI
@@ -527,7 +527,7 @@ workstream.
 
 ### 5.8 UI exposure of `scheduler_eval` quality data — designed, parked
 
-Full design lives in `docs/UI_QUALITY_EXPOSURE.md`. Status: future
+Full design lives in `docs/workstreams/ui-quality-exposure.md`. Status: future
 roadmap, no active development. Captures a four-tier plan for
 surfacing harness-side quality measurements in the editor and
 viewer UIs.
@@ -736,13 +736,11 @@ this doc covers what's done + what's pending.
 
 If you're picking this up:
 
-1. **Read this handoff + `REPRODUCTION_PROMPT.md` + `PRIORITIES.md`** in that order.
-2. **Open items** are §5 above — split into two buckets:
-   - *Scheduler-quality polish*: browser scheduler retirement (5.1), container parallelism investigation (5.2), par_quad outlier diagnosis (5.3), and most importantly the **eval re-run with the corrected harness configuration (5.9)** — the previous "we're still poor" verdict was based on `sa_iterations=0`. The corrected re-run is the gate for any structural decisions about the algorithm.
-   - *Authorization + lifecycle*: schedule-lifecycle phases D/F/G (5.7) and the full RBAC workstream (5.6). Both have detailed dedicated docs (`SCHEDULE_LIFECYCLE.md`, `RBAC_MODEL.md`) but neither is in active development. Paused pending change-freeze lift and open-question decisions; tracked here so they don't drift out of sight.
-   - *UI exposure of harness work*: surfacing `scheduler_eval` quality data in the editor + viewer (5.8). Designed in `UI_QUALITY_EXPOSURE.md` as a four-tier plan; no active development. Today's editor card is effective at what it does but hides per-pair / per-team detail and the lex tuple.
+1. **Read in order:** `README.md` → `PRIORITIES.md` (algorithm spec) → `docs/ROADMAP.md` (where this is going) → this HANDOFF (recent session log) → `docs/decisions/` (architectural decisions) → `docs/workstreams/` (per-workstream design docs as needed).
+2. **Open items** live in `docs/ROADMAP.md`, not in this handoff. HANDOFF's §5 is a per-session view of in-flight work; ROADMAP is the canonical "where we're going."
 3. **For state events**, recommend Stark via best-of-30 at SA=2M (~75s wall-clock). Container "Best" works but with the caveat in §5.2.
-4. **Never silently bypass FRC §10.5.2 paramount.** The lex tuple is the contract. Cooldown comes first, always.
-5. **MatchMaker is a peer**, not a competitor. The framing throughout the codebase reflects this.
+4. **Never silently bypass FRC §10.5.2 paramount.** The lex tuple is the contract. Cooldown comes first, always. See ADR 002.
+5. **MatchMaker is a peer**, not a competitor. See ADR 005.
+6. **The schedule itself is the artifact.** Bit-exact replay from seed isn't guaranteed across algorithm versions. See ADR 004.
 
-The scheduler core is in good shape, all tests pass, algorithm work is mostly polish + diagnostics from here. The remaining substantive work is on the authorization side — see §5.6 / §5.7 and the dedicated docs they point to.
+The scheduler core is in good shape; quality is narrowly poor (mean composite 30.64 across 16 fixtures) with two specific phenomena driving the gap; Phase 5 diagnostics running on Stark as of 2026-05-10 will determine whether the next investment is Plan B (post-pass budget) or Plan C (lex-tuple expansion).

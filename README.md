@@ -276,12 +276,12 @@ This means a compromised container cannot reach other cluster services or intern
 Stage 1 — Abstract Schedule
   Input:  numTeams, matchesPerTeam, cooldown, seed (hex)
   Output: slot-indexed match structure (no real team numbers)
-          reproducible: same seed → identical structure
+          deterministic within an algorithm version
 
 Stage 2 — Team Assignment
   Input:  abstract schedule + event roster + assign_seed (hex)
   Output: slot_map {slot: team_number}, lex SA + post-pass optimized
-          reproducible: same assign_seed → identical mapping
+          deterministic within an algorithm version
 ```
 
 > 📐 **FRC §10.5.2 paramount lexicographic semantics.** Cooldown is
@@ -349,7 +349,15 @@ Both stages use deterministic seeded PRNGs:
 - JS: mulberry32 (`makeRng(parseInt(seed, 16))`)
 - Python: `random.Random(int(seed, 16))`
 
-Same seed always produces identical output. Seeds are auto-generated, stored in the database, and encoded in the share URL so any schedule can be exactly reproduced.
+Within a single algorithm version, the same seed produces identical
+output. Seeds are auto-generated, stored in the database, and
+encoded in share URLs as informational metadata. **The schedule
+itself — saved in the database — is the artifact.** Share URLs
+fetch the saved schedule from the DB rather than regenerating from
+seed, so user-facing replay is robust regardless of algorithm
+changes. Bit-exact regeneration from seed is not guaranteed across
+algorithm versions; see ADR 004 in `docs/decisions/` for the policy
+and rationale.
 
 ---
 
@@ -536,7 +544,11 @@ Non-numbers are silently skipped. Duplicates ignored. After import, TBA is queri
 - Match rows have `id="schedule-match-N"` for direct scroll targeting
 - `scrollToMatch(N)` and `scrollToDay(N)` both use `getBoundingClientRect()` for reliable cross-browser positioning
 
-### URL reproducibility
+### URL parameters
+
+The editor encodes its full state in the URL so a configuration
+can be shared as a link. The schedule itself is fetched from the
+database (via `sid`), not regenerated from seed.
 
 ```
 ?n=51&mpt=11&cd=3&ct=8&days=2&seed=a1b2c3d4&aseed=cafebabe
