@@ -42,7 +42,85 @@ inventory and re-run. Takes ~15-20 minutes on Stark.
 
 ---
 
-## TL;DR
+## ⚠️ Methodology correction (2026-05-10)
+
+**Both the 49.29 baseline below and the 40.12 follow-up re-run on
+2026-05-10 were generated with `sa_iterations=0` — the SA optimization
+pass was silently disabled.** Cause: the `FrcSchedulerServerAdapter`
+defaulted `sa_iterations=0` and the runner had no CLI flag to override
+it, so every harness invocation tested construction + post-passes only,
+not the algorithm production users actually get from the UI.
+
+What the 49.29 → 40.12 numbers actually measure:
+
+| Number | Date | Configuration | What it represents |
+|---|---|---|---|
+| 49.29 | 2026-05-09 | construction only, no post-passes shipped yet | pre-Phase-1 baseline |
+| 40.12 | 2026-05-10 | construction + R/B post-pass + Sykes station post-pass, **SA still disabled** | post-Phase-2 result, SA never measured |
+| (pending) | (next run) | construction + post-passes + SA | what the production scheduler actually delivers |
+
+The improvement from 49.29 to 40.12 is real and isolates the
+post-passes' contribution: R/B post-pass (Phase 1) and Sykes station
+post-pass (Phase 2) ship and work as designed. But Phase 0's SA
+unification (lex tuple, hard cooldown, targeted moves) and Phase 4's
+quality-preset infrastructure (50K / 500K / 2M / 5M) are completely
+unmeasured by these two runs.
+
+**Single-fixture data does suggest the SA is doing real work.** From
+`docs/scheduler/ITERATION_CEILING.md`, on `2026mnst` (36 teams × 7 MPT)
+best-of-30 at SA=2M produces a lex tuple `(0, 252, 404, 0, 1, 39, 0, 0)`
+— matching MatchMaker's `(0, 252, 416, 0, 3, 65, 0, 0)` on cooldown +
+partner-floor and beating it on opp_quad, rb_metric, station_pen.
+That's strong evidence the SA closes most of the gap on at least one
+fixture. The 16-fixture eval needs to be rerun with SA actually
+enabled before any conclusions can be drawn about scaling to other
+fixture sizes.
+
+### Fix (2026-05-10)
+
+- `FrcSchedulerServerAdapter.__init__`: default `sa_iterations` is now
+  `DEFAULT_SA_ITERATIONS = iterations_for_preset(DEFAULT_PRESET)`
+  (currently `'good'` = 500K), matching what UI users get. Explicit
+  `sa_iterations=0` still works for reproducing the historical
+  construction-only baseline.
+- `runner.py` gains two CLI flags:
+  - `--sa-iterations N` — explicit iteration count
+  - `--quality-preset {fair,good,best,maximum}` — friendly preset name
+  - When both are passed, `--sa-iterations` wins. When neither is
+    passed, the adapter's default applies.
+- The eval banner and per-fixture diagnostics now show the resolved
+  SA iteration count + preset name. A reader looking at any report can
+  see exactly what was tested without checking source.
+- Regression test `tests/test_eval_harness_sa_plumbing.py` (19 checks)
+  pins the default to non-zero, validates the CLI resolution logic,
+  and asserts both flags are declared. If anyone resets the default
+  to 0 thinking "construction-only is safer," tests fail.
+
+### Re-run command for the post-Phase-4 baseline
+
+```bash
+python3 -m scripts.scheduler_eval.runner \
+    --fixtures all \
+    --adapters frc-scheduler-server,actual,matchmaker \
+    --trials 100 \
+    --workers 36 \
+    --quality-preset best
+```
+
+Wall-clock estimate on Stark with 36 workers: ~55 minutes (16
+fixtures × 100 trials × 75s for SA=2M, divided across 36 cores).
+Faster sanity check at `--quality-preset good` (~15 min total) or
+`--quality-preset fair` (~3 min total) to see whether the gap closes
+substantially before committing to the longer run.
+
+The data sections below remain useful as historical reference but
+should be read with the caveat that the `frc-scheduler-server` column
+reflects the unmeasured-SA configuration. Re-run results will replace
+them.
+
+---
+
+## TL;DR (historical — pre-correction; see methodology note above)
 
 Our in-house scheduler is significantly worse than both Idle Loop's
 MatchMaker and FRC's actually-published schedules across a representative

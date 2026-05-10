@@ -2,7 +2,7 @@
 
 **Repository:** `github.com/croadfeldt/frc-scheduler-server`
 **Document type:** Active workstream plan
-**Status:** **Phases 0–4 complete.** Scheduler change-freeze lifted (post-2026mnst). All planned scheduler-quality phases have shipped. Phase 5 (decision point on CP-SAT / BIBD / further SA tuning) is the only open item.
+**Status:** **Phases 0–4 complete.** Scheduler change-freeze lifted (post-2026mnst). All planned scheduler-quality phases have shipped. Phase 5 (decision point on CP-SAT / BIBD / further SA tuning) is currently blocked on **eval methodology correction** — the harness was running with `sa_iterations=0` (construction-only) since the Phase 0 refactor, so neither the 49.29 nor the 40.12 baseline measured the SA path. Adapter default has been corrected (2026-05-10) and the harness gained `--sa-iterations` / `--quality-preset` flags; rerun pending. See [`EVAL_FINDINGS.md`](EVAL_FINDINGS.md) "Methodology correction" section.
 
 **Progress:**
 - ✅ **Phase 0** (Unified Stage 2 with true SA + lex semantics): complete. See `tests/phase0_unified/SUMMARY.md`, `tests/phase0a_lex/SUMMARY.md`, `tests/phase0b_cooldown/SUMMARY.md`, `tests/phase0c_targeted/SUMMARY.md`. Lex tuple is now authoritative; cooldown paramount; targeted move generator improves convergence on criterion #3.
@@ -272,15 +272,51 @@ Expose as UI dropdown next to "Generate" and as `&q=fair|good|best` URL paramete
 
 ### Phase 5 — Decision point
 
-After Phase 4, run the eval harness and assess:
+**Status (2026-05-10):** Blocked on eval re-run with the correct
+harness configuration. The previously-run eval (40.12 mean composite,
+flagged "investigate further" by the cutoffs below) was generated with
+`sa_iterations=0` — construction + post-passes only, no SA. The
+harness adapter default has been corrected and a re-run with
+`--quality-preset best` is the gate to make the Phase 5 decision.
+
+After re-running the eval at the proper SA budget, assess:
 
 | Eval result | Decision |
 |---|---|
 | Mean composite ≤ 20 | Done. Ship it. |
-| Mean composite 20-30 | Acceptable. Ship and reassess. Targeted improvements only. |
+| Mean composite 20–30 | Acceptable. Ship and reassess. Targeted improvements only. |
 | Mean composite > 30 | Investigate further. Options: Stage 1 BIBD seeding (deterministic-first phase before SA), CP-SAT plugin for small events, smarter SA temperature schedules. |
 
-The decision is made on data, not in advance. Reserve 0.5 day for the assessment.
+**Diagnostic data needed even if composite is acceptable.** The
+single-fixture analysis on 2026mnst suggests the SA closes most of
+the gap to MatchMaker on that one fixture, but we don't yet know
+whether it scales. If the eval re-run shows a size-scaling pattern
+(small fixtures fine, large fixtures poor), that's a different
+investigation than "broken across the board." See `EVAL_FINDINGS.md`
+"Methodology correction" for the size-scaling pattern observed in
+the construction-only run; whether it persists with SA enabled is
+the central diagnostic.
+
+Sub-items already known regardless of eval outcome:
+
+- **Per-metric aggregate view in the report** (`EVAL_FINDINGS.md`
+  known-issue #2, ~30–60 min). Tells us *which metric × fixture-size*
+  combinations are bottlenecks; useful for any "investigate further"
+  path.
+- **Threshold tuning for `max_color_imbalance`** (~1–2 hours). The
+  current ≤1 / ≤2 thresholds are strict enough that even MatchMaker
+  classifies "12 of 13 poor" overall; the eval composite is dragged
+  by a metric where MM doesn't have a real edge.
+- **Three odd-team-count fixtures still error on MatchMaker.**
+  `EVAL_FINDINGS.md` claims `[FIXED 2026-05-09]` but the 2026-05-10
+  re-run still showed errors on 2023mnmi (61t), 2024mndu (55t),
+  2025mnmi (51t). Either the fix didn't ship or the underlying issue
+  is different. Independent of the SA-iterations correction; worth a
+  5-minute look.
+
+The decision is made on data from the corrected re-run, not from
+either of the two prior SA-disabled runs. Reserve 0.5 day for the
+assessment after the rerun lands.
 
 ---
 
@@ -296,6 +332,14 @@ Per [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md):
 
 ### Eval baselines (current, from 2026-05-09 run)
 
+> ⚠️ **Both this baseline and the 2026-05-10 follow-up reran with the
+> same SA-disabled configuration** (`sa_iterations=0`). The 49.29 below
+> measures construction-only with no post-passes shipped yet; the
+> later 40.12 measures construction + R/B + station post-passes,
+> still no SA. Neither measures the algorithm production users
+> actually get. See `EVAL_FINDINGS.md` "Methodology correction" for
+> details and the corrected re-run command.
+
 | Adapter | Mean composite | Wins vs ours | Wins vs actual |
 |---|---|---|---|
 | matchmaker | 16.65 | 13W-0L | 5W-1L-7T |
@@ -303,6 +347,12 @@ Per [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md):
 | frc-scheduler-server | 49.29 | — | 2W-14L |
 
 ### Per-phase quality targets
+
+> Per-phase targets below are from the original plan and assume the
+> eval harness measures the SA path. Since the harness was not
+> measuring SA until the 2026-05-10 fix, no phase has been validated
+> against its target yet. Re-running the eval at `--quality-preset best`
+> is the next step before any of these are meaningful.
 
 | After phase | Target frc-scheduler-server mean composite | Rationale |
 |---|---|---|

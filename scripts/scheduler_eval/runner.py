@@ -55,6 +55,15 @@ from scripts.scheduler_eval.adapters import (
 from scripts.scheduler_eval.harness_types import Fixture, Schedule
 from scripts.scheduler_eval.metrics import analyze, AnalysisReport, THRESHOLDS
 
+# Quality-preset resolver — maps friendly names ('good', 'best', etc.)
+# to SA iteration counts. Single source of truth for both UI and
+# harness so the adapter, the API endpoint, and this runner agree.
+from app.quality_presets import (
+    QUALITY_PRESETS,
+    iterations_for_preset,
+    preset_for_iterations,
+)
+
 
 HERE         = Path(__file__).parent
 FIXTURES_DIR = HERE / "fixtures"
@@ -474,6 +483,18 @@ def write_markdown_report(out_path: Path, run_id: str, fixtures: list[Fixture],
                     notes_list.append(f"score={diag['stage1_score']:.0f}")
                 if diag.get("source"):
                     notes_list.append(f"source={diag['source']}")
+                # Surface the SA iteration count for frc-scheduler-server
+                # so reports are self-describing — a reader looking at an
+                # old report can see whether SA was running and at what
+                # budget. Hides the field when the adapter doesn't expose
+                # it (actual, matchmaker) so the column stays clean.
+                if "sa_iterations" in diag:
+                    sa = diag["sa_iterations"]
+                    preset = preset_for_iterations(sa)
+                    if preset:
+                        notes_list.append(f"sa_iters={sa:,} ({preset})")
+                    else:
+                        notes_list.append(f"sa_iters={sa:,}")
                 lines.append(f"| {an} | {_classification_marker(overall)} {overall} | "
                              f"{composite:.2f} | {t_sec:.2f}s | {', '.join(notes_list)} |")
             else:
@@ -599,7 +620,32 @@ def main():
     ap.add_argument("--out-dir", default=str(REPORTS_DIR))
     ap.add_argument("--actual-csv", default=None,
                     help="path to a CSV for the 'actual' adapter (single-fixture mode)")
+    # SA iteration knobs for the frc-scheduler-server adapter. Either flag
+    # may be passed; --quality-preset is the friendly form, --sa-iterations
+    # is the explicit override. If both are passed, --sa-iterations wins
+    # (explicit beats friendly). If neither is passed, the adapter falls
+    # through to its DEFAULT_SA_ITERATIONS (the UI's default preset).
+    # Historical note: prior to 2026-05-10 the runner had no way to set
+    # this; the adapter defaulted to 0 (construction-only). The 49.29 and
+    # 40.12 baselines in EVAL_FINDINGS.md were both run with no SA. Use
+    # --sa-iterations 0 to reproduce those construction-only baselines.
+    ap.add_argument("--sa-iterations", type=int, default=None,
+                    help="explicit SA iteration count for frc-scheduler-server "
+                         "(overrides --quality-preset). 0 = construction only.")
+    ap.add_argument("--quality-preset", default=None,
+                    choices=sorted(QUALITY_PRESETS.keys()),
+                    help="UI-friendly preset name for frc-scheduler-server. "
+                         "Resolves to an iteration count via app/quality_presets.py.")
     args = ap.parse_args()
+
+    # Resolve the SA iteration count. Explicit --sa-iterations wins. If
+    # only --quality-preset is given, look it up. If neither, leave as
+    # None and let the adapter's DEFAULT_SA_ITERATIONS apply.
+    resolved_sa: int | None = None
+    if args.sa_iterations is not None:
+        resolved_sa = args.sa_iterations
+    elif args.quality_preset is not None:
+        resolved_sa = iterations_for_preset(args.quality_preset)
 
     # ── Load fixtures ───────────────────────────────────────────────
     if args.fixtures == "all":
@@ -623,6 +669,21 @@ def main():
     print(f"Adapters: {adapter_names}")
     print(f"Trials:   {args.trials}")
     print(f"Workers:  {args.workers}")
+    # Surface the SA iteration count so the run banner reflects exactly
+    # what the harness is testing. Without this it's easy to run with
+    # default settings and not realize the SA isn't running (this hid
+    # the 0-iteration default until 2026-05-10).
+    if "frc-scheduler-server" in adapter_names:
+        if resolved_sa is not None:
+            preset_name = preset_for_iterations(resolved_sa) or "custom"
+            print(f"SA iters: {resolved_sa:,} ({preset_name}) — frc-scheduler-server")
+        else:
+            from scripts.scheduler_eval.adapters.frc_scheduler_server import (
+                DEFAULT_SA_ITERATIONS,
+            )
+            preset_name = preset_for_iterations(DEFAULT_SA_ITERATIONS) or "custom"
+            print(f"SA iters: {DEFAULT_SA_ITERATIONS:,} ({preset_name}, "
+                  f"adapter default) — frc-scheduler-server")
     print()
 
     # ── Build the work list ─────────────────────────────────────────
@@ -641,6 +702,13 @@ def main():
                     kwargs["binary"] = args.matchmaker_binary
                 trials = args.trials
             elif an == "frc-scheduler-server":
+                # Pass the resolved SA budget through to the adapter. If
+                # nothing was specified on the CLI, leave kwargs empty
+                # and let the adapter's DEFAULT_SA_ITERATIONS apply —
+                # that way "no flag" means "what the UI's default users
+                # get," not "construction-only."
+                if resolved_sa is not None:
+                    kwargs["sa_iterations"] = resolved_sa
                 trials = args.trials
             else:
                 trials = args.trials

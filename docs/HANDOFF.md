@@ -5,16 +5,22 @@ project. Practical, terse, code-anchored — same convention as the rest of
 `docs/`. Read this first if you're new to the codebase or coming back
 after a gap.
 
-Last updated: 2026-05-10, end of the practice-import-from-MatchMaker-xlsx
-debugging session, render-pdf auth removal, session-deliverable protocol
-documentation, cycle-time-change off-by-one regression fix,
-documentation-status sweep surfacing the RBAC + lifecycle workstreams,
-and a follow-up audit of the UI-side schedule-quality tools that
+Last updated: 2026-05-10, after a series of fixes and audits: practice-
+import-from-MatchMaker-xlsx debugging, render-pdf auth removal, session-
+deliverable protocol documentation, cycle-time-change off-by-one
+regression fix, documentation-status sweep surfacing the RBAC + lifecycle
+workstreams, a follow-up audit of UI-side schedule-quality tools that
 produced a roadmap doc for exposing the `scheduler_eval` harness work
-in the UI. Three layered xlsx-import bugs in §4.7, auth-removal in
-§4.8, doc convention in §4.9, cycle-change semantics in §4.10. Three
-new tracked workstreams in §5.6 (RBAC), §5.7 (lifecycle phases D/F/G),
-and §5.8 (UI exposure of harness quality data).
+in the UI, the day-banner override double-stamp fix, and finally an
+eval-methodology correction: the harness was running with
+`sa_iterations=0` since the Phase 0 refactor, so neither the 49.29
+nor the 40.12 baseline measured the SA path. Adapter default fixed,
+CLI flags added, regression test landed; corrected re-run pending.
+Three layered xlsx-import bugs in §4.7, auth-removal in §4.8, doc
+convention in §4.9, cycle-change semantics in §4.10. Three new tracked
+workstreams in §5.6 (RBAC), §5.7 (lifecycle phases D/F/G), §5.8 (UI
+exposure of harness quality data), and §5.9 (eval re-run pending after
+methodology correction).
 
 ---
 
@@ -48,6 +54,7 @@ all surface FRC compliance state to the user.
 | **Print + export unauthenticated** (this session)                | ✓ | `render-pdf` no longer requires auth; matches `/teams/export` posture. §4.8. |
 | **Session-deliverable protocol documented** (this session)       | ✓ | Two-tarball + commit-ready-commands + commit-message-style convention canonicalised in `REPRODUCTION_PROMPT.md`. §4.9. |
 | **Cycle-change off-by-one regression** (this session)            | ✓ | `afterMatch=N` now correctly applies new ct to gap N→N+1 per V2_SPEC §7 (was N+1→N+2). Six application sites fixed. §4.10. |
+| **Eval-harness SA path measurement** (this session)              | ✓ | Adapter was defaulting `sa_iterations=0` since Phase 0; both historical baselines reflected SA-disabled config. Default corrected to UI's `'good'` preset; `--sa-iterations` + `--quality-preset` CLI flags added; regression test landed. Re-run pending. §5.9. |
 | Schedule lifecycle (Phases A/B/C/E shipped; D/F/G open)          | ◐ | Auth-mandatory + fork + structural-immutability + is_admin shipped. `event_audit_events` table, lock TTL/heartbeat, lifecycle response field deferred. See `docs/SCHEDULE_LIFECYCLE.md` and §5.7. |
 | RBAC (proper roles + permissions)                                | ☐ | Designed in `docs/RBAC_MODEL.md` (5 roles, 7 phases R-1..R-7); zero implementation. Current model is interim `is_admin` flag. Paused pending change-freeze lift + open-question decisions. §5.6. |
 | UI exposure of `scheduler_eval` quality data                     | ☐ | Designed in `docs/UI_QUALITY_EXPOSURE.md` — 4-tier plan to surface per-pair / per-team / lex-tuple / reference-comparison detail in the editor + viewer. Today only the headline diversity card is shown. §5.8. |
@@ -387,6 +394,70 @@ Find K* per the tight-criterion definition. Levels 10M, 20M, 50M.
 ~5 hours wall-clock on Stark. Documented in
 `docs/scheduler/ITERATION_CEILING.md` "Future work".
 
+### 5.9 Eval-harness SA path measurement — corrected, rerun pending
+
+**Status:** Methodology fix shipped 2026-05-10; corrected re-run is
+the next concrete action.
+
+**The bug:** From the Phase 0 refactor through 2026-05-10, the
+scheduler-eval harness ran with `sa_iterations=0`. The
+`FrcSchedulerServerAdapter` defaulted to 0 and the runner had no CLI
+flag to override it. Every run measured construction + post-passes
+only — not the SA path that production users get from the UI. Both
+historical baselines in `EVAL_FINDINGS.md` (49.29 from 2026-05-09 and
+40.12 from the 2026-05-10 re-run) reflect this configuration, not
+the post-Phase-4 algorithm.
+
+Per-trial wall-clock confirmed it: ~0.7s per trial vs the ~20s/75s
+that SA at "good"/"best" would produce.
+
+**The fix (shipped 2026-05-10):**
+- Adapter default changed from `sa_iterations=0` to
+  `DEFAULT_SA_ITERATIONS = iterations_for_preset(DEFAULT_PRESET)`
+  (currently `'good'` = 500K). Explicit `sa_iterations=0` still works
+  for reproducing historical construction-only baselines.
+- Runner gains `--sa-iterations N` and `--quality-preset {fair,good,
+  best,maximum}` CLI flags. Explicit overrides preset; no flag falls
+  through to adapter default.
+- Banner + per-fixture diagnostics surface the resolved value so
+  reports are self-describing ("sa_iters=2,000,000 (best)"); a reader
+  can tell at a glance what was tested.
+- Regression test `tests/test_eval_harness_sa_plumbing.py` (19 checks)
+  pins the default non-zero, validates resolution logic, asserts both
+  CLI flags are present.
+
+**Next concrete action:** re-run the 16-fixture eval with
+`--quality-preset best` to get the actual post-Phase-4 baseline.
+
+```bash
+python3 -m scripts.scheduler_eval.runner \
+    --fixtures all \
+    --adapters frc-scheduler-server,actual,matchmaker \
+    --trials 100 \
+    --workers 36 \
+    --quality-preset best
+```
+
+Wall-clock estimate on Stark: ~55 minutes. Faster sanity check at
+`--quality-preset good` (~15 min) to gauge whether the gap closes
+substantially before the long run.
+
+**Single-fixture data suggests the SA closes most of the gap.** From
+`docs/scheduler/ITERATION_CEILING.md`, on `2026mnst` (36t × 7 MPT)
+best-of-30 at SA=2M produces a lex tuple matching MatchMaker on
+cooldown + partner-floor and beating it on opp_quad / rb_metric /
+station_pen. Whether that scales to 60-team fixtures is the central
+question the corrected re-run answers.
+
+If the corrected eval lands ≤ 25 mean composite, scheduler-quality
+work is essentially done and the next session is UI exposure (5.8)
++ the secondary items in `EVAL_FINDINGS.md` (per-metric aggregate
+view, threshold tuning, fixture inventory expansion). If 25–30, it's
+acceptable per Phase 5 cutoffs; ship + targeted improvements. If
+> 30, Phase 5 "Investigate further" becomes the active workstream
+(BIBD seeding, CP-SAT plugin, or SA cooling-schedule rework — pick
+based on the per-metric × per-size pattern).
+
 ### 5.6 RBAC (proper roles + permissions) — designed, paused
 
 Full design lives in `docs/RBAC_MODEL.md` (~935 lines, status:
@@ -667,7 +738,7 @@ If you're picking this up:
 
 1. **Read this handoff + `REPRODUCTION_PROMPT.md` + `PRIORITIES.md`** in that order.
 2. **Open items** are §5 above — split into two buckets:
-   - *Scheduler-quality polish*: browser scheduler retirement (5.1), container parallelism investigation (5.2), par_quad outlier diagnosis (5.3).
+   - *Scheduler-quality polish*: browser scheduler retirement (5.1), container parallelism investigation (5.2), par_quad outlier diagnosis (5.3), and most importantly the **eval re-run with the corrected harness configuration (5.9)** — the previous "we're still poor" verdict was based on `sa_iterations=0`. The corrected re-run is the gate for any structural decisions about the algorithm.
    - *Authorization + lifecycle*: schedule-lifecycle phases D/F/G (5.7) and the full RBAC workstream (5.6). Both have detailed dedicated docs (`SCHEDULE_LIFECYCLE.md`, `RBAC_MODEL.md`) but neither is in active development. Paused pending change-freeze lift and open-question decisions; tracked here so they don't drift out of sight.
    - *UI exposure of harness work*: surfacing `scheduler_eval` quality data in the editor + viewer (5.8). Designed in `UI_QUALITY_EXPOSURE.md` as a four-tier plan; no active development. Today's editor card is effective at what it does but hides per-pair / per-team detail and the lex tuple.
 3. **For state events**, recommend Stark via best-of-30 at SA=2M (~75s wall-clock). Container "Best" works but with the caveat in §5.2.
