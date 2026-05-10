@@ -4059,9 +4059,14 @@ async def import_csv_endpoint(
 async def render_schedule_pdf_endpoint(
     body: dict,
     format: str = "pdf",
-    user: dict = Depends(require_auth),
 ):
     """Render a schedule to PDF or HTML.
+
+    No auth required — print/export operate on schedule data the
+    /view page already exposes publicly to spectators and kiosks.
+    The same view.html page that renders schedules without login
+    needs to be able to print and export them too. Mirrors the
+    posture of /api/events/{id}/teams/export.
 
     Body shape (see app.pdf_render docstring for details):
         {

@@ -39,6 +39,7 @@ all surface FRC compliance state to the user.
 | Import flow event-id resolution                                  | ✓ | `ensureEventLoadedForImport` helper used by 3 import call sites. |
 | MatchMaker comparison language softened                          | ✓ | Removed all "beats MatchMaker" / "OURS WINS" framing across UI + tests + docs. |
 | **Practice-from-MatchMaker-xlsx** (this session)                 | ✓ | Stale-cache invalidation + datetime time-cell handling + derived practiceDay. §4.7. |
+| **Print + export unauthenticated** (this session)                | ✓ | `render-pdf` no longer requires auth; matches `/teams/export` posture. §4.8. |
 
 ---
 
@@ -224,6 +225,34 @@ End-to-end on the user's `2026mnst-matchmaker-with-practice.xlsx`:
 
 `app/xlsx_extract.py`, `app/main.py`, `app/schedule_derive.py`,
 `tests/test_day_config_v2.py`.
+
+### 4.8 Print + export unauthenticated (2026-05-10)
+
+User-visible: clicking Print or Export PDF from `/view` failed with 401
+because `view.html` (public spectator/kiosk page) doesn't send an
+Authorization header, but `POST /api/schedules/render-pdf` was gated
+behind `Depends(require_auth)`. The data those endpoints render is
+already exposed publicly via `GET /api/assigned-schedules/{id}` and
+the `/view` page itself, so requiring auth on the render path was
+inconsistent.
+
+Fix: removed the `user: dict = Depends(require_auth)` param from
+`render_schedule_pdf_endpoint`. Mirrors the existing posture of
+`GET /api/events/{id}/teams/export` (no auth dep at all). Editor's
+`assignTeams`-style auth-bearing fetches from `index.html` continue
+to work — the server just ignores the token.
+
+Audit of all print/export-flavoured routes (`@app.get|post(...)`
+matching `export|render|print|download|snapshot`):
+- `GET /api/events/{event_id}/teams/export` — already unauth
+- `POST /api/schedules/render-pdf` — unauth as of this session
+
+Browser-only export paths (`downloadXLSX`, `downloadCSV`,
+`downloadJSON` in `static/index.html`) build files in the browser
+via SheetJS and don't hit any server endpoint, so they were
+already auth-free.
+
+`app/main.py:render_schedule_pdf_endpoint`.
 
 ---
 
