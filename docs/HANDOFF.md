@@ -7,9 +7,14 @@ after a gap.
 
 Last updated: 2026-05-10, end of the practice-import-from-MatchMaker-xlsx
 debugging session, render-pdf auth removal, session-deliverable protocol
-documentation, and cycle-time-change off-by-one regression fix. Three
-layered xlsx-import bugs in §4.7, auth-removal in §4.8, doc convention
-in §4.9, cycle-change semantics in §4.10.
+documentation, cycle-time-change off-by-one regression fix,
+documentation-status sweep surfacing the RBAC + lifecycle workstreams,
+and a follow-up audit of the UI-side schedule-quality tools that
+produced a roadmap doc for exposing the `scheduler_eval` harness work
+in the UI. Three layered xlsx-import bugs in §4.7, auth-removal in
+§4.8, doc convention in §4.9, cycle-change semantics in §4.10. Three
+new tracked workstreams in §5.6 (RBAC), §5.7 (lifecycle phases D/F/G),
+and §5.8 (UI exposure of harness quality data).
 
 ---
 
@@ -43,6 +48,9 @@ all surface FRC compliance state to the user.
 | **Print + export unauthenticated** (this session)                | ✓ | `render-pdf` no longer requires auth; matches `/teams/export` posture. §4.8. |
 | **Session-deliverable protocol documented** (this session)       | ✓ | Two-tarball + commit-ready-commands + commit-message-style convention canonicalised in `REPRODUCTION_PROMPT.md`. §4.9. |
 | **Cycle-change off-by-one regression** (this session)            | ✓ | `afterMatch=N` now correctly applies new ct to gap N→N+1 per V2_SPEC §7 (was N+1→N+2). Six application sites fixed. §4.10. |
+| Schedule lifecycle (Phases A/B/C/E shipped; D/F/G open)          | ◐ | Auth-mandatory + fork + structural-immutability + is_admin shipped. `event_audit_events` table, lock TTL/heartbeat, lifecycle response field deferred. See `docs/SCHEDULE_LIFECYCLE.md` and §5.7. |
+| RBAC (proper roles + permissions)                                | ☐ | Designed in `docs/RBAC_MODEL.md` (5 roles, 7 phases R-1..R-7); zero implementation. Current model is interim `is_admin` flag. Paused pending change-freeze lift + open-question decisions. §5.6. |
+| UI exposure of `scheduler_eval` quality data                     | ☐ | Designed in `docs/UI_QUALITY_EXPOSURE.md` — 4-tier plan to surface per-pair / per-team / lex-tuple / reference-comparison detail in the editor + viewer. Today only the headline diversity card is shown. §5.8. |
 
 ---
 
@@ -379,6 +387,130 @@ Find K* per the tight-criterion definition. Levels 10M, 20M, 50M.
 ~5 hours wall-clock on Stark. Documented in
 `docs/scheduler/ITERATION_CEILING.md` "Future work".
 
+### 5.6 RBAC (proper roles + permissions) — designed, paused
+
+Full design lives in `docs/RBAC_MODEL.md` (~935 lines, status:
+"Proposal — paused"). Five roles: Admin / Support (global) and
+Owner / Manager / Viewer (event-scoped), with implicit Public for
+read-only `/view`. Capability matrix, delegation rules ("you can
+only delegate what you have"), expiration model, in-app
+notifications, and a request mechanism for users to seek elevated
+access are all spec'd out.
+
+**Status: zero phases implemented.** Current authorization model
+is the `is_admin` interim flag (see §5.7). No `role_grants` /
+`role_requests` / `notifications` tables exist; no `can(user,
+capability)` checker. The doc is explicit that all 7 phases (R-1..
+R-7) are paused pending change-freeze lift + decisions on the seven
+open design questions in `RBAC_MODEL.md` "Open design questions."
+
+R-1 is the foundation everything else builds on (schema +
+authorization checker, replacing `is_admin` references). Doc
+recommends shipping R-1 + R-2 (back-end enforcement) before any
+UI work begins.
+
+Trigger to revisit: when the live-event change-freeze lifts and
+the tool starts being shared beyond a single team's internal use.
+
+### 5.7 Schedule-lifecycle phases D / F / G — partially shipped
+
+Full design lives in `docs/SCHEDULE_LIFECYCLE.md` (~1019 lines,
+status: "Draft for implementation"). 7 phases (A–G) plus Part 13's
+layered authorization rules.
+
+**Shipped:**
+- A — Auth mandatory on writes (see §4.8)
+- B — `forked_from_id` schema (`db.py:193`) + fork via
+  `/api/assigned-schedules/{id}/duplicate` (`main.py:2499`)
+- C — Structural immutability check (`_was_ever_official` at
+  `main.py:1656`, gate at `:1760`)
+- E — `is_admin` flag (`db.py:342`) + admin-gated `freeze` /
+  `unfreeze` / `unmark-official` / force-unlock-by-admin
+
+**Open:**
+- **D — Consolidated `event_audit_events` table.** Partial today:
+  `assigned_schedule_history` and `assigned_schedule_lock_events`
+  capture the most-active event types, but the unified table the
+  spec defines (one row per meaningful action across all event
+  surfaces) doesn't exist. Until it does, `event_audit_events`
+  is implicit — readers reconstruct it by joining the per-table
+  histories, which is why an audit-log UI hasn't shipped.
+- **F — Lock TTL + heartbeat.** Basic locks ship; lock acquisition
+  sets `locked_at` and `locked_by_user_id`. No TTL check (locks
+  don't expire on their own), no heartbeat endpoint to refresh
+  while editing, no client-side ping. Result: a closed-tab editor
+  leaves the lock pinned until someone manually unlocks. Schema
+  changes: none required (`locked_at` already exists).
+- **G — Lifecycle response field.** Schedule GET responses don't
+  include the `lifecycle` block (`structural_frozen`, `lock_state`,
+  `freeze_state`) the spec defines. Frontend reproduces the
+  layering check ad-hoc against `is_official` / `locked_at` /
+  the event freeze flag. Schema changes: none required; pure
+  read-side enrichment.
+
+Each is independently shippable per `SCHEDULE_LIFECYCLE.md` Part 11.
+F is the highest-immediate-UX-value (kills the "dead lock from
+closed tab" papercut); G removes a class of frontend bugs by
+centralising the layering check; D unblocks the audit-log UI
+workstream.
+
+### 5.8 UI exposure of `scheduler_eval` quality data — designed, parked
+
+Full design lives in `docs/UI_QUALITY_EXPOSURE.md`. Status: future
+roadmap, no active development. Captures a four-tier plan for
+surfacing harness-side quality measurements in the editor and
+viewer UIs.
+
+**Today's UI quality surface:** the Schedule Quality card
+(`#diversityReportCard` at `static/index.html:2757`, rendered by
+`renderDiversityCard()` at `:4220`). Card is effective at what it
+does — uses floor-relative semantics rather than the harness's
+mis-calibrated threshold classification, sidesteps the
+"MatchMaker = poor" embarrassment in the harness output, cleanly
+separates configuration knobs from measurement. **What's missing:**
+per-pair specifics with team numbers, per-team breakdowns, the
+8-element FRC §10.5.2 lex tuple, reference-distribution comparison,
+and any quality info on the public `/view` page.
+
+**Four-tier plan** (full detail in the dedicated doc):
+
+- **T1 — Surface what's already on the wire.** Small (~3–4 hours).
+  The diversity-report endpoint already returns `worst_pairs` and
+  `slot_table`; the card uses only their counts. Render the
+  per-pair list with team numbers, expose `slot_table` as a
+  per-team `<details>` panel. No backend change. Closes the most-
+  reported gap.
+- **T2 — Surface the lex tuple.** Medium effort. New endpoint
+  returning the 8-element tuple with labels and per-element
+  annotations. New "Quality breakdown" section in the card. Adds
+  side-by-side schedule comparison view with per-criterion deltas.
+  Pre-work: fix the `match_equity` placeholder (currently
+  hardcoded to 0 in `_score_from_state:1101` — inert tuple slot).
+- **T3 — Reference comparison via recalibrated thresholds.**
+  Substantial. Pull TBA played-schedule corpus, compute metric
+  distributions per fixture-size bucket, set thresholds at real
+  percentiles (acceptable=80th, near-optimal=50th). Bake into
+  shipped JSON. Server endpoint returning percentile rank.
+  Percentile badges in UI. Highest user value, most calibration
+  judgment required. Should not ship until calibration is
+  validated against multiple reference fixtures.
+- **T4 — Surface to `/view`.** Independent of tier choice. Public
+  spectator view currently has zero quality info; can expose any
+  subset of T1/T2/T3 to coaches viewing the public link. Open
+  product question: is exposing schedule-quality detail to a
+  public audience desirable, or does it invite litigation of
+  mathematically-forced edge cases.
+
+**Recommended ordering when this resumes:** T1 alone is the
+tightest single increment. T1 + T2 together is the natural
+"expose scheduler_eval in the UI" scope. T3 is its own workstream.
+T4 parallel to any of the above.
+
+**Pre-work that becomes more visible if T2 ships:** the lex-tuple
+audit findings from the prior session — fix `match_equity` slot,
+clarify the `score` DB column's non-authoritative-ness, add a
+cooldown verifier for imported schedules.
+
 ---
 
 ## 6 · Code locations (verbatim)
@@ -534,9 +666,12 @@ this doc covers what's done + what's pending.
 If you're picking this up:
 
 1. **Read this handoff + `REPRODUCTION_PROMPT.md` + `PRIORITIES.md`** in that order.
-2. **Open items** are §5 above — browser scheduler retirement, container parallelism investigation, par_quad outlier diagnosis.
+2. **Open items** are §5 above — split into two buckets:
+   - *Scheduler-quality polish*: browser scheduler retirement (5.1), container parallelism investigation (5.2), par_quad outlier diagnosis (5.3).
+   - *Authorization + lifecycle*: schedule-lifecycle phases D/F/G (5.7) and the full RBAC workstream (5.6). Both have detailed dedicated docs (`SCHEDULE_LIFECYCLE.md`, `RBAC_MODEL.md`) but neither is in active development. Paused pending change-freeze lift and open-question decisions; tracked here so they don't drift out of sight.
+   - *UI exposure of harness work*: surfacing `scheduler_eval` quality data in the editor + viewer (5.8). Designed in `UI_QUALITY_EXPOSURE.md` as a four-tier plan; no active development. Today's editor card is effective at what it does but hides per-pair / per-team detail and the lex tuple.
 3. **For state events**, recommend Stark via best-of-30 at SA=2M (~75s wall-clock). Container "Best" works but with the caveat in §5.2.
 4. **Never silently bypass FRC §10.5.2 paramount.** The lex tuple is the contract. Cooldown comes first, always.
 5. **MatchMaker is a peer**, not a competitor. The framing throughout the codebase reflects this.
 
-The code is in good shape, all tests pass, the architecture is clean. Mostly polish + diagnostics from here.
+The scheduler core is in good shape, all tests pass, algorithm work is mostly polish + diagnostics from here. The remaining substantive work is on the authorization side — see §5.6 / §5.7 and the dedicated docs they point to.

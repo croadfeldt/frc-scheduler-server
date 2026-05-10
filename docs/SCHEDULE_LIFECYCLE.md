@@ -705,7 +705,15 @@ The work splits into independently shippable phases. Each is a
 separate PR and can be rolled forward without rolling forward the
 next.
 
+> **Status rollup (2026-05-10):** Phases A, B, C, E shipped.
+> Phases D, F, G open. Per-phase status noted in each section
+> below. See `docs/HANDOFF.md` §5.7 for the live tracker.
+
 ### Phase A — Auth mandatory
+
+**Status: ✓ shipped.** Confirmed end-to-end after the 2026-05-10
+render-pdf auth-removal session left every other write endpoint
+behind `require_auth`. See `HANDOFF.md` §4.8.
 
 Smallest, most operationally critical, no schema changes.
 
@@ -723,6 +731,12 @@ Ship first.
 
 ### Phase B — `forked_from_id` schema + fork endpoint
 
+**Status: ✓ shipped.** Schema column at `app/db.py:193`. Fork
+behaviour is exposed as `POST /api/assigned-schedules/{id}/duplicate`
+(`app/main.py:2499`) rather than `/fork` — same semantics, different
+verb. Setting `forked_from_id=src.id` on the new draft is at
+`main.py:2548`.
+
 - Migration: add `forked_from_id` column + index.
 - Implement `POST /api/assigned-schedules/{id}/fork`.
 - Frontend: add fork button to read-only schedules.
@@ -730,6 +744,10 @@ Ship first.
   with proper lineage; view payload includes `forked_from_id`.
 
 ### Phase C — Structural immutability check
+
+**Status: ✓ shipped.** `_was_ever_official(db, assigned)` helper at
+`app/main.py:1656`; gated at PATCH (`:1760`). Returns 409 with a
+"fork instead" hint pointing at `/duplicate` when the check fails.
 
 - Migration: none.
 - Implement the "ever official" check on PATCH/restore using the
@@ -741,6 +759,14 @@ Ship first.
 
 ### Phase D — `event_audit_events` table + audit hooks
 
+**Status: ◐ partial.** `assigned_schedule_history` and
+`assigned_schedule_lock_events` tables exist and capture the
+most-active event types, but the unified `event_audit_events` table
+this phase defines does not. Until it does, callers reconstruct
+the event-wide audit by joining the per-table histories — one of
+the reasons an audit-log UI hasn't shipped yet (it would need that
+join logic in the read path).
+
 - Migration: create the new table.
 - Wire audit-row writes into every write endpoint per the table in
   Part 8. Use a small helper function so each endpoint adds one
@@ -749,6 +775,17 @@ Ship first.
   contain actor identity for all actions performed after Phase A.
 
 ### Phase E — `is_admin` flag + admin-gated endpoints
+
+**Status: ✓ shipped.** `users.is_admin` column at `app/db.py:342`.
+Admin-gated endpoints in `app/main.py`:
+- `POST /api/events/{id}/freeze`   (line 2370)
+- `POST /api/events/{id}/unfreeze` (line 2409)
+- `POST /api/assigned-schedules/{id}/unmark-official` (line 2313)
+- Force-unlock-by-admin behavior in the lock endpoint
+
+Note: this remains the **interim** authorization model. The full
+RBAC replacement is designed in `RBAC_MODEL.md` (paused) and will
+absorb these capabilities into the Admin role once R-1 ships.
 
 - Migration: add `is_admin` column.
 - Implement env-var allow-list in `upsert_user()`.
@@ -759,6 +796,20 @@ Ship first.
 
 ### Phase F — Lock TTL + heartbeat
 
+**Status: ◐ partial — basic lock shipped; TTL + heartbeat open.**
+Lock acquire/release endpoints (`/lock`, `/unlock`, `/lock-events`)
+exist at `app/main.py:1843` / `:1909` / `:2189`. They set
+`locked_at` + `locked_by_user_id` and write `assigned_schedule_lock_events`
+audit rows. What's missing:
+- No TTL check — locks don't auto-expire when stale.
+- No heartbeat endpoint to refresh `locked_at` from an active
+  editor.
+- No client-side ping in the editor.
+
+Result: an editor whose tab is closed without unlocking leaves the
+schedule pinned until someone manually unlocks. Highest-immediate-
+UX-value of the open phases.
+
 - Migration: none (`locked_at` already exists).
 - Update lock acquisition to refresh `locked_at` if held by
   caller; treat expired locks as released.
@@ -768,6 +819,14 @@ Ship first.
   prevent expiry while active.
 
 ### Phase G — Lifecycle response field on reads
+
+**Status: ☐ open.** Schedule GET responses (`main.py:1688`) don't
+include the `lifecycle` block this phase defines. Frontend code in
+both `static/index.html` and `static/view.html` reproduces the
+layering check ad-hoc against `is_official` / `locked_at` / event
+freeze. Centralising it in the API response would remove a class
+of frontend bugs and let the read-only banner driver be a single
+boolean instead of a derived expression.
 
 - No schema changes; pure read-side enrichment.
 - Add `lifecycle` block to schedule GET responses per Part 9.
