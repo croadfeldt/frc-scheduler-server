@@ -2644,8 +2644,8 @@
 
             <!-- ── Quality preset (iteration count) ──
                  Doesn't affect FRC compliance — controls search thoroughness.
-                 Defaults to 'good' (500K, ~20s/trial). 'best' = 2M, beats
-                 MatchMaker on the reference fixture. -->
+                 Defaults to 'good' (500K, ~20s/trial). 'best' = 2M, the
+                 production-quality setting recommended for competition events. -->
             <div class="field-row single" style="margin-bottom:0.5rem;">
               <div class="field">
                 <label>Quality Preset
@@ -2654,7 +2654,7 @@
                 <select id="qualityPreset" onchange="onQualityPresetChange()">
                   <option value="fair">Fair (50K iters, ~2s) — quick previews</option>
                   <option value="good" selected>Good (500K iters, ~20s) — default for editing</option>
-                  <option value="best">Best (2M iters, ~75s) — production quality, beats MatchMaker</option>
+                  <option value="best">Best (2M iters, ~75s) — production quality, recommended for competition events</option>
                   <option value="maximum">Maximum (5M iters, ~3min) — when compute allows</option>
                   <option value="custom">Custom… (advanced)</option>
                 </select>

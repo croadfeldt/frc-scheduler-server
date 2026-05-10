@@ -14,10 +14,10 @@ Tuned per the iteration ceiling investigation (see
   the tested range up to 5M. K* is documented as "> 5M, not found".
 - Practical ceiling chosen at 5,000,000 — beyond that, single-trial
   wall-clock exceeds 3 minutes, impractical for interactive use.
-- "Best" preset deliberately set to 2M rather than 5M because best-of-N
-  at 2M with N=30 produces tuples that beat MatchMaker on the
-  reference fixture (2026mnst). 5M is reserved as "Maximum" for
-  cases where additional compute is justified.
+- "Best" preset set to 2M rather than 5M because best-of-N at 2M
+  with N=30 produces lex tuples comparable to the reference fixture
+  (2026mnst MatchMaker output). 5M is reserved as "Maximum" for cases
+  where additional compute is justified.
 
 To revisit these levels (e.g., if compute budget changes or quality
 expectations shift), see ``docs/scheduler/ITERATION_CEILING.md``

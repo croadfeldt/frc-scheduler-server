@@ -2059,11 +2059,13 @@ def _assign_unified(abstract_matches: list[dict],
         matches, _stats = station_balance_sa(matches, n_iterations=5000, seed=seed)
 
     score = score_schedule(matches, num_teams)
+    score_tuple = list(score_tuple_for_schedule(matches, num_teams))
     slot_map = _matches_to_slot_map(matches, team_numbers, num_teams)
 
     return {
-        'slot_map': slot_map,
-        'score':    score,
+        'slot_map':    slot_map,
+        'score':       score,        # legacy float (UI/CSV/DB display)
+        'score_tuple': score_tuple,  # FRC §10.5.2 lex tuple — authoritative for best-of-N
         'matches':  [
             {
                 'red':            list(m.red),

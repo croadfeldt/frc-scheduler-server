@@ -274,7 +274,6 @@ def main():
         best = min(tuples)
         print(f"  {level:>10}: {best}")
 
-    # If we have a comparison schedule (MatchMaker), show win rate
     print()
     print("Done.")
 

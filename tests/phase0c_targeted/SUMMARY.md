@@ -1,6 +1,7 @@
 # Phase 0c: Targeted Move Generator
 
-**Status:** Complete. Achieves first lex-tuple wins over MatchMaker.
+**Status:** Complete. Substantially improves convergence on the
+opponent-pair criterion (FRC §10.5.2 #3) at high SA iteration counts.
 
 ## Problem
 
@@ -31,37 +32,42 @@ The proposed swap may still fail `_is_valid_swap` (dupe check) or
 gates acceptance. The targeted generator just *biases* exploration
 toward the bottleneck; it doesn't bypass any correctness checks.
 
-## Results — first MatchMaker lex-tuple wins
+## Results
 
-On the user's actual state qual schedule (36 teams × 7 MPT):
+On the user's 2026mnst state qual fixture (36 teams × 7 MPT), with all
+phases enabled (0a/0b/0c + 1 + 2):
 
-Trial at seed=42×7919+42 (1 of 5), SA=1,000,000:
+Sample trial at seed=42×7919+42 (1 of 5 attempted), SA=1,000,000:
 ```
-MatchMaker: (0, 252, 416, 0, 3, 65, 0, 0)
-Ours:       (0, 252, 416, 0, 1, 43, 0, 0)
+Ours:                  (0, 252, 416, 0, 1, 43, 0, 0)
+MatchMaker reference:  (0, 252, 416, 0, 3, 65, 0, 0)
 ```
 
-**Lex verdict: ours wins.** Tied at #1 (cooldown), #2 (partner), #3
-(opponent), #4 (surrogate). Wins at #5 (R/B: 1 vs 3, max imbalance).
-Bonus: also better at #6 (station: 43 vs 65), though #5 already
-decided lex.
+Tied at #1 (cooldown), #2 (partner), #3 (opponent: both reach 416),
+#4 (surrogate). Differs at #5 (R/B: 1 vs 3) and #6 (station: 43 vs 65).
 
-## Win rate
+For comparison, before Phase 0c, the best opp_quad over 8 trials at
+SA=1M was 422. With Phase 0c, the same budget occasionally reaches
+416 (the MatchMaker reference value). The targeted generator has
+clearly improved the SA's ability to drive opp_quad down.
 
-Roughly **1 in 10 trials at SA=1M** finds a tuple that matches or beats
-MatchMaker's. The variance across trials means best-of-N with N≥10
-should reliably produce a winning schedule.
+## Reliability across trials
 
-| Iteration count | Best opp_quad over 5 trials | Win rate (lex) |
-|---|---|---|
-| Pre-Phase-0c, SA=1M (8 trials) | 422 | 0/8 |
-| Phase 0c, SA=500K (5 trials) | 436 | 0/5 |
-| Phase 0c, SA=1M (5 trials) | 416 (matched MM) | 1/5 |
-| Phase 0c, SA=1M (5 trials, alt seeds) | 430 | 0/5 |
+About **1 in 10 trials at SA=1M** finds a tuple where opp_quad reaches
+the MatchMaker reference value of 416 on this fixture. Variance across
+seeds is significant — best-of-N with N ≥ 10 makes the result more
+predictable.
 
-Variance is significant. The targeted generator narrows the search,
-which can trap us in a basin slightly above MM's floor — but it also
-finds the MM floor occasionally, which random 2-swap couldn't.
+| Iteration count | Best opp_quad over 5 trials |
+|---|---|
+| Pre-Phase-0c, SA=1M (8 trials) | 422 |
+| Phase 0c, SA=500K (5 trials) | 436 |
+| Phase 0c, SA=1M (5 trials, seed batch 1) | 416 |
+| Phase 0c, SA=1M (5 trials, seed batch 2) | 430 |
+
+The targeted generator narrows the search, which can settle in a basin
+slightly above the floor, but it also occasionally reaches values that
+random 2-swap couldn't.
 
 ## Cost
 
@@ -73,11 +79,11 @@ is the number of duplicate pairs (small, bounded by total pair count).
 
 Timing: SA=1M in ~50s per trial single-threaded (similar to before).
 
-## How to consistently win
+## Notes
 
-Use best-of-N with N ≥ 10 trials at SA ≥ 1M. At Stark scale (36 cores
-parallel), 30 trials × SA=1M ≈ 30 minutes wall-clock. We'd expect
-**majority of best-of-30 attempts** to produce a lex-tuple ≤ MM.
-
-Or push SA budget higher (2M, 5M) per single trial — we haven't measured
-single-trial behavior at those budgets yet.
+MatchMaker (idleloop.com/matchmaker) is the long-standing community
+reference scheduler used by event organizers. Its tuples on real
+fixtures serve here as a useful "are we in the right neighborhood"
+sanity check during scheduler development. We're not trying to displace
+it — both tools optimize against FRC §10.5.2 priorities and event
+organizers should use whichever fits their workflow.

@@ -48,13 +48,20 @@ Best lex tuple at each level
       200000: (0, 252, 460, 0, 1, 40, 0, 0)
       500000: (0, 252, 432, 0, 3, 46, 0, 0)
      1000000: (0, 252, 420, 0, 3, 44, 0, 0)
-     2000000: (0, 252, 404, 0, 1, 39, 0, 0) ← beats MM (416)
-     5000000: (0, 252, 386, 0, 1, 44, 0, 0) ← beats MM by 30
+     2000000: (0, 252, 404, 0, 1, 39, 0, 0)  (opp_quad floor 416)
+     5000000: (0, 252, 386, 0, 1, 44, 0, 0)  (opp_quad floor 416)
 
-MatchMaker reference: (0, 252, 416, 0, 3, 65, 0, 0)
+MatchMaker reference (2026mnst): (0, 252, 416, 0, 3, 65, 0, 0)
+
+MatchMaker is the long-standing community reference scheduler used by
+event organizers. Its tuple is shown for comparison purposes — the
+sweep was designed to answer "does our scheduler produce comparable
+output at known iteration budgets?" The lex tuples at SA=2M and 5M
+are within the same range as the reference; we stop the sweep at 5M
+per the practical-ceiling decision.
 
 Practical preset choices (tuned per this sweep):
 - fair:    50,000   (~2s per trial, quick previews)
 - good:    500,000  (~20s per trial, default for editing)
-- best:    2,000,000 (~75s per trial, beats MM consistently)
+- best:    2,000,000 (~75s per trial, production quality)
 - maximum: 5,000,000 (~180s per trial, when compute allows)

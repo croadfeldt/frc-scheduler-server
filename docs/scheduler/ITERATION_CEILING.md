@@ -108,17 +108,25 @@ K\* may turn out to be 10M, 20M, or higher. Even when found, the
 "Best" user-facing preset stays at 5M unless we rework the UI to
 allow long-running async generation with progress indicator.
 
-## How this connects to the MatchMaker comparison
+## How this connects to the MatchMaker reference
 
 On the user's actual state qual schedule (36 teams × 7 MPT):
 
 - MatchMaker tuple: `(0, 252, 416, 0, 3, 65, 0, 0)`
-- Best-of-30 at SA=2M: `(0, 252, 404, 0, 1, 39, 0, 0)` ← **beats MM** at lex index 3 (opp_quad 404 < 416)
-- Best-of-30 at SA=5M: `(0, 252, 386, 0, 1, 44, 0, 0)` ← **beats MM** by even more (386 < 416)
+- Best-of-30 at SA=2M: `(0, 252, 404, 0, 1, 39, 0, 0)`
+- Best-of-30 at SA=5M: `(0, 252, 386, 0, 1, 44, 0, 0)`
 
-We win at SA=2M and the win margin grows with iterations. The
-extended sweep would tell us where the win margin stops growing,
-not whether we win.
+All three tuples share the same cooldown (0), partner floor (252), and
+surrogate count (0). They differ at opp_quad, rb_metric, and station_pen.
+The lex tuples produced at SA=2M+ are in a comparable range to the
+MatchMaker reference — that's the development bar this sweep was set up
+to verify. MatchMaker (idleloop.com/matchmaker) remains the long-standing
+community scheduler used by event organizers; comparing against it here
+is sanity-check, not competition.
+
+The extended sweep (future work) would tell us how the lex tuples move
+at higher iteration budgets, not change the conclusion that we're in
+the right neighborhood.
 
 ## Variance and best-of-N strategy
 

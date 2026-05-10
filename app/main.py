@@ -1132,11 +1132,33 @@ async def assign_teams_endpoint(
         # Resolve iteration count from quality_preset or explicit iterations.
         # See app/quality_presets.py for the preset map.
         iterations = body.resolved_iterations()
-        n_workers  = min(iterations, actual_workers)
+
+        # Phase 0+ chunking strategy (corrected 2026-05-09):
+        # Under FRC paramount lex SA, the optimizer needs MANY consecutive
+        # iterations on a single trial to converge — splitting the budget
+        # into small chunks produces near-construction-quality output
+        # because each chunk barely warms up. Iteration sweep on Stark
+        # (docs/scheduler/ITERATION_CEILING.md) confirms that par_quad
+        # only reaches floor 252 with single-trial SA budgets ≥ 50K, and
+        # opp_quad keeps improving up to and beyond 5M.
+        #
+        # Strategy: each worker runs the FULL iteration budget on its own
+        # seed (best-of-N over independent trials). Wall-clock equals
+        # single-trial time because workers run in parallel. With Stark's
+        # 36 cores, "best" preset (2M iters) finishes in ~75s wall-clock
+        # and produces ~best-of-36 quality.
+        #
+        # n_workers caps at actual_workers (avoid over-subscribing CPUs)
+        # AND at a sensible best-of-N count (more workers don't help once
+        # we have enough samples to cover the variance). 30 trials
+        # matches the iteration sweep and reliably samples the lower tail.
+        BEST_OF_N_TARGET = 30
+        n_workers = min(actual_workers, BEST_OF_N_TARGET)
+        # Each worker runs ONE trial at the full iteration budget.
+        chunk_size = iterations
+        chunks_per_worker = 1
+        total_chunks = n_workers
         _aseed_int = int(body.assign_seed, 16) if body.assign_seed else None
-        chunk_size = max(10, iterations // (n_workers * 20))
-        chunks_per_worker = max(1, (iterations // n_workers) // chunk_size)
-        total_chunks = n_workers * chunks_per_worker
         done_chunks  = 0
         best_result  = None
 
@@ -1145,29 +1167,40 @@ async def assign_teams_endpoint(
             futures = []
             for w in range(n_workers):
                 worker_seed = (_aseed_int ^ (w * 99991)) if _aseed_int is not None else None
-                for c in range(chunks_per_worker):
-                    chunk_seed = (worker_seed ^ (c * 7919)) if worker_seed is not None else None
-                    futures.append(loop.run_in_executor(
-                        pool, run_assignment_chunk,
-                        (abstract_matches, abstract_num_teams, team_numbers,
-                         abstract_cooldown, chunk_size, w, chunk_seed),
-                    ))
+                # One full-budget trial per worker; no inner chunk loop.
+                futures.append(loop.run_in_executor(
+                    pool, run_assignment_chunk,
+                    (abstract_matches, abstract_num_teams, team_numbers,
+                     abstract_cooldown, chunk_size, w, worker_seed),
+                ))
             for f in asyncio.as_completed(futures):
                 try:
                     res = await f
                     done_chunks += 1
-                    if best_result is None or res["score"] > best_result["score"]:
+                    # Best-of-N comparison uses the FRC §10.5.2 lex tuple
+                    # (lower is better) — authoritative for which trial wins.
+                    # Fall back to score float for older worker results that
+                    # lack score_tuple (shouldn't happen post-Phase-0a but
+                    # the guard is cheap).
+                    if best_result is None:
                         best_result = res
+                    else:
+                        new_t = res.get('score_tuple')
+                        cur_t = best_result.get('score_tuple')
+                        if new_t and cur_t:
+                            if tuple(new_t) < tuple(cur_t):
+                                best_result = res
+                        else:
+                            # Legacy fallback: higher score float = better
+                            if res["score"] > best_result["score"]:
+                                best_result = res
                     pct = int(done_chunks / total_chunks * 100)
-                    # Frontend reads `done`/`total` (matches Stage 1's pattern)
-                    # AND we keep `pct` as a fallback for older clients.
-                    # `done`/`total` are CHUNK counts, not iteration counts —
-                    # but each chunk is `chunk_size` iterations, so the user-
-                    # visible iteration count is done_chunks * chunk_size.
+                    # `done` and `total` are TRIAL counts (not iteration counts)
+                    # under the new chunking. UI shows "5/30 trials complete".
                     progress_msg = {
                         'type':  'progress',
-                        'done':  done_chunks * chunk_size,
-                        'total': total_chunks * chunk_size,
+                        'done':  done_chunks,
+                        'total': total_chunks,
                         'pct':   pct,
                         'score': best_result['score'],
                     }
