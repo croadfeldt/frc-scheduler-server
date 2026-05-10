@@ -3399,7 +3399,7 @@ async def import_pdf(
                 roster = None
                 if event_id:
                     roster_result = await db.execute(
-                        select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+                        select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)
                     )
                     roster = [r[0] for r in roster_result.all()] or None
                 try:
@@ -3624,7 +3624,7 @@ async def import_pdf(
     if event_id:
         async with AsyncSessionLocal() as db:
             roster_result = await db.execute(
-                select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+                select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)
             )
             roster = [r[0] for r in roster_result.all()] or None
 
@@ -3736,7 +3736,7 @@ async def import_xlsx(
                 roster = None
                 if event_id:
                     roster_result = await db.execute(
-                        select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+                        select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)
                     )
                     roster = [r[0] for r in roster_result.all()] or None
                 validation = pdf_validate.validate_schedule(
@@ -3773,7 +3773,7 @@ async def import_xlsx(
     async with AsyncSessionLocal() as db:
         if event_id:
             roster_result = await db.execute(
-                select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+                select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)
             )
             roster = [r[0] for r in roster_result.all()] or None
     validation = pdf_validate.validate_schedule(matches, roster)
@@ -3885,7 +3885,7 @@ async def import_csv_endpoint(
                 roster = None
                 if event_id:
                     roster_result = await db.execute(
-                        select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+                        select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)
                     )
                     roster = [r[0] for r in roster_result.all()] or None
                 validation = pdf_validate.validate_schedule(
@@ -3920,7 +3920,7 @@ async def import_csv_endpoint(
     async with AsyncSessionLocal() as db:
         if event_id:
             roster_result = await db.execute(
-                select(EventTeam.team_number).where(EventTeam.event_id == event_id)
+                select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)
             )
             roster = [r[0] for r in roster_result.all()] or None
     validation = pdf_validate.validate_schedule(matches, roster)
@@ -4096,7 +4096,7 @@ async def commit_pdf_import(
         # Final validation. If user submitted edited matches that have errors,
         # bail with a useful message — don't silently corrupt the schedule.
         roster_result = await db.execute(
-            select(EventTeam.team_number).where(EventTeam.event_id == body.event_id)
+            select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == body.event_id)
         )
         roster = [r[0] for r in roster_result.all()] or None
         validation = pdf_validate.validate_schedule(matches, roster)
