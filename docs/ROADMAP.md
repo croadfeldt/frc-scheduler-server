@@ -89,6 +89,17 @@ to determine which structural change closes the remaining gap.
   (2023mnmi 61t, 2024mndu 55t, 2025mnmi 51t). The
   `[FIXED 2026-05-09]` claim in EVAL_FINDINGS.md is incorrect.
   ~5-minute investigation, independent of everything else.
+- ☐ Retire the browser scheduler. The editor's `generateMatches()`
+  in `static/index.html` runs the original weighted-sum
+  construction, while the server's `generate_matches()` runs the
+  Phase 0+1+2 lex SA pipeline that the eval measures. Users who
+  click "Generate" without subsequently clicking "Assign Teams"
+  get a materially worse schedule than the project's quality
+  measurements suggest. ADR 006 commits to Option A: server-only
+  construction via `/api/generate-abstract`. Estimated 2-3 days
+  of focused work covering the retirement, the practice-match
+  endpoint design, and the Placement Criteria panel cleanup. See
+  HANDOFF §5.1.
 
 ### v1.2 — "multi-event, multi-tenant"
 
@@ -127,9 +138,6 @@ Long-term shape of the product. Not actively planned.
 
 ## Backlog (not version-targeted)
 
-- Browser scheduler retirement (HANDOFF §5.1) — UI runs its own
-  scheduler; container path is now better, browser path is dead
-  weight.
 - Container parallelism investigation (HANDOFF §5.2) — best-of-N
   on container vs Stark behaves differently; root cause unknown.
 - par_quad outlier diagnosis (HANDOFF §5.3) — single fixture

@@ -56,6 +56,7 @@ all surface FRC compliance state to the user.
 | **Eval-harness SA path measurement** (this session)              | ✓ | Adapter was defaulting `sa_iterations=0` since Phase 0; both historical baselines reflected SA-disabled config. Default corrected, CLI flags added, regression test landed. **Re-run completed: mean composite 30.64** (vs 40.12 SA-disabled baseline). Phase 5 active; failure narrowed to `max_station_spread` + `repeat_opponents` on high-MPT fixtures. §5.9. |
 | **Doc structure reorganization** (this session)                  | ✓ | New `docs/ROADMAP.md` as single source of truth for "where we're going"; new `docs/decisions/` with ADRs 001–005 capturing lex tuple, FRC paramount, three-layer architecture, no-reproducibility-guarantee, and MatchMaker-as-peer; renamed `docs/RBAC_MODEL.md` → `docs/workstreams/rbac.md`, `docs/SCHEDULE_LIFECYCLE.md` → `docs/workstreams/schedule-lifecycle.md`, `docs/UI_QUALITY_EXPOSURE.md` → `docs/workstreams/ui-quality-exposure.md`, `docs/scheduler/QUALITY_IMPROVEMENT_PLAN.md` → `docs/workstreams/scheduler-quality.md`, `docs/SCHEDULE_COMPARISON_AND_NAMED_HISTORY.md` → `docs/workstreams/schedule-comparison.md`. New `CONTRIBUTING.md` extracts the session-deliverable protocol. README updated to reflect the no-reproducibility-guarantee policy. All cross-references updated. |
 | **Seed UI removal** (this session, follow-up to ADR 004)         | ✓ | The "seed:" and "assign seed:" copy-able displays removed from the share bar in `static/index.html`. `copySeed()` / `copyAssignSeed()` helpers deleted. `?seed=` and `?aseed=` no longer emitted in URLs. Autoload-from-seed-only path dropped (sid/aid is the canonical share pointer). Schedule ID and Assignment ID kept — those are DB primary keys, useful. README's URL-parameter table updated. ADR 004 action items marked done. |
+| **Browser scheduler retirement** (this session) — promoted       | ☐ | Was a Backlog one-liner; now a v1.1 line item with ADR 006 capturing the Option A decision (server-only construction, browser becomes presentation). Code work not yet started. §5.1 rewritten to reference the ADR. |
 | Schedule lifecycle (Phases A/B/C/E shipped; D/F/G open)          | ◐ | Auth-mandatory + fork + structural-immutability + is_admin shipped. `event_audit_events` table, lock TTL/heartbeat, lifecycle response field deferred. See `docs/workstreams/schedule-lifecycle.md` and §5.7. |
 | RBAC (proper roles + permissions)                                | ☐ | Designed in `docs/workstreams/rbac.md` (5 roles, 7 phases R-1..R-7); zero implementation. Current model is interim `is_admin` flag. Paused pending change-freeze lift + open-question decisions. §5.6. |
 | UI exposure of `scheduler_eval` quality data                     | ☐ | Designed in `docs/workstreams/ui-quality-exposure.md` — 4-tier plan to surface per-pair / per-team / lex-tuple / reference-comparison detail in the editor + viewer. Today only the headline diversity card is shown. §5.8. |
@@ -343,20 +344,30 @@ at 36 instead of 35; new test catches that).
 ## 5 · Open items
 
 ### 5.1 Browser scheduler retirement
-The client-side `generateMatches()` in `static/index.html` builds
-the abstract using old weighted-sum scoring. The Python SA on `/assign`
-fixes some but not all of what suboptimal abstract construction
+
+**Status:** Promoted to v1.1 in ROADMAP. Architectural decision
+captured in ADR 006: Option A (server-only construction).
+
+The client-side `generateMatches()` in `static/index.html` runs
+the original weighted-sum scoring with construction-only logic
+(no SA pass). The server's `generate_matches()` runs the
+Phase 0+1+2 lex SA pipeline that the eval measures. Users who
+click "Generate" in the editor without subsequently clicking
+"Assign Teams" get the JS path output, which is materially worse
+than the project's quality measurements suggest the algorithm
 produces.
 
-**Two options:**
-- A. Move construction to the server entirely. `/api/generate-abstract`
-  builds via `generate_matches()` (Python). Browser is presentation only.
-- B. Update browser scoring to match Python lex SA. Keeps client-side
-  preview but aligns semantics.
+ADR 006 commits to retiring the browser path entirely:
+construction becomes server-only via `/api/generate-abstract`,
+the browser becomes presentation, the duplicate
+`generateMatches()` definitions in `static/index.html` are
+removed, the practice-match call site gets a server analog, and
+the "Placement Criteria" panel (which lets users tweak weights
+for the now-removed JS path) is removed or reframed as
+informational.
 
-A is cleaner. Either way, the legacy "Placement Criteria" panel that
-references browser-only weights becomes irrelevant and should be removed
-or relabeled.
+Estimated 2-3 days of focused work. Action items detailed in
+ADR 006.
 
 ### 5.2 Container parallelism investigation
 User reported 2m 48s wall-clock for "Best" preset (2M iters × best-of-30)

@@ -30,6 +30,7 @@ and consequences. Immutable once accepted.
 | [003](decisions/003-three-layer-architecture.md) | Day-config / abstract / assigned three-layer pipeline |
 | [004](decisions/004-no-reproducibility-guarantee.md) | Schedule is the artifact; bit-exact replay not guaranteed |
 | [005](decisions/005-matchmaker-as-peer.md) | MatchMaker as peer reference, not competitor |
+| [006](decisions/006-server-only-construction.md) | Server-only construction; retire the browser scheduler |
 
 ## Workstreams
 
