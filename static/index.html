@@ -2421,6 +2421,21 @@
         <div id="pdfImportTableContainer" style="overflow-x:auto;">
           <table id="pdfImportTable" class="pdf-import-table"></table>
         </div>
+
+        <!-- Practice match section — rendered when the import response
+             includes a non-empty practice array. Hidden by default;
+             shown when renderPdfImportPreview detects practice data. -->
+        <div id="pdfImportPracticeSection" style="display:none;margin-top:1rem;">
+          <div style="font-size:0.78rem;font-weight:600;margin-bottom:0.25rem;color:var(--text);">
+            Practice matches
+          </div>
+          <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.4rem;">
+            Practice matches included with this schedule. They will be imported alongside the qualification matches.
+          </div>
+          <div id="pdfImportPracticeTableContainer" style="overflow-x:auto;">
+            <table id="pdfImportPracticeTable" class="pdf-import-table"></table>
+          </div>
+        </div>
       </div>
 
       <!-- Stage 3 footer (sticks to bottom of modal) -->
@@ -3662,6 +3677,22 @@ function renderPdfImportPreview(d) {
 
   // Match table
   renderPdfImportTable(d.matches);
+
+  // Practice table — only shown if the import response includes a
+  // non-empty practice array (XLSX/CSV imports of files with a
+  // Practice sheet). The user can edit individual cells like quals.
+  const practiceSection = document.getElementById('pdfImportPracticeSection');
+  if (practiceSection) {
+    if (d.practice && d.practice.length > 0) {
+      practiceSection.style.display = '';
+      renderPdfImportTable(d.practice, {
+        tableId: 'pdfImportPracticeTable',
+        statePath: 'practice',
+      });
+    } else {
+      practiceSection.style.display = 'none';
+    }
+  }
 }
 
 function escapeHtml(s) {
@@ -3869,8 +3900,17 @@ function applyDayplanToForm() {
 }
 
 
-function renderPdfImportTable(matches) {
-  const tbl = document.getElementById('pdfImportTable');
+function renderPdfImportTable(matches, opts) {
+  // opts.tableId    — DOM id of the <table> to populate (default 'pdfImportTable')
+  // opts.statePath  — JS field on _pdfImportState that holds these matches
+  //                   ('matches' for qual, 'practice' for practice). Used by
+  //                   the cell-edit / surrogate-toggle handlers to find the
+  //                   right array.
+  opts = opts || {};
+  const tableId = opts.tableId || 'pdfImportTable';
+  const statePath = opts.statePath || 'matches';
+  const tbl = document.getElementById(tableId);
+  if (!tbl) return;
   // Column order matches FMS scoring-table convention: Blue on the
   // left, Red on the right. Per-cell data fields (red[], blue[],
   // red_surrogate[], blue_surrogate[]) keep their semantic names —
@@ -3890,17 +3930,17 @@ function renderPdfImportTable(matches) {
     for (var j = 0; j < 3; j++) {
       html += '<td class="col-blue">' +
         '<input class="cell-input" type="number" min="1" value="' + (blue[j] || '') + '" ' +
-        'onchange="updatePdfImportCell(' + idx + ',\'blue\',' + j + ',this.value)">' +
+        'onchange="updatePdfImportCell(' + idx + ',\'blue\',' + j + ',this.value,\'' + statePath + '\')">' +
         '<span class="surrogate-toggle' + (bs[j] ? ' active' : '') + '" ' +
-        'onclick="togglePdfImportSurrogate(' + idx + ',\'blue\',' + j + ')" title="Toggle surrogate">S</span>' +
+        'onclick="togglePdfImportSurrogate(' + idx + ',\'blue\',' + j + ',\'' + statePath + '\')" title="Toggle surrogate">S</span>' +
         '</td>';
     }
     for (var i = 0; i < 3; i++) {
       html += '<td class="col-red">' +
         '<input class="cell-input" type="number" min="1" value="' + (red[i] || '') + '" ' +
-        'onchange="updatePdfImportCell(' + idx + ',\'red\',' + i + ',this.value)">' +
+        'onchange="updatePdfImportCell(' + idx + ',\'red\',' + i + ',this.value,\'' + statePath + '\')">' +
         '<span class="surrogate-toggle' + (rs[i] ? ' active' : '') + '" ' +
-        'onclick="togglePdfImportSurrogate(' + idx + ',\'red\',' + i + ')" title="Toggle surrogate">S</span>' +
+        'onclick="togglePdfImportSurrogate(' + idx + ',\'red\',' + i + ',\'' + statePath + '\')" title="Toggle surrogate">S</span>' +
         '</td>';
     }
     html += '</tr>';
@@ -3909,25 +3949,43 @@ function renderPdfImportTable(matches) {
   tbl.innerHTML = html;
 }
 
-function updatePdfImportCell(matchIdx, side, pos, value) {
+function updatePdfImportCell(matchIdx, side, pos, value, statePath) {
   if (!_pdfImportState) return;
-  const m = _pdfImportState.matches[matchIdx];
+  statePath = statePath || 'matches';
+  const arr = _pdfImportState[statePath];
+  if (!arr || !arr[matchIdx]) return;
+  const m = arr[matchIdx];
   const v = parseInt(value);
   if (isNaN(v) || v <= 0) return;
   m[side][pos] = v;
-  // Re-validate after each edit so the user sees immediate feedback
-  revalidatePdfImport();
+  // Re-validate after each edit so the user sees immediate feedback.
+  // (Validation runs over qual matches only; practice doesn't have
+  // the same MPT/cooldown constraints, so editing practice doesn't
+  // re-trigger validation.)
+  if (statePath === 'matches') {
+    revalidatePdfImport();
+  }
 }
 
-function togglePdfImportSurrogate(matchIdx, side, pos) {
+function togglePdfImportSurrogate(matchIdx, side, pos, statePath) {
   if (!_pdfImportState) return;
-  const m = _pdfImportState.matches[matchIdx];
+  statePath = statePath || 'matches';
+  const arr = _pdfImportState[statePath];
+  if (!arr || !arr[matchIdx]) return;
+  const m = arr[matchIdx];
   const key = side + '_surrogate';
   if (!m[key]) m[key] = [false, false, false];
   m[key][pos] = !m[key][pos];
-  // Re-render just this cell's toggle (cheap, avoid full re-render)
-  renderPdfImportTable(_pdfImportState.matches);
-  revalidatePdfImport();
+  // Re-render just this table (cheap; the other table is untouched).
+  if (statePath === 'matches') {
+    renderPdfImportTable(_pdfImportState.matches);
+    revalidatePdfImport();
+  } else {
+    renderPdfImportTable(_pdfImportState.practice, {
+      tableId: 'pdfImportPracticeTable',
+      statePath: 'practice',
+    });
+  }
 }
 
 // Re-run validation client-side using the same checks the server does.
@@ -3987,6 +4045,12 @@ async function confirmPdfImport() {
         event_id:      parseInt(_currentEventId),
         name:          'PDF Import ' + new Date().toLocaleString(),
         matches:       _pdfImportState.matches,
+        // Practice matches — included when the source had a Practice
+        // sheet (XLSX/CSV imports). Backend stores them on the
+        // assigned schedule's practice_matches column. Empty array
+        // is a no-op (existing behavior preserved for sources
+        // without practice).
+        practice:      _pdfImportState.practice || [],
         // Send V2 day_config natively — backend accepts both shapes
         // (server-side normalize handles V1 input) but emitting V2
         // direct skips a redundant migration round-trip and matches

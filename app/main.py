@@ -3335,6 +3335,10 @@ class PdfImportCommitRequest(BaseModel):
     # User may have edited the matches in the preview UI before confirming.
     # If provided, use these instead of the cached parsed matches.
     matches:       list[dict] | None = None
+    # Same for practice matches — XLSX/CSV imports of files with a
+    # Practice sheet send this through. None falls back to whatever
+    # the cached parse contained (empty list for sources without practice).
+    practice:      list[dict] | None = None
     day_config:    Any = None
 
 
@@ -4210,12 +4214,17 @@ async def commit_pdf_import(
             .where(AssignedSchedule.event_id == body.event_id)
             .values(is_active=False)
         )
-        # Practice matches — pulled from the cached parse if the source
-        # had a practice sheet (XLSX import) or the parsed PDF included
-        # them. Stored with real team numbers (not slot indices) for
-        # imported schedules; _resolve_practice_matches falls through
-        # to identity mapping for unknown slots so this round-trips.
-        practice_parsed = pdf_import.parsed.get("practice", []) or []
+        # Practice matches — prefer the user-edited list from the request
+        # body (the preview UI sends them through as `practice`). Fall back
+        # to the cached parse for backward-compat with clients that only
+        # send the qual `matches` field. Empty list is the no-practice
+        # default. Stored with real team numbers (not slot indices) for
+        # imported schedules; _resolve_practice_matches falls through to
+        # identity mapping for unknown slots so this round-trips.
+        if body.practice is not None:
+            practice_parsed = body.practice
+        else:
+            practice_parsed = pdf_import.parsed.get("practice", []) or []
         practice_for_db = []
         for pm in practice_parsed:
             red  = list(pm.get("red")  or [])
