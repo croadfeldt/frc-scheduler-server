@@ -3163,23 +3163,12 @@ async function restoreFromJsonFile(file) {
     return;
   }
 
-  // Auto-create event if needed (same reasoning as openPdfImportModal).
+  // Resolve event_id robustly — try _currentEventId, then typed event
+  // code, then _currentEventInfo, then ask before falling back to ad-hoc.
+  // See ensureEventLoadedForImport() for the full ladder.
   if (!_currentEventId) {
-    try {
-      showApiStatus('⏳ Preparing event for restore…');
-      const ev = await apiFetch('/api/events/adhoc');
-      if (ev.teams && ev.teams.length > 0) {
-        for (var i = 0; i < ev.teams.length; i++) {
-          await apiFetch('/api/events/' + ev.id + '/teams/' + ev.teams[i].number, { method: 'DELETE' })
-            .catch(function() {});
-        }
-        ev.teams = [];
-      }
-      await activateEvent(ev);
-    } catch (e) {
-      showApiStatus('Could not prepare event: ' + e.message, true);
-      return;
-    }
+    const ok = await ensureEventLoadedForImport('JSON restore');
+    if (!ok) return;
   }
 
   // Apply parameters to form fields. Each is independently optional;
@@ -3317,23 +3306,8 @@ async function _restoreMatchListFile(file, endpoint, label) {
   // responses in the same shape, so the preview UI is identical.
   // Differences are just the endpoint URL and the user-facing label
   // for status messages.
-  if (!_currentEventId) {
-    try {
-      showApiStatus('⏳ Preparing event for ' + label + ' import…');
-      const ev = await apiFetch('/api/events/adhoc');
-      if (ev.teams && ev.teams.length > 0) {
-        for (var i = 0; i < ev.teams.length; i++) {
-          await apiFetch('/api/events/' + ev.id + '/teams/' + ev.teams[i].number, { method: 'DELETE' })
-            .catch(function() {});
-        }
-        ev.teams = [];
-      }
-      await activateEvent(ev);
-    } catch (e) {
-      showApiStatus('Could not prepare event: ' + e.message, true);
-      return;
-    }
-  }
+  const ok = await ensureEventLoadedForImport(label + ' import');
+  if (!ok) return;
 
   // Open the modal in stage 2 (loading); on success swap to preview;
   // on error go to stage 1 with the error inline.
@@ -3442,25 +3416,15 @@ async function openPdfImportModal() {
   // events are persistent-by-design and have always behaved this
   // way (Quick Schedule does the same thing), and (b) loading the
   // ad-hoc event a second time reuses the same row.
+  // Resolve event_id robustly. Previously this would silently create
+  // an ad-hoc event whenever _currentEventId was unset — which often
+  // forked an import that was supposed to land on a real event but
+  // hadn't fully synced its event_id (e.g., post page-reload from a
+  // /view link). The helper tries _currentEventInfo + the typed event
+  // code first, and confirms before creating an ad-hoc event.
   if (!_currentEventId) {
-    try {
-      showApiStatus('⏳ Preparing event for PDF import…');
-      const ev = await apiFetch('/api/events/adhoc');
-      // Clear any stale teams from a previous ad-hoc session — the
-      // PDF will provide its own roster (or we'll add teams later).
-      if (ev.teams && ev.teams.length > 0) {
-        for (var i = 0; i < ev.teams.length; i++) {
-          await apiFetch('/api/events/' + ev.id + '/teams/' + ev.teams[i].number, { method: 'DELETE' })
-            .catch(function() {});
-        }
-        ev.teams = [];
-      }
-      await activateEvent(ev);
-      // activateEvent flips the bar to loaded state — fine.
-    } catch (e) {
-      showApiStatus('Could not prepare event: ' + e.message, true);
-      return;
-    }
+    const ok = await ensureEventLoadedForImport('PDF import');
+    if (!ok) return;
   }
 
   // Reset modal to stage 1
@@ -9887,6 +9851,85 @@ function switchEvent() {
   renderEventBarState('empty');
   // Focus the event-code input so keyboard users can keep typing.
   if (codeInput) codeInput.focus();
+}
+
+// ── Robust event resolution before destructive imports ───────────────────────
+// Used by JSON restore, XLSX/CSV import, and PDF import. Tries _currentEventId,
+// the typed-but-not-loaded event code in eventCodeInput, the cached
+// _currentEventInfo, then falls back to creating an ad-hoc event AFTER asking
+// the user. Returns true if an event is now active, false if cancelled.
+async function ensureEventLoadedForImport(label) {
+  if (_currentEventId) return true;
+
+  // Strategy: eventCodeInput might have a value the user typed but
+  // hasn't loaded yet. Resolve via /api/events lookup (same logic as
+  // loadEventByCode) without disturbing UI state on lookup failure.
+  try {
+    const codeInput = document.getElementById('eventCodeInput');
+    const yearInput = document.getElementById('eventYear');
+    const raw = (codeInput && codeInput.value || '').trim();
+    if (raw) {
+      const year = parseInt(yearInput && yearInput.value) || new Date().getFullYear();
+      const code = /^\d{4}/.test(raw) ? raw.toLowerCase() : year + raw.toLowerCase();
+      showApiStatus('⏳ Resolving event "' + raw + '" for ' + label + '…');
+      const events = await apiFetch('/api/events');
+      const local = events.find(e =>
+        e.key === code ||
+        e.key === raw.toLowerCase() ||
+        (e.name || '').toLowerCase() === raw.toLowerCase()
+      );
+      if (local) {
+        const ev = await apiFetch('/api/events/' + local.id);
+        await activateEvent(ev);
+        return true;
+      }
+    }
+  } catch (e) {
+    console.warn('Event code lookup during ' + label + ' failed:', e);
+  }
+
+  // Strategy: _currentEventInfo carries metadata even when _currentEventId
+  // hasn't been re-synced (post page-reload via a /view link).
+  if (_currentEventInfo && _currentEventInfo.id) {
+    try {
+      const ev = await apiFetch('/api/events/' + _currentEventInfo.id);
+      await activateEvent(ev);
+      return true;
+    } catch (e) {
+      console.warn('Event resolution from _currentEventInfo failed:', e);
+    }
+  }
+
+  // Last resort — confirm with the user before creating an ad-hoc event.
+  // This prevents accidental ad-hoc forks when the user actually had a
+  // specific event in mind but it didn't get loaded for some reason.
+  const proceed = window.confirm(
+    'No event is currently loaded for ' + label + '.\n\n' +
+    'OK   = Create an ad-hoc event for this import.\n' +
+    'Cancel = Close this dialog so you can load the correct event first.\n\n' +
+    '(Tip: type your event code in the Event Code field and press Load, then ' +
+    'try the ' + label + ' again.)'
+  );
+  if (!proceed) {
+    showApiStatus(label + ' cancelled — load your event first', true);
+    return false;
+  }
+  try {
+    showApiStatus('⏳ Preparing ad-hoc event for ' + label + '…');
+    const ev = await apiFetch('/api/events/adhoc');
+    if (ev.teams && ev.teams.length > 0) {
+      for (var i = 0; i < ev.teams.length; i++) {
+        await apiFetch('/api/events/' + ev.id + '/teams/' + ev.teams[i].number, { method: 'DELETE' })
+          .catch(function() {});
+      }
+      ev.teams = [];
+    }
+    await activateEvent(ev);
+    return true;
+  } catch (e) {
+    showApiStatus('Could not prepare ad-hoc event: ' + e.message, true);
+    return false;
+  }
 }
 
 // Set the active event in UI state
