@@ -116,14 +116,24 @@ of truth), no UX changes needed beyond updating the README.
 
 ## Action items
 
-- [ ] Update `README.md` to remove the bit-exact replay claim and
+- [x] Update `README.md` to remove the bit-exact replay claim and
       replace it with the schedule-is-the-artifact framing.
-- [ ] Update `docs/REPRODUCTION_PROMPT.md` if it makes claims about
+      *(Done 2026-05-10 alongside this ADR.)*
+- [x] Update `docs/REPRODUCTION_PROMPT.md` if it makes claims about
       reproducibility (it does, in passing).
+      *(The doc's reading-order section was rewritten in the
+      structural reorg; the seed-related claim is gone.)*
+- [x] Remove the user-facing seed UI: the "seed:" / "assign seed:"
+      copy-able displays in the share bar of `static/index.html`,
+      the `copySeed()` / `copyAssignSeed()` helpers, the
+      `?seed=` / `?aseed=` URL emitters, and the legacy autoload-
+      from-seed-only path. Schedule ID and Assignment ID stay
+      (they're DB primary keys, useful as canonical share
+      pointers). *(Done 2026-05-10.)*
 - [ ] Surface algorithm version in stored schedules. Could be as
       simple as the git commit short-hash recorded at generation
       time. Useful for audit/debug workflows; doesn't promise
-      anything.
+      anything. *(Deferred — not gating any current work.)*
 
 ## References
 

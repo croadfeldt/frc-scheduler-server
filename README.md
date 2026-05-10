@@ -548,10 +548,12 @@ Non-numbers are silently skipped. Duplicates ignored. After import, TBA is queri
 
 The editor encodes its full state in the URL so a configuration
 can be shared as a link. The schedule itself is fetched from the
-database (via `sid`), not regenerated from seed.
+database via `sid` (abstract schedule) or `aid` (assigned
+schedule), not regenerated from seed. Per ADR 004, seeds are no
+longer part of the URL surface.
 
 ```
-?n=51&mpt=11&cd=3&ct=8&days=2&seed=a1b2c3d4&aseed=cafebabe
+?n=51&mpt=11&cd=3&ct=8&days=2&sid=42&aid=87
   &d1=08:00-17:00&d1b=Lunch|12:00|13:00
   &d2=08:00-15:00&teams=254,1114,...
 ```
@@ -563,8 +565,6 @@ database (via `sid`), not regenerated from seed.
 | `cd` | Cooldown |
 | `ct` | Default cycle time (minutes) |
 | `days` | Number of competition days |
-| `seed` | Stage 1 hex seed |
-| `aseed` | Stage 2 hex seed |
 | `teams` | Team numbers in slot order |
 | `d1`–`d5` | Per-day start–end (`HH:MM-HH:MM`) |
 | `d1b`–`d5b` | Per-day breaks: `Name\|start\|end`, comma-separated |

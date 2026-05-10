@@ -1802,22 +1802,18 @@
       <button class="btn-auth signed-in" id="btnSignOut" onclick="signOut()" style="display:none;">Sign Out</button>
     </div>
   </header>
-  <!-- Share/seed bar — shown after schedule is generated -->
+  <!-- Share/IDs bar — shown after schedule is generated -->
   <div id="shareBar" style="display:none;background:var(--surface);border-bottom:1px solid var(--border);padding:0.4rem 1.25rem;display:none;align-items:center;gap:0.5rem;flex-wrap:wrap;">
     <details style="font-size:0.68rem;color:var(--text-muted);">
       <summary style="cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:0.35rem;">
-        <span style="font-size:0.65rem;opacity:0.6;">&#9432;</span> Schedule IDs &amp; seeds
+        <span style="font-size:0.65rem;opacity:0.6;">&#9432;</span> Schedule IDs
       </summary>
       <div class="seed-row" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;margin-top:0.3rem;">
         <span style="color:var(--text-muted);font-size:0.68rem;">Schedule&nbsp;ID:</span>
         <span class="seed-val" id="displayAbstractId" title="Click to copy — use this ID to reload this exact schedule from the server" onclick="copyAbstractId()" style="font-family:monospace;letter-spacing:0.03em;"></span>
-        <span style="color:var(--text-muted);font-size:0.68rem;margin-left:0.25rem;">seed:</span>
-        <span class="seed-val" id="displaySeed" title="Click to copy — the seed reproduces this schedule layout from scratch (without server)" onclick="copySeed()" style="font-size:0.68rem;opacity:0.75;"></span>
         <span id="assignSeedDisplay" style="display:none;align-items:center;gap:0.4rem;margin-left:0.25rem;">
           <span style="color:var(--text-muted);font-size:0.68rem;">· Assignment&nbsp;ID:</span>
           <span class="seed-val" id="displayAssignedId" title="Click to copy — use this ID to reload this specific team assignment from the server" onclick="copyAssignedId()" style="font-family:monospace;letter-spacing:0.03em;"></span>
-          <span style="color:var(--text-muted);font-size:0.68rem;">assign&nbsp;seed:</span>
-          <span class="seed-val" id="displayAssignSeed" title="Click to copy assign seed" onclick="copyAssignSeed()" style="font-size:0.68rem;opacity:0.75;"></span>
         </span>
       </div>
     </details>
@@ -5026,14 +5022,12 @@ function signOut() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SEED HELPERS
+// SHARE-BAR ID HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
-function copySeed() {
-  if (_currentSeed) { navigator.clipboard.writeText(_currentSeed).catch(function(){}); showApiStatus('Seed copied'); }
-}
-function copyAssignSeed() {
-  if (_currentAssignSeed) { navigator.clipboard.writeText(_currentAssignSeed).catch(function(){}); showApiStatus('Assign seed copied'); }
-}
+// Per ADR 004, seeds are not surfaced in the UI — there used to be
+// copySeed() / copyAssignSeed() helpers here for the (now-removed)
+// click-to-copy seed displays. The remaining helpers operate on
+// the canonical share pointers: Schedule ID and Assignment ID.
 function copyAbstractId() {
   if (_currentAbstractScheduleId) {
     navigator.clipboard.writeText(String(_currentAbstractScheduleId)).catch(function(){});
@@ -5048,18 +5042,24 @@ function copyAssignedId() {
 }
 
 function updateSeedDisplay(seed, assignSeed) {
+  // Per ADR 004, seeds are no longer surfaced in the UI. We keep
+  // _currentSeed and _currentAssignSeed as in-memory metadata that
+  // some API responses still provide, but they are not displayed
+  // and not written into URLs. This function continues to be the
+  // single entry point for "schedule was generated/loaded —
+  // refresh the share bar's IDs," because every call site in the
+  // codebase already routes through here. Callers that pass null
+  // or a seed value see no behavioral difference today; the seed
+  // arg is retained for source-call-site compatibility.
   _currentSeed = seed || null;
   _currentAssignSeed = assignSeed || null;
   const bar = document.getElementById('shareBar');
   bar.style.display = 'flex';
-  document.getElementById('displaySeed').textContent = seed || '(client-side)';
   // Show abstract schedule ID
   var absIdEl = document.getElementById('displayAbstractId');
   if (absIdEl) absIdEl.textContent = _currentAbstractScheduleId ? '#' + _currentAbstractScheduleId : '';
   const assignRow = document.getElementById('assignSeedDisplay');
-  if (assignSeed) {
-    document.getElementById('displayAssignSeed').textContent = assignSeed;
-    // Show assigned schedule ID
+  if (assignSeed || _currentAssignedScheduleId) {
     var asgIdEl = document.getElementById('displayAssignedId');
     if (asgIdEl) asgIdEl.textContent = _currentAssignedScheduleId ? '#' + _currentAssignedScheduleId : '';
     assignRow.style.display = 'flex';
@@ -5327,8 +5327,13 @@ function buildShareUrl() {
   if (urlAP && !urlAP.checked) params.set('autoPopulate',    '0');
   if (urlAM && !urlAM.checked) params.set('autoMaxCycles',   '0');
   if (urlAS &&  urlAS.checked) params.set('autoAssign',      '1');  // default off — store when on
-  if (_currentSeed)                params.set('seed',  _currentSeed);
-  if (_currentAssignSeed)          params.set('aseed', _currentAssignSeed);
+  // Note: seed/aseed are no longer emitted in URLs. Per ADR 004
+  // the schedule itself is the artifact (saved in the DB); share
+  // URLs reference it by sid/aid (server-side row IDs), not by
+  // seed (which would imply bit-exact regeneration is promised).
+  // _currentSeed and _currentAssignSeed are kept as in-memory
+  // metadata for code paths that still receive them from the API,
+  // but they're not user-facing or URL-facing.
   if (_currentAbstractScheduleId)  params.set('sid',   _currentAbstractScheduleId);
   if (_currentAssignedScheduleId)  params.set('aid',   _currentAssignedScheduleId);
   // Lock state — URL-only (not persisted to DB). Refresh keeps the
@@ -5667,11 +5672,14 @@ function applyUrlParams(params) {
   if (params.autoMaxCycles   != null && urlApplyAM) urlApplyAM.checked = params.autoMaxCycles;
   if (params.autoAssign      != null && urlApplyAS) urlApplyAS.checked = params.autoAssign;
 
-  if (params.seed) {
-    _currentSeed = params.seed;
-    document.getElementById('shareBar').style.display = 'flex';
-    document.getElementById('displaySeed').textContent = params.seed;
-  }
+  // Per ADR 004, the seed is no longer surfaced in the UI or used
+  // for bit-exact regeneration. Old URLs may still contain ?seed=,
+  // and applyUrlParams used to populate a now-removed displaySeed
+  // element with it. We drop that display entirely. The seed is
+  // also not consumed by autoRunFromUrl as a regeneration trigger
+  // anymore — old ?seed=...&n=...&teams=... URLs fall through to
+  // the form-field-population flow above, which sets up the editor
+  // for the user to click Generate.
 }
 
 // Auto-run from URL params on load
@@ -5691,7 +5699,12 @@ async function autoRunFromUrl() {
   // V2 day params (and no V1 ?days=) are present.
   var _spForDcv = new URLSearchParams(window.location.search);
   var _hasV2Dc  = _spForDcv.get('dcv') === '2';
-  if (!params.seed && !params.n && !_hasV2Dc && !params.days && !params.sid && !params.aid) return;
+  // Per ADR 004, ?seed=... alone no longer triggers autoload —
+  // bit-exact regeneration isn't promised across versions. Autoload
+  // requires sid/aid (canonical server pointers), or full event
+  // configuration (n/days/etc.) that puts the editor in a "generate
+  // when ready" state.
+  if (!params.n && !_hasV2Dc && !params.days && !params.sid && !params.aid) return;
   // Set the loading guard BEFORE applyUrlParams, which populates
   // form fields via the same oninput-triggering path that
   // loadAssignedSchedule uses. Without the guard, every numTeams /
@@ -5848,7 +5861,9 @@ async function autoRunFromUrl() {
     } catch(e) {
       console.error('[autoRunFromUrl] aid path failed:', e);
       showApiStatus('Could not load assignment #' + params.aid + ': ' + e.message, true);
-      if (params.seed) { _urlAutoTeams = params.teams; await generateScheduleWithSeed(params.seed); }
+      // Per ADR 004, no longer fall back to seed-based regeneration —
+      // the schedule (in the DB) is the artifact. If the aid lookup
+      // fails, surface the error and let the user act on it.
     }
     return;
   }
@@ -5910,20 +5925,19 @@ async function autoRunFromUrl() {
       showApiStatus('\u2713 Schedule #' + params.sid + ' loaded from server');
     } catch(e) {
       showApiStatus('Could not load schedule #' + params.sid + ': ' + e.message, true);
-      if (params.seed) { _urlAutoTeams = params.teams; await generateScheduleWithSeed(params.seed); }
+      // Per ADR 004, no longer fall back to seed-based regeneration.
     }
     return;
   }
 
-  // Fall back to seed-based client regeneration
-  if (params.seed) {
-    _urlAutoTeams = params.teams;
-    await generateScheduleWithSeed(params.seed);
-  }
+  // Per ADR 004, ?seed= alone no longer triggers regeneration. The
+  // canonical share path is via ?sid=/?aid=. URLs that contain only
+  // a seed (legacy bookmarks) fall through to here and the editor
+  // ends up in its "form fields populated, click Generate" state.
 
   // Final clear of the loading guard. Branches that called
   // loadAssignedSchedule already cleared it via their own finally,
-  // but the sid/seed branches don't go through there. Defensive
+  // but the sid branch doesn't go through there. Defensive
   // double-clear is harmless. Use setTimeout(0) so any remaining
   // synchronous oninput handlers from form-field population still
   // see the truthy flag and short-circuit.
