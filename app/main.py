@@ -1177,6 +1177,18 @@ async def assign_teams_endpoint(
                 try:
                     res = await f
                     done_chunks += 1
+                    # Log per-worker timing — critical for diagnosing
+                    # quality issues. Compares actual wall-clock to
+                    # expected (~37-50μs/iter on dedicated CPU). Workers
+                    # noticeably slower than that indicate CPU contention.
+                    log.info(
+                        "Stage 2 worker %s: iters=%s elapsed=%.1fs (%.0f μs/iter) tuple=%s",
+                        res.get('worker_id', '?'),
+                        res.get('iterations_done', '?'),
+                        res.get('worker_elapsed_s', 0.0),
+                        res.get('us_per_iter', 0.0),
+                        res.get('score_tuple', '?'),
+                    )
                     # Best-of-N comparison uses the FRC §10.5.2 lex tuple
                     # (lower is better) — authoritative for which trial wins.
                     # Fall back to score float for older worker results that

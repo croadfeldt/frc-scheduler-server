@@ -2081,12 +2081,15 @@ def _assign_unified(abstract_matches: list[dict],
 def run_assignment_chunk(args: tuple) -> dict:
     """Worker entry point for the /assign endpoint.
 
-    Phase 0: preserves the legacy tuple signature but calls the unified
-    Phase 0 pipeline. ``chunk_size`` is reinterpreted as the SA iteration
-    budget for this chunk; the worker runs one trial (no inner loop)
-    because the SA itself is the optimization, not best-of-N.
+    Each worker runs one full SA trial at ``chunk_size`` iterations.
+    Returns timing/iteration metadata so the dispatcher can spot trials
+    that were truncated, returned early, or ran much slower than expected
+    (e.g., if the container's CPU is over-subscribed and workers are
+    time-sliced).
     """
+    import time as _time
     abstract_matches, num_teams, team_numbers, ideal_gap, chunk_size, worker_id, seed = args
+    t0 = _time.monotonic()
     result = _assign_unified(
         abstract_matches=abstract_matches,
         num_teams=num_teams,
@@ -2095,8 +2098,19 @@ def run_assignment_chunk(args: tuple) -> dict:
         sa_iterations=chunk_size,
         seed=seed,
     )
+    elapsed = _time.monotonic() - t0
     result['worker_id'] = worker_id
+    result['iterations_requested'] = chunk_size
+    # NOTE: iterations_done is the REQUESTED count for now — the SA inner
+    # loop doesn't yet expose actual-iters-completed. Use elapsed time
+    # vs expected wall-clock to detect truncation.
     result['iterations_done'] = chunk_size
+    result['worker_elapsed_s'] = elapsed
+    # Per-iter cost (μs) lets the dispatcher detect over-subscription:
+    # On a dedicated CPU, ~37-50μs/iter is normal. >100μs suggests the
+    # worker is sharing a core with other workers (CPU oversubscription).
+    if chunk_size > 0:
+        result['us_per_iter'] = (elapsed * 1e6) / chunk_size
     return result
 
 
