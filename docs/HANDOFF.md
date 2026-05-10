@@ -5,540 +5,376 @@ project. Practical, terse, code-anchored — same convention as the rest of
 `docs/`. Read this first if you're new to the codebase or coming back
 after a gap.
 
-Last updated: 2026-05-08, end of the View UX Overhaul session.
+Last updated: 2026-05-09, end of the FRC §10.5.2 paramount + competition-
+approved + import-path-cleanup session.
 
 ---
 
 ## 1 · Where we are
 
-The V2 day_config migration is **done through phase 5c** plus a follow-on
-**View UX Overhaul** (status pills, field-position alliance layout,
-unified agenda fit bar, source-aware row tints).
+The scheduler operates under **FRC §10.5.2 paramount lexicographic semantics**.
+Cooldown is paramount; the remaining criteria are compared lexicographically.
+The Python SA + post-passes implement this; the import + assign + view paths
+all surface FRC compliance state to the user.
 
-| Phase | Status | Notes |
-|-------|--------|-------|
-| 0 — specs ratified                           | ✓ | Phase gate met. |
-| 1 — backend V2 native                        | ✓ | POST/PATCH validate, GET normalize. |
-| 2 — DB migration applied                     | ✓ | All rows V2-shape. |
-| 3 — V1 toggle removed + V1 markup deleted    | ✓ | Two stages, both done. |
-| 4 — V2 URL emit/parse                        | ✓ | 36 tests. V1 back-compat parse retained. |
-| 5 — V1 helpers deleted                       | ✓ | ~870 lines gone. |
-| 5b — renames + view-page color fix           | ✓ | |
-| 5c — V2-native qual scheduler                | ✓ | `_v2BuildQualPlan` + V1 fallback branch. |
-| **VUX — View UX overhaul (post-roadmap)**    | ✓* | See §3 below. *Pending live verification. |
-
-The `docs/V2_ROADMAP.md` document tracks phases 0–5c. The View UX
-overhaul isn't part of the V2 roadmap proper — it's a UX polish pass
-that piggybacks on the V2 plumbing now that all data flows through
-the unified pipeline.
-
----
-
-## 2 · Architecture snapshot
-
-```
-                ┌──────────────┐
-                │   Editor     │  static/index.html (~17,113 lines)
-                │  (V2 native) │  collectDayConfigV2 → POST /api/schedules
-                └───────┬──────┘
-                        │ V2 wire shape
-                        ▼
-                ┌──────────────┐
-                │   Backend    │  app/*.py (FastAPI, Pydantic V2 models)
-                │  (V2 native) │  app/day_config_v2.py is canonical
-                └───────┬──────┘
-                        │ V2 wire shape
-                        ▼
-                ┌──────────────┐
-                │   Postgres   │  All rows V2-shape post-phase-2
-                └───────┬──────┘
-                        │
-                        ▼
-                ┌──────────────┐
-                │  View page   │  static/view.html (~7,957 lines)
-                │  V2 → V1     │  _v2DowngradeToV1ForView() shim, then
-                │  shim layer  │  legacy renderers consume V1 shape
-                └──────────────┘
-```
-
-**Why the shim survives:** the view-page renderers were never
-rewritten for V2-native consumption — they read V1 shape. Rather than
-rewrite ~3000 lines of viewer rendering code, we run a one-shot
-downgrade at load time. This keeps the seam clean: backend & editor
-are V2-native, view is V1-native with a V2 adapter at the boundary.
-
-The downgrade is **lossy by design** for fields the view doesn't use,
-but preserves everything the view renders (rosters, timing, breaks,
-playoff blocks, subtypes for break colors). The reverse direction
-(V1 → V2) does NOT exist anywhere — the editor never round-trips
-through V1. That asymmetry is intentional.
+| Workstream | Status | Notes |
+|------------|--------|-------|
+| V2 day_config (phases 0–5c)                                     | ✓ | Complete from prior sessions. |
+| View UX overhaul                                                 | ✓ | Status pills, field-position alliance, source-aware tints. |
+| **Phase 0a — Lex score**                                         | ✓ | `score_tuple_for_schedule` returns 8-element tuple; SA accept/reject lex-compare. |
+| **Phase 0b — Hard cooldown filter**                              | ✓ | `_swap_preserves_cooldown` filters violations BEFORE state mutation. ~5x SA speedup. |
+| **Phase 0c — Targeted move generator**                           | ✓ | Biases SA toward duplicate-pair bottlenecks. 1/3 partner-targeted, 1/3 opponent-targeted, 1/3 random. |
+| **Phase 1 — R/B post-pass**                                      | ✓ | `app/post_passes/rb_balance.py`. Whole-match flip + SA. 8 commutativity tests. |
+| **Phase 2 — Sykes station post-pass**                            | ✓ | `app/post_passes/station_balance.py`. Within-alliance permutation + SA-from-greedy. 12 commutativity tests. |
+| Iteration sweep + K* analysis                                    | ✓ | K* > 5M; practical ceiling at 5M. See `docs/scheduler/ITERATION_CEILING.md`. |
+| Quality presets (fair/good/best/maximum)                         | ✓ | `app/quality_presets.py`. |
+| Competition-approved checkbox + audit trail                      | ✓ | DB columns + `app/frc_compliance.py` + UI surfaces in index + view. |
+| /assign chunking fix                                             | ✓ | Each worker runs full SA budget; best-of-N over independent trials. |
+| /assign auth-header bug fix                                      | ✓ | `assignTeams()` was sending raw fetch with no Authorization. |
+| EventTeam.team_number bug fix                                    | ✓ | Seven sites in main.py; replaced with proper join through `Team.number`. |
+| MatchMaker import path                                           | ✓ | `state_qual_schedule.txt` → FMS xlsx → import flow. Practice sheet supported. |
+| Practice-import wiring (storage + UI + commit)                   | ✓ | XLSX/CSV cache stores practice; preview UI renders it; commit body sends it. |
+| Import flow event-id resolution                                  | ✓ | `ensureEventLoadedForImport` helper used by 3 import call sites. |
+| MatchMaker comparison language softened                          | ✓ | Removed all "beats MatchMaker" / "OURS WINS" framing across UI + tests + docs. |
 
 ---
 
-## 3 · View UX overhaul (current session, mostly done)
-
-The view page got a substantial UX update. All implemented in
-`static/view.html`. Snapshot of what changed:
-
-### 3.1 Schedule-table row tints
-
-Was: yellow / orange row tints driven by direct `STATE.liveByMatch`
-reads in the renderer.
-
-Now: green / amber / purple, driven by `_findFieldThreeUp()` (the
-same source the 3-up status grid uses). Three states tracked:
-
-| Class                 | Color                | Meaning                             |
-|-----------------------|----------------------|-------------------------------------|
-| `tr.current-match`    | green `#639922`      | Match is on the field.              |
-| `tr.upcoming-match`   | amber `#BA7517`      | Match is on deck (next up).         |
-| `tr.queueing-match`   | purple `#7F77DD`     | Match is queueing (after on-deck).  |
-| `tr.estimated`        | (modifier)           | Source is `'scheduled'`, not live.  |
-
-Estimated rows get:
-- Tint alpha dropped 18% → 10%
-- `box-shadow` left bar replaced with `border-left: 4px dashed`
-- Field-state pill switches from solid → hollow
-
-### 3.2 Field-state pills
-
-Inline next to the match number in the schedule table. Distinct from
-the existing `.queue-pill` (which is per-match Nexus `queue_status`)
-— field-state pills only render on the three field-relevant rows.
-
-| Class                       | Solid bg / text       |
-|-----------------------------|-----------------------|
-| `.field-pill-on-field`      | `#4d8b1a` / `#fff`    |
-| `.field-pill-on-deck`       | `#c66800` / `#fff`    |
-| `.field-pill-queueing`      | `#5d4ec9` / `#fff`    |
-| `.field-pill.estimated`     | transparent / colored |
-
-Dark-mode hollow pills lighten the text color so it reads against the
-dark surrounding surface.
-
-### 3.3 Live-status source banner
-
-`<div id="statusSourceBanner">` between the match-table-header and
-the match table. Three states:
-
-| State         | Visible | Text                                                     |
-|---------------|---------|----------------------------------------------------------|
-| `live`        | yes     | "Live status from Nexus / TBA — confirmed by feed."      |
-| `estimated`   | yes     | "Status estimated from the schedule — no live data yet." |
-| (none)        | hidden  | When `_findFieldThreeUp()` returns no field/deck/queueing. |
-
-Populated post-render, after the table is in the DOM, in the
-`renderTable()` flow.
-
-### 3.4 Pre-event guard on `_findFieldThreeUp()`
-
-Was: the scheduled fallback walked all matches with no date or time
-gating. Result: 3-up grid + table tints lit up days before the event.
-
-Now (the scheduled-only branch — Nexus/TBA paths bypass these):
-
-1. **Active-day filter.** Only matches whose `entry.date` matches
-   today's `YYYY-MM-DD` get into the candidate pool. Entries without
-   a date attribute stay eligible (old saves / fresh local
-   schedules), with the timestamp guard below as the safety net.
-
-2. **15-min pre-start window.** The earliest candidate must start
-   within 15 minutes (or already be past its scheduled start with no
-   live confirmation). Outside that window the function returns
-   `{ field: null, deck: null, queueing: null, source: null }`.
-
-Live data (Nexus / TBA actuals) overrides both gates — those branches
-return earlier with `source: 'nexus'`.
-
-### 3.5 Field-position alliance layout
-
-`_buildAllianceFieldHtml(entry, opts)` — top-down field view:
+## 2 · FRC §10.5.2 lex tuple — the canonical scoring model
 
 ```
-Blue stack (left wall)              Red stack (right wall)
-┌────────────────┐                  ┌────────────────┐
-│ ¹ 3633         │                  │         3082 ³ │   top
-├────────────────┤                  ├────────────────┤
-│ ² 5172         │     [ field ]    │         4198 ² │
-├────────────────┤                  ├────────────────┤
-│ ³ 7137         │                  │         6162 ¹ │   bottom
-└────────────────┘                  └────────────────┘
-                  ━━━━━━━━━━━━━━━━━━
-                    scoring table
+(cooldown_violations,    # paramount — never traded against anything else
+ par_quad,               # partner-pair sum-of-squares (penalizes repeats hard)
+ opp_quad,               # opponent-pair sum-of-squares
+ surrogate_count,
+ rb_metric,              # R/B imbalance — variant by num_teams (max-imbalance ≥24, swap-count <24)
+ station_pen,            # station distribution penalty (FRC #6)
+ surrogate_spread,       # P11
+ match_equity)           # P5
 ```
 
-Stations follow the "1, 2, 3 left to right from driver POV" rule:
-blue 1→3 reads top-to-bottom; red 3→1 reads top-to-bottom (red driver
-faces left, mirror across centerline). B3 and R1 sit at the
-table-side end.
+Comparison: lexicographic, lower = better. Cooldown is paramount —
+never accept any swap that worsens it. SA accept-reject uses lex
+compare with stochastic uphill on lower-priority criteria only.
 
-Companion to `_buildAllianceLineHtml` (linear blue-vs-red layout).
-Picked at runtime via `_allianceHtmlForMode()` based on
-`localStorage['frc_field_view_mode']` (`'linear'` or `'field'`).
+Reference fixture (2026mnst, 36 teams × 7 MPT):
 
-Station label = digit-only superscript with 8-direction white
-text-shadow ring. Just the digit — alliance color carries the B/R.
+| Source                                         | Tuple                          |
+|------------------------------------------------|--------------------------------|
+| MatchMaker reference                           | `(0, 252, 416, 0, 3, 65, 0, 0)` |
+| Best-of-30 at SA=2M (sweep)                    | `(0, 252, 404, 0, 1, 39, 0, 0)` |
+| Best-of-30 at SA=5M (sweep)                    | `(0, 252, 386, 0, 1, 44, 0, 0)` |
+| par_quad floor (theoretical optimum)           | 252                             |
+| opp_quad floor (theoretical optimum)           | 378                             |
 
-### 3.6 Field/linear view toggle
-
-Toggle button **lives in the match-table-actions toolbar** (next to
-Print/Export, QR, theme toggle). Always visible — does NOT hide
-pre-event. Persists to `localStorage['frc_field_view_mode']`.
-
-`toggleFieldView()` flips the preference, calls
-`_updateFieldViewToggleLabel()`, then triggers a full `rerender()`
-so all four alliance-rendering surfaces refresh:
-
-1. 3-up status grid cells
-2. Team-card next-match alliance roster
-3. Next-only fallback alliance line
-4. Any future caller using `_allianceHtmlForMode()`
-
-### 3.7 Unified agenda fit bar
-
-Match-segment label now matches the editor's two-line format:
-
-```
-   12 matches            ← line1, always visible
- 22/35 min · 9→8 min     ← line2, shown when widthPct >= 14%
-```
-
-Cycle progression auto-derived by walking `seg.entries` and
-collecting distinct `endMin - startMin` values in order.
-
-Bar height bumped 36px → 38px to match the editor.
-
-Day-head structure aligned with editor's `renderScheduleBars`:
-
-- Clickable colored day label (practice green / qual blue) that
-  scrolls to the first match of the day.
-- Inline date label via `formatDateLabel(d.date)`.
-- Window time range in muted text.
-- Right-justified summary stats.
-
-### 3.8 Agenda legend additions
-
-Legend in the agenda fit panel gained:
-
-- Awards (`#d9a13e`)
-- Alliance selection (`#3fa6a0`)
-- Ceremony (`#dd7858`)
-- Playoff (`#bd92f0`)
-
-Plus existing: Matches, Practice, Breaks, Unallocated, Elapsed, Now,
-Selected team.
-
-### 3.9 8T → 8A label
-
-Playoff alliance count label changed from `8T` to `8A` everywhere
-in the view's agenda bar (inline label and tooltip). Editor already
-used "Alliance" — verified.
+MatchMaker is the long-standing community reference scheduler used by
+event organizers. Comparing against it is sanity-check, not competition.
 
 ---
 
-## 4 · Bug fixes from the live-test feedback round
+## 3 · Architecture snapshot
 
-User reported four issues after seeing the deployed code in production.
-All four addressed in this session:
+```
+            ┌──────────────────────────┐
+            │ Browser (static/index.html) │
+            │ • Generate (browser SA)     │  ← still client-side, weighted-sum
+            │ • Assign Teams              │──┐
+            │ • Import (xlsx/csv/pdf)     │  │
+            └──────────────────────────┘  │
+                                          ▼
+           ┌────────────────────────────────────────────┐
+           │ FastAPI (app/main.py)                      │
+           │ /api/abstract-schedules/{id}/assign        │ ← Python lex SA
+           │ /api/schedules/import-{xlsx,csv,pdf}       │
+           │ /api/schedules/import-pdf/commit           │
+           │ PATCH /api/assigned-schedules/{id}         │ ← accepts day_config + practice_matches
+           └────────────────────────────────────────────┘
+                                          ▼
+           ┌────────────────────────────────────────────┐
+           │ app/scheduler.py                           │
+           │ • generate_matches() — fresh abstract+SA   │
+           │ • _assign_unified() — relabel + SA + posts │
+           │ • _sa_optimize() — lex SA over Match[]     │
+           │ • Phase 1 (R/B) + Phase 2 (station)        │
+           └────────────────────────────────────────────┘
+                                          ▼
+                            PostgreSQL (asyncpg/SQLAlchemy)
+```
 
-### 4.1 Practice cycleTime discrepancy (10 min in editor → 9 min in view)
+**Two-stage data model:**
+- `AbstractSchedule` (slot indices 1..N, no team numbers) → reusable across rosters
+- `AssignedSchedule` (`slot_map: {1: 3276, 2: 7797, ...}`) → real teams + day_config + practice_matches + competition_approved + audit_trail
 
-**Root cause:** `_v2DowngradeToV1ForView` emits `practiceDay.ct`
-(canonical V1 field name). The view's renderer at line ~3344 was
-reading `pday.cycleTime` (the V2 field name). Mismatch → fallback
-to `cfg.practiceCycleTime || 9`.
+**Browser scheduler still exists.** `generateMatches()` at static/index.html:8689 (~500 lines) is a complete client-side scheduler with old weighted-sum scoring. It builds the abstract that the server then takes through `/assign`. The browser uses simpler weighted-sum scoring; the server's lex SA fixes whatever it can on the assign step. **Eventual cleanup**: retire the browser scheduler entirely or update it to match Python lex semantics. Tracked in §5.
 
-**Fix:** renderer now reads `pday.ct || pday.cycleTime ||
-cfg.practiceCycleTime || 9`. V1 field wins, V2 alias kept as
-back-compat for any renderer caller that bypasses the downgrade.
+---
 
-### 4.2 Pre-event status rows showing days early
+## 4 · This session's bug fixes
 
-**Root cause:** `_findFieldThreeUp()` scheduled fallback walked all
-matches with no date/time gating. Day 1 + Day 2 of an event 8 days
-out got marked as on-field / on-deck / queueing.
+### 4.1 /assign chunking
+Pre-fix: 720 chunks × ~694 iters each. Each chunk barely warmed up
+before stopping. Result: par_quad ~262 vs floor 252; opp_quad ~470
+(construction-quality). Confirmed by user uploading buggy output:
+`(0, 260, 462, 0, 3, 45, 0, 0)`.
 
-**Fix:** active-day filter + 15-minute pre-start window in the
-scheduled-only branch. See §3.4.
+Fix: each worker runs the FULL iteration budget on its own seed.
+Best-of-N over independent SA trials, capped at 30 trials. Wall-clock
+≈ single-trial time (workers in parallel). Best-of-N comparison uses
+the lex tuple, not the legacy summary float.
 
-### 4.3 Field-view toggle invisible pre-event
+`app/main.py:1131-1175` (worker dispatch). `app/scheduler.py:run_assignment_chunk` returns `score_tuple` + `worker_elapsed_s` + `us_per_iter` for diagnostics.
 
-**Root cause:** the toggle button was inside `status-three-up-wrap`,
-which has `display: none` until `_renderFieldThreeUp()` finds a
-field/deck/queueing match. Pre-event the wrap stayed hidden, so the
-toggle was unreachable.
+### 4.2 /assign auth header
+`assignTeams()` was using raw fetch with `Content-Type` only —
+no `Authorization`. Pre-existing bug surfaced by tightened auth dep.
+Fix: standard `getToken()` + Bearer token pattern.
 
-**Fix:** moved the button to the always-visible
-`match-table-actions` toolbar. Uses `.btn .btn-secondary` styling
-consistent with the theme and Print/Export buttons.
+### 4.3 EventTeam.team_number
+Seven SQL queries referenced `EventTeam.team_number` — column doesn't
+exist. Team number lives on `Team.number`, joined via `team_id`.
+Fixed all sites: `select(Team.number).join(EventTeam, EventTeam.team_id == Team.id).where(EventTeam.event_id == event_id)`.
 
-### 4.4 Agenda bar consistency edit ↔ view
+### 4.4 Practice matches dropped on import
+Three concurrent bugs:
+- **Storage:** `pdf_import.parsed = {"matches": ..., "notes": ...}` — practice stripped at write time. Fixed at 4 sites (XLSX + CSV, initial + upsert).
+- **Display:** `renderPdfImportPreview` only rendered `d.matches`. Fixed: parameterized `renderPdfImportTable(matches, opts)` with target table id + state path; new practice section in modal HTML.
+- **Commit:** `confirmPdfImport` body had only `matches`. Fixed: added `practice` field; backend `PdfImportCommitRequest.practice` accepts it; commit handler prefers body over cached parse.
 
-**Partial fix this session:**
+### 4.5 Import flow event-id resolution
+Three import call sites silently created an ad-hoc event whenever
+`_currentEventId` was null. Common case: post page-reload from
+`/view` link sets `_currentEventInfo` but not `_currentEventId`.
 
-- View's day-head now mirrors editor's `renderScheduleBars` head
-  structure: clickable colored label, inline date label, window
-  time, summary with `<strong>` highlights.
-- View's match-segment color hardcoded to `#5daf78` / `--blue-alliance`
-  to match editor's hardcoded `#5daf78` / `var(--accent)` exactly.
+Fix: `ensureEventLoadedForImport(label)` helper. Tries
+`_currentEventId`, then typed event code in `eventCodeInput`,
+then `_currentEventInfo`, then asks the user before falling back to
+ad-hoc. Also: `restoreFromFile` now preserves event across `fullReset`
+(was wiping `_currentEventId` before the helper could run).
 
-**Not yet aligned (open issue):**
+### 4.6 PATCH endpoint accepts practice_matches
+For post-import grafting of practice onto an existing schedule.
+Same snapshot-history pattern as day_config edits.
 
-- Editor's `renderScheduleBars` uses `dayColor()` to give each day
-  its own color from a palette. View uses the same blue across all
-  days. Question for the next round: should editor adopt view's
-  uniform color, or should view adopt editor's per-day cycling?
-  Direction unclear from the user's "use the colors from the page,
-  but the initialization and other info from the edit page" — could
-  be read either way.
+`app/main.py:patch_assigned_schedule`.
 
 ---
 
 ## 5 · Open items
 
-### 5.1 Needs live verification
+### 5.1 Browser scheduler retirement
+The client-side `generateMatches()` in `static/index.html` builds
+the abstract using old weighted-sum scoring. The Python SA on `/assign`
+fixes some but not all of what suboptimal abstract construction
+produces.
 
-- All four fixes from §4 — practice CT, pre-event guard, toggle
-  placement, day-head alignment.
-- 3-up grid and table behavior across all four `_findFieldThreeUp()`
-  outcomes:
-  - Nexus queue_status flowing → solid pills, full tints.
-  - TBA actuals only (no Nexus queue) → next-only fallback.
-  - Pre-event clock-only, > 15 min out → no rows marked, banner hidden.
-  - Pre-event clock-only, < 15 min out → hollow pills, faint tints.
+**Two options:**
+- A. Move construction to the server entirely. `/api/generate-abstract`
+  builds via `generate_matches()` (Python). Browser is presentation only.
+- B. Update browser scoring to match Python lex SA. Keeps client-side
+  preview but aligns semantics.
 
-### 5.2 Confirm view loads ACTIVE schedule
+A is cleaner. Either way, the legacy "Placement Criteria" panel that
+references browser-only weights becomes irrelevant and should be removed
+or relabeled.
 
-User raised this in the same feedback round. Practice CT discrepancy
-was symptomatic — the field-name fix probably resolves it — but the
-underlying confirm is still pending. Worth checking the view's load
-path (`/api/schedules/{id}` → STATE.schedule) and Cache-Control
-headers to make sure the user isn't hitting a stale CDN copy.
+### 5.2 Container parallelism investigation
+User reported 2m 48s wall-clock for "Best" preset (2M iters × best-of-30)
+on the OpenShift container. Math says 30 × 2M iters at ~37μs/iter on
+12 effective cores = ~187 seconds minimum. 168 actual is *faster* than
+that — suggests trials may not all be running their full budget, OR
+container per-iter cost is shorter than the test environment.
 
-### 5.3 Editor agenda bar color decision
+`app/scheduler.py:run_assignment_chunk` now logs `worker_elapsed_s` +
+`us_per_iter` per worker. After the next "Best" run, check:
+```bash
+oc logs deploy/<app-pod> --since=10m | grep "Stage 2 worker"
+```
 
-See §4.4 above. Three options:
+If all 30 workers report `iters=2000000` with `elapsed≈75s`, we're
+fine — the schedule quality just reflects best-of-30-at-2M variance.
+If many show truncated iterations or excessive elapsed, investigate
+further (CPU contention, broken pool, FastAPI cancellation).
 
-1. Editor adopts view's single-color approach. Day distinction comes
-   from the day label + date.
-2. View adopts editor's per-day color cycling. Days visually
-   distinguished even at a glance.
-3. Status quo. Document the divergence as intentional (editor =
-   "designing", view = "viewing").
+### 5.3 par_quad=256 outlier on container vs Stark sweep stdev=0
+Stark sweep at SA=2M had stdev 0.0 across 30 trials — every trial hit
+floor 252. User's 2m48s "Best" run produced par_quad=256. With the
+chunking fix landed and quality presets correctly resolving 2M, the
+likely cause is the container's worker timing (5.2). Re-running an
+additional 2M-iter SA pass on top of the user's output drops to floor
+in 75s, proving the schedule wasn't structurally stuck.
 
-Need user input before making the call.
+### 5.4 Best-of-N production runner (deferred)
+`/assign` currently caps at `BEST_OF_N_TARGET=30`. Could expose a
+top-level "Generate Best Schedule" workflow for state events that
+explicitly runs N-trial SA at high iteration budgets, with progress
+reporting and cancellation. Stark recommended.
 
-### 5.4 Optional V2-native cleanups (out of scope, tracked)
-
-- `_v2BuildSchedulerInput` is still load-bearing for `getPracticeConfig`
-  + `collectDayConfig` save/load paths. Could rewrite those callers
-  V2-native; would let us delete the V1-shape transform entirely.
-  Deferred since the current path works and the win is purely
-  internal.
-
-### 5.5 Roadmap update
-
-`docs/V2_ROADMAP.md` doesn't include the View UX overhaul. Should
-add a "Phase 6 — View UX" section documenting the status pills,
-field-position layout, source banner, and the four fixes above.
-Low priority but worth doing before the next major workstream.
+### 5.5 Extended iteration sweep (deferred)
+Find K* per the tight-criterion definition. Levels 10M, 20M, 50M.
+~5 hours wall-clock on Stark. Documented in
+`docs/scheduler/ITERATION_CEILING.md` "Future work".
 
 ---
 
 ## 6 · Code locations (verbatim)
 
-### `static/view.html` (~7,957 lines)
+### `app/main.py` (~4400 lines)
 
-| Function / DOM                                              | Line   |
-|-------------------------------------------------------------|--------|
-| `_v2DowngradeToV1ForView`                                   | ~2665  |
-| `_v2BlockToV1Break`                                         | ~2687  |
-| `_v2DowngradeToV1ForView` practiceDay emit (`ct:` field)    | ~3036  |
-| Practice CT renderer read (`pday.ct \|\| pday.cycleTime`)   | ~3344  |
-| `renderAgendaFitView` entry                                 | ~4072  |
-| Match-segment two-line label render                         | ~4350  |
-| Day-head with clickable colored label                       | ~4524  |
-| `_findFieldThreeUp` (with active-day + 15-min guard)        | ~5341  |
-| `_renderFieldThreeUp`                                       | ~5470  |
-| `_buildAllianceFieldHtml`                                   | ~6045  |
-| `_buildAllianceLineHtml`                                    | ~6155  |
-| `_allianceHtmlForMode` (dispatcher)                         | ~6178  |
-| `toggleFieldView`                                           | ~6101  |
-| `_updateFieldViewToggleLabel`                               | ~6113  |
-| `<div id="statusSourceBanner">`                             | ~2127  |
-| `<button id="btnFieldViewToggle">` (toolbar)                | ~2330  |
-| `<div id="statusThreeUpWrap">` (no header inside)           | ~2192  |
+| Line   | Symbol                                                | What it does                              |
+|--------|-------------------------------------------------------|-------------------------------------------|
+| ~371   | `AssignRequest` Pydantic model                        | quality_preset, competition_approved, rb_post_pass, station_post_pass, cooldown |
+| ~1131  | `assign_teams_endpoint` worker dispatch               | best-of-N parallel SA trials              |
+| ~1701  | `patch_assigned_schedule`                              | accepts day_config + practice_matches     |
+| ~2768  | `_resolve_practice_matches`                            | slot→team translation; identity fallback   |
+| ~3330  | `PdfImportCommitRequest`                               | matches + practice + day_config           |
+| ~3815  | XLSX import storage (4 sites)                          | preserves practice in pdf_import.parsed   |
+| ~4096  | `commit_pdf_import`                                    | reads body.practice OR cached parse       |
 
-### `static/index.html` (~17,113 lines)
+### `app/scheduler.py` (~2120 lines)
 
-| Function / DOM                                              | Line   |
-|-------------------------------------------------------------|--------|
-| `_v2BuildQualPlan`                                          | ~12273 |
-| `_v2BuildSchedulerInput`                                    | ~11874 |
-| `_v2dayCycleChanges`                                        | ~12207 |
-| `_v2blockChangesToV1` (single-block shim)                   | ~12238 |
-| `_finishGenerationInner`                                    | ~14420 |
-| `getPracticeConfig` (reads `pd.ct` correctly)               | ~7702  |
-| `renderScheduleBars`                                        | ~6657  |
-| `dayColor` (per-day palette cycling)                        | ~6666  |
+| Symbol                          | What it does                                      |
+|---------------------------------|---------------------------------------------------|
+| `generate_matches`              | construction + SA + post-passes (one process)     |
+| `_assign_unified`               | relabel slot→team + SA + post-passes              |
+| `_sa_optimize`                  | lex-compare SA over Match[]                       |
+| `score_tuple_for_schedule`      | 8-element FRC §10.5.2 lex tuple                   |
+| `score_schedule`                | legacy float (UI/CSV/DB display only)             |
+| `_swap_preserves_cooldown`      | hard filter — paramount preserved before mutation |
+| `_propose_targeted_move`        | duplicate-pair-aware move generator               |
+| `run_assignment_chunk`          | worker entry; logs elapsed + μs/iter              |
 
-### `app/day_config_v2.py`
+### `app/post_passes/`
 
-`downgrade_v2_to_v1` mirrors phase 5c per-block cycleTime + synthetic
-gap breaks. Companion to view's `_v2DowngradeToV1ForView` for any
-backend code path that needs V1 shape.
+- `rb_balance.py` — Phase 1, whole-match R/B flip + SA, 8 property tests
+- `station_balance.py` — Phase 2, Sykes-style within-alliance permutation + SA-from-greedy, 12 property tests
 
-### Tests
+### `app/frc_compliance.py`
 
-| File                                        | Count       | Runner   |
-|---------------------------------------------|-------------|----------|
-| `tests/test_v2_url.js`                      | 36 tests    | node     |
-| `tests/test_v2_scheduler_input.js`          | 20 tests    | node     |
-| `tests/test_day_config_v2.py`               | 31 tests    | python   |
-| `tests/test_migration_script.py`            | 7 tests     | python   |
+- `FRC_DEFAULTS` — `{"rb_post_pass": True, "station_post_pass": True, ...}`
+- `compute_deviations(settings)` — list of human-readable deviation strings
+- `build_audit_record(settings, cooldown, preset, iterations)` — full audit JSON
 
-All four green as of this commit.
+### `app/quality_presets.py`
 
----
+- `QUALITY_PRESETS` — `fair=50K, good=500K, best=2M, maximum=5M`
+- `MAX_ITERATIONS = 5_000_000`
+- `iterations_for_preset(name)`, `preset_for_iterations(n)`
 
-## 7 · Operational knowledge
+### `static/index.html` (~17,700 lines)
 
-Things the next person will trip over if they don't know.
+| Line   | Symbol                                  | What it does                                       |
+|--------|-----------------------------------------|----------------------------------------------------|
+| ~2645  | FRC compliance section in Generate form | checkbox + deviation banner + algorithm toggles    |
+| ~3099  | `restoreFromFile`                       | preserves event across fullReset                   |
+| ~3315  | `_restoreMatchListFile` (xlsx/csv)      | uses `ensureEventLoadedForImport`                  |
+| ~3406  | `openPdfImportModal`                    | uses `ensureEventLoadedForImport`                  |
+| ~3553  | `renderPdfImportPreview`                | renders qual + practice tables                     |
+| ~3872  | `renderPdfImportTable(matches, opts)`   | parameterized for qual or practice rendering       |
+| ~5050  | `recomputeFrcCompliance` + handlers     | live banner update on algorithm-toggle change      |
+| ~8689  | `generateMatches` (browser SA)          | client-side abstract construction (legacy weighted-sum) |
+| ~9861  | `ensureEventLoadedForImport`            | shared event-resolution helper                      |
+| ~14000 | `assignTeams`                           | sends quality_preset, competition_approved, etc.   |
 
-### 7.1 Field-name dance: practice cycle time
+### `static/view.html` (~8200 lines)
 
-- V2 native: block has `cycleTime` field.
-- V1 canonical (used by view's renderer + editor's `getPracticeConfig`):
-  `practiceDay.ct`.
-- The view's `_v2DowngradeToV1ForView` emits `ct:` (correct V1).
-- View's renderer reads `pday.ct || pday.cycleTime || cfg.practiceCycleTime || 9`
-  for forward + back compat.
-
-If you're adding a new consumer of `practiceDay.cycleTime` somewhere,
-prefer reading both names.
-
-### 7.2 `fieldSource === 'nexus'` covers TBA too
-
-`_findFieldThreeUp()` returns `source: 'nexus'` whenever it found data
-via the Nexus `queue_status` path **or** the TBA `actual_time && !post_result_time`
-fallback. There's no separate `'tba'` value — both upstream live
-sources collapse into the `'nexus'` bucket.
-
-If you need to distinguish them in the future (e.g. to show different
-banner text for TBA-only), split the source field into
-`'nexus' | 'tba' | 'scheduled'` and update the banner +
-estimated-modifier callers.
-
-### 7.3 Pre-event guard timing
-
-The 15-minute window is hardcoded as `WINDOW_MS = 15 * 60 * 1000`
-in `_findFieldThreeUp()`. If the event organizer wants more lead
-time (say, 30 min), this is the single knob.
-
-`todayStr` is computed from local Date, not from the schedule's
-event timezone. If the user is viewing the schedule from a different
-timezone than the event, the active-day filter may misfire. Worth
-revisiting if it bites — would need to plumb the event timezone into
-the function.
-
-### 7.4 V2 palette colors (canonical)
-
-| Block subtype       | Hex       | Used in                         |
-|---------------------|-----------|----------------------------------|
-| `practice`          | `#5daf78` | match seg + practice day-head    |
-| `qualification`     | (`--blue-alliance`) `#0969da` light / `#58a6ff` dark | match seg + qual day-head |
-| `playoff`           | `#bd92f0` | playoff segments + agenda inset  |
-| `break` (default)   | `#ec8a3f` | unsubtyped breaks                |
-| `awards`            | `#d9a13e` | awards subtype                   |
-| `alliance_selection`| `#3fa6a0` | alliance selection subtype       |
-| `ceremony`          | `#dd7858` | opening / closing ceremonies     |
-
-Status pill colors (different palette — these are interactive signals):
-
-| State    | Hex       |
-|----------|-----------|
-| On field | `#4d8b1a` |
-| On deck  | `#c66800` |
-| Queueing | `#5d4ec9` |
-
-### 7.5 localStorage keys
-
-| Key                       | Values                | Default       |
-|---------------------------|------------------------|---------------|
-| `frcDayConfigUseV2`       | `'1'`                  | `'1'` (toggle retired) |
-| `frc_field_view_mode`     | `'linear'` / `'field'` | `'linear'`    |
-| `frc_view_theme`          | `'light'` / `'dark'`   | `'light'`     |
-| `frcUse24h`               | `'1'` / `'0'`          | `'0'` (12h)   |
-| `frc_theme` (editor)      | palette index          | `'dark'`      |
-
-### 7.6 Container WORKDIR
-
-`/app`. The OpenShift deployment expects all paths (static files,
-app code, migrations) rooted at `/app/...`. If you're running locally
-in a different layout, the `apply.sh` script handles the path mapping.
-
-### 7.7 Network allowlist for `bash_tool`
-
-Only these domains are reachable from this sandbox:
-`api.anthropic.com, archive.ubuntu.com, crates.io, files.pythonhosted.org,
-github.com, index.crates.io, npmjs.com, npmjs.org, pypi.org, pythonhosted.org,
-registry.npmjs.org, registry.yarnpkg.com, security.ubuntu.com,
-static.crates.io, www.npmjs.com, www.npmjs.org, yarnpkg.com`.
-
-If you need to add a dependency from a different host, you'll get a
-clear `x-deny-reason` header and have to ask the user to update the
-sandbox config. Tests don't need network access — they're all local.
+| Symbol                  | What it does                                          |
+|-------------------------|-------------------------------------------------------|
+| `renderFrcBanner`       | top-of-page green/yellow/gray banner from audit_trail |
+| `_renderFrcAudit`       | audit modal — deviations + settings table             |
+| `_applyLoadedSchedule`  | calls renderFrcBanner on every load                   |
 
 ---
 
-## 8 · Deploy
+## 7 · Test status
+
+All green:
+- Smoke test (canonical metrics)
+- V2 URL (36 tests)
+- Three-up (23 tests)
+- day_config_v2
+- Phase 0 lex SA + targeted moves
+- Phase 1 R/B (8 commutativity)
+- Phase 2 station (12 commutativity)
+- FRC compliance (11 tests in `tests/test_frc_compliance.py`)
+- Inline JS in static/index.html and static/view.html parses cleanly
+
+---
+
+## 8 · Operational knowledge
+
+### Production
+- Hostname: `frc-scheduler.roadfeldt.com`
+- Pod label: `app=frc-scheduler-server-git`
+- Postgres: pod label `app=frc-postgres`, db `frc_scheduler`
+- Container: 12 effective cores via cgroup quota (1.2 CPU = 12 effective). `os.cpu_count()` reports 16 (host) but cpu.max limits to 12.
+- Event for state: `2026mnst`, event_id `4`, 36 teams (MSHSL)
+- HAProxy timeout: 120s (`openshift/05-route.yaml`) — SSE keep-alive resets idle timer
+
+### Stark (eval machine)
+- 36 cores
+- Used for iteration sweeps + production-quality state schedules
+- `CPU_WORKERS=36` env
+
+### DB migration applied
+```bash
+oc cp migrate_competition_approved.sql frc-postgres-XXXXX:/tmp/
+oc rsh pod/frc-postgres-XXXXX
+psql -U postgres -d frc_scheduler -f /tmp/migrate_competition_approved.sql
+```
+
+Verify columns:
+```bash
+psql -U postgres -d frc_scheduler -c "\d assigned_schedules" | grep -E 'competition_approved|audit_trail'
+```
+
+---
+
+## 9 · Deploy
 
 Standard flow:
-
 ```bash
 cd ~/git/frc-scheduler-server
 git pull && git add -A
 git commit -m "<message>"
 git push
-./openshift/apply.sh
+./openshift/apply.sh --build
 ```
 
-The `apply.sh` script handles the OpenShift rollout. It tags the
-commit, builds the container, pushes to the registry, and triggers
-a rolling deploy. No manual step on the cluster side.
+Hard-refresh Safari/Chrome after deploy (`⌘⇧R` / `Ctrl+Shift+R`) — UI changes from this session won't appear without it.
 
-Pod label `app=frc-scheduler-server-git`. Postgres pod label
-`app=frc-postgres`. Hostname `frc-scheduler.roadfeldt.com`.
-
-DB name `frc_scheduler`, event key `2026mnst`, event_id `4`,
-team count 36 (MSHSL).
-
----
-
-## 9 · Reproduction prompt
-
-If you're an AI coming into this project cold, the
-`docs/REPRODUCTION_PROMPT.md` document is the standard onboarding
-context. Pair it with this handoff for the most up-to-date picture.
-
-`REPRODUCTION_PROMPT.md` covers the project goals + structure +
-constraints. This document covers what was just done + what's
-pending. They're complementary, not redundant.
+Tarball pattern (Claude session):
+```bash
+cd /tmp && tar czf /mnt/user-data/outputs/frc-scheduler-server.tgz \
+  --exclude='frc-scheduler-server/.git' \
+  --exclude='*/__pycache__' \
+  --exclude='frc-scheduler-server/REPRODUCTION_PROMPT.md' \
+  --exclude='frc-scheduler-server/NOTES.md' \
+  --exclude='frc-scheduler-server/notes.md' \
+  --exclude='frc-scheduler-server/TODO.local.md' \
+  frc-scheduler-server/
+```
 
 ---
 
-## 10 · TL;DR
+## 10 · Reproduction prompt
 
-If you're reading this and have to pick up tomorrow:
+`REPRODUCTION_PROMPT.md` (root) is the canonical AI onboarding doc.
+Pair it with this handoff for current state. They're complementary,
+not redundant — the prompt covers project goals + structure + constraints,
+this doc covers what's done + what's pending.
 
-1. **Verify** the four fixes from §4 in production. Most likely all
-   working, but live confirmation matters.
-2. **Decide** on the editor agenda bar color question (§5.3) and
-   apply the chosen direction.
-3. **Update** `docs/V2_ROADMAP.md` to include "Phase 6 — View UX"
-   summarizing this session's work.
-4. **Repackage** if you've made code changes — current build is in
-   `/mnt/user-data/outputs/frc-scheduler-server.tgz`.
+`docs/REPRODUCTION_PROMPT.md` is a stub redirecting to the root copy
+(used to be diverged; consolidated this session).
 
-That's it. The code is in good shape, all tests pass, the architecture
-is clean. The next work is polish and verification, not structural.
+---
+
+## 11 · TL;DR
+
+If you're picking this up:
+
+1. **Read this handoff + `REPRODUCTION_PROMPT.md` + `PRIORITIES.md`** in that order.
+2. **Open items** are §5 above — browser scheduler retirement, container parallelism investigation, par_quad outlier diagnosis.
+3. **For state events**, recommend Stark via best-of-30 at SA=2M (~75s wall-clock). Container "Best" works but with the caveat in §5.2.
+4. **Never silently bypass FRC §10.5.2 paramount.** The lex tuple is the contract. Cooldown comes first, always.
+5. **MatchMaker is a peer**, not a competitor. The framing throughout the codebase reflects this.
+
+The code is in good shape, all tests pass, the architecture is clean. Mostly polish + diagnostics from here.

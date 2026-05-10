@@ -1,513 +1,411 @@
 # FRC Match Scheduler — Reproduction Prompt
 
-This document captures all architecture decisions, implementation details, and known pitfalls needed to reproduce or extend this codebase from scratch.
+Onboarding context for an AI assistant (or human contributor) coming
+into this codebase cold. Pair with `docs/HANDOFF.md` for "what's
+in-flight right now," `PRIORITIES.md` for "what the algorithm does,"
+and `docs/PRIORITIES.md` for "how the algorithm is structured
+internally."
+
+Last verified against tree: 2026-05-09 (post-FRC-§10.5.2-paramount session).
+
+---
+
+## Licensing & IP Posture (READ FIRST)
+
+This is **not a port of MatchMaker**. The Python scheduler in
+`app/scheduler.py` is a clean-room implementation against the published
+FRC §10.5.2 rules. Two specific pieces have explicit prior-art
+attribution:
+
+- **R/B post-pass** (`app/post_passes/rb_balance.py`): inspired by
+  MatchMaker's R/B handling as documented at idleloop.com/matchmaker/.
+- **Station post-pass** (`app/post_passes/station_balance.py`): based
+  on the public Sykes algorithm (Tom + Cathy Saxton, 2017) as
+  described at idleloop.com/matchmaker/stations.php.
+
+Neither is a port of MatchMaker code. Throughout the codebase,
+MatchMaker is referred to as a **peer reference scheduler used by event
+organizers**, not as a competitor. Comparison numbers are sanity-checks
+during development, not "we beat them" claims. See
+`docs/scheduler/MATCHMAKER_LICENSING_BRIEF.md` if curious.
+
+The codebase is GPLv3. AI-assisted development; humans direct
+architecture and validate output. See README.md for the AI assistance
+notice.
 
 ---
 
 ## Project Overview
 
-Single-file HTML/CSS/JS frontend (`static/index.html`, ~6400 lines) + FastAPI backend (`app/main.py`) + pure Python scheduler (`app/scheduler.py`). PostgreSQL via asyncpg/SQLAlchemy. Containerised for OpenShift.
+Single-file HTML/CSS/JS frontend in `static/index.html` (~17,700 lines)
++ FastAPI backend in `app/main.py` (~4,400 lines) + pure Python
+scheduler in `app/scheduler.py` (~2,120 lines). PostgreSQL via
+asyncpg/SQLAlchemy. Containerised for OpenShift.
 
-Two-stage scheduling:
-- **Stage 1:** Abstract schedule (slot indices, no team numbers) — deterministic, one pass
-- **Stage 2:** Team assignment (SA optimiser maps team numbers to slots)
+**Frontend has TWO HTML pages:**
+- `static/index.html` — the editor (Generate, Assign, Save, Import).
+- `static/view.html` (~8,200 lines) — read-only schedule viewer. Used
+  by competitors / spectators / kiosks. Loaded via `/view/{schedule_id}`
+  or `/view?event=<key>`.
 
----
+**Two-stage scheduling data model:**
+- **Stage 1** (Abstract Schedule): slot indices 1..N, no team numbers.
+  Reusable across rosters of the same size. Built by either the browser
+  scheduler (legacy weighted-sum, still in use) or `generate_matches()`
+  in Python.
+- **Stage 2** (Team Assignment): `slot_map: {1: 3276, 2: 7797, ...}`
+  layered on top. Per-schedule fields: `day_config`, `practice_matches`,
+  `competition_approved`, `audit_trail`, lock state, official mark.
 
-## Critical Architecture Decisions
-
-### Double-calcMaxMatches Bug (FIXED)
-`applyAgendaToSchedule()` must NOT call `calcMaxMatches()`. The chain in `fetchAndRenderAgendaFit` calls it after `applyAgendaToSchedule` returns. Having both call it caused the first `generateSchedule()` to be aborted by the second, leaving the overlay stuck.
-
-### _agendaFetchPending Flag
-Set to `true` in `activateEvent` before any async work. `onParamChanged()` returns early when this is true. Cleared in `.finally()` after `fetchAndRenderAgendaFit` completes. Prevents debounced generation from racing the PDF chain.
-
-### Overlay show() before loadRoster()
-`_overlay.show()` and `_overlay.step('roster')` must be called **before** `await loadRoster()`. Previously they were called after, meaning overlay was always one step behind (roster already done when overlay shown).
-
-### calcMaxMatches Infinite Loop Guard
-The `while` loop in `calcMaxMatches()` has a `_safetyLimit = 2000` iteration cap and a `ct < 0.5` guard. Without this, a blank or zero cycle-time field (mid-keystroke) causes an infinite loop that permanently hangs the browser tab.
-
-### Day Break / Early End
-
-`addDayEarlyEnd(dayRow, afterMatch)` — adds a `.day-earlyend-row` to the day row. Only one per day (replaces existing). Calls `onCycleTimeChanged()` on input/change/remove.
-
-`getDayEarlyEnd(dayRow)` — returns the integer limit or null. Used by `calcMaxMatches` and `_finishGenerationInner`.
-
-**`calcMaxMatches`:** reads `getDayEarlyEnd(row)` into `dayEarlyEnd`; after incrementing `dayMatchCount`, checks `if (dayEarlyEnd !== null && dayMatchCount >= dayEarlyEnd) break`.
-
-**`_finishGenerationInner`:** `earlyEnd` stored on day object (`isObj ? row.earlyEnd : getDayEarlyEnd(row)`); `dayMatchCount` counter incremented after each placed match; `if (day.earlyEnd !== null && dayMatchCount >= day.earlyEnd) break`.
-
-**Persistence chain:** `collectDayConfig` → `earlyEnd: getDayEarlyEnd(row)` → DB `day_config`. `applyDayConfigToUI` → `if (day.earlyEnd != null) addDayEarlyEnd(row, day.earlyEnd)`. URL: `d{N}e=M`, parsed via `p.get('d' + i + 'e')`, applied in `applyUrlParams`.
+The browser still owns the Generate-step abstract construction. The
+Python `/assign` endpoint runs lex SA + post-passes on the resulting
+abstract. **Eventual cleanup** is to move construction server-side too
+— tracked in `docs/HANDOFF.md` §5.1.
 
 ---
 
-### Print Schedule
+## Algorithm — FRC §10.5.2 Paramount Lex Tuple
 
-`openPrintDialog()` — disables `#printOptTeamNums` if `hasAssignment` is false (opacity 0.45, `disabled`, tooltip). Calls `openModal('modalPrint')`.
+The authoritative score is an 8-element tuple compared lexicographically.
+Lower is better at every position. Cooldown is paramount and never
+traded against any other criterion.
 
-`printSchedule()` — reads opts, builds HTML string, opens `window.open('', '_blank')`, calls `w.print()` after 300ms.
-
-**CRITICAL — teamLabel:** `entry.red/blue` are already real team numbers after Stage 2 (server resolves in API). `teamLabel(val)` = `showTeamNums ? String(val) : '—'`. Do NOT look up `_currentSlotMap[val]` — keys are slot indices, not team numbers.
-
-**matchPassesPrintFilter(entry):** `entry.red.concat(entry.blue)` checked against `_frcFilters.teams`. No mapping needed — values are already team numbers.
-
-**Page break:** `opts.pageBreak` → day title gets class `page-break` on days after the first → CSS `page-break-before: always`.
-
-**Opts:** `cycleTimes`(on), `cycleChanges`(on), `breaks`(on), `dayBreaks`(on), `teamNums`(on), `roundDividers`(off), `pageBreak`(off).
-
----
-
-### Cycle Change Duplication Fix
-
-Both `applyUrlParams` and `applyDayConfigToUI` add non-start cycle change rows. Without clearing first, each reload duplicated them. Fix applied in both functions:
-
-```javascript
-// Before adding saved cc rows:
-document.querySelectorAll('.day-cc-row[data-is-start="0"]').forEach(function(r) { r.remove(); });
+```
+(cooldown_violations, par_quad, opp_quad, surrogate_count,
+ rb_metric, station_pen, surrogate_spread, match_equity)
 ```
 
-The `data-is-start="1"` row is always created by `buildDaysUI()` and is never removed — its `.cc-time` value is simply updated in place.
+Maps to:
+1. FRC §10.5.2 #1 — Cooldown (paramount)
+2. FRC §10.5.2 #2 — Partner repeats (sum-of-squares)
+3. FRC §10.5.2 #3 — Opponent repeats (sum-of-squares)
+4. FRC §10.5.2 #4 — Surrogate count
+5. FRC §10.5.2 #5 — R/B alliance distribution (variant by team count)
+6. FRC §10.5.2 #6 — Station distribution
+7. P11 (Surrogate spread, secondary)
+8. P5 (Match equity, secondary)
 
----
+`score_tuple_for_schedule(matches, num_teams)` computes this. The
+legacy `score_schedule()` returns a float for UI/CSV/DB display only;
+**never use it for accept-reject decisions**.
 
-### Agenda Fit Overflow Bar
+### Phase 0 SA core
+- Phase 0a — `score_tuple_for_schedule` returns 8-element tuple. SA
+  accept/reject lex-compares.
+- Phase 0b — `_swap_preserves_cooldown` filters violations BEFORE state
+  mutation. ~5x SA speedup over post-mutation reject.
+- Phase 0c — `_propose_targeted_move` biases 2/3 of moves toward
+  duplicate partner/opponent pairs. Substantially improves convergence
+  on criterion #3.
 
-`renderScheduleBars()` appends `<div id="agendaFitOverflow">` as a sibling of `#agendaFitBlocks` (created on first call, reused thereafter). Shown when `window._frcFinalDayOverflow.unscheduled > 0`:
+### Post-passes
+- Phase 1 — `app/post_passes/rb_balance.py`. Whole-match R/B flip + SA.
+  Changes only `rb_metric`. 8 commutativity property tests prove it
+  preserves all other criteria.
+- Phase 2 — `app/post_passes/station_balance.py`. Sykes-style within-
+  alliance station permutation + SA-from-greedy. Changes only
+  `station_pen`. 12 commutativity property tests.
 
-```javascript
-// Estimate additional time from last section's avg cycle time
-var estCt = lastSection.committed / lastSection.matchCount;
-var extraMin = Math.round(ov.unscheduled * estCt);
-```
+### Quality presets (`app/quality_presets.py`)
+| preset    | iters     | wall (Stark, best-of-30) |
+|-----------|-----------|--------------------------|
+| fair      | 50,000    | ~2s   |
+| good      | 500,000   | ~20s  |
+| best      | 2,000,000 | ~75s  |
+| maximum   | 5,000,000 | ~3min |
 
-Bar fills 100% width with `background:var(--danger)`. Hidden (`display:none`) when all matches fit. `resetAgendaPanel()` also clears it.
+`MAX_ITERATIONS = 5_000_000`. K* (mean improvement < stdev) was not met
+within tested range; documented as ">5M, not found" in
+`docs/scheduler/ITERATION_CEILING.md`.
 
----
-
-### Cycle Time Sync Prompt
-
-`cycleTime` `change` listener checks `anyDiffers`: if any `.day-cc-row[data-is-start="1"] .cc-time` value ≠ new ct, shows `confirm()`. On OK: pushes to all start rows + shows `cycleTimePushWarning` 4s. `input` listener: only `onParamChanged()`.
-
----
-
-### Team List Clear / Export
-
-`clearTeamList()` — DOM-reads team nums, `confirm()`, sequential `DELETE` calls, `loadRoster()`, `numTeams=0`, `onParamChanged()`.
-
-`exportTeamList()` — `#teamRoster .team-row` → CSV rows, Blob URL download as `teams-event-{id}.csv`.
-
----
-
-### Single-Day End Time
-
-`applyDayEndTimes()`: `isLast = (i === total - 1) && (total > 1)`. Single day → `18:00`. Multi-day last → `12:00`.
-
----
-
-### Ad-hoc Event
-
-`GET /api/events/adhoc` — upserts a `Team`-less event with `key='adhoc'` on first call:
+### Competition compliance (`app/frc_compliance.py`)
+A schedule is **competition-approved** iff generated with FRC defaults:
 ```python
-ADHOC_KEY = "adhoc"
-event = await db.execute(select(Event).where(Event.key == ADHOC_KEY))
-# if not found: create with current year, empty location, tba_synced=False
+FRC_DEFAULTS = {"rb_post_pass": True, "station_post_pass": True, ...}
 ```
-Returns same shape as `get_event` — `activateEvent(ev)` works unchanged. No migration needed; creates on demand.
-
-Client: `loadAdhocEvent()` → `apiFetch('/api/events/adhoc')` → `activateEvent(ev)`. Button `#btnAdhoc` hides in `activateEvent` (`adhocBtn.style.display = 'none'`), reappears in `fullReset`.
-
----
-
-### Team List Import
-
-**`parseTeamListText(text)`** — auto-detects format, no dependencies:
-- JSON: `t.startsWith('[')` → `JSON.parse` → integers
-- YAML/bullets: `/^\s*[-*]\s+\d/m` → extract from `- N` lines
-- Generic fallback: `text.match(/\d+/g)` → filter 1–99999
-- Returns sorted, deduped array. Non-numbers silently skipped.
-
-**`_bulkAddTeams(numbers)`** — sequential `POST /api/events/{id}/teams` (avoids server overload). Skips existing numbers via DOM query on `#teamRoster .team-num`. Single `loadRoster()` after all adds. Fires `enrichTeamFromTba(n)` for each new number.
-
-**`enrichTeamFromTba(teamNumber)`** — completely non-blocking, all failures silent:
-1. `GET /api/tba/team/{n}` → server calls `tba_client.get_team(f"frc{n}")` → `normalise_team()`
-2. Updates `.team-name` span in existing row (no full re-render)
-3. `PATCH /api/events/{id}/teams/{n}` → updates `Team.nickname`/`Team.name` in DB
-
-**Server endpoints added:**
-- `GET /api/tba/team/{team_number}` — wraps `tba_client.get_team()`, returns 404 on any error
-- `PATCH /api/events/{event_id}/teams/{team_number}` — updates `Team.nickname`/`Team.name`, 200 response
-
-**Input methods:** textarea paste, `#teamImportFile` FileReader, `ondrop` on textarea.
+Cooldown is intentionally NOT a deviation (per FRC, varies by event size
+— logged but not penalized). UI surfaces approval state via:
+- Green/yellow checkbox on Generate form
+- Per-row badge in saved-schedules list (✓/!/?)
+- Top-of-page banner on /view, click for audit modal
+- `assigned_schedules.audit_trail` JSONB stores full forensics
 
 ---
 
-### Page Load Performance
+## Two-stage scheduling: end-to-end
 
-**Immediately on load:** `loadEvents()` (GET /api/events), `initAuth()` (GET /auth/me).
+### Stage 1 — Abstract Schedule
 
-**Deferred:**
-- `fetchTbaDropdown()` — on first `focus` of `#eventCodeInput` (was 800ms eager)
-- `ensureTbaSearchIndex()` — 5s after load; `localStorage` cache `tba_idx_{year}` 6h TTL
-- `/api/health` — 2s timeout (only for `_cpuWorkers` count in overlay)
+Currently built **client-side** in `static/index.html:8689`
+(`generateMatches()`, ~500 lines). Uses old weighted-sum scoring.
+Output: a list of matches with slot indices 1..N, surrogate flags, R/B
+distribution, station assignments.
 
-**Diagnosis:** `apiFetch()` logs `[api] METHOD /path Nms STATUS` to the browser console. Check this on first load to identify which call is slow.
+`/api/generate-abstract` POSTs the browser-built result to the server
+which stores it as an `AbstractSchedule` row.
 
----
+**Why client-side:** legacy. The original tool was a static page that
+ran entirely in the browser. The Python lex SA was added later for the
+team-assignment step, but the construction phase didn't get migrated.
 
-### numDays ↔ Day Rows Sync
+**Why it persists:** the browser scheduler works "well enough" for
+construction. The Python SA on /assign cleans up most of what the
+weighted-sum left suboptimal. But a fresh `generate_matches()` abstract
+on the server reaches better tuples than a browser-built one going
+through the same SA — see `docs/HANDOFF.md` §5.1.
 
-Bidirectional, always in sync. `syncDayRowsToNumDays()` is the single source of truth for numDays → rows:
-```javascript
-// Triggered by both 'change' and 'input' (input guarded: !isNaN(n) && n >= 1 && n <= 5)
-document.getElementById('numDays').addEventListener('change', syncDayRowsToNumDays);
-document.getElementById('numDays').addEventListener('input', function() {
-  var n = parseInt(this.value);
-  if (!isNaN(n) && n >= 1 && n <= 5) syncDayRowsToNumDays();
-});
-```
+### Stage 2 — Team Assignment
 
-`addDay()` → increments `numDays.value` then calls `buildDaysUI()`.
-`removeDay(el)` → removes row, sets `numDays.value = querySelectorAll('.day-row').length`.
-`buildDaysUI()` → sets `numDays.value` to actual row count after add/remove.
+`POST /api/abstract-schedules/{id}/assign` triggers:
+1. Build initial `Match[]` by relabeling slots → real team numbers
+2. Run Phase 0 lex SA for `iterations` steps (resolved from
+   `quality_preset` or explicit `iterations`)
+3. Run R/B post-pass (Phase 1) if `rb_post_pass=True` (FRC default)
+4. Run station post-pass (Phase 2) if `station_post_pass=True` (FRC
+   default)
 
-**PDF fail warning** — `configuredDays = querySelectorAll('.day-row').length`. Warning says "Schedule is configured for N qual days" using actual row count, not date estimate.
+**Best-of-N is the default**: 30 trials in parallel (capped by
+available cores via `min(actual_workers, BEST_OF_N_TARGET=30)`).
+Best-of-N comparison uses the lex tuple. Wall-clock ≈ single-trial
+time because workers run in parallel.
 
----
-
-### Print Schedule
-
-`openPrintDialog()` — disables/unchecks `printOptTeamNums` if no assignment (`!hasAssignment`). `openModal('modalPrint')`.
-
-`printSchedule()` — reads opts from checkboxes, builds HTML string, opens in new tab, calls `window.print()` after 300ms.
-
-**`teamLabel(val)` — CRITICAL:** `entry.red/blue` already contain real team numbers after Stage 2 (server resolves slot→team). Return `String(val)` if `showTeamNums`, else `'—'`. Never look up `_currentSlotMap[val]` — slot map is keyed by slot index, not team number.
-
-**`matchPassesPrintFilter(entry)`** — `entry.red.concat(entry.blue)` checked against `_frcFilters.teams`. No slot→team mapping needed.
-
-**Page break:** `opts.pageBreak` → CSS `.day-title.page-break { page-break-before: always }` added to print style. Applied to all days except first (`isFirstDay = scheduled.indexOf(day) === 0`).
-
-**Options:** `printOptCycleTimes`✓, `printOptCycleChanges`✓, `printOptBreaks`✓, `printOptDayBreaks`✓, `printOptTeamNums`✓ (disabled if no assign), `printOptRoundDividers`☐, `printOptPageBreak`☐.
+Each worker now returns timing diagnostics (`worker_elapsed_s`,
+`us_per_iter`) for spotting CPU-contention or truncation issues — see
+`docs/HANDOFF.md` §5.2.
 
 ---
 
-### Cycle Change Duplication Fix
+## URL Reproducibility
 
-Both `applyUrlParams` and `applyDayConfigToUI` add non-start cycle change rows. Without clearing first, each reload duplicated them. Fix applied in both functions:
+The editor URL encodes the full schedule state for sharing /
+bookmarking. Parameters: `n=<num_teams>`, `mpt=`, `cd=` (cooldown),
+`ct=` (cycle time), `days=`, `bb=` (break buffer), `seed=`, `aseed=`
+(assign seed), `sid=`, `aid=`, `dcv=2` (day-config version), and
+day-specific fields like `d1=`, `d1b1=`, `d1b1cc=`.
 
-```javascript
-// Before adding saved cc rows:
-document.querySelectorAll('.day-cc-row[data-is-start="0"]').forEach(function(r) { r.remove(); });
-```
-
-The `data-is-start="1"` row is always created by `buildDaysUI()` and is never removed — its `.cc-time` value is simply updated in place.
-
----
-
-### Agenda Fit Overflow Bar
-
-`renderScheduleBars()` appends `<div id="agendaFitOverflow">` as a sibling of `#agendaFitBlocks` (created on first call, reused thereafter). Shown when `window._frcFinalDayOverflow.unscheduled > 0`:
-
-```javascript
-// Estimate additional time from last section's avg cycle time
-var estCt = lastSection.committed / lastSection.matchCount;
-var extraMin = Math.round(ov.unscheduled * estCt);
-```
-
-Bar fills 100% width with `background:var(--danger)`. Hidden (`display:none`) when all matches fit. `resetAgendaPanel()` also clears it.
+Loading a URL recreates the exact schedule state. Useful for sharing
+"my exact setup" between contributors.
 
 ---
 
-### Global Cycle Time Field Routing
+## UI Flow (editor — `static/index.html`)
 
-`#cycleTime` `input` → `onCycleTimeChanged()` (was `onParamChanged()` — wrong, skipped calcMaxMatches).
-`#cycleTime` `change` → push to day start rows (with confirm if differs) → `onCycleTimeChanged()`.
+### Event bar (top)
+- Type event code (e.g. `2026mnst`) → Load → activates event for
+  editing. Sets `_currentEventId` + `_currentEventInfo`. Loads the
+  most-recent active assigned schedule if one exists.
+- "Quick / Ad-hoc" button creates an unnamed event for one-off use.
 
-Both must go through `onCycleTimeChanged()` so the 1.2s debounce fires `calcMaxMatches()` when autoMaxCycles is on.
+### Generate Schedule
+- Form fields for num_teams, MPT, cooldown, cycle time, num_days, day_config.
+- Click Generate → browser builds abstract → POST `/api/generate-abstract`.
 
----
+### Assign Teams
+- Quality preset dropdown (Fair / Good / Best / Maximum / Custom).
+- Algorithm toggles: rb_post_pass, station_post_pass.
+- Cooldown input (FRC says varies by event size; editable, audited).
+- Competition Approved checkbox (defaults checked, auto-unchecks on
+  any algorithm-toggle change). Re-check opens reset confirmation.
+- Click Assign Teams → POST `/api/abstract-schedules/{id}/assign`
+  (lex SA + post-passes, best-of-N).
 
-### Agenda Fit Fill Bar Label
+### Saved schedules
+- List modal shows all schedule versions for the event.
+- Per-row badges: official (gold star), locked (lock icon), edited
+  (amber pill), FRC compliance (✓ green / ! red / ? gray, clickable
+  for audit modal).
+- Promote, mark/unmark official, copy, view, delete actions.
 
-Format: `N matches · X / Y min · Z min/match avg`
-- `Z = avgCtStr` = `committed / matchCount`, rounded: `avgCt % 1 < 0.05 ? Math.round(avgCt) : avgCt.toFixed(1)`
-- Cycle change progression (`9→8 min/match`) shown as `title` tooltip on the bar track, not inline
-- `ctBadge` header element removed entirely
-
----
-
-### Cycle Time Sync Prompt
-
-On `cycleTime` `change` event:
-1. `var dayStartInputs = Array.from(querySelectorAll('.day-cc-row[data-is-start="1"] .cc-time'))`
-2. `var anyDiffers = dayStartInputs.some(inp => parseFloat(inp.value) !== newCt)`
-3. If `anyDiffers`: `confirm('Apply N min cycle time to all day start-of-day rows?')` — OK pushes to all, Cancel skips
-4. If all match or no rows: push silently
-
----
-
-### fullReset Event State Cleanup
-
-After URL cleanup, `fullReset()` now also clears:
-```javascript
-_currentEventId = null;
-codeInput.value = ''; codeInput.className = '';
-codeStatus.textContent = '';
-eventSel.value = '';
-btnManageTeams.disabled = true;
-btnDeleteEvent.disabled = true;
-btnAdhoc.style.display = '';
-```
+### Import schedule
+- Three sources: PDF (LLM-parsed), XLSX (FMS export format), CSV.
+- Each goes through preview → user confirms or edits → commit.
+- XLSX/CSV imports support a Practice sheet alongside Qualification.
+  Preview UI shows both tables. Commit stores both.
+- All imports use `ensureEventLoadedForImport()` to resolve event
+  before falling back to ad-hoc.
 
 ---
 
-### onCycleTimeChanged Debounce
-Cycle-time inputs call `onCycleTimeChanged()` (1.2s debounce) not `onParamChanged()` (2.5s). This calls `calcMaxMatches()` when `autoMaxCycles` is on, bypassing the plain debounce. Without the 1.2s debounce, mid-keystroke values (typing "10" → field briefly shows "1") caused rapid-fire calcMaxMatches calls.
+## UI Flow (viewer — `static/view.html`)
 
-### _DAY_COLORS Must Be Defined Before buildDaysUI
-`_DAY_COLORS` must be defined at module level directly above `buildDaysUI()` — before `buildDaysUI` in the source order. `buildDaysUI()` is called at page load (line ~1565) before most of the script body is parsed. Defining `_DAY_COLORS` anywhere after `buildDaysUI` causes `TypeError: undefined is not an object (evaluating '_DAY_COLORS.length')`.
+- Read-only schedule display, no editing controls.
+- Source pill: live (Nexus) / estimated / pre-event / TBA.
+- 3-up grid showing on-field / on-deck / queueing.
+- Practice + Qual + Playoff tabs.
+- FRC compliance banner at top: green/yellow/gray, clickable for full
+  audit modal.
 
-### SA Incremental Scoring
-`assign_teams()` uses `build_score_state()` once per iteration start, then `delta_swap()` for each swap attempt. `delta_swap()` only rescores the ~10-20 matches containing the swapped slots. State is fully rebuilt only on accepted moves. This gives ~30ms/iter vs 80ms for full rescore.
-
-### CPU Worker Count Must Match Pod CPU Limit
-`CPU_WORKERS=0` causes `os.cpu_count()` to return the node's full CPU count (e.g. 16+) even in a container with a 2-CPU limit. The pool spawns 16 workers competing for 2 CPUs → constant context switching → minimal throughput. Always set `CPU_WORKERS` explicitly to match the pod's CPU limit.
-
-### WEB_WORKERS=1 with High CPU_WORKERS
-With `WEB_WORKERS>1`, each uvicorn process has its own `ProcessPoolExecutor`. At `WEB_WORKERS=2, CPU_WORKERS=12`, two concurrent assignment jobs could spawn 24 Python processes for 12 CPUs. Use `WEB_WORKERS=1` so one process owns the full pool.
-
-### scrollToMatch Uses getBoundingClientRect
-`offsetTop` + `offsetParent` traversal is unreliable for `<tr>` elements inside `<table>`. Both `scrollToMatch()` and `scrollToDay()` use `getBoundingClientRect()` with `output.scrollTop + (rowRect.top - outputRect.top)` for reliable cross-browser scroll positioning.
-
-### day.start / day.end Must Be Stored on _frcScheduled
-`_finishGenerationInner` must push `{dayNum, start: day.start, end: day.end, entries}` to the `scheduled` array. Without `start`/`end`, `renderScheduleBars()` falls back to first/last match timestamps, showing match-span not the full agenda slot.
+Loaded via `/view/{schedule_id}` (specific) or
+`/view/by-key/{event_key}` (latest active). TBA-only events
+(no local schedules) load via `/api/events/by-key/{key}/view-payload`
+which proxies TBA data.
 
 ---
 
-## Auto Chain Precedence
+## Key code locations
 
-```javascript
-// In fetchAndRenderAgendaFit success path:
-if (autoApply.checked)   applyAgendaToSchedule();  // does NOT call calcMaxMatches
-if (autoMax.checked)     calcMaxMatches();           // calls generateSchedule() if autoPopulate on
-else if (autoGen.checked) generateSchedule();        // generateSchedule() steps 'generate' overlay internally
+### `app/main.py`
 
-// In fetchAndRenderAgendaFit fail (PDF not found) path:
-_overlay.done('pdf');
-if (autoMax.checked)     calcMaxMatches();
-else if (autoGen.checked) generateSchedule();
-else                      _overlay.hide();
+| Symbol                                               | Purpose                                       |
+|------------------------------------------------------|-----------------------------------------------|
+| `AssignRequest`                                      | Pydantic model — quality_preset, competition_approved, rb_post_pass, station_post_pass, cooldown |
+| `assign_teams_endpoint`                              | best-of-N parallel SA dispatch                |
+| `patch_assigned_schedule`                            | accepts day_config + practice_matches edits   |
+| `_resolve_practice_matches`                          | slot→team translation w/ identity fallback    |
+| `PdfImportCommitRequest`                             | matches + practice + day_config commit body   |
+| `commit_pdf_import`                                  | reads body.practice OR cached parse           |
+| `import_xlsx`, `import_csv`, `import_pdf`            | preview endpoints, all cache by content hash  |
+| `_build_assigned_schedule_response`                  | resolves slot_map → real teams; renders audit |
 
-// In calcMaxMatches end:
-_overlay.done('maxcycles');
-updateAgendaFit();
-if (_abstractParams !== null || autoPopulate.checked) generateSchedule();
+### `app/scheduler.py`
 
-// In generateSchedule Stage 1 completion:
-_overlay.done('generate');
-if (autoAssign.checked && _currentEventId) {
-  _overlay.step('assign', '…');
-  setTimeout(assignTeams, 200);
-} else {
-  _overlay.hide();
-}
+| Symbol                          | Purpose                                            |
+|---------------------------------|----------------------------------------------------|
+| `generate_matches`              | construction + SA + post-passes (one-shot)         |
+| `_assign_unified`               | relabel slot→team + SA + post-passes               |
+| `_sa_optimize`                  | lex-compare SA over `Match[]`                      |
+| `score_tuple_for_schedule`      | 8-element FRC §10.5.2 lex tuple — authoritative    |
+| `score_schedule`                | legacy float for UI/CSV display only               |
+| `_swap_preserves_cooldown`      | hard filter — paramount preserved before mutation  |
+| `_propose_targeted_move`        | duplicate-pair-aware move generator                |
+| `run_assignment_chunk`          | worker entry; logs elapsed + μs/iter               |
 
-// In assignTeams completion:
-_overlay.hide();
-```
+### `app/post_passes/`
 
----
+- `rb_balance.py` — Phase 1
+- `station_balance.py` — Phase 2
 
-## Key Functions
+### `app/frc_compliance.py`
 
-**`buildDaysUI()`** — creates `.day-row` divs, applies `_DAY_COLORS[i % 7]` as background tint (`+14` hex alpha) and border (`+50`), sets day label color to the day color.
+- `FRC_DEFAULTS` — algorithm-default settings dict
+- `compute_deviations(settings)` — list of human-readable deviations
+- `build_audit_record(settings, cooldown, preset, iterations)` — audit JSON
 
-**`renumberDays()`** — called after add/remove day; reapplies colors and updates `scrollToDay` onclick handlers.
+### `app/quality_presets.py`
 
-**`applyAgendaToSchedule()`** — groups `_agendaBlocks` by day, sets numDays, day start/end, adds breaks for gaps ≥30 min (label "Lunch") or shorter (label "Break"). Calls `validateTimes()` only — NOT `validateTimesAndRecalc()` and NOT `calcMaxMatches()`.
+- `QUALITY_PRESETS` — `{fair: 50K, good: 500K, best: 2M, maximum: 5M}`
+- `iterations_for_preset(name)`, `preset_for_iterations(n)`
 
-**`calcMaxMatches()`** — simulates scheduling loop per day. Guards: `_safetyLimit=2000`, `ct < 0.5 → break`. Calls `_overlay.done('maxcycles')`, `updateAgendaFit()`, then `generateSchedule()`.
+### `static/index.html`
 
-**`onCycleTimeChanged()`** — 1.2s debounced; calls `calcMaxMatches()` (if autoMaxCycles on) or `onParamChanged()`. Called by all cycle-time input events.
+| Symbol                                  | Purpose                                            |
+|-----------------------------------------|----------------------------------------------------|
+| `generateMatches` (line ~8689)          | client-side abstract construction (legacy)         |
+| `assignTeams`                           | sends quality_preset + FRC fields to /assign       |
+| `recomputeFrcCompliance` + handlers     | live banner update on algorithm-toggle change      |
+| `ensureEventLoadedForImport`            | shared event-resolution helper for imports         |
+| `restoreFromFile`                       | dispatches xlsx/csv/json restore; preserves event  |
+| `renderPdfImportTable(matches, opts)`   | parameterized for qual or practice rendering       |
 
-**`renderScheduleBars()`** — builds section bars from `window._frcScheduled`. Splits at breaks > `AGENDA_BREAK_THRESHOLD` (5 min). Stores `firstMatchNum` on each section. Day label calls `scrollToMatch(firstMatchNum)`.
+### `static/view.html`
 
-**`scrollToMatch(N)`** — `output.scrollTop + row.getBoundingClientRect().top - output.getBoundingClientRect().top - 48`
-
-**`ensureTbaSearchIndex()`** — fetches `/api/tba/events/{curYear}` + `/api/tba/events/{curYear+1}` in parallel. `localStorage` key `tba_idx_{curYear}`, TTL 6h. Called 5s after page load and on first cross-year search.
-
-**`_overlay.show(title, steps)`** — must be called before `loadRoster()` in `activateEvent`. Steps built from enabled flags only.
-
----
-
-## Auto Flags Persistence
-
-Named booleans in URL and `day_config` JSON:
-
-| Flag | Default | URL when non-default | day_config key |
-|------|---------|---------------------|----------------|
-| `autoPopulate` | true | `?autoPopulate=0` | `autoPopulate: bool` |
-| `autoApplyAgenda` | true | `?autoApplyAgenda=0` | `autoApplyAgenda: bool` |
-| `autoMaxCycles` | true | `?autoMaxCycles=0` | `autoMaxCycles: bool` |
-| `autoAssign` | false | `?autoAssign=1` | `autoAssign: bool` |
-
-`parseBoolFlag(name)` in `parseUrlParams()`: returns `true/false/null` (null = absent = keep default).
+| Symbol                  | Purpose                                                    |
+|-------------------------|------------------------------------------------------------|
+| `renderFrcBanner`       | top-of-page green/yellow/gray banner from audit_trail     |
+| `_renderFrcAudit`       | audit modal — deviations + settings table                  |
+| `_applyLoadedSchedule`  | calls renderFrcBanner on every load                        |
 
 ---
 
-## Agenda Fit Bar Math
+## Critical pitfalls
 
-```
-slotStart   = day.start (morning) or break.end (afternoon)
-slotEnd     = break.start (morning) or day.end (afternoon)
-effectiveEnd = slotEnd - (hasTrailingBreak ? breakBuffer : 0)
-available    = effectiveEnd - slotStart
-committed    = Σ max(0, min(m.endMin, effectiveEnd) - m.startMin)
-fillPct      = committed / available * 100
-```
+### Browser cache after deploy
+UI changes don't appear without a hard refresh (`⌘⇧R` on macOS,
+`Ctrl+Shift+R` elsewhere). The HTML and JS are cached aggressively.
 
-`avgCt = committed / matchCount` — true weighted average, reflects actual cycle time changes.
+### Event-id resolution before imports
+The browser used to silently fork to ad-hoc when `_currentEventId`
+was unset, even when the user clearly intended a specific event.
+`ensureEventLoadedForImport()` fixes this — but the legacy
+`/api/events/adhoc` flow is still there for the deliberate
+"Quick / Ad-hoc" button. Don't confuse the two.
 
-`ctProgression` built from `cycle-change` entries in `_frcScheduled`: `firstMatch.endMin - firstMatch.startMin` gives starting ct; each `cc.newTime` appended if different from previous.
+### `pdf_import.parsed` storage shape
+Cache narrowing was dropping the `practice` array. All four storage
+sites (XLSX initial + upsert; CSV initial + upsert) now store
+`{matches, practice, notes}`. Don't add a fifth without including
+practice.
+
+### `EventTeam.team_number` doesn't exist
+`EventTeam` is just `event_id` + `team_id`. Team numbers live on
+`Team.number`. Always join: `select(Team.number).join(EventTeam, ...)`.
+
+### Import response cache hits
+Cache-hit responses returned `matches` only — adding `practice` to
+the response shape was a separate fix from the storage shape. Both
+must be in sync.
+
+### `_currentEventId` vs `_currentEventInfo`
+The editor uses `_currentEventId` (int) and `_currentEventInfo`
+(metadata dict). `fullReset(true)` wipes both. After a `/view` page
+reload, only `_currentEventInfo` may be populated for editing flows
+to find. The helper checks both.
+
+### Container vs Stark CPU detection
+`os.cpu_count()` returns 16 on the OpenShift container (host CPU
+count) but the cgroup quota limits effective parallelism to 12.
+`/sys/fs/cgroup/cpu.max` shows `1200000 100000` = 12 cores. Use
+`actual_workers` from env override (`CPU_WORKERS=12`).
+
+### Browser scheduler still in use
+The Generate button uses client-side `generateMatches()` with old
+weighted-sum scoring. `/assign` runs lex SA on top. Both are
+authoritative for different parts of the lifecycle. Don't assume
+"it's all Python lex SA" — there's a hybrid.
+
+### HAProxy timeout on /assign
+`openshift/05-route.yaml` has `haproxy.router.openshift.io/timeout: 120s`.
+SSE `: ping` keep-alives reset the idle timer, so long-running /assign
+requests work as long as progress events stream.
 
 ---
 
-## Day Color Palette
+## Test expectations
 
-```javascript
-var _DAY_COLORS = [
-  '#5b9bd5', // Day 1 — steel blue
-  '#4aab8a', // Day 2 — teal green
-  '#8b74c8', // Day 3 — violet
-  '#c48b3a', // Day 4 — amber gold
-  '#c05a6e', // Day 5 — rose crimson
-  '#5a7fa8', // Day 6 — slate blue
-  '#6a9455', // Day 7 — moss green
-];
-```
+All green:
+- `python3 scripts/scheduler_eval/smoke_test.py` — canonical-metrics smoke
+- `node tests/test_v2_url.js` — 36 URL round-trip cases
+- `node tests/test_field_three_up.js` — 23 view-page 3-up cases
+- `python3 tests/test_day_config_v2.py` — V2 day_config validation
+- `python3 tests/test_match_sa.py` — Phase 0 lex SA + targeted moves (300 + 86 cases)
+- `python3 tests/test_rb_balance.py` — 8 R/B commutativity property tests
+- `python3 tests/test_station_balance.py` — 12 station commutativity tests
+- `python3 tests/test_frc_compliance.py` — 11 audit / FRC compliance tests
+- `node` parse on inline `<script>` blocks in both HTML files
 
-Defined at module level before `buildDaysUI`. Applied as:
-- Bar fill: full color (or amber if >95% full)
-- Bar track: `color + '22'` (~13% opacity tint)
-- Day row background: `color + '14'` (~8% opacity)
-- Day row border: `color + '50'` (~31% opacity)
-- Day label text: full color
+`tests/iteration_sweep/2026mnst_30trials_analysis.txt` documents the
+Stark sweep results that `app/quality_presets.py` was tuned against.
 
 ---
 
-## PDF Parsing Format Variants
+## Operational reference
 
-`normalizePDFText()` fixes: `fi` ligature, truncated AM/PM, fragmented time tokens.
+- Production hostname: `frc-scheduler.roadfeldt.com`
+- Pod label: `app=frc-scheduler-server-git`
+- Postgres pod: `app=frc-postgres`, db `frc_scheduler`
+- Container: 12 effective cores via cgroup
+- State event: `2026mnst`, event_id 4, 36 teams
+- Stark eval: 36 cores, used for sweeps + production state schedules
 
-`parseQualBlocks()` patterns:
-- `qualRe` — standard with optional footnote markers, `~` on end time, en/em dash
-- `qualNoSepRe` — Ontario two-column (anchored at line start)
-- `qualBeginRe` — NC Begin/Continue with `openBeginBlock` state tracking
-- `dayRe` — handles both `Month Day` and `M/D/YY` (Colorado)
-- Block merge: gap ≤30 min → merge (Wisconsin field resets)
-- Fallback: join all lines, retry with global regex
-
----
-
-## Repo & Deployment Hygiene
-
-**Containerfiles:**
-- `Containerfile` — Docker/Podman builds (`python:3.12-slim` base)
-- `Containerfile.openshift` — OpenShift builds (`quay.io/sclorg/python-312-c10s`, avoids Docker Hub rate limits)
-- No `Dockerfile` — removed. Never re-add.
-
-**Gitignored (never commit real values):**
-- `.env`, `openshift/config.env`, `openshift/01-secrets.yaml`
-- `*.key`, `*.pem`, `*.crt`, `*.p12`
-
-**Template pattern:** `*.example` files are committed. User copies them, fills in real values, the real files are gitignored.
-
-**apply.sh substitution:** Uses `sed` to replace placeholders (`YOUR_HOSTNAME`, `YOUR_ORG/YOUR_REPO`, `letsencrypt-prod`) from `config.env` values at apply time. Never embeds real values in committed manifests.
-
-**`01-secrets.yaml` workflow:**
-```sh
-cp openshift/01-secrets.yaml.example openshift/01-secrets.yaml
-# fill in real values
-oc apply -f openshift/01-secrets.yaml
-rm openshift/01-secrets.yaml   # never leave on disk
-```
-
-## Security
-
-**Rate limiting** — `slowapi==0.1.9`, `Limiter(key_func=get_remote_address, default_limits=["200/minute"])`, `SlowAPIMiddleware`. Returns 429 on breach. All endpoints open (no `require_auth`) — rate limiting is the DoS protection.
-
-**CORS** — `ALLOWED_ORIGINS` env var. `*` in dev, hostname in prod. `CORSMiddleware(allow_credentials=True)`.
-
-**TLS** — `entrypoint.sh` reads `SSL_CERTFILE` and `SSL_KEYFILE`. If both set and files exist, passes `--ssl-certfile`/`--ssl-keyfile` to uvicorn. Falls back to plain HTTP if unset.
-
-**NetworkPolicy** (`10-networkpolicy.yaml`) — deny-all default + allow:
-- Inbound 8443 from anywhere
-- Outbound 5432 to postgres pod (same namespace only)
-- Outbound 53 to `openshift-dns` namespace
-- Outbound 443 to internet with RFC1918 blocked (pod cannot reach cluster internals)
-
-**cert-manager TLS flow (OpenShift):**
-- `09-certificate.yaml` → cert-manager issues cert via ClusterIssuer → stores in Secret `frc-scheduler-tls`
-- Secret mounted at `/certs` in pod → `SSL_CERTFILE=/certs/tls.crt`, `SSL_KEYFILE=/certs/tls.key`
-- `stakater/Reloader` annotation on Deployment → rolling restart on cert renewal (annotation: `secret.reloader.stakater.com/reload: "frc-scheduler-tls"`)
-- MetalLB LoadBalancer Service (`frc-scheduler-server-lb`) exposes port 443→8443 externally via BGP VIP
-
-## OpenShift Deployment — Live Configuration
-
-**Verified working configuration (March 18 2026):**
-- ClusterIssuer: `letsencrypt-production` (DNS-01, no port 80 needed)
-- MetalLB pool: `dmz-vlan`, BGP peer `10.0.0.1`, no NAT
-- External port: configured via firewall rule (e.g. 8088) → container 8443
-- cert-manager + cert-utils-operator both installed
-- Reloader NOT installed — using `09-cert-renewal-restart.yaml` CronJob instead
-
-**cert-utils-operator role** — expiry alerting ONLY. Does not restart pods on renewal.
-Annotate the Secret after first deployment:
+Deploy:
 ```bash
-oc annotate secret frc-scheduler-tls -n frc-scheduler-server \
-  cert-utils-operator.redhat-cop.io/generate-cert-expiry-alert=true \
-  cert-utils-operator.redhat-cop.io/cert-expiry-check-frequency=24h
+cd ~/git/frc-scheduler-server
+git pull && git add -A && git commit -m "<msg>"
+git push && ./openshift/apply.sh --build
 ```
 
-**cert renewal restart** — `09-cert-renewal-restart.yaml` CronJob, runs Sunday 03:00.
-Uses `build-trigger-sa`. Runs `oc rollout restart deployment/frc-scheduler-server`.
-If Reloader is installed later: add `secret.reloader.stakater.com/reload: "frc-scheduler-tls"` to Deployment annotations and delete the CronJob.
-
-**apply.sh substitutions:**
-- `YOUR_HOSTNAME` → `APP_HOSTNAME` from config.env
-- `letsencrypt-prod` → `CERT_ISSUER` from config.env (use exact name from `oc get clusterissuer`)
-- `METALLB_IP` → `METALLB_IP` from config.env
-- `https://YOUR_HOSTNAME` → `https://${APP_HOSTNAME}` (for ALLOWED_ORIGINS)
-
-**NetworkPolicy** — 5 separate NetworkPolicy objects in `10-networkpolicy.yaml`.
-Verify postgres label: `oc get pods -n frc-scheduler-server --show-labels | grep postgres`
-Expected label: `app: frc-postgres`
-
-## OpenShift Deployment Notes
-
-
-`04-deployment.yaml` key settings:
-- `replicas: 2` with `topologySpreadConstraints` (one pod per node)
-- `strategy: RollingUpdate` with `maxUnavailable: 0`
-- `PodDisruptionBudget: minAvailable: 1`
-- `CPU_WORKERS: "12"`, `WEB_WORKERS: "1"`
-- `cpu request: "4"`, `cpu limit: "12"`
-- `_gen_concurrency = max(2, CPU_WORKERS // 3)` — with `CPU_WORKERS=12`: `= 4` concurrent jobs per pod
-- **8 concurrent user capacity:** 2 pods × 4 jobs = 8 simultaneous assignments; each job gets 3 workers → ~10s at full load
-
-**8 concurrent user capacity:** 2 pods × 4 jobs = 8. Each job gets 3 workers → ~10s at 1000 iterations full load, ~5s at half load.
+Hard-refresh browsers after deploy.
 
 ---
 
-## Status Messages (auto chain)
+## Reading order for new contributors
 
-| Step | Message |
-|------|---------|
-| Event load | `⏳ Loading team roster…` → `✓ Roster loaded — N teams` |
-| PDF | `⏳ Fetching agenda PDF…` (in agenda panel) |
-| Apply | `⏳ Applying agenda to day config…` |
-| Max cycles | `⏳ Calculating max matches…` → `✓ Max N matches/team — ...` |
-| Stage 1 | `⏳ Generating schedule…` + progress bar → `Stage 1 complete` |
-| Auto-assign | `⏳ Auto-assigning teams…` |
-| Stage 2 | progress bar with iterations/ETA/score |
-| Done | `Teams assigned — review the schedule then click Commit to activate` |
+1. **README.md** — what is this thing, install, run
+2. **`PRIORITIES.md`** (root, this directory) — what the algorithm does
+3. **`docs/HANDOFF.md`** — what's in flight, what's done, what's next
+4. **`docs/PRIORITIES.md`** — algorithmic deep dive (Stage 1/2 details)
+5. **`docs/scheduler/`** — phase-by-phase implementation history
+6. **`tests/phase0a_lex/SUMMARY.md` through `tests/phase2_station/SUMMARY.md`**
+   — per-phase summaries with concrete numbers
+
+That should be enough to pick up the codebase and contribute.

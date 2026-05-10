@@ -15,24 +15,39 @@
     at a time, using best-of-60-attempts with a diversity-aware scoring
     function for each candidate match.
   - **SA optimization phase**: simulated annealing on the constructed
-    schedule, optimizing the canonical score (see _score_from_state) via
-    random 2-swap moves between match positions. Each accepted move
-    changes which teams are in which match.
+    schedule, optimizing under FRC §10.5.2 lexicographic semantics via
+    random 2-swap moves between match positions. Cooldown is **paramount**:
+    swaps that worsen it are filtered before state mutation. Acceptance for
+    other criteria uses lex-tuple compare with stochastic uphill on
+    lower-priority criteria only. Targeted moves (1/3 partner-targeted,
+    1/3 opponent-targeted, 1/3 random) bias the search toward duplicate-
+    pair bottlenecks. Each accepted move changes which teams are in which
+    match.
 
   After Stage 2's two phases, separable post-passes optimize specific
   criteria without disturbing others:
-  - **R/B balance post-pass** (Phase 1): whole-match R/B flip moves
-    that preserve partner pairs, opponent pairs, station-within-alliance
-    distribution, cooldown, b2b, and surrogate counts. SA-driven to
-    escape greedy local optima.
-  - **Station balance post-pass** (Phase 2, planned): within-match station
-    permutations to drive each team's station distribution to optimal.
+  - **R/B balance post-pass** (Phase 1, complete): whole-match R/B flip
+    moves that preserve partner pairs, opponent pairs, station-within-
+    alliance distribution, cooldown, b2b, and surrogate counts. SA-driven
+    to escape greedy local optima. 8 commutativity property tests.
+  - **Station balance post-pass** (Phase 2, complete): Sykes-style within-
+    alliance station permutations driving each team's station distribution
+    to optimal. SA-from-greedy ensures result is never worse than greedy
+    alone. 12 commutativity property tests.
 
-The scheduler's defaults are aligned with the FRC manual's six
-§13.6.2 criteria (formerly §10.5.2). Where we go beyond the manual,
-it's additive — better diversity, more flexibility — never
-contradictory. See the **FIRST Alignment** section below for the
-line-by-line comparison.
+The scheduler operates under **FRC §10.5.2 paramount lexicographic
+semantics**. The 8-element lex tuple `(cooldown, par_quad, opp_quad,
+surrogate, rb_metric, station_pen, surrogate_spread, match_equity)` is
+the authoritative score; lower is better, comparison is lexicographic.
+Cooldown is paramount and never traded against any other criterion.
+The remaining six positions map to FRC §10.5.2 priorities #2–#6 plus two
+secondary refinements that don't conflict with the FRC priorities.
+
+The legacy `score_schedule()` float remains for UI/CSV/DB display where
+a single number is convenient, but **all SA accept-reject decisions and
+all best-of-N comparisons use the lex tuple**. See `PRIORITIES.md` (root)
+and `docs/scheduler/FRC_COMPLIANCE.md` for the full lex-tuple spec and
+audit trail design.
 
 ---
 

@@ -2,22 +2,35 @@
 
 **Repository:** `github.com/croadfeldt/frc-scheduler-server`
 **Document type:** Active workstream plan
-**Status:** **Active.** Scheduler change-freeze lifted (post-2026mnst). **Phase 0 and Phase 1 complete and ready to ship.** Each phase ships independently with comparison artifacts.
+**Status:** **Phases 0–4 complete.** Scheduler change-freeze lifted (post-2026mnst). All planned scheduler-quality phases have shipped. Phase 5 (decision point on CP-SAT / BIBD / further SA tuning) is the only open item.
 
 **Progress:**
-- ✅ **Phase 0** (Unified Stage 2 with true SA): complete. See `tests/phase0_unified/SUMMARY.md`. Eval shows mean composite drops from 65.80 → 58.27 (best 53.80 → 49.40) at SA=50000.
-- ✅ **Phase 1** (R/B balance post-pass): complete. See `tests/phase1_rb/SUMMARY.md`. Best composite 29.20 (target ≤30), mean 51.20.
-- ⏳ **Phase 2** (Sykes station post-pass): next.
-- ⏳ **Phase 3** (hard cooldown): pending.
-- ⏳ **Phase 4** (quality presets): pending.
+- ✅ **Phase 0** (Unified Stage 2 with true SA + lex semantics): complete. See `tests/phase0_unified/SUMMARY.md`, `tests/phase0a_lex/SUMMARY.md`, `tests/phase0b_cooldown/SUMMARY.md`, `tests/phase0c_targeted/SUMMARY.md`. Lex tuple is now authoritative; cooldown paramount; targeted move generator improves convergence on criterion #3.
+- ✅ **Phase 1** (R/B balance post-pass): complete. See `tests/phase1_rb/SUMMARY.md`. 8 commutativity property tests prove it preserves all other criteria.
+- ✅ **Phase 2** (Sykes station post-pass): complete. See `tests/phase2_station/SUMMARY.md`. ~30% reduction in `total_station_pen` on the reference fixture; max_station_spread drops 4→2. 12 commutativity property tests.
+- ✅ **Phase 3** (hard cooldown enforcement): complete. `_swap_preserves_cooldown` filters violations BEFORE state mutation. ~5x SA speedup. Self-healing for construction-phase bugs.
+- ✅ **Phase 4** (quality presets): complete. `app/quality_presets.py` defines fair (50K) / good (500K) / best (2M) / maximum (5M). UI dropdown wired. Iteration ceiling documented in `ITERATION_CEILING.md`.
 - ⏳ **Phase 5** (decision point): pending.
+
+**Beyond the original plan, also shipped this session:**
+- ✅ Iteration sweep + K* analysis (30 trials × 7 levels on Stark)
+- ✅ Competition-approved checkbox + `audit_trail` JSONB column + UI surfaces
+- ✅ /assign chunking fix (was diluting iterations across 720 chunks)
+- ✅ /assign auth-header bug fix
+- ✅ EventTeam.team_number → Team.number join (7 sites)
+- ✅ MatchMaker import path (state_qual_schedule.txt → FMS xlsx → existing import flow with practice support)
+- ✅ Practice-import wiring (storage + preview UI + commit body)
+- ✅ Import flow event-id resolution (avoids silent ad-hoc forks)
+- ✅ MatchMaker comparison language softened (peer reference, not competitor)
 
 **Companion docs:**
 - [`EVAL_FINDINGS.md`](EVAL_FINDINGS.md) — empirical results that motivate this work
+- [`ITERATION_CEILING.md`](ITERATION_CEILING.md) — sweep + K* analysis + practical ceiling decision
+- [`FRC_COMPLIANCE.md`](FRC_COMPLIANCE.md) — competition-approved + audit trail spec
 - [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md) — licensing constraints binding this work
 - [`SCHEDULER_QUALITY_ROADMAP.md`](SCHEDULER_QUALITY_ROADMAP.md) — original tactical roadmap (superseded by this doc; retained for historical context)
 - [`MATCHMAKER_ALIGNMENT_ROADMAP.md`](MATCHMAKER_ALIGNMENT_ROADMAP.md) — pre-licensing-brief roadmap (superseded; retained)
-- [`PHASE_0_HARD_COOLDOWN_BRIEF.md`](PHASE_0_HARD_COOLDOWN_BRIEF.md) — implementation-ready brief for cooldown (still valid; reused as Phase 3 here)
+- [`PHASE_0_HARD_COOLDOWN_BRIEF.md`](PHASE_0_HARD_COOLDOWN_BRIEF.md) — implementation-ready brief for cooldown (shipped as Phase 0b/3)
 - [`THREE_LAYER_ARCHITECTURE_DESIGN.md`](THREE_LAYER_ARCHITECTURE_DESIGN.md) — destination architecture (deferred until quality work is done)
 
 ---

@@ -274,29 +274,34 @@ This means a compromised container cannot reach other cluster services or intern
 
 ```
 Stage 1 — Abstract Schedule
-  Input:  numTeams, matchesPerTeam, cooldown, seed (hex), [weights]
+  Input:  numTeams, matchesPerTeam, cooldown, seed (hex)
   Output: slot-indexed match structure (no real team numbers)
-          reproducible: same seed + weights → identical structure
+          reproducible: same seed → identical structure
 
 Stage 2 — Team Assignment
   Input:  abstract schedule + event roster + assign_seed (hex)
-  Output: slot_map {slot: team_number}
+  Output: slot_map {slot: team_number}, lex SA + post-pass optimized
           reproducible: same assign_seed → identical mapping
 ```
 
-> 📐 **FIRST alignment:** the scheduler's defaults follow FRC's published
-> placement criteria from the Game Manual (§13.6.2 in 2025), including
-> partner/opponent diversity, station-position balancing, and surrogate
-> handling. Weights are tunable via the editor's Advanced Criteria panel
-> with a "⊕ Match FIRST defaults" reset button.
+> 📐 **FRC §10.5.2 paramount lexicographic semantics.** Cooldown is
+> paramount — never traded against any other criterion. The remaining
+> priorities are compared lexicographically: a candidate that's
+> strictly better at a higher-priority criterion wins regardless of
+> lower-priority differences.
 >
-> The scheduler is an independent implementation of FRC's published
-> criteria — see [`NOTICE.md`](NOTICE.md) for algorithm attribution,
-> third-party software acknowledgments, and the licensing posture toward
-> Idle Loop's MatchMaker (which we evaluate against but do not bundle
-> or invoke from the running app). See [`docs/PRIORITIES.md`](docs/PRIORITIES.md)
-> for the full criteria table, configurability details, and the FIRST
-> alignment matrix.
+> The scheduler emits an 8-element lex tuple
+> `(cooldown, par_quad, opp_quad, surrogate, rb_metric, station_pen, surrogate_spread, match_equity)`
+> — see [`PRIORITIES.md`](PRIORITIES.md) for the full spec.
+>
+> Each schedule carries a `competition_approved` flag and a full
+> `audit_trail` JSONB record. Schedules generated with FRC §10.5.2
+> defaults get a green ✓ FRC badge; deviations show ! and list what
+> changed. The scheduler is an independent implementation of FRC's
+> published criteria — see [`NOTICE.md`](NOTICE.md) for algorithm
+> attribution. MatchMaker (idleloop.com/matchmaker/) is treated as
+> a peer reference scheduler used by event organizers, not a
+> competitor.
 
 ### System components
 
