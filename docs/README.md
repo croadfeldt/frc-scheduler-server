@@ -29,7 +29,7 @@ and consequences. Immutable once accepted.
 | [002](decisions/002-frc-paramount-priority.md) | FRC §10.5.2 paramount cooldown via hard filter |
 | [003](decisions/003-three-layer-architecture.md) | Day-config / abstract / assigned three-layer pipeline |
 | [004](decisions/004-no-reproducibility-guarantee.md) | Schedule is the artifact; bit-exact replay not guaranteed |
-| [005](decisions/005-matchmaker-as-peer.md) | MatchMaker as peer reference, not competitor |
+| [005](decisions/005-reference-scheduler-as-peer.md) | Reference scheduler as peer, not competitor |
 | [006](decisions/006-server-only-construction.md) | Server-only construction; retire the browser scheduler |
 
 ## Workstreams
@@ -57,12 +57,13 @@ for the SA / post-passes / lex tuple internals.
 | Document                                                          | What it covers                                                       |
 |-------------------------------------------------------------------|----------------------------------------------------------------------|
 | [scheduler/EVAL_FINDINGS.md](scheduler/EVAL_FINDINGS.md)          | Per-run eval results, including the post-Phase-4 baseline (2026-05-10). |
+| [scheduler/quality-metrics.md](scheduler/quality-metrics.md)      | Catalog of every quality metric we compute or plan to compute: definitions, thresholds, floors, sources. Living doc; recalibration in progress. |
 | [scheduler/ITERATION_CEILING.md](scheduler/ITERATION_CEILING.md)  | SA iteration sweep findings; tight-criterion analysis.               |
 | [scheduler/FRC_COMPLIANCE.md](scheduler/FRC_COMPLIANCE.md)        | Mapping FRC §10.5.2 to test invariants.                              |
 | [scheduler/THREE_LAYER_ARCHITECTURE_DESIGN.md](scheduler/THREE_LAYER_ARCHITECTURE_DESIGN.md) | Implementation framing for the three-layer pipeline (see ADR 003). |
 | [scheduler/PHASE_0_HARD_COOLDOWN_BRIEF.md](scheduler/PHASE_0_HARD_COOLDOWN_BRIEF.md) | Phase 0 implementation brief — hard-cooldown rejection. |
-| [scheduler/MATCHMAKER_ALIGNMENT_ROADMAP.md](scheduler/MATCHMAKER_ALIGNMENT_ROADMAP.md) | Historical: which MatchMaker behaviors we deliberately match vs. diverge from. |
-| [scheduler/MATCHMAKER_LICENSING_BRIEF.md](scheduler/MATCHMAKER_LICENSING_BRIEF.md) | Licensing analysis for using MatchMaker as a peer reference (see ADR 005). |
+| [scheduler/REFERENCE_SCHEDULER_ALIGNMENT.md](scheduler/REFERENCE_SCHEDULER_ALIGNMENT.md) | Historical: which reference-scheduler behaviors we deliberately match vs. diverge from. |
+| [scheduler/REFERENCE_SCHEDULER_LICENSING.md](scheduler/REFERENCE_SCHEDULER_LICENSING.md) | Licensing analysis for treating the established FRC scheduler as a peer (see ADR 005). |
 | [scheduler/SCHEDULER_QUALITY_ROADMAP.md](scheduler/SCHEDULER_QUALITY_ROADMAP.md) | Historical: original 6-phase plan that became `workstreams/scheduler-quality.md`. |
 
 ## V2 day_config

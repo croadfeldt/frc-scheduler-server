@@ -109,7 +109,7 @@ Manual edits via `PATCH /api/assigned-schedules/{id}` do NOT unset
 preserved; the edit is tracked separately in
 `AssignedScheduleHistory`.
 
-## Behavior on import (CSV / MatchMaker)
+## Behavior on import (CSV / the reference scheduler)
 
 The `/import` endpoint creates `AssignedSchedule` rows with
 `competition_approved = NULL` (we don't know the algorithm

@@ -138,7 +138,7 @@ thoroughly the SA explores. Higher = better convergence but slower.
 | maximum   | 5,000,000   | ~3min                                    |
 
 The "best" preset (2M iters × best-of-30) consistently produces tuples
-in the same range as the MatchMaker reference output on the 2026mnst
+in the same range as the external reference output on the 2026mnst
 fixture. Documented in `docs/scheduler/ITERATION_CEILING.md`.
 
 `MAX_ITERATIONS = 5_000_000`. K* (the iteration count where mean
@@ -212,5 +212,5 @@ the browser scheduler is tracked in `docs/HANDOFF.md` §5.1.
 - `tests/phase0b_cooldown/SUMMARY.md` — hard cooldown filter
 - `tests/phase0c_targeted/SUMMARY.md` — targeted move generator
 - `tests/phase1_rb/SUMMARY.md` — R/B post-pass
-- `tests/phase2_station/SUMMARY.md` — Sykes station post-pass
+- `tests/phase2_station/SUMMARY.md` — station post-pass
 - `tests/iteration_sweep/2026mnst_30trials_analysis.txt` — sweep data

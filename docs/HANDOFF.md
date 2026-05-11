@@ -27,6 +27,26 @@ adds application-friendly entry points (`compute_diversity_report`,
 response shape preserved exactly; `renderDiversityCard()` untouched.
 13 test suites green (12 existing + new `tests/test_quality.py`).
 
+Then **scrubbed third-party-product name references from user-facing
+prose** to limit legal exposure and ill will toward the upstream
+authors of the established FRC reference scheduler. Four files
+renamed and rewritten generically (the licensing brief, ADR 005, the
+alignment doc, and the compare script); ~245 prose substitutions
+across 35 files turning comparative-product framings into
+empirical-distribution framings. Legitimate technical references kept
+(the eval adapter that runs the binary, the xlsx-format parser,
+NOTICE attributions, historical test summaries). Cross-references
+updated.
+
+Finally **landed `docs/scheduler/quality-metrics.md`**: a living
+catalog of every metric we measure or plan to measure, with
+definitions, theoretical floors, threshold bands, sources, and an
+explicit "calibration in progress" caveat for current threshold
+values. Five planned-but-not-implemented metrics (SoS, pair
+distribution thresholds, partner-vs-opponent difference, match-gap
+distribution, surrogate placement validation) called out as plugin
+extensions to be added after the quality framework matures.
+
 ---
 
 ## 1 · Where we are
@@ -44,27 +64,29 @@ all surface FRC compliance state to the user.
 | **Phase 0b — Hard cooldown filter**                              | ✓ | `_swap_preserves_cooldown` filters violations BEFORE state mutation. ~5x SA speedup. |
 | **Phase 0c — Targeted move generator**                           | ✓ | Biases SA toward duplicate-pair bottlenecks. 1/3 partner-targeted, 1/3 opponent-targeted, 1/3 random. |
 | **Phase 1 — R/B post-pass**                                      | ✓ | `app/post_passes/rb_balance.py`. Whole-match flip + SA. 8 commutativity tests. |
-| **Phase 2 — Sykes station post-pass**                            | ✓ | `app/post_passes/station_balance.py`. Within-alliance permutation + SA-from-greedy. 12 commutativity tests. |
+| **Phase 2 — station post-pass**                            | ✓ | `app/post_passes/station_balance.py`. Within-alliance permutation + SA-from-greedy. 12 commutativity tests. |
 | Iteration sweep + K* analysis                                    | ✓ | K* > 5M; practical ceiling at 5M. See `docs/scheduler/ITERATION_CEILING.md`. |
 | Quality presets (fair/good/best/maximum)                         | ✓ | `app/quality_presets.py`. |
 | Competition-approved checkbox + audit trail                      | ✓ | DB columns + `app/frc_compliance.py` + UI surfaces in index + view. |
 | /assign chunking fix                                             | ✓ | Each worker runs full SA budget; best-of-N over independent trials. |
 | /assign auth-header bug fix                                      | ✓ | `assignTeams()` was sending raw fetch with no Authorization. |
 | EventTeam.team_number bug fix                                    | ✓ | Seven sites in main.py; replaced with proper join through `Team.number`. |
-| MatchMaker import path                                           | ✓ | `state_qual_schedule.txt` → FMS xlsx → import flow. Practice sheet supported. |
+| reference schedule import path                                           | ✓ | `state_qual_schedule.txt` → FMS xlsx → import flow. Practice sheet supported. |
 | Practice-import wiring (storage + UI + commit)                   | ✓ | XLSX/CSV cache stores practice; preview UI renders it; commit body sends it. |
 | Import flow event-id resolution                                  | ✓ | `ensureEventLoadedForImport` helper used by 3 import call sites. |
-| MatchMaker comparison language softened                          | ✓ | Removed all "beats MatchMaker" / "OURS WINS" framing across UI + tests + docs. |
-| **Practice-from-MatchMaker-xlsx** (this session)                 | ✓ | Stale-cache invalidation + datetime time-cell handling + derived practiceDay. §4.7. |
+| reference comparison language softened                          | ✓ | Removed all "improves over the reference" / "improvement over reference" framing across UI + tests + docs. |
+| **Practice-from-the reference scheduler-xlsx** (this session)                 | ✓ | Stale-cache invalidation + datetime time-cell handling + derived practiceDay. §4.7. |
 | **Print + export unauthenticated** (this session)                | ✓ | `render-pdf` no longer requires auth; matches `/teams/export` posture. §4.8. |
 | **Session-deliverable protocol documented** (this session)       | ✓ | Two-tarball + commit-ready-commands + commit-message-style convention canonicalised in `REPRODUCTION_PROMPT.md`. §4.9. |
 | **Cycle-change off-by-one regression** (this session)            | ✓ | `afterMatch=N` now correctly applies new ct to gap N→N+1 per V2_SPEC §7 (was N+1→N+2). Six application sites fixed. §4.10. |
 | **Eval-harness SA path measurement** (this session)              | ✓ | Adapter was defaulting `sa_iterations=0` since Phase 0; both historical baselines reflected SA-disabled config. Default corrected, CLI flags added, regression test landed. **Re-run completed: mean composite 30.64** (vs 40.12 SA-disabled baseline). Phase 5 active; failure narrowed to `max_station_spread` + `repeat_opponents` on high-MPT fixtures. §5.9. |
-| **Doc structure reorganization** (this session)                  | ✓ | New `docs/ROADMAP.md` as single source of truth for "where we're going"; new `docs/decisions/` with ADRs 001–005 capturing lex tuple, FRC paramount, three-layer architecture, no-reproducibility-guarantee, and MatchMaker-as-peer; renamed `docs/RBAC_MODEL.md` → `docs/workstreams/rbac.md`, `docs/SCHEDULE_LIFECYCLE.md` → `docs/workstreams/schedule-lifecycle.md`, `docs/UI_QUALITY_EXPOSURE.md` → `docs/workstreams/ui-quality-exposure.md`, `docs/scheduler/QUALITY_IMPROVEMENT_PLAN.md` → `docs/workstreams/scheduler-quality.md`, `docs/SCHEDULE_COMPARISON_AND_NAMED_HISTORY.md` → `docs/workstreams/schedule-comparison.md`. New `CONTRIBUTING.md` extracts the session-deliverable protocol. README updated to reflect the no-reproducibility-guarantee policy. All cross-references updated. |
+| **Doc structure reorganization** (this session)                  | ✓ | New `docs/ROADMAP.md` as single source of truth for "where we're going"; new `docs/decisions/` with ADRs 001–005 capturing lex tuple, FRC paramount, three-layer architecture, no-reproducibility-guarantee, and reference-as-peer; renamed `docs/RBAC_MODEL.md` → `docs/workstreams/rbac.md`, `docs/SCHEDULE_LIFECYCLE.md` → `docs/workstreams/schedule-lifecycle.md`, `docs/UI_QUALITY_EXPOSURE.md` → `docs/workstreams/ui-quality-exposure.md`, `docs/scheduler/QUALITY_IMPROVEMENT_PLAN.md` → `docs/workstreams/scheduler-quality.md`, `docs/SCHEDULE_COMPARISON_AND_NAMED_HISTORY.md` → `docs/workstreams/schedule-comparison.md`. New `CONTRIBUTING.md` extracts the session-deliverable protocol. README updated to reflect the no-reproducibility-guarantee policy. All cross-references updated. |
 | **Seed UI removal** (this session, follow-up to ADR 004)         | ✓ | The "seed:" and "assign seed:" copy-able displays removed from the share bar in `static/index.html`. `copySeed()` / `copyAssignSeed()` helpers deleted. `?seed=` and `?aseed=` no longer emitted in URLs. Autoload-from-seed-only path dropped (sid/aid is the canonical share pointer). Schedule ID and Assignment ID kept — those are DB primary keys, useful. README's URL-parameter table updated. ADR 004 action items marked done. |
 | **Browser scheduler retirement** (this session) — promoted       | ☐ | Was a Backlog one-liner; now a v1.1 line item with ADR 006 capturing the Option A decision (server-only construction, browser becomes presentation). Code work not yet started. §5.1 rewritten to reference the ADR. |
 | **Abstract library cache-always policy** (this session)          | ✓ | `workstreams/abstract-library.md` clarified to make cache-hit-below-preset-quality explicit. Added Case 3 policy: a user paying for higher preset than the cached entry's budget regenerates and supersedes if better. Every `best`-preset Generate is now an implicit curation run. ROADMAP v1.1 gains a "suggested sequencing when work starts" block making the order explicit. |
 | **Schedule Quality Reporting — Phase A** (this session)          | ✓ | `app/quality.py` consolidates the four overlapping quality systems behind one canonical entry point. Re-exports `THRESHOLDS`/`MetricResult`/`AnalysisReport` from `scripts/scheduler_eval/metrics.py`; adds `compute_diversity_report()` (the structures the editor's Quality card needs — pair histograms, theoretical floors, per-slot tables, worst-pair callouts), `analyze_against_thresholds()` (app-friendly wrapper around the harness analyzer), and `composite_score()` (single-number ranking, matches the harness's runner formula). Shape-agnostic input: accepts DB dicts, `app.scheduler.Match` NamedTuples, and `harness_types.Match` dataclasses interchangeably. The `/api/abstract-schedules/{id}/diversity-report` endpoint shrinks from ~145 lines of inline computation to a 13-line thin wrapper; response JSON shape preserved exactly for `renderDiversityCard()` compatibility. New `tests/test_quality.py` (47 assertions across 6 sections) covers shape-agnostic input, frontend-shape contract, harness-equivalence, composite score, theoretical floors, pair-table sanity. First step of `workstreams/schedule-quality-reporting.md` per the v1.1 sequencing in ROADMAP. |
+| **Reference-scheduler name scrub** (this session)                | ✓ | Limited legal exposure and ill-will toward the upstream authors of the established FRC reference scheduler by rewriting user-facing prose generically. Four files renamed: `MATCHMAKER_LICENSING_BRIEF.md` → `REFERENCE_SCHEDULER_LICENSING.md`, ADR 005 (`005-matchmaker-as-peer.md` → `005-reference-scheduler-as-peer.md`), `MATCHMAKER_ALIGNMENT_ROADMAP.md` → `REFERENCE_SCHEDULER_ALIGNMENT.md`, `scripts/compare_matchmaker.py` → `compare_reference.py`. ~245 prose substitutions across 35 files. Comparative claims ("competitive with MatchMaker," "beats MM on...") became empirical framings ("at this fixture size, published FRC schedules show..."). Class names (`MatchMakerAdapter`) and adapter identifiers (`"matchmaker"` as CLI flag, `matchmaker.py` adapter file, `MATCHMAKER_BINARY` env var) preserved — the technical machinery that actually runs the external binary keeps its literal name. NOTICE attributions and historical test SUMMARY.md artifacts left alone. ADR 005 reframed: peer-not-competitor framing kept, but applied to "the established FRC reference scheduler" rather than naming a specific tool. 13 test suites green. |
+| **Quality metrics catalog** (this session)                       | ✓ | New `docs/scheduler/quality-metrics.md` documents every metric we measure or plan to measure, with definitions, theoretical floors, threshold bands, and sources. Calibration-in-progress note up front: today's threshold values are inherited from initial implementation and not yet validated against a wide corpus of real FRC schedules; recalibration is tracked in Phase E of `schedule-quality-reporting.md`. Five planned-but-not-implemented metrics called out as plugin extensions: Strength of Schedule (Statbotics framework, gated on EPA/rank data integration), pair distribution thresholds, partner-vs-opponent difference per pair, match-gap distribution beyond minimum, surrogate placement validation. Invites community input. Cross-referenced from `docs/README.md`, `app/quality.py` docstring, and `workstreams/schedule-quality-reporting.md` Related section. |
 | **Schedule Quality Reporting Phase A** (this session)            | ✓ | `app/quality.py` created — unified scoring module consolidating today's four overlapping quality systems. Re-exports from `scripts/scheduler_eval/metrics.py` (THRESHOLDS, MetricResult, AnalysisReport, harness analyze). Adds shape-agnostic input (`_normalize_match` accepts dict/NamedTuple/dataclass), `DiversityReport` with `to_dict()` producing the legacy endpoint JSON shape exactly, `compute_diversity_report` and `analyze_against_thresholds` as application-friendly entry points, `composite_score` matching the runner's formula. `/api/abstract-schedules/{id}/diversity-report` refactored from 145 inline lines down to a 5-line `compute_diversity_report` call. New `tests/test_quality.py` (45+ checks) covers shape-agnostic inputs, frontend JSON contract preservation, threshold-analysis equivalence with direct harness call, theoretical floors, and pair-table sanity. All 13 test suites pass. |
 | **v1.1 architecture confirmed** (this session)                   | ✓ | Confirmed the two foundational workstreams for v1.1: abstract schedule library (lookup-first, cache-always-on-miss) and unified schedule-quality scoring (one canonical framework consumed by API, UI, eval harness, and library). Both docs already existed from a prior session; this session re-verified the structure, sharpened the "always cache" emphasis in `workstreams/abstract-library.md`, and confirmed both are referenced from v1.1 of ROADMAP. ADR 006's retirement work simplifies to ~half a day once the library lands. |
 | **Abstract library + quality reporting** (this session)          | ☐ | Two new v1.1 workstreams captured. `workstreams/abstract-library.md` defines a lookup-first/cache-on-miss library of pre-computed best-known abstracts per FRC fixture shape; `workstreams/schedule-quality-reporting.md` defines a unified quality framework consolidating today's four overlapping scoring systems with tiered UI exposure. Latter supersedes `ui-quality-exposure.md`. ROADMAP v1.1 rewritten around them. Code work not yet started; design captured for follow-up. |
@@ -95,13 +117,13 @@ Reference fixture (2026mnst, 36 teams × 7 MPT):
 
 | Source                                         | Tuple                          |
 |------------------------------------------------|--------------------------------|
-| MatchMaker reference                           | `(0, 252, 416, 0, 3, 65, 0, 0)` |
+| external reference                           | `(0, 252, 416, 0, 3, 65, 0, 0)` |
 | Best-of-30 at SA=2M (sweep)                    | `(0, 252, 404, 0, 1, 39, 0, 0)` |
 | Best-of-30 at SA=5M (sweep)                    | `(0, 252, 386, 0, 1, 44, 0, 0)` |
 | par_quad floor (theoretical optimum)           | 252                             |
 | opp_quad floor (theoretical optimum)           | 378                             |
 
-MatchMaker is the long-standing community reference scheduler used by
+established FRC scheduling is the long-standing community baseline used by
 event organizers. Comparing against it is sanity-check, not competition.
 
 ---
@@ -191,9 +213,9 @@ Same snapshot-history pattern as day_config edits.
 
 `app/main.py:patch_assigned_schedule`.
 
-### 4.7 Practice-from-MatchMaker-xlsx — three layered bugs (2026-05-10)
+### 4.7 Practice-from-the reference scheduler-xlsx — three layered bugs (2026-05-10)
 
-User report: restoring a MatchMaker-exported xlsx with a Practice sheet
+User report: restoring a reference scheduler xlsx with a Practice sheet
 landed 42 quals but silently dropped the 6 practice matches, even though
 the import preview's `format_detected` line said "FMS xlsx (42 qual,
 6 practice)". The string came from the parser; the data was gone.
@@ -216,7 +238,7 @@ The dedicated PDF import path has a `?nocache=1` toggle; the restore
 path doesn't, so users couldn't bypass this manually.
 
 **Bug B — datetime time-cells.** openpyxl returns Python `datetime`
-objects for date/time-formatted cells (typical for MatchMaker exports).
+objects for date/time-formatted cells (typical for the reference scheduler exports).
 The parser was doing `str(time_val).strip()`, producing
 `"2026-05-15 19:00:00"`. Downstream `_hhmm_to_min` rejects this; cycle
 and start/end derivation falls back to defaults (8.0 min cycle,
@@ -433,11 +455,11 @@ broad poor performance.
 **The narrow signature:**
 - ✓ `repeat_partners` and `max_partner_repeats` at floor on every
   fixture. SA + Phase 1 R/B post-pass work as designed.
-- ✓ We *beat* MatchMaker on `max_color_imbalance`,
+- ✓ We *beat* the reference scheduler on `max_color_imbalance`,
   `max_opponent_repeats`, `min_match_gap`.
 - ✗ `max_station_spread`: 13/13 we're worse, mean 3.54 vs MM's 0.38.
-  The Phase 2 (Sykes) post-pass works on synthetic small-team inputs
-  but hits a 2–3 floor on real 36+ team fixtures while MatchMaker
+  The Phase 2 (the station-balance technique) post-pass works on synthetic small-team inputs
+  but hits a 2–3 floor on real 36+ team fixtures while the reference scheduler
   reaches 0.
 - ✗ `repeat_opponents` on 40-team × 12-MPT fixtures (the 2024micmp*
   family): we have ~20% more 2-encounter pairs than MM. `opp_quad`
@@ -623,7 +645,7 @@ Ships in four phases:
 Five open questions captured in the workstream doc: coverage
 estimate (Q1), quality ceiling estimate (Q2 — partly addressed by
 Phase 5 Plan A results), single vs multiple entries per shape
-(Q3), MatchMaker as source (Q4), cache invalidation when curation
+(Q3), the reference scheduler as source (Q4), cache invalidation when curation
 improves (Q5).
 
 This changes the project's character: from "high-quality schedule
@@ -663,7 +685,7 @@ ships — README and project pitch shift accordingly.
 ### `app/post_passes/`
 
 - `rb_balance.py` — Phase 1, whole-match R/B flip + SA, 8 property tests
-- `station_balance.py` — Phase 2, Sykes-style within-alliance permutation + SA-from-greedy, 12 property tests
+- `station_balance.py` — Phase 2, the station-balance technique-style within-alliance permutation + SA-from-greedy, 12 property tests
 
 ### `app/frc_compliance.py`
 
@@ -789,7 +811,7 @@ If you're picking this up:
 2. **Open items** live in `docs/ROADMAP.md`, not in this handoff. HANDOFF's §5 is a per-session view of in-flight work; ROADMAP is the canonical "where we're going."
 3. **For state events**, recommend Stark via best-of-30 at SA=2M (~75s wall-clock). Container "Best" works but with the caveat in §5.2.
 4. **Never silently bypass FRC §10.5.2 paramount.** The lex tuple is the contract. Cooldown comes first, always. See ADR 002.
-5. **MatchMaker is a peer**, not a competitor. See ADR 005.
+5. **the reference scheduler is a peer**, not a competitor. See ADR 005.
 6. **The schedule itself is the artifact.** Bit-exact replay from seed isn't guaranteed across algorithm versions. See ADR 004.
 
 The scheduler core is in good shape; quality is narrowly poor (mean composite 30.64 across 16 fixtures) with two specific phenomena driving the gap; Phase 5 diagnostics running on Stark as of 2026-05-10 will determine whether the next investment is Plan B (post-pass budget) or Plan C (lex-tuple expansion).

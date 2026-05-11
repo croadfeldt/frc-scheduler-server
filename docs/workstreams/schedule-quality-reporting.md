@@ -6,6 +6,7 @@
 
 **Related:**
 - ADR 001 — lex tuple as canonical schedule score (this workstream builds on it)
+- `scheduler/quality-metrics.md` — catalog of every metric this workstream surfaces; definitions, thresholds, sources
 - `workstreams/scheduler-quality.md` — Phase 5 of the scheduler-quality plan; this workstream productizes the eval-harness work
 - `workstreams/abstract-library.md` — library quality is measured by the framework defined here
 - `scheduler/EVAL_FINDINGS.md` — current eval methodology that becomes UI-accessible
@@ -20,7 +21,7 @@ A unified scoring and reporting framework for *every* schedule — generated, im
 2. **Server API** — schedule responses include the quality report. Existing endpoints get enriched; one new endpoint (`/api/schedules/{id}/quality-report`) is the canonical "analyze this schedule" entry point.
 3. **UI surfaces** — the Schedule Quality card in the editor (today's `#diversityReportCard`) becomes the rendering layer. Tiered exposure (per-pair detail → lex tuple → reference comparison → public `/view` surfacing) covers progressively deeper use cases.
 
-The framework is the same for: a freshly-generated schedule, a MatchMaker xlsx the user imported, a library entry being audited, two schedules being compared side-by-side, the eval harness running against TBA fixtures.
+The framework is the same for: a freshly-generated schedule, a reference scheduler xlsx the user imported, a library entry being audited, two schedules being compared side-by-side, the eval harness running against TBA fixtures.
 
 ## Why this is the right shape
 
@@ -44,7 +45,7 @@ This workstream consolidates. One scoring framework, callable everywhere. Three 
 
 1. **Same answer everywhere.** A schedule's quality report is identical whether asked from the editor, the eval harness, the API, a CLI tool, or a future audit job. No surface-specific divergence.
 
-2. **Works on any schedule.** Generated, imported, library-served, hand-edited, MM-output. The framework doesn't care where the schedule came from.
+2. **Works on any schedule.** Generated, imported, library-served, hand-edited, reference output. The framework doesn't care where the schedule came from.
 
 3. **Multi-level detail.** Headline ("how good?") for the user wanting a glance. Per-metric breakdown for someone investigating. Per-pair and per-team detail for debugging or coaching. Lex tuple for algorithm authors.
 
@@ -194,11 +195,11 @@ Pre-work: **fix the `match_equity` placeholder.** Currently hardcoded to 0 in `_
 
 #### Tier 3 — Reference comparison via recalibrated thresholds
 
-Today's `metrics.py` thresholds (acceptable ≤ N, near-optimal ≤ M) are mis-calibrated — MatchMaker's output classifies as "poor" on most metrics. The thresholds were set against an idealized floor, not against real-world reference schedules. (See `EVAL_FINDINGS.md` "Known issues" #2.)
+Today's `metrics.py` thresholds (acceptable ≤ N, near-optimal ≤ M) are mis-calibrated — the reference scheduler's output classifies as "poor" on most metrics. The thresholds were set against an idealized floor, not against real-world reference schedules. (See `EVAL_FINDINGS.md` "Known issues" #2.)
 
 This tier fixes the calibration and surfaces percentile-based context in the UI:
 
-- **Recalibrate thresholds** against TBA-pulled played schedules. Infrastructure exists (`scripts/scheduler_eval/pull_tba_fixtures.py`, `event_keys.txt`). Pull each event's played schedule, compute per-metric distributions per fixture-size bucket. Set `acceptable` to the 80th percentile of real schedules, `near_optimal` to the 50th. The "MatchMaker = poor" embarrassment goes away as a side effect.
+- **Recalibrate thresholds** against TBA-pulled played schedules. Infrastructure exists (`scripts/scheduler_eval/pull_tba_fixtures.py`, `event_keys.txt`). Pull each event's played schedule, compute per-metric distributions per fixture-size bucket. Set `acceptable` to the 80th percentile of real schedules, `near_optimal` to the 50th. The "the reference scheduler = poor" embarrassment goes away as a side effect.
 - **Bake calibration data into a JSON file** shipped with the server (`scripts/scheduler_eval/calibration_data.json`). Versioned in git.
 - **`ReferenceComparison` data** in `QualityReport`. For each metric, a percentile rank against the calibration distribution.
 - **UI: percentile badges** next to each headline tile in the Quality card. "Avg partner repeats: 0.4 — 70th percentile" with hover for the underlying comparison.
@@ -231,7 +232,7 @@ Once `abstract-library.md` ships, an admin view of library entries with their qu
 
 ### 2. Import quality assessment
 
-When a user imports a MatchMaker xlsx / PDF / CSV, the same quality report runs against the imported schedule. The user sees "this imported schedule has composite 17 — comparable to typical FRC events" or "composite 45 — significantly worse than typical." Users get an objective answer to "is the schedule we got from organization X any good?"
+When a user imports a reference scheduler xlsx / PDF / CSV, the same quality report runs against the imported schedule. The user sees "this imported schedule has composite 17 — comparable to typical FRC events" or "composite 45 — significantly worse than typical." Users get an objective answer to "is the schedule we got from organization X any good?"
 
 ### 3. Schedule comparison
 
@@ -266,7 +267,7 @@ Recommended: option 1, with explicit changelog entry. Slot indexes are an intern
 
 ### Q3 — Calibration data freshness
 
-Tier 3 calibration data has drift risk: as MatchMaker improves and FRC field sizes shift, the reference distribution changes. Three policies:
+Tier 3 calibration data has drift risk: as reference schedulers improve and FRC field sizes shift, the reference distribution changes. Three policies:
 
 - **Manual refresh, infrequent.** Recalibrate annually as part of season prep. Cost: percentile claims drift slowly.
 - **Continuous calibration via TBA fetch.** Every N days, pull recent events, append to the dataset, recompute distributions. Cost: more moving parts.

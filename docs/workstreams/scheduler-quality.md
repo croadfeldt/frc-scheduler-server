@@ -7,7 +7,7 @@
 **Progress:**
 - ✅ **Phase 0** (Unified Stage 2 with true SA + lex semantics): complete. See `tests/phase0_unified/SUMMARY.md`, `tests/phase0a_lex/SUMMARY.md`, `tests/phase0b_cooldown/SUMMARY.md`, `tests/phase0c_targeted/SUMMARY.md`. Lex tuple is now authoritative; cooldown paramount; targeted move generator improves convergence on criterion #3.
 - ✅ **Phase 1** (R/B balance post-pass): complete. See `tests/phase1_rb/SUMMARY.md`. 8 commutativity property tests prove it preserves all other criteria.
-- ✅ **Phase 2** (Sykes station post-pass): complete. See `tests/phase2_station/SUMMARY.md`. ~30% reduction in `total_station_pen` on the reference fixture; max_station_spread drops 4→2. 12 commutativity property tests.
+- ✅ **Phase 2** (station post-pass): complete. See `tests/phase2_station/SUMMARY.md`. ~30% reduction in `total_station_pen` on the reference fixture; max_station_spread drops 4→2. 12 commutativity property tests.
 - ✅ **Phase 3** (hard cooldown enforcement): complete. `_swap_preserves_cooldown` filters violations BEFORE state mutation. ~5x SA speedup. Self-healing for construction-phase bugs.
 - ✅ **Phase 4** (quality presets): complete. `app/quality_presets.py` defines fair (50K) / good (500K) / best (2M) / maximum (5M). UI dropdown wired. Iteration ceiling documented in `ITERATION_CEILING.md`.
 - ⏳ **Phase 5** (decision point): pending.
@@ -18,18 +18,18 @@
 - ✅ /assign chunking fix (was diluting iterations across 720 chunks)
 - ✅ /assign auth-header bug fix
 - ✅ EventTeam.team_number → Team.number join (7 sites)
-- ✅ MatchMaker import path (state_qual_schedule.txt → FMS xlsx → existing import flow with practice support)
+- ✅ reference schedule import path (state_qual_schedule.txt → FMS xlsx → existing import flow with practice support)
 - ✅ Practice-import wiring (storage + preview UI + commit body)
 - ✅ Import flow event-id resolution (avoids silent ad-hoc forks)
-- ✅ MatchMaker comparison language softened (peer reference, not competitor)
+- ✅ reference comparison language softened (peer reference, not competitor)
 
 **Companion docs:**
 - [`EVAL_FINDINGS.md`](EVAL_FINDINGS.md) — empirical results that motivate this work
 - [`ITERATION_CEILING.md`](ITERATION_CEILING.md) — sweep + K* analysis + practical ceiling decision
 - [`FRC_COMPLIANCE.md`](FRC_COMPLIANCE.md) — competition-approved + audit trail spec
-- [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md) — licensing constraints binding this work
+- [`REFERENCE_SCHEDULER_LICENSING.md`](REFERENCE_SCHEDULER_LICENSING.md) — licensing constraints binding this work
 - [`SCHEDULER_QUALITY_ROADMAP.md`](SCHEDULER_QUALITY_ROADMAP.md) — original tactical roadmap (superseded by this doc; retained for historical context)
-- [`MATCHMAKER_ALIGNMENT_ROADMAP.md`](MATCHMAKER_ALIGNMENT_ROADMAP.md) — pre-licensing-brief roadmap (superseded; retained)
+- [`REFERENCE_SCHEDULER_ALIGNMENT.md`](REFERENCE_SCHEDULER_ALIGNMENT.md) — pre-licensing-brief roadmap (superseded; retained)
 - [`PHASE_0_HARD_COOLDOWN_BRIEF.md`](PHASE_0_HARD_COOLDOWN_BRIEF.md) — implementation-ready brief for cooldown (shipped as Phase 0b/3)
 - [`THREE_LAYER_ARCHITECTURE_DESIGN.md`](THREE_LAYER_ARCHITECTURE_DESIGN.md) — destination architecture (deferred until quality work is done)
 
@@ -37,7 +37,7 @@
 
 ## TL;DR
 
-Eval data showed our scheduler is significantly worse than MatchMaker (mean composite 49.29 vs. 16.65) and worse than FRC's actually-played schedules (25.77).
+Eval data showed our scheduler is significantly worse than the reference scheduler (mean composite 49.29 vs. 16.65) and worse than FRC's actually-played schedules (25.77).
 
 **Two findings shape this plan:**
 
@@ -56,9 +56,9 @@ The naming has been backwards. `generate_matches` does the structural work; `ass
 
 | Phase | What | Effort | Expected impact |
 |---|---|---|---|
-| 0 (REFRAMED) | Convert `generate_matches` to true SA over canonical score; accept real teams; remove `assign_teams` | 4-5 days | Largest single quality win; closes ~half the gap to MatchMaker |
+| 0 (REFRAMED) | Convert `generate_matches` to true SA over canonical score; accept real teams; remove `assign_teams` | 4-5 days | Largest single quality win; closes ~half the gap to the reference scheduler |
 | 1 | R/B post-pass on slot-level structure (flip whole-match R/B) | 1 day | Eliminates max_color_imbalance as a poor metric |
-| 2 | Sykes-style station post-pass (within-match station permutation) | 2-3 days | Eliminates max_station_spread as a poor metric |
+| 2 | standard station-balance post-pass (within-match station permutation) | 2-3 days | Eliminates max_station_spread as a poor metric |
 | 3 | Hard cooldown enforcement (per Phase 0 cooldown brief) | 0.5 day | Truthfulness fix; pathological-weights robustness |
 | 4 | Quality presets (Fair / Good / Best) | 1 day | More iterations on a faster, focused inner loop |
 | 5 | Decision point | 0.5 day | Decide on CP-SAT, BIBD, or further SA tuning |
@@ -77,7 +77,7 @@ The naming has been backwards. `generate_matches` does the structural work; `ass
 - `build_score_state()` (full rescore): linear partner/opponent with hardcoded × 12, × 15, NO station term
 - `delta_swap()` (steers SA accept/reject): ONLY computed `max_imbalance × 500`, ignored all other terms
 
-The SA's accept/reject was driven only by R/B balance because `delta_swap` was the hot-path arbiter. This was the proximate cause of "we're 3× worse than MatchMaker" — the SA was effectively performing R/B-balance-guided random search.
+The SA's accept/reject was driven only by R/B balance because `delta_swap` was the hot-path arbiter. This was the proximate cause of "we're 3× worse than the reference scheduler" — the SA was effectively performing R/B-balance-guided random search.
 
 **Fix shipped to /tmp:** unified canonical score in `_score_from_state(state)`, full delta tracking in `_assign_apply_swap_delta(state, slot_map, sa, sb, topo)`. Property tests verify delta exactly equals `score_after - score_before` for 300 random swaps × 3 fixture sizes; self-inverse property verified across 50 swap-and-revert pairs.
 
@@ -202,13 +202,13 @@ This is the right architecture. It eliminates the no-op layer, makes the code do
 
 **Dependencies:** Phase 0.
 
-### Phase 2 — Sykes-style station-balance post-pass
+### Phase 2 — the standard station-balance technique post-pass
 
 **Goal:** Replace the `W_STATION × station_imbalance` term in the canonical score with a separable post-pass that produces near-optimal station distribution per team.
 
 **Mechanism:** After Phase 0+1, run a post-pass that operates on within-match station position assignments. For each team, compute current station distribution; for each match the team is in, evaluate whether station permutations within that match (without flipping R/B alliances — Phase 1 already balanced those) move the team toward a more balanced distribution; pick the swap that produces the largest aggregate improvement; repeat until no improvement available.
 
-The Sykes algorithm itself isn't published as pseudocode (Idle Loop's site describes the result, not the implementation). What I'll implement is in the same algorithm class — within-match station permutations to balance per-team distributions — derived from first principles. Sykes's contribution is credited as the motivating work.
+The the station-balance algorithm itself isn't published as pseudocode (the upstream tool's authors's site describes the result, not the implementation). What I'll implement is in the same algorithm class — within-match station permutations to balance per-team distributions — derived from first principles. the station-balance technique's contribution is credited as the motivating work.
 
 **Scope:**
 - `app/post_passes/station_balance.py` (new module)
@@ -264,7 +264,7 @@ Expose as UI dropdown next to "Generate" and as `&q=fair|good|best` URL paramete
 - Best preset's headline metrics ≤ Good's on the same seed across the eval corpus
 - Wall-clock at Best for 60 teams stays under 90 seconds
 - URL reproducibility preserved (same seed + preset → same schedule)
-- Eval composite at Best preset within striking distance of MatchMaker. Target: ≤ 25.
+- Eval composite at Best preset within striking distance of the reference scheduler. Target: ≤ 25.
 
 **Why fifth:** Phases 0-3 make each iteration cheaper (fewer terms in inner loop) and more focused (delta steers correctly). Adding more iterations now compounds those gains.
 
@@ -289,7 +289,7 @@ After re-running the eval at the proper SA budget, assess:
 
 **Diagnostic data needed even if composite is acceptable.** The
 single-fixture analysis on 2026mnst suggests the SA closes most of
-the gap to MatchMaker on that one fixture, but we don't yet know
+the gap to the reference scheduler on that one fixture, but we don't yet know
 whether it scales. If the eval re-run shows a size-scaling pattern
 (small fixtures fine, large fixtures poor), that's a different
 investigation than "broken across the board." See `EVAL_FINDINGS.md`
@@ -304,10 +304,10 @@ Sub-items already known regardless of eval outcome:
   combinations are bottlenecks; useful for any "investigate further"
   path.
 - **Threshold tuning for `max_color_imbalance`** (~1–2 hours). The
-  current ≤1 / ≤2 thresholds are strict enough that even MatchMaker
+  current ≤1 / ≤2 thresholds are strict enough that even the reference scheduler
   classifies "12 of 13 poor" overall; the eval composite is dragged
   by a metric where MM doesn't have a real edge.
-- **Three odd-team-count fixtures still error on MatchMaker.**
+- **Three odd-team-count fixtures still error on the reference scheduler.**
   `EVAL_FINDINGS.md` claims `[FIXED 2026-05-09]` but the 2026-05-10
   re-run still showed errors on 2023mnmi (61t), 2024mndu (55t),
   2025mnmi (51t). Either the fix didn't ship or the underlying issue
@@ -322,11 +322,11 @@ assessment after the rerun lands.
 
 ## Validation strategy
 
-Per [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md):
+Per [`REFERENCE_SCHEDULER_LICENSING.md`](REFERENCE_SCHEDULER_LICENSING.md):
 
 **Primary surface: TBA-actual.** Every phase ends with a re-run of `scripts/scheduler_eval/runner.py --adapters frc-scheduler-server,actual`. License-clean, runnable in CI.
 
-**Secondary surface: occasional MatchMaker check.** A few times across the project (after Phase 0, Phase 2, Phase 4) for ceiling calibration only. Personal evaluation use, not in CI.
+**Secondary surface: occasional the reference scheduler check.** A few times across the project (after Phase 0, Phase 2, Phase 4) for ceiling calibration only. Personal evaluation use, not in CI.
 
 **Tertiary surface: per-phase comparison artifacts** under `tests/phase{N}_*/`.
 
@@ -386,7 +386,7 @@ Everything else lives in post-passes (Phase 1 R/B, Phase 2 station) or hard cons
 
 **Documentation alignment.** `docs/PRIORITIES.md` is the source of truth for what the algorithm does. Every phase that changes algorithm behavior updates `PRIORITIES.md` *in the same PR* — not as follow-up.
 
-**Algorithm attribution.** Per [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md), the resulting algorithm uses the name `sa-saxton-sykes-extended` in code and "Saxton-Sykes SA + Decomposed Cleanups" in user UI. Each post-pass module credits the inspiration.
+**Algorithm attribution.** Per [`REFERENCE_SCHEDULER_LICENSING.md`](REFERENCE_SCHEDULER_LICENSING.md), the resulting algorithm uses the name `sa-saxton-sykes-extended` in code and "SA-classical SA + Decomposed Cleanups" in user UI. Each post-pass module credits the inspiration.
 
 ---
 
@@ -396,7 +396,7 @@ Everything else lives in post-passes (Phase 1 R/B, Phase 2 station) or hard cons
 - Practice match scheduling
 - Playoff scheduling
 - BIBD/CP-SAT plugins (Phase 5 candidates)
-- User-supplied MatchMaker schedule import (future feature; not blocking quality work)
+- User-supplied reference-scheduler schedule import (future feature; not blocking quality work)
 - Frontend visual redesign
 - Auth / OAuth changes
 - DB schema migration to remove `slot_map` columns (separate follow-up; preserved as shim during Phase 0)
@@ -417,12 +417,12 @@ Everything else lives in post-passes (Phase 1 R/B, Phase 2 station) or hard cons
 ## Reference material
 
 - **Eval data:** [`EVAL_FINDINGS.md`](EVAL_FINDINGS.md)
-- **Licensing constraints:** [`MATCHMAKER_LICENSING_BRIEF.md`](MATCHMAKER_LICENSING_BRIEF.md)
+- **Licensing constraints:** [`REFERENCE_SCHEDULER_LICENSING.md`](REFERENCE_SCHEDULER_LICENSING.md)
 - **FRC manual §13.6.2 (current) / §10.5.2 (historical):** authoritative criterion list
-- **Saxton MatchMaker white paper:** https://idleloop.com/matchmaker/
-- **Sykes station-balancing:** https://idleloop.com/matchmaker/stations.php
+- **Published algorithm description** (see internal docs for source attribution)
+- **Station-balance technique:** publicly documented in the FRC reference scheduler's 2017 station-balance update and 2021 refinement
 - **This tool's PRIORITIES.md:** `docs/PRIORITIES.md`
 
 ---
 
-*Plan ready for execution. Phase 0 begins next; eval re-run after each phase. The architectural reframe is committed; quality targets per phase are committed; the validation strategy uses TBA-actual primarily and MatchMaker as occasional ceiling-calibration only.*
+*Plan ready for execution. Phase 0 begins next; eval re-run after each phase. The architectural reframe is committed; quality targets per phase are committed; the validation strategy uses TBA-actual primarily and the reference scheduler as occasional ceiling-calibration only.*

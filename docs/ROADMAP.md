@@ -45,7 +45,7 @@ shipped, not planned.
 
 - ✓ Two-stage scheduler (abstract construction + SA assignment)
 - ✓ Lex-tuple optimization per FRC §10.5.2 paramount priority
-- ✓ R/B post-pass (Phase 1) and Sykes station post-pass (Phase 2)
+- ✓ R/B post-pass (Phase 1) and station post-pass (Phase 2)
 - ✓ Quality presets (fair / good / best / maximum)
 - ✓ V2 day config with breaks, cycle changes, practice day support
 - ✓ Auth (Google + GitHub OAuth), mandatory on writes
@@ -53,7 +53,7 @@ shipped, not planned.
   structural immutability, `is_admin` interim authorization)
 - ✓ Schedule Quality card in editor UI
 - ✓ Stable URLs, exports (PDF/XLSX/CSV), public `/view`
-- ✓ MatchMaker xlsx + CSV + PDF imports
+- ✓ reference scheduler xlsx + CSV + PDF imports
 - ✓ Eval harness (16-fixture inventory, working as of 2026-05-10)
 
 Quality baseline at this point: mean composite 30.64 across 16 TBA
@@ -160,7 +160,7 @@ Line items:
   are computed at best-of-1000+ offline) but worth measuring for
   the cache-miss path quality story. See HANDOFF §5.x or open as
   a new item.
-- ☐ Three odd-team-count fixtures still error on MatchMaker
+- ☐ Three odd-team-count fixtures still error on the reference scheduler
   (2023mnmi 61t, 2024mndu 55t, 2025mnmi 51t). The
   `[FIXED 2026-05-09]` claim in EVAL_FINDINGS.md is incorrect.
   ~5-minute investigation, independent of everything else.
@@ -218,7 +218,7 @@ Long-term shape of the product. Not actively planned.
 - Extended iteration sweep (HANDOFF §5.5) — find K* per the
   tight-criterion definition. ~5 hours wall-clock on Stark.
 - Threshold recalibration in `metrics.py` (EVAL_FINDINGS issue
-  #2) — current thresholds classify MatchMaker output as "poor"
+  #2) — current thresholds classify reference scheduler output as "poor"
   on most metrics. Calibrate against TBA played-schedule
   distribution.
 - Per-metric aggregate view in eval report (EVAL_FINDINGS

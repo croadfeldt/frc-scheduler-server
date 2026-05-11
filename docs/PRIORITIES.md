@@ -30,7 +30,7 @@
     moves that preserve partner pairs, opponent pairs, station-within-
     alliance distribution, cooldown, b2b, and surrogate counts. SA-driven
     to escape greedy local optima. 8 commutativity property tests.
-  - **Station balance post-pass** (Phase 2, complete): Sykes-style within-
+  - **Station balance post-pass** (Phase 2, complete): the station-balance technique-style within-
     alliance station permutations driving each team's station distribution
     to optimal. SA-from-greedy ensures result is never worse than greedy
     alone. 12 commutativity property tests.

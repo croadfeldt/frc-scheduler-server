@@ -61,7 +61,7 @@ The decomposable cleanups are a **prerequisite multiplier**: once W_BALANCE, W_S
 |---|---|---|---|---|---|
 | 0 | Hard cooldown constraint | Truthfulness + cleanup | `cooldown-hard` | 2–4 hours | Low |
 | 1 | R/B balance post-pass | Decomposable cleanup | `rb-post-pass` | ~1 day | Low |
-| 2 | Sykes-style station post-pass | Decomposable cleanup | `station-post-pass` | 2–3 days | Medium |
+| 2 | standard station-balance post-pass | Decomposable cleanup | `station-post-pass` | 2–3 days | Medium |
 | 3 | Quality presets (Fair/Good/Best) | Budget | `quality-presets` | ~1 day | Low |
 | 4 | External comparison harness | Validation infrastructure | `comparison-harness` | ~2 days | Low |
 | 5 | Algorithm plugin model + CP-SAT plugin | Architecture inflection point | `algo-plugins` | ~1–2 weeks | High |
@@ -92,17 +92,17 @@ The decomposable cleanups are a **prerequisite multiplier**: once W_BALANCE, W_S
 
 **Acceptance:** Diversity Report alliance imbalance ≤ existing baseline on a corpus of seeds. SA convergence time drops measurably (one fewer term in inner loop). No regression in pairing metrics.
 
-**Why second:** Smallest of the three decomposable cleanups. The flip operation is the cleanest possible separable optimization — provably zero coupling with any other criterion. Validates the post-pass architectural pattern with low complexity before tackling the harder Sykes problem.
+**Why second:** Smallest of the three decomposable cleanups. The flip operation is the cleanest possible separable optimization — provably zero coupling with any other criterion. Validates the post-pass architectural pattern with low complexity before tackling the harder the station-balance technique problem.
 
 **Dependencies:** None blocking, but Phase 0's score-function-simplification pattern is reusable here.
 
 ---
 
-### Phase 2 — Sykes-style station-balance post-pass
+### Phase 2 — the standard station-balance technique post-pass
 
 **Goal:** Replace inline `W_STATION=30` with a separable pass that produces provably-near-optimal station distribution.
 
-**Mechanism:** Implement the Sykes 2021 algorithm (a published station-balancing algorithm for round-robin tournament structures). Operates on (team, station) assignments after R/B is fixed: for each team, compute current vs. theoretical-best station distribution; identify station-position swaps within a match that move teams toward best distribution without disturbing R/B balance.
+**Mechanism:** Implement the the 2021 station-balance algorithm (a published station-balancing algorithm for round-robin tournament structures). Operates on (team, station) assignments after R/B is fixed: for each team, compute current vs. theoretical-best station distribution; identify station-position swaps within a match that move teams toward best distribution without disturbing R/B balance.
 
 **Scope:** New module `app/post_passes/station_balance.py`. Remove `W_STATION` term from Stage 2 score. Add `station_post_pass: true` config flag.
 
@@ -110,7 +110,7 @@ The decomposable cleanups are a **prerequisite multiplier**: once W_BALANCE, W_S
 
 **Why third:** Biggest single quality win available. Architecturally identical pattern to Phase 1, so the validation harness from Phase 1 carries over. Unblocks the credible "near-optimal station balance" claim in `PRIORITIES.md`.
 
-**Dependencies:** Phase 1 should land first so R/B is already a separable pass — running Sykes after R/B (rather than before) is cleaner because Sykes is known to preserve R/B balance, but the reverse is not as clean to verify.
+**Dependencies:** Phase 1 should land first so R/B is already a separable pass — running the station-balance technique after R/B (rather than before) is cleaner because the station-balance technique is known to preserve R/B balance, but the reverse is not as clean to verify.
 
 ---
 
@@ -300,7 +300,7 @@ For implementation context:
 - **FRC manual §13.6.2 (current) / §10.5.2 (historical):** the six-criterion authoritative source
 - **Surrogate-as-3rd-match rule:** in place since 2008, current FRC manual restates it
 - **This tool's PRIORITIES.md:** `docs/PRIORITIES.md` in the repo
-- **Sykes station-balancing algorithm (2021):** a published reference algorithm for station-position balance in round-robin tournament structures; cited as one approach for Phase 2's post-pass
+- **station-balancing algorithm (2021):** a published reference algorithm for station-position balance in round-robin tournament structures; cited as one approach for Phase 2's post-pass
 - **Three-layer architecture proposal:** `THREE_LAYER_ARCHITECTURE_DESIGN.md` — broader framing under which Phase 5's plugin model becomes the algorithm-suite layer
 
 ---

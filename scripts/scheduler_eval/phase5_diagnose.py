@@ -8,12 +8,12 @@ metric failures in the post-Phase-4 eval baseline.
 Background: the corrected eval (2026-05-10, EVAL_FINDINGS.md
 "Post-Phase-4 baseline") shows mean composite 30.64 with the failure
 narrowed to two phenomena:
-  1. max_station_spread: 13/13 fixtures we're worse than MatchMaker
-     (mean 3.54 vs 0.38). The Phase 2 (Sykes) station post-pass works
+  1. max_station_spread: 13/13 fixtures we're worse than the reference scheduler
+     (mean 3.54 vs 0.38). The Phase 2 (the station-balance technique) station post-pass works
      on synthetic small-team inputs but hits a 2-3 floor on real
      36+ team fixtures.
   2. repeat_opponents: on 40-team x 12-MPT fixtures specifically, we
-     have ~20% more 2-encounter pairs than MatchMaker even though
+     have ~20% more 2-encounter pairs than the reference scheduler even though
      opp_quad is at floor — sum-of-squares vs count-above-one
      measure different things.
 

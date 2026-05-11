@@ -1,6 +1,6 @@
 """Base class for scheduling adapters.
 
-An adapter wraps one scheduling tool (MatchMaker, our scheduler, CP-SAT,
+An adapter wraps one scheduling tool (the reference scheduler, our scheduler, CP-SAT,
 or "the published schedule") behind a uniform interface so the harness
 can compare them apples-to-apples.
 

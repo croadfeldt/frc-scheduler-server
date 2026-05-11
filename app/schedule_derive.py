@@ -301,7 +301,7 @@ def derive_parameters(
     # Practice day (if any). Encoded as a V2 day with a single
     # practice block — view.html's V2→V1 downgrade promotes a
     # practice-only day to `practiceDay`, which is what gates the
-    # practice-tab render. Without this, importing a MatchMaker
+    # practice-tab render. Without this, importing a the reference scheduler
     # workbook with a Practice sheet leaves practice matches in
     # the DB but invisible on /view.
     if practice_matches:

@@ -37,7 +37,7 @@ to update its Status field).
 - [002 — FRC §10.5.2 paramount priority](002-frc-paramount-priority.md)
 - [003 — Three-layer architecture](003-three-layer-architecture.md)
 - [004 — No reproducibility guarantee](004-no-reproducibility-guarantee.md)
-- [005 — MatchMaker as peer, not competitor](005-matchmaker-as-peer.md)
+- [005 — Reference scheduler as peer, not competitor](005-reference-scheduler-as-peer.md)
 - [006 — Server-only construction; retire browser scheduler](006-server-only-construction.md)
 
 ## When to write an ADR

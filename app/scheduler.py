@@ -22,7 +22,7 @@ import random
 from typing import NamedTuple
 
 # ── Weights ───────────────────────────────────────────────────────────────────
-# Defaults aligned with the FIRST official MatchMaker algorithm (Idle Loop /
+# Defaults aligned with the FIRST official the reference scheduler algorithm (the upstream tool's authors /
 # Saxton, used by FMS at all official events). Notes on each:
 #
 #   W_BALANCE   — penalty for red/blue imbalance per team. FIRST: balanced.
@@ -68,11 +68,11 @@ DEFAULT_WEIGHTS = {
     "sur_rpt":  W_SUR_RPT,
 }
 
-# "FIRST strict" preset: matches the canonical MatchMaker algorithm as
-# documented at https://idleloop.com/matchmaker/. The weights here reflect
-# our best read of FIRST's relative priorities. Not literally the same
-# numbers (FIRST uses simulated annealing, not weighted scoring), but the
-# RELATIVE ordering matches what FMS produces:
+# "FIRST strict" preset: matches the canonical FRC reference algorithm as
+# publicly documented. The weights here reflect our best read of FIRST's
+# relative priorities. Not literally the same numbers (FIRST uses simulated
+# annealing, not weighted scoring), but the RELATIVE ordering matches what
+# FMS produces:
 #   round uniformity (hard) >> match separation (hard) >> pairing uniformity
 #   >> minimize surrogates >> red/blue balance >> station balance.
 FIRST_STRICT_WEIGHTS = dict(DEFAULT_WEIGHTS)  # currently identical to defaults
@@ -761,7 +761,7 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         # check (sub-millisecond per iteration). Total cost <100ms typical.
         matches, _rb_stats = rb_balance_sa(matches, n_iterations=5000, seed=seed)
 
-    # ── Phase 2: Sykes-style station balance post-pass ─────────────────────
+    # ── Phase 2: standard station-balance balance post-pass ─────────────────────
     # After R/B balance settles, run within-alliance station permutations
     # to drive the per-team station distribution toward the optimal floor.
     # Provably commutative with all other criteria: doesn't change which
@@ -2052,7 +2052,7 @@ def _assign_unified(abstract_matches: list[dict],
         from app.post_passes.rb_balance import rb_balance_sa
         matches, _stats = rb_balance_sa(matches, n_iterations=5000, seed=seed)
 
-    # Phase 2: Sykes-style station balance post-pass (commutative with R/B,
+    # Phase 2: standard station-balance balance post-pass (commutative with R/B,
     # partner, opponent, cooldown, surrogate)
     if station_post_pass and len(matches) > 0:
         from app.post_passes.station_balance import station_balance_sa

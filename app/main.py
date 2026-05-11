@@ -410,7 +410,7 @@ class AssignRequest(BaseModel):
     rb_post_pass:         bool       = Field(True,
         description="Phase 1 R/B balance post-pass (FRC #5)")
     station_post_pass:    bool       = Field(True,
-        description="Phase 2 Sykes station balance post-pass (FRC #6)")
+        description="Phase 2 station-balance post-pass (FRC #6)")
     cooldown:             int        = Field(3, ge=1, le=20,
         description="ideal_gap between matches per team (FRC: varies by event size)")
 
@@ -3658,7 +3658,7 @@ async def import_xlsx(
                 # from the cached dict alone, so when the key is absent we
                 # invalidate and re-parse. The parser is fast (xlsx_extract
                 # is deterministic, no LLM call) so this is cheap. Without
-                # this check, MatchMaker xlsx files with a Practice sheet
+                # this check, reference scheduler xlsx files with a Practice sheet
                 # silently lose their practice section through a stale-
                 # cache hit even though `format_detected` (set at parse
                 # time) still mentions the practice count.

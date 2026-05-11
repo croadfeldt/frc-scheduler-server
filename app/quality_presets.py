@@ -16,7 +16,7 @@ Tuned per the iteration ceiling investigation (see
   wall-clock exceeds 3 minutes, impractical for interactive use.
 - "Best" preset set to 2M rather than 5M because best-of-N at 2M
   with N=30 produces lex tuples comparable to the reference fixture
-  (2026mnst MatchMaker output). 5M is reserved as "Maximum" for cases
+  (2026mnst reference scheduler output). 5M is reserved as "Maximum" for cases
   where additional compute is justified.
 
 To revisit these levels (e.g., if compute budget changes or quality

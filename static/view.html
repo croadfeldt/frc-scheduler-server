@@ -2550,9 +2550,9 @@
           <span>JSON</span>
         </label>
         <label class="export-format-radio"
-               title="Tab-delimited file for FIRST FMS Match Maker import. Qualification matches only.">
+               title="Tab-delimited file for FIRST FMS reference scheduler import. Qualification matches only.">
           <input type="radio" name="exportFormat" value="fms" onchange="onExportFormatChange()">
-          <span>FMS Match Maker</span>
+          <span>FMS reference scheduler</span>
         </label>
         <label class="export-format-radio"
                title="Plain-text team list for FIRST FMS Team Selection 'Import Teams from File'. One team number per line.">
@@ -2629,13 +2629,13 @@
           </div>
         </div>
 
-        <!-- FMS panel — two separate downloads. FMS Match Maker
+        <!-- FMS panel — two separate downloads. FMS reference scheduler
              imports practice and qualification as distinct round
              numbering schemes, so they need separate files.
              Inline buttons replace the bottom Download button. -->
         <div class="export-panel" id="exportPanel-fms" style="display:none;">
           <div style="font-size:14px;line-height:1.45;">
-            Tab-delimited files matching FIRST FMS Match Maker's
+            Tab-delimited files matching FIRST FMS reference scheduler's
             import format. Practice and qualification download as
             separate files; match times must be re-entered in FMS
             Build Schedule after import.

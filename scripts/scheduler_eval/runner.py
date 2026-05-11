@@ -594,7 +594,7 @@ def write_markdown_report(out_path: Path, run_id: str, fixtures: list[Fixture],
     lines.append("- Per-team burden normalizes color, station, gap, repeats, and day rhythm across teams")
     lines.append("  in a single schedule, so the most-affected teams surface automatically.")
     lines.append("- Thresholds in the metric table are calibrated from FRC community norms and the")
-    lines.append("  reviewer's MatchMaker analysis (800 trials on 36-team field).")
+    lines.append("  reviewer's the reference scheduler analysis (800 trials on 36-team field).")
     lines.append("- Surrogate slot-fills count toward color/station balance (team is physically there)")
     lines.append("  but not toward repeat-partner / repeat-opponent counts (team is filling in,")
     lines.append("  not playing competitively).")
@@ -616,7 +616,7 @@ def main():
     ap.add_argument("--seed", type=int, default=None,
                     help="base seed for stochastic adapters; trial index modifies it")
     ap.add_argument("--matchmaker-binary", default=None,
-                    help="path to MatchMaker binary (only needed if --adapters includes matchmaker)")
+                    help="path to external reference binary (only needed if --adapters includes matchmaker)")
     ap.add_argument("--out-dir", default=str(REPORTS_DIR))
     ap.add_argument("--actual-csv", default=None,
                     help="path to a CSV for the 'actual' adapter (single-fixture mode)")

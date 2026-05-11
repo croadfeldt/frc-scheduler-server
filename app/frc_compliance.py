@@ -40,7 +40,7 @@ from typing import Any
 
 FRC_DEFAULTS: dict[str, Any] = {
     'rb_post_pass':       True,    # Phase 1 R/B balance post-pass
-    'station_post_pass':  True,    # Phase 2 Sykes-style station balance
+    'station_post_pass':  True,    # Phase 2 standard station-balance balance
     'lex_score':          True,    # FRC §10.5.2 lex priority order (Phase 0a)
     'hard_cooldown':      True,    # Phase 0b — never accept cooldown-violating swap
     'targeted_moves':     True,    # Phase 0c — bias SA toward duplicate pairs

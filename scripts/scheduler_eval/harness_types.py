@@ -45,20 +45,20 @@ class Fixture:
 
     `surrogate_first_match` is the match number (1-indexed) where the
     first surrogate appearance occurs in the actual played schedule.
-    Descriptive only — the harness DOES NOT pass this to MatchMaker as
-    a `-u` round flag (that was a previous bug). MatchMaker handles
+    Descriptive only — the harness DOES NOT pass this to the reference scheduler as
+    a `-u` round flag (that was a previous bug). the reference scheduler handles
     surrogate placement itself, defaulting to round 3 since 2008
     per FIRST's convention.
 
     `surrogate_count` is the total number of surrogate slot-fills in
-    the actual played schedule. Per Idle Loop's white paper, this is
+    the actual played schedule. Per the upstream tool's authors's white paper, this is
     at most 5 for FRC events.
 
     Both surrogate fields are descriptive metadata about the actual
     schedule we pulled from TBA, not configuration for the schedulers
     we're evaluating.
 
-    `breaks` is a list of break specifications using MatchMaker's -k
+    `breaks` is a list of break specifications using the reference scheduler's -k
     syntax conceptually — match number after which to insert a break.
     Used for lunch breaks in multi-block days.
     """

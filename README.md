@@ -26,7 +26,7 @@ Copyright (C) 2025 FRC Match Scheduler Contributors.
 
 For third-party software acknowledgments, algorithm attribution, and
 the project's posture toward external services (TBA, FRC Events API)
-and proprietary tools (Idle Loop's MatchMaker — evaluation only, not
+and proprietary tools (the established FRC reference scheduler — evaluation only, not
 bundled), see [NOTICE](NOTICE.md).
 
 ---
@@ -299,7 +299,7 @@ Stage 2 — Team Assignment
 > defaults get a green ✓ FRC badge; deviations show ! and list what
 > changed. The scheduler is an independent implementation of FRC's
 > published criteria — see [`NOTICE.md`](NOTICE.md) for algorithm
-> attribution. MatchMaker (idleloop.com/matchmaker/) is treated as
+> attribution. the reference scheduler (the published algorithm description) is treated as
 > a peer reference scheduler used by event organizers, not a
 > competitor.
 

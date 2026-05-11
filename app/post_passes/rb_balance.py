@@ -3,9 +3,9 @@
 # Copyright (C) 2025 FRC Match Scheduler Contributors
 #
 # Implements an independent post-pass for Red/Blue alliance balancing
-# inspired by the technique described by Tom and Cathy Saxton in the
-# MatchMaker references at idleloop.com/matchmaker/. Not a port of
-# MatchMaker code; not a wrapper around the MatchMaker binary.
+# inspired by the technique described by the algorithm's published authors in the
+# external references at the published algorithm description. Not a port of
+# the reference scheduler code; not a wrapper around the external reference binary.
 
 """Red/Blue balance post-pass.
 

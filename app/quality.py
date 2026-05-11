@@ -28,6 +28,8 @@ through here. Today that means:
 
 Workstream reference: workstreams/schedule-quality-reporting.md.
 ADR reference: ADR 001 (lex tuple is the canonical algorithm score).
+Metric catalog: docs/scheduler/quality-metrics.md — every metric this
+module computes is defined there with thresholds, floors, and sources.
 
 Why this module exists rather than just calling metrics.py directly:
 

@@ -35,7 +35,7 @@ Layer 1 (day config) and Layer 3 (team assignment) are unchanged.
 ## Why this matters
 
 Today every Generate runs the SA fresh. Quality varies by RNG
-seed. The eval shows the SA can reach near-MatchMaker quality on
+seed. The eval shows the SA can reach near-the reference scheduler quality on
 small/medium fixtures but the per-run variance is real and the
 per-run wall-clock is real (~100s at "Best" preset).
 

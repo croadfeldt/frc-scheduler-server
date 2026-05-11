@@ -219,8 +219,8 @@ header:
 # Copyright (C) 2025 FRC Match Scheduler Contributors
 ```
 
-The licensing posture re. MatchMaker (we are an independent
+The licensing posture re. the reference scheduler (we are an independent
 implementation, not a port or wrapper) is documented in
-`docs/scheduler/MATCHMAKER_LICENSING_BRIEF.md`. New scheduler-side
+`docs/scheduler/REFERENCE_SCHEDULER_LICENSING.md`. New scheduler-side
 work should review that brief before borrowing patterns from
-MatchMaker's published documentation.
+the reference scheduler's published documentation.

@@ -10,5 +10,5 @@ efficiently on its own.
 
 Modules:
 - ``rb_balance``: Red/Blue alliance balance (Phase 1)
-- ``station_balance``: Sykes-style station distribution (Phase 2)
+- ``station_balance``: standard station-balance distribution (Phase 2)
 """

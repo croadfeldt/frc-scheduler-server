@@ -10,7 +10,7 @@ The lex SA's iteration count tunes wall-clock vs schedule quality. We
 ran an iteration sweep on Stark (36 workers, 30 trials per level) on
 the 2026mnst fixture (36 teams × 7 MPT) with all phases enabled
 (Phase 0a lex score, 0b hard cooldown, 0c targeted moves, Phase 1 R/B
-post-pass, Phase 2 Sykes station post-pass).
+post-pass, Phase 2 station post-pass).
 
 **Tight criterion:** K\* is the smallest iteration count where the mean
 improvement at the next level is less than the standard deviation at K.
@@ -108,19 +108,19 @@ K\* may turn out to be 10M, 20M, or higher. Even when found, the
 "Best" user-facing preset stays at 5M unless we rework the UI to
 allow long-running async generation with progress indicator.
 
-## How this connects to the MatchMaker reference
+## How this connects to the external reference
 
 On the user's actual state qual schedule (36 teams × 7 MPT):
 
-- MatchMaker tuple: `(0, 252, 416, 0, 3, 65, 0, 0)`
+- the reference scheduler tuple: `(0, 252, 416, 0, 3, 65, 0, 0)`
 - Best-of-30 at SA=2M: `(0, 252, 404, 0, 1, 39, 0, 0)`
 - Best-of-30 at SA=5M: `(0, 252, 386, 0, 1, 44, 0, 0)`
 
 All three tuples share the same cooldown (0), partner floor (252), and
 surrogate count (0). They differ at opp_quad, rb_metric, and station_pen.
 The lex tuples produced at SA=2M+ are in a comparable range to the
-MatchMaker reference — that's the development bar this sweep was set up
-to verify. MatchMaker (idleloop.com/matchmaker) remains the long-standing
+external reference — that's the development bar this sweep was set up
+to verify. the reference scheduler (the published algorithm description) remains the long-standing
 community scheduler used by event organizers; comparing against it here
 is sanity-check, not competition.
 

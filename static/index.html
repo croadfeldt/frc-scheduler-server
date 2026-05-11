@@ -2126,9 +2126,9 @@
             <span>JSON</span>
           </label>
           <label class="export-format-radio" style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;padding:0.4rem 0.5rem;border-radius:4px;cursor:pointer;"
-                 title="Tab-delimited file for FIRST FMS Match Maker import. Qualification matches only.">
+                 title="Tab-delimited file for FIRST FMS reference scheduler import. Qualification matches only.">
             <input type="radio" name="exportFormat" value="fms" onchange="onExportFormatChange()">
-            <span>FMS Match Maker</span>
+            <span>FMS reference scheduler</span>
           </label>
           <label class="export-format-radio" style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;padding:0.4rem 0.5rem;border-radius:4px;cursor:pointer;"
                  title="Plain-text team list for FIRST FMS Team Selection 'Import Teams from File'. One team number per line.">
@@ -2223,15 +2223,15 @@
           </div>
 
           <!-- FMS panel — two separate downloads (qual + practice).
-               FMS Match Maker imports practice and qualification as
+               FMS reference scheduler imports practice and qualification as
                distinct round numbering schemes inside Build Schedule,
                so they need to be separate files. The bottom Download
                button is hidden when this panel is active because
                choosing one of these two buttons IS the action. -->
           <div class="export-panel" id="exportPanel-fms" style="display:none;">
-            <div class="modal-section-label">FMS Match Maker</div>
+            <div class="modal-section-label">FMS reference scheduler</div>
             <div style="margin-top:0.5rem;font-size:0.85rem;line-height:1.45;">
-              Tab-delimited files matching the FIRST FMS Match Maker
+              Tab-delimited files matching the FIRST FMS reference scheduler
               import format. Practice and qualification are downloaded
               as separate files because FMS imports them as distinct
               round numbering schemes. Match times must be re-entered
@@ -2612,7 +2612,7 @@
                the Assign Teams section because that's where the team
                placement actually happens; tweaking weights here
                affects the next assignment run. Defaults match
-               FIRST/MatchMaker (FMS-aligned); deviating triggers a
+               FIRST/the reference scheduler (FMS-aligned); deviating triggers a
                notice that the result won't match official FIRST
                scheduling. URL-encoded as wb/wg/wc/wo/wp/ws/wsr for
                reproducibility. -->
@@ -2620,7 +2620,7 @@
             <summary style="font-size:0.72rem;color:var(--text-muted);cursor:pointer;user-select:none;letter-spacing:0.04em;padding:0.2rem 0;">Placement Criteria (FIRST-aligned)</summary>
             <div style="margin-top:0.5rem;font-size:0.72rem;color:var(--text-muted);line-height:1.4;margin-bottom:0.6rem;">
               How heavily each scheduling concern is weighted. Defaults align with the FIRST
-              <a href="https://idleloop.com/matchmaker/" target="_blank" rel="noopener" style="color:var(--accent);">MatchMaker</a>
+              <a href="https://the published algorithm description" target="_blank" rel="noopener" style="color:var(--accent);">the reference scheduler</a>
               algorithm used by FMS. Higher = more important relative to the others.
             </div>
             <div id="placementCriteriaWeights" class="weights-grid"></div>
@@ -2629,7 +2629,7 @@
                       title="Reset all weights to canonical FIRST values">⊕ Match FIRST defaults</button>
             </div>
             <div id="weightsDeviationNotice" style="display:none;background:rgba(200,153,42,0.12);border:1px solid var(--amber);border-radius:4px;padding:0.5rem 0.75rem;margin-top:0.5rem;font-size:0.75rem;color:var(--amber);line-height:1.4;">
-              &#9888; <strong>Custom weights in use.</strong> The generated schedule will not match what official FIRST scheduling would produce. Click "Match FIRST defaults" to align with FRC manual §10.5.2 / MatchMaker.
+              &#9888; <strong>Custom weights in use.</strong> The generated schedule will not match what official FIRST scheduling would produce. Click "Match FIRST defaults" to align with FRC manual §10.5.2 / the reference scheduler.
             </div>
           </details>
           <details style="margin-bottom:0.5rem;">
@@ -16002,7 +16002,7 @@ function renderSchedule() {
     // Column order matches FMS scoring-table convention: Blue alliance
     // is on the left, Red on the right (FMS Manual: red drivers sit
     // to the right of the scorekeeper, software is configured to
-    // appear that way visually). FMS Match Maker IMPORT format is
+    // appear that way visually). FMS reference scheduler IMPORT format is
     // Red-first — that's a separate spec and unchanged here.
     thead.innerHTML =
       '<tr>' +
@@ -16348,7 +16348,7 @@ async function downloadXLSX() {
   showApiStatus(msg);
 }
 
-// ── Download schedule for FIRST FMS Match Maker import ────────────────────────
+// ── Download schedule for FIRST FMS reference scheduler import ────────────────────────
 //
 // Format spec from the official FMS Manual (2025.1):
 //   https://fms-manual.readthedocs.io/en/latest/event-manager/event-wizard/run-match-maker.html
@@ -16368,11 +16368,11 @@ async function downloadXLSX() {
 //     This export contains qualification matches only.
 //   - Times are NOT imported — FMS uses the schedule from its own Build Schedule
 //     step. Re-enter day start, breaks, and cycle time changes in FMS first,
-//     then import this file on the Match Maker step.
+//     then import this file on the reference scheduler step.
 //   - Requires assigned (real) team numbers. Slot indices won't import.
 function downloadFMS(scope) {
   // scope: 'qual' (default) or 'practice'
-  // Each is its own file because FMS Match Maker imports practice
+  // Each is its own file because FMS reference scheduler imports practice
   // and qualification matches as separate operations — they're
   // distinct round numbering schemes inside FMS Build Schedule.
   scope = scope || 'qual';
@@ -16455,7 +16455,7 @@ function downloadFMS(scope) {
   showApiStatus(
     '✓ Exported ' + lines.length + ' ' +
     (scope === 'practice' ? 'practice' : 'qualification') +
-    ' matches for FMS Match Maker import'
+    ' matches for FMS reference scheduler import'
   );
 }
 
@@ -16701,7 +16701,7 @@ function openFMSSetupSheet() {
     '  <strong>How to use this sheet in FMS:</strong> ' +
     '  Open the FMS Event Wizard \u2192 Build Schedule step. Enter the values from the ' +
     '  Event Parameters and per-day sections below. Add breaks and cycle time changes ' +
-    '  as listed. After completing Build Schedule, advance to the Run Match Maker step ' +
+    '  as listed. After completing Build Schedule, advance to the Run reference scheduler step ' +
     '  and import the FMS pairings file (separately downloaded). Practice and ' +
     '  qualification schedules are configured separately in FMS.' +
     '</div>' +

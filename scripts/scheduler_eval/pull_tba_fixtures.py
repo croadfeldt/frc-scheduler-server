@@ -173,7 +173,7 @@ async def _fetch_event(event_key: str) -> tuple[Fixture, Schedule] | None:
 
     # Surrogate metadata is descriptive — we record where surrogates
     # appear in the played schedule for reporting purposes, but we
-    # don't pass anything to scheduling adapters about it. MatchMaker
+    # don't pass anything to scheduling adapters about it. the reference scheduler
     # handles surrogate placement itself (default round 3 since 2008).
     surrogate_first_match = None
     if surrogate_total > 0:

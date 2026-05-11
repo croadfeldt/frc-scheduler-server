@@ -42,7 +42,7 @@ prevents this.
 
 **Reject all cooldown-violating starting schedules, then optimize
 freely.** Rejected because importing schedules from other tools
-(MatchMaker, PDF, CSV) might bring in cooldown violations that
+(the reference scheduler, PDF, CSV) might bring in cooldown violations that
 should be reported, not silently violated. The scheduler tolerates
 violations in input but never *produces* them. (This still leaves
 a known gap: imported schedules can land in the DB with violations.

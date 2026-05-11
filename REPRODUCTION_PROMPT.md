@@ -12,22 +12,22 @@ Last verified against tree: 2026-05-09 (post-FRC-§10.5.2-paramount session).
 
 ## Licensing & IP Posture (READ FIRST)
 
-This is **not a port of MatchMaker**. The Python scheduler in
+This is **not a port of the reference scheduler**. The Python scheduler in
 `app/scheduler.py` is a clean-room implementation against the published
 FRC §10.5.2 rules. Two specific pieces have explicit prior-art
 attribution:
 
 - **R/B post-pass** (`app/post_passes/rb_balance.py`): inspired by
-  MatchMaker's R/B handling as documented at idleloop.com/matchmaker/.
+  the reference scheduler's R/B handling as documented at the published algorithm description.
 - **Station post-pass** (`app/post_passes/station_balance.py`): based
-  on the public Sykes algorithm (Tom + Cathy Saxton, 2017) as
-  described at idleloop.com/matchmaker/stations.php.
+  on the public the station-balance algorithm (Tom + Cathy Saxton, 2017) as
+  described at the published station-balance description.
 
-Neither is a port of MatchMaker code. Throughout the codebase,
-MatchMaker is referred to as a **peer reference scheduler used by event
+Neither is a port of any external reference scheduler's code. Throughout the codebase,
+the established FRC reference scheduling approach is treated as a **peer reference used by event
 organizers**, not as a competitor. Comparison numbers are sanity-checks
 during development, not "we beat them" claims. See
-`docs/scheduler/MATCHMAKER_LICENSING_BRIEF.md` if curious.
+`docs/scheduler/REFERENCE_SCHEDULER_LICENSING.md` if curious.
 
 The codebase is GPLv3. AI-assisted development; humans direct
 architecture and validate output. See README.md for the AI assistance
@@ -102,7 +102,7 @@ legacy `score_schedule()` returns a float for UI/CSV/DB display only;
 - Phase 1 — `app/post_passes/rb_balance.py`. Whole-match R/B flip + SA.
   Changes only `rb_metric`. 8 commutativity property tests prove it
   preserves all other criteria.
-- Phase 2 — `app/post_passes/station_balance.py`. Sykes-style within-
+- Phase 2 — `app/post_passes/station_balance.py`. the station-balance technique-style within-
   alliance station permutation + SA-from-greedy. Changes only
   `station_pen`. 12 commutativity property tests.
 

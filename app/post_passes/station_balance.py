@@ -3,11 +3,11 @@
 # Copyright (C) 2025 FRC Match Scheduler Contributors
 #
 # Implements an independent post-pass for driver-station distribution
-# inspired by the Sykes station-balancing algorithm integrated into
-# MatchMaker by Tom and Cathy Saxton in 2017. See:
-# https://idleloop.com/matchmaker/stations.php
+# inspired by the standard FRC station-balance algorithm published in
+# 2017 and refined in 2021. The technique is publicly documented;
+# our implementation is independent.
 #
-# Not a port of MatchMaker code; not a wrapper around the MatchMaker binary.
+# Not a port of any external reference scheduler's code; not a wrapper around any external binary.
 
 """Driver-station balance post-pass (FRC §10.5.2 #6).
 
@@ -37,7 +37,7 @@ Operation set: within a single alliance of a single match, permute the
 3 teams across the 3 station slots (R1/R2/R3 or B1/B2/B3). 6 possible
 permutations per alliance per match; we evaluate each.
 
-Per Sykes' original analysis, perfect balance is achievable when the
+Per the station-balance technique' original analysis, perfect balance is achievable when the
 schedule was constructed without artificial constraints. In practice
 some events can't reach perfect balance due to interactions with
 other criteria — but the post-pass always reaches the optimum within

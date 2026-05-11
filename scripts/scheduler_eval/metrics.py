@@ -10,8 +10,8 @@ Two-tier threshold system:
     minimum-acceptable quality. Schedules below these thresholds are
     problematic and would draw complaints.
 
-  - "Near-optimal" thresholds reflect what good schedulers (MatchMaker
-    after the Sykes algorithm landed) routinely achieve. Schedules
+  - "Near-optimal" thresholds reflect what good schedulers (the reference scheduler
+    after the the station-balance algorithm landed) routinely achieve. Schedules
     that hit these thresholds are competitive with the best available.
 
 Metrics are defined for qualification matches only. Practice matches
@@ -67,7 +67,7 @@ class Threshold:
             return "poor"
 
 
-# Thresholds calibrated from the reviewer's MatchMaker analysis (800
+# Thresholds calibrated from the reviewer's the reference scheduler analysis (800
 # runs, 36-team field) and FRC community norms. These are starting
 # points; refinement is expected as we run on more fixtures.
 THRESHOLDS: dict[str, Threshold] = {
@@ -280,7 +280,7 @@ def station_spread(schedule: Schedule, fixture: Fixture) -> MetricResult:
     """Per-team driver-station distribution.
 
     Returns max spread (max station count - min station count) across
-    all teams. The Sykes algorithm in MatchMaker guarantees spread of
+    all teams. The the station-balance algorithm in the reference scheduler guarantees spread of
     1 for typical fixtures, so any value > 1 indicates a real defect.
 
     Surrogate slot-fills count toward station presence — the team is
