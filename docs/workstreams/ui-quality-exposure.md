@@ -2,8 +2,21 @@
 
 **Repository:** `github.com/croadfeldt/frc-scheduler-server`
 **Document type:** Roadmap / specification draft
-**Status:** Future work — captured for follow-up. No active development. Lives in `HANDOFF.md` §5.8.
-**Companion docs:**
+
+> **Status: SUPERSEDED by [`schedule-quality-reporting.md`](schedule-quality-reporting.md) (2026-05-10).**
+>
+> This doc is preserved for history. The four-tier UI exposure plan
+> below was folded into the larger scoring + reporting workstream, which
+> consolidates the four overlapping quality systems (lex tuple, legacy
+> summary float, diversity-report endpoint, eval-harness metrics) into
+> a unified framework before exposing it in the UI. The tiered plan is
+> recapitulated in that doc as the UI-layer portion (Tiers 1-4 unchanged
+> in shape, sequenced after the unified scoring module lands).
+>
+> Read [`schedule-quality-reporting.md`](schedule-quality-reporting.md)
+> for the current plan. Keep this doc for history only.
+
+**Companion docs (when this was current):**
 - `docs/scheduler/EVAL_FINDINGS.md` — the harness-side quality evaluation work
 - `workstreams/scheduler-quality.md` — the ongoing scheduler-quality workstream
 - `scripts/scheduler_eval/README.md` — the harness this work would expose

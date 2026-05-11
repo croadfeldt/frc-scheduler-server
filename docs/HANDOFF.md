@@ -5,21 +5,17 @@ project. Practical, terse, code-anchored — same convention as the rest of
 `docs/`. Read this first if you're new to the codebase or coming back
 after a gap.
 
-Last updated: 2026-05-10, end of day. Multi-thread session that
-covered: practice-import-from-MatchMaker-xlsx debugging, render-pdf
-auth removal, session-deliverable protocol documentation,
-cycle-time-change off-by-one regression fix, documentation-status
-sweep surfacing the RBAC + lifecycle workstreams, a UI quality-tools
-audit producing a four-tier exposure roadmap, the day-banner override
-double-stamp fix, eval-harness methodology correction (adapter was
-running `sa_iterations=0`), the corrected re-run landing at mean
-composite 30.64 (down from 40.12 SA-disabled baseline) with the
-failure narrowed to two specific phenomena, a Phase 5 Plan A
-diagnostic script kicked off on Stark, and a doc-structure
-reorganization producing `docs/ROADMAP.md` as the canonical "where
-we're going," `docs/decisions/` for ADRs (5 to start), and
-`docs/workstreams/` for per-workstream design docs (renamed from
-the prior scatter at `docs/`).
+Last updated: 2026-05-10, end of day. Continued multi-thread session
+that, in addition to the work already summarized below, captured two
+new v1.1 workstreams: `workstreams/abstract-library.md` (pre-computed
+best-known abstracts per FRC fixture shape, lookup-first / cache-on-
+miss) and `workstreams/schedule-quality-reporting.md` (unified quality
+framework, consolidating the four overlapping scoring systems and
+exposing them in the UI). The latter supersedes
+`workstreams/ui-quality-exposure.md` (kept for history). v1.1 in
+ROADMAP rewritten around these two; the browser scheduler retirement
+(ADR 006) is now ~half a day instead of 2-3 days because of the
+library work simplifying it.
 
 ---
 
@@ -57,6 +53,9 @@ all surface FRC compliance state to the user.
 | **Doc structure reorganization** (this session)                  | ✓ | New `docs/ROADMAP.md` as single source of truth for "where we're going"; new `docs/decisions/` with ADRs 001–005 capturing lex tuple, FRC paramount, three-layer architecture, no-reproducibility-guarantee, and MatchMaker-as-peer; renamed `docs/RBAC_MODEL.md` → `docs/workstreams/rbac.md`, `docs/SCHEDULE_LIFECYCLE.md` → `docs/workstreams/schedule-lifecycle.md`, `docs/UI_QUALITY_EXPOSURE.md` → `docs/workstreams/ui-quality-exposure.md`, `docs/scheduler/QUALITY_IMPROVEMENT_PLAN.md` → `docs/workstreams/scheduler-quality.md`, `docs/SCHEDULE_COMPARISON_AND_NAMED_HISTORY.md` → `docs/workstreams/schedule-comparison.md`. New `CONTRIBUTING.md` extracts the session-deliverable protocol. README updated to reflect the no-reproducibility-guarantee policy. All cross-references updated. |
 | **Seed UI removal** (this session, follow-up to ADR 004)         | ✓ | The "seed:" and "assign seed:" copy-able displays removed from the share bar in `static/index.html`. `copySeed()` / `copyAssignSeed()` helpers deleted. `?seed=` and `?aseed=` no longer emitted in URLs. Autoload-from-seed-only path dropped (sid/aid is the canonical share pointer). Schedule ID and Assignment ID kept — those are DB primary keys, useful. README's URL-parameter table updated. ADR 004 action items marked done. |
 | **Browser scheduler retirement** (this session) — promoted       | ☐ | Was a Backlog one-liner; now a v1.1 line item with ADR 006 capturing the Option A decision (server-only construction, browser becomes presentation). Code work not yet started. §5.1 rewritten to reference the ADR. |
+| **Abstract library cache-always policy** (this session)          | ✓ | `workstreams/abstract-library.md` clarified to make cache-hit-below-preset-quality explicit. Added Case 3 policy: a user paying for higher preset than the cached entry's budget regenerates and supersedes if better. Every `best`-preset Generate is now an implicit curation run. ROADMAP v1.1 gains a "suggested sequencing when work starts" block making the order explicit. |
+| **v1.1 architecture confirmed** (this session)                   | ✓ | Confirmed the two foundational workstreams for v1.1: abstract schedule library (lookup-first, cache-always-on-miss) and unified schedule-quality scoring (one canonical framework consumed by API, UI, eval harness, and library). Both docs already existed from a prior session; this session re-verified the structure, sharpened the "always cache" emphasis in `workstreams/abstract-library.md`, and confirmed both are referenced from v1.1 of ROADMAP. ADR 006's retirement work simplifies to ~half a day once the library lands. |
+| **Abstract library + quality reporting** (this session)          | ☐ | Two new v1.1 workstreams captured. `workstreams/abstract-library.md` defines a lookup-first/cache-on-miss library of pre-computed best-known abstracts per FRC fixture shape; `workstreams/schedule-quality-reporting.md` defines a unified quality framework consolidating today's four overlapping scoring systems with tiered UI exposure. Latter supersedes `ui-quality-exposure.md`. ROADMAP v1.1 rewritten around them. Code work not yet started; design captured for follow-up. |
 | Schedule lifecycle (Phases A/B/C/E shipped; D/F/G open)          | ◐ | Auth-mandatory + fork + structural-immutability + is_admin shipped. `event_audit_events` table, lock TTL/heartbeat, lifecycle response field deferred. See `docs/workstreams/schedule-lifecycle.md` and §5.7. |
 | RBAC (proper roles + permissions)                                | ☐ | Designed in `docs/workstreams/rbac.md` (5 roles, 7 phases R-1..R-7); zero implementation. Current model is interim `is_admin` flag. Paused pending change-freeze lift + open-question decisions. §5.6. |
 | UI exposure of `scheduler_eval` quality data                     | ☐ | Designed in `docs/workstreams/ui-quality-exposure.md` — 4-tier plan to surface per-pair / per-team / lex-tuple / reference-comparison detail in the editor + viewer. Today only the headline diversity card is shown. §5.8. |
@@ -537,62 +536,88 @@ closed tab" papercut); G removes a class of frontend bugs by
 centralising the layering check; D unblocks the audit-log UI
 workstream.
 
-### 5.8 UI exposure of `scheduler_eval` quality data — designed, parked
+### 5.8 Schedule quality scoring & reporting — superseded into a v1.1 workstream
 
-Full design lives in `docs/workstreams/ui-quality-exposure.md`. Status: future
-roadmap, no active development. Captures a four-tier plan for
-surfacing harness-side quality measurements in the editor and
-viewer UIs.
+**Status (2026-05-10, end of day):** Promoted from a parked roadmap
+item to an active v1.1 workstream. Captured in
+`workstreams/schedule-quality-reporting.md`. The prior four-tier UI
+exposure plan (`workstreams/ui-quality-exposure.md`) is folded in as
+the UI-layer portion (Tiers 1-4 unchanged in shape) of a larger
+unified scoring + reporting framework.
 
-**Today's UI quality surface:** the Schedule Quality card
-(`#diversityReportCard` at `static/index.html:2757`, rendered by
-`renderDiversityCard()` at `:4220`). Card is effective at what it
-does — uses floor-relative semantics rather than the harness's
-mis-calibrated threshold classification, sidesteps the
-"MatchMaker = poor" embarrassment in the harness output, cleanly
-separates configuration knobs from measurement. **What's missing:**
-per-pair specifics with team numbers, per-team breakdowns, the
-8-element FRC §10.5.2 lex tuple, reference-distribution comparison,
-and any quality info on the public `/view` page.
+The reframe: today the project has four overlapping quality systems
+(lex tuple, legacy summary float, diversity-report endpoint, eval-
+harness metrics), three of which disagree subtly. Users have no
+canonical way to ask "is my schedule good?" because there's no
+canonical answer. The new workstream consolidates into one
+framework (`app/quality.py`) callable everywhere, with the existing
+Schedule Quality card becoming the rendering layer.
 
-**Four-tier plan** (full detail in the dedicated doc):
+Ships in six phases:
+- A. Unified scoring module (~2 days)
+- B. Server API + `quality_composite` column (~1 day)
+- C. UI Tier 1 — per-pair / per-team detail (~3-4 hours)
+- D. UI Tier 2 — lex tuple + schedule comparison (~1 day; pre-work: `match_equity` decision)
+- E. Calibration + UI Tier 3 — reference comparison (~3-5 days, v1.2)
+- F. UI Tier 4 — public `/view` surfacing (gated on product decision, v2.0)
 
-- **T1 — Surface what's already on the wire.** Small (~3–4 hours).
-  The diversity-report endpoint already returns `worst_pairs` and
-  `slot_table`; the card uses only their counts. Render the
-  per-pair list with team numbers, expose `slot_table` as a
-  per-team `<details>` panel. No backend change. Closes the most-
-  reported gap.
-- **T2 — Surface the lex tuple.** Medium effort. New endpoint
-  returning the 8-element tuple with labels and per-element
-  annotations. New "Quality breakdown" section in the card. Adds
-  side-by-side schedule comparison view with per-criterion deltas.
-  Pre-work: fix the `match_equity` placeholder (currently
-  hardcoded to 0 in `_score_from_state:1101` — inert tuple slot).
-- **T3 — Reference comparison via recalibrated thresholds.**
-  Substantial. Pull TBA played-schedule corpus, compute metric
-  distributions per fixture-size bucket, set thresholds at real
-  percentiles (acceptable=80th, near-optimal=50th). Bake into
-  shipped JSON. Server endpoint returning percentile rank.
-  Percentile badges in UI. Highest user value, most calibration
-  judgment required. Should not ship until calibration is
-  validated against multiple reference fixtures.
-- **T4 — Surface to `/view`.** Independent of tier choice. Public
-  spectator view currently has zero quality info; can expose any
-  subset of T1/T2/T3 to coaches viewing the public link. Open
-  product question: is exposing schedule-quality detail to a
-  public audience desirable, or does it invite litigation of
-  mathematically-forced edge cases.
+Three uses the unified framework enables beyond the editor:
+- "Best library entries" view (admin/curator view of the abstract library)
+- Import quality assessment (run the same report on imported xlsx/PDF/CSV)
+- Schedule comparison (per-criterion delta between any two schedules)
 
-**Recommended ordering when this resumes:** T1 alone is the
-tightest single increment. T1 + T2 together is the natural
-"expose scheduler_eval in the UI" scope. T3 is its own workstream.
-T4 parallel to any of the above.
+See `workstreams/schedule-quality-reporting.md` for full design,
+open questions (Q1-Q5), and shipping order. Companion workstream:
+`workstreams/abstract-library.md` (§5.10 below) — they ship as a
+pair in v1.1.
 
-**Pre-work that becomes more visible if T2 ships:** the lex-tuple
-audit findings from the prior session — fix `match_equity` slot,
-clarify the `score` DB column's non-authoritative-ness, add a
-cooldown verifier for imported schedules.
+### 5.10 Abstract schedule library — designed; v1.1
+
+**Status (2026-05-10):** Captured in
+`workstreams/abstract-library.md`. New v1.1 workstream.
+
+Pre-computed best-known abstracts per FRC fixture shape, looked up
+at Generate time. Cache-on-miss for uncovered shapes: first user
+of a shape pays the SA cost; subsequent users get the cached
+result. The library is curated offline at maximum compute budgets
+(SA=50M × best-of-1000, ~24 hours per shape) — quality budgets
+that are impossible per-Generate. Result: quality becomes
+deterministic per fixture shape; the quality ceiling is raised
+dramatically.
+
+Three behaviors at lookup time:
+- Library hit → fast + best-known quality.
+- Library miss + cache-on-miss enabled (default) → SA generation,
+  result inserted into library as `source='cached-on-miss'`.
+- Library miss + lookup-only mode → 404 with list of covered
+  shapes.
+
+Schema sketch:
+- `abstract_library` (id, num_teams, MPT, TPA, abstract_blob,
+  lex_tuple, curated_at, curation_method, source, superseded_by_id)
+- `abstract_library_lookups` (audit + analytics on hit/miss/cache)
+- `assigned_schedules.library_entry_id` (new optional column —
+  which library entry produced this schedule)
+
+Ships in four phases:
+- 1. Infrastructure (schema, API, curation script). ~2 days.
+- 2. Curate FRC-common shapes at maximum budget. ~1 weekend of
+  Stark compute + ~1 day review.
+- 3. Browser scheduler retirement via library lookup. ~half a
+  day (was 2-3 days in ADR 006).
+- 4. UI surfacing via the reporting workstream (§5.8 →
+  schedule-quality-reporting.md).
+
+Five open questions captured in the workstream doc: coverage
+estimate (Q1), quality ceiling estimate (Q2 — partly addressed by
+Phase 5 Plan A results), single vs multiple entries per shape
+(Q3), MatchMaker as source (Q4), cache invalidation when curation
+improves (Q5).
+
+This changes the project's character: from "high-quality schedule
+generator" to "curated library of known-good schedules with a
+generator for uncovered cases." Worth being explicit when this
+ships — README and project pitch shift accordingly.
 
 ---
 

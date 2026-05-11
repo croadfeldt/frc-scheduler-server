@@ -40,10 +40,12 @@ The ROADMAP says when each one will be picked up.
 
 | Document                                                       | Status                       | What it covers                                                                                                |
 |----------------------------------------------------------------|------------------------------|---------------------------------------------------------------------------------------------------------------|
-| [scheduler-quality.md](workstreams/scheduler-quality.md)       | Phases 0-4 shipped; Phase 5 active | The six-phase plan to evolve the team-placement scheduler. Quality presets, post-passes, decision point. |
+| [scheduler-quality.md](workstreams/scheduler-quality.md)       | Phases 0-4 shipped; Phase 5 active | The six-phase plan to evolve the team-placement scheduler. Quality presets, post-passes, decision point. Becomes the curation pipeline for the abstract library. |
+| [abstract-library.md](workstreams/abstract-library.md)         | Designed; targeted at v1.1   | Pre-computed best-known abstracts per FRC fixture shape. Lookup first, generate-and-cache on miss. The library is what users get; the SA populates it. |
+| [schedule-quality-reporting.md](workstreams/schedule-quality-reporting.md) | Designed; targeted at v1.1 | Unified quality scoring framework callable everywhere (server, CLI, UI). Consolidates today's four overlapping quality systems. Includes tiered UI exposure. |
 | [schedule-lifecycle.md](workstreams/schedule-lifecycle.md)     | A/B/C/E shipped; D/F/G open  | Lifecycle, locking, freeze, audit-trail. Auth-mandatory, fork model, admin role, full audit table.            |
 | [rbac.md](workstreams/rbac.md)                                 | Designed; paused             | Role-based access control proposal — roles, delegation, notifications, role requests. Replaces interim `is_admin` flag and supersedes the EventManager section of AUTH_DESIGN.md. |
-| [ui-quality-exposure.md](workstreams/ui-quality-exposure.md)   | Designed; not started        | Four-tier plan for surfacing `scheduler_eval` quality data in editor + viewer.                                |
+| [ui-quality-exposure.md](workstreams/ui-quality-exposure.md)   | Superseded                   | Earlier four-tier plan for surfacing harness data in the UI. Folded into `schedule-quality-reporting.md`. Kept for history. |
 | [schedule-comparison.md](workstreams/schedule-comparison.md)   | Designed; paused             | Schedule diff between schedules or history snapshots, plus user-supplied labels on history rows.              |
 
 ## Algorithm deep-dives
