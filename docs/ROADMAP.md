@@ -113,34 +113,44 @@ algorithmic change to invest in.
 
 This order minimizes risk by getting the measurement-and-scoring
 infrastructure in before the structural changes that depend on it.
-Steps 1-3 are safe to ship sequentially. Library Phase 2 gates
-on Plan C landing so we don't freeze pre-improvement composite
-scores into the library.
+
+> **Direction change 2026-05-11:** Per user feedback ("we need to
+> develop an algorithm that gets us to the best possible schedule
+> period... let's focus on the long term goals"), the time-bound
+> "ship Plan C-1 first" framing is superseded by
+> `workstreams/best-possible-schedule.md`. Plan C is now downstream
+> of Phase 1 investigation, not the immediate next action. v1.1 line
+> items below are updated to reflect this.
 
 Line items:
 
 - ✓ Phase 5 Plan A diagnostics — complete 2026-05-10 on Stark.
-  Two experiments (station post-pass budget scaling, opp_quad vs
-  repeat_opponents). Outcome: Plan B ruled out (budget 10,000×
-  didn't move station_spread); Plan C is the path. See
+  Plan B ruled out; Plan C identified as the direction. See
   `workstreams/phase5-plan-c.md`.
-- ☐ Plan C-1 — station post-pass redesign. Expand move set with
-  cross-match station swaps (C-1-a, ~1 day, lower-risk first
-  attempt) or replace with exact assignment (C-1-b, ~2-3 days,
-  higher-confidence). Recommended: C-1-a first, escalate to
-  C-1-b if the eval re-run doesn't show improvement. See
-  `phase5-plan-c.md`.
-- ☐ Plan C-2 — lex tuple extension. Append explicit
-  `repeat_opp_count` and `repeat_par_count` slots after their
-  respective `*_quad` siblings. Requires ADR 007 superseding
-  ADR 001 on the tuple shape. ~1 day plus eval re-run. See
-  `phase5-plan-c.md`.
+- ☐ **Best Possible Schedule — Phase 1 (investigation).** Research-
+  only. Four questions: is the lex tuple shape right (count vs
+  sum-of-squares, plus Saxton role-imbalance insight); where does
+  CP-SAT become impractical; what's the methodology for declaring
+  "best possible reached"; should the two-stage architecture stay
+  for small fixtures or fold to single-stage CP-SAT; plus cooldown
+  role, MPT vs quality ceiling, reproducibility guarantee. Output:
+  ADR 007 draft + ADR 008 draft + measurement report. ~1-2 weeks.
+  See `workstreams/best-possible-schedule.md`.
+- ☐ **Best Possible Schedule — Phase 2** (lex tuple shape lands)
+  through **Phase 7** (library curation). All downstream of Phase 1
+  conclusions; estimates and scope refined post-Phase 1 review.
+- ☐ Plan C-1, C-2, C-3 — superseded by Best Possible Schedule
+  Phases 2-3. Diagnostic findings and candidate interventions
+  retained in `phase5-plan-c.md` for reference; final intervention
+  shapes set by Phase 1 conclusions.
 - ☐ Abstract Schedule Library (Phase 1) — schema, API, curation
   script, lookup-first/cache-second integration. ~2 days. See
-  abstract-library.md Phase 1.
+  abstract-library.md Phase 1. **Safe to ship independently of
+  Best Possible Schedule** (infrastructure only; curation gates).
 - ☐ Abstract Schedule Library (Phase 2) — curate FRC-common
-  shapes at maximum budget. ~1 weekend of Stark compute + ~1 day
-  review. Gates on Plan C-1 and Plan C-2 landing first.
+  shapes at maximum budget. Gates on Best Possible Schedule Phase
+  5 conclusions (which shapes need library curation vs which can
+  generate on-demand).
 - ✓ Schedule Quality Reporting (Phase A) — unified `app/quality.py`
   module consolidating today's four scoring systems. Done
   2026-05-11: re-exports the harness's `metrics.py` primitives,
@@ -150,14 +160,18 @@ Line items:
   test assertions in `tests/test_quality.py`.
 - ☐ Schedule Quality Reporting (Phase B) — server API:
   `/api/schedules/{id}/quality-report` endpoint + enrichment of
-  existing responses + `quality_composite` column. ~1 day.
+  existing responses + `quality_composite` column. ~1 day. **Safe
+  to ship independently of Best Possible Schedule** (measurement
+  framework; the metrics themselves don't change behavior).
 - ☐ Schedule Quality Reporting (Phase C — UI Tier 1) — surface
   per-pair detail + per-team breakdown + concentrated surrogate
-  slots in the existing editor Quality card. ~3-4 hours.
+  slots in the existing editor Quality card. ~3-4 hours. Safe to
+  ship independently.
 - ☐ Schedule Quality Reporting (Phase D — UI Tier 2) — surface
   the lex tuple in the editor + schedule comparison view. ~1 day.
   Pre-work: decide `match_equity` slot fate (Q2 in
-  schedule-quality-reporting.md).
+  schedule-quality-reporting.md). Also affected by Best Possible
+  Schedule Phase 2 if the lex tuple shape changes.
 - ☐ Retire the browser scheduler. With the library in place,
   this becomes "replace JS `generateMatches()` with API call to
   the library lookup endpoint" — ~half a day instead of the

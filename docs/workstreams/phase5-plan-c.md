@@ -1,21 +1,33 @@
 # Workstream — Phase 5 Plan C
 
-**Status:** Diagnostic complete (2026-05-10). Two Plan C interventions
-identified; design decisions pending; no implementation yet.
+**Status:** Diagnostic complete (2026-05-10). Plan C-1, C-2, C-3
+candidate interventions identified.
+
+> **Sequencing superseded by [`best-possible-schedule.md`](best-possible-schedule.md)**
+> (2026-05-11). The "ship Plan C-1 first, then C-2" sequencing this
+> doc proposed was time-bound thinking. The user redirected toward
+> long-term "best possible schedule" investigation; Plan C is now
+> downstream of Phase 1 research questions, not the next action.
+> This doc is retained as historical context for the diagnostic
+> findings and the candidate interventions; the actual Phase 2+
+> implementation work happens per `best-possible-schedule.md`.
 
 **Supersedes:** the open Phase 5 Plan A/B/C question in
 `workstreams/scheduler-quality.md`. Plan A (diagnostic) is done;
 Plan B (more iteration budget) is ruled out by the data; Plan C
-(structural change) is where the work is. This doc captures *which*
-Plan C interventions to make.
+(structural change) is the direction. This doc captures the
+diagnostic findings and candidate interventions; the final
+intervention shape is gated on the investigation in
+`best-possible-schedule.md`.
 
 **Related:**
+- `workstreams/best-possible-schedule.md` — the active workstream that supersedes this one's sequencing
 - `workstreams/scheduler-quality.md` — the Phase 5 plan this doc closes out
 - `scheduler/EVAL_FINDINGS.md` — the eval data that motivated the diagnostic
-- `scheduler/quality-metrics.md` — the metric catalog; both Plan C interventions affect entries there
+- `scheduler/quality-metrics.md` — the metric catalog; Plan C interventions affect entries there
 - `scripts/scheduler_eval/phase5_diagnose.py` — the diagnostic script
 - `scripts/scheduler_eval/reports/phase5_diagnose_20260510-183721.json` — the raw diagnostic output
-- ADR 001 — lex tuple as canonical score (one of the two Plan C interventions amends this)
+- ADR 001 — lex tuple as canonical score (Plan C-2 amends or supersedes this)
 - `workstreams/abstract-library.md` — library curation depends on knowing the answer here
 
 ---
@@ -280,9 +292,44 @@ sum-of-squares as primary; adds the count framing as a tiebreaker.
 The 10-element tuple is still tractable. ADR 007 supersedes ADR 001
 with the rationale captured here.
 
+### Plan C-3 — Role-imbalance penalty (added 2026-05-11)
+
+**Goal:** Encode Saxton's published insight that *"if match
+duplication does occur, it's preferable that a team that is seen
+twice is seen once as a partner and once as an opponent, rather
+than twice in either role."* Currently the lex tuple measures
+partner and opponent diversity independently; a pair seen 2× as
+partner + 0× as opponent and a pair seen 1× as partner + 1× as
+opponent score the same overall but the latter is community-
+preferred.
+
+**Options:**
+
+- **C-3-a:** Add a `role_imbalance` slot to the tuple. For each
+  pair, compute `|partner_count − opponent_count|`; sum across
+  pairs; add as a new lex element after `repeat_opp_count`.
+- **C-3-b:** Fold into a combined "pair-encounter quality" metric
+  that incorporates both repeat count and role balance.
+
+**Why it might NOT measurably help:** if Plan C-2-a already drives
+all pair counts toward 1 or 0, the role-balance question may not
+arise frequently enough to matter empirically. Worth measuring
+before committing to implementation.
+
+**Recommendation:** Include in Q1 of `best-possible-schedule.md` —
+the lex-tuple shape investigation should evaluate whether role-
+imbalance is measurably important alongside the count-vs-sum-of-
+squares question. Don't pre-commit to implementing.
+
 ---
 
 ## Sequencing
+
+> **Sequencing below is now historical.** Per
+> `best-possible-schedule.md` (2026-05-11), Plan C is downstream
+> of Phase 1 investigation, not the next action. The orderings
+> below describe how Plan C *would* sequence if it were the next
+> action — retained for context, not as a current plan.
 
 These two interventions are independent. Either can ship first.
 Three plausible orderings:
@@ -301,7 +348,7 @@ extension is a smaller, more surgical change.
 Plan C-2-a (the tuple extension) are non-interacting changes — they
 affect different post-passes. Could ship simultaneously.
 
-**Recommendation: Order A.** Reasons:
+**Historical recommendation: Order A.** Reasons:
 
 - The station post-pass affects every fixture; the eval baseline
   improves immediately and visibly. Faster validation.
