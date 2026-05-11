@@ -112,7 +112,7 @@ Software Design's MatchMaker binary for benchmarking purposes.
 
 See `scripts/scheduler_eval/NOTICE.md` for harness-specific operational
 guidance and the implementation brief at
-`docs/scheduler/MATCHMAKER_LICENSING_BRIEF.md` for the architectural
+`docs/scheduler/REFERENCE_SCHEDULER_LICENSING.md` for the architectural
 constraints this posture creates.
 
 ## Reporting concerns

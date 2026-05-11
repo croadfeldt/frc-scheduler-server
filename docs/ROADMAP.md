@@ -99,39 +99,48 @@ algorithmic change to invest in.
 3. **Schedule Quality Reporting Phase B** (server API, ~1 day) and
    **Phase C** (UI Tier 1, ~3-4 hours). Surfaces per-pair / per-team
    detail in the editor against the now-cached library entries.
-4. **Phase 5 result lands**. Diagnostic data from Stark determines
-   Plan B vs Plan C. Either becomes a parameter/code change in the
-   curation pipeline, not in every Generate.
+4. **Plan C (station post-pass redesign + lex tuple extension) lands.**
+   Phase 5 diagnostic on Stark concluded Plan C is the path —
+   raising iteration budget doesn't help. Two interventions:
+   redesign the station post-pass (expand move set or replace
+   with exact solver) and extend the lex tuple with an explicit
+   `repeat_opp_count` slot. ~2-3 days plus eval re-runs. See
+   `phase5-plan-c.md`.
 5. **Abstract Schedule Library Phase 2** (curate FRC-common shapes,
-   ~weekend of Stark compute). With Phase 5 settled, curation
+   ~weekend of Stark compute). With Plan C settled, curation
    produces the best library entries achievable. Production users
    start getting library hits.
 
 This order minimizes risk by getting the measurement-and-scoring
 infrastructure in before the structural changes that depend on it.
-Steps 1-3 are safe to ship sequentially regardless of how Phase 5
-resolves.
+Steps 1-3 are safe to ship sequentially. Library Phase 2 gates
+on Plan C landing so we don't freeze pre-improvement composite
+scores into the library.
 
 Line items:
 
-- ☐ Phase 5 Plan A diagnostics — running on Stark. Two experiments
-  that distinguish iteration-limited from objective-limited causes
-  for `max_station_spread` and `repeat_opponents` failures.
-  Determines whether Plan B (post-pass budget bump) or Plan C
-  (lex-tuple expansion) is the right curation-pipeline investment.
-- ☐ Phase 5 Plan B (if iteration-limited): raise post-pass
-  iteration budget per fixture size. Becomes a parameter of the
-  curation pipeline rather than of every Generate.
-- ☐ Phase 5 Plan C (if objective-limited): extend the lex tuple
-  with a count-clustering term, or redesign post-pass move set.
-  Becomes a one-time curation-pipeline change rather than a
-  reproducibility break.
+- ✓ Phase 5 Plan A diagnostics — complete 2026-05-10 on Stark.
+  Two experiments (station post-pass budget scaling, opp_quad vs
+  repeat_opponents). Outcome: Plan B ruled out (budget 10,000×
+  didn't move station_spread); Plan C is the path. See
+  `workstreams/phase5-plan-c.md`.
+- ☐ Plan C-1 — station post-pass redesign. Expand move set with
+  cross-match station swaps (C-1-a, ~1 day, lower-risk first
+  attempt) or replace with exact assignment (C-1-b, ~2-3 days,
+  higher-confidence). Recommended: C-1-a first, escalate to
+  C-1-b if the eval re-run doesn't show improvement. See
+  `phase5-plan-c.md`.
+- ☐ Plan C-2 — lex tuple extension. Append explicit
+  `repeat_opp_count` and `repeat_par_count` slots after their
+  respective `*_quad` siblings. Requires ADR 007 superseding
+  ADR 001 on the tuple shape. ~1 day plus eval re-run. See
+  `phase5-plan-c.md`.
 - ☐ Abstract Schedule Library (Phase 1) — schema, API, curation
   script, lookup-first/cache-second integration. ~2 days. See
   abstract-library.md Phase 1.
 - ☐ Abstract Schedule Library (Phase 2) — curate FRC-common
   shapes at maximum budget. ~1 weekend of Stark compute + ~1 day
-  review.
+  review. Gates on Plan C-1 and Plan C-2 landing first.
 - ✓ Schedule Quality Reporting (Phase A) — unified `app/quality.py`
   module consolidating today's four scoring systems. Done
   2026-05-11: re-exports the harness's `metrics.py` primitives,

@@ -2,7 +2,7 @@
 
 **Repository:** `github.com/croadfeldt/frc-scheduler-server`
 **Document type:** Active workstream plan
-**Status:** **Phases 0–4 complete.** Scheduler change-freeze lifted (post-2026mnst). All planned scheduler-quality phases have shipped. Phase 5 (decision point) is **active** as of 2026-05-10 with the corrected eval data: mean composite 30.64 (down from the SA-disabled 40.12 baseline). Just into "investigate further" territory by the cutoffs below, but the failure has narrowed to two specific phenomena: `max_station_spread` (Phase 2 post-pass under-converges at scale) and `repeat_opponents` on high-MPT fixtures (sum-of-squares vs count-above-one objective mismatch). See [`EVAL_FINDINGS.md`](EVAL_FINDINGS.md) "Post-Phase-4 baseline (corrected)" for the data and the recommended Phase 5 path (Plan A: diagnose first).
+**Status:** **Phases 0–4 complete. Phase 5 diagnostic (Plan A) complete 2026-05-10; outcome is Plan C.** Scheduler change-freeze lifted (post-2026mnst). The corrected post-Phase-4 eval baseline showed mean composite 30.64 — just into "investigate further" territory, with the failure narrowed to `max_station_spread` (Phase 2 post-pass under-converges at scale) and `repeat_opponents` on high-MPT fixtures. The Phase 5 diagnostic ruled out Plan B (more iteration budget): scaling the station post-pass budget 10,000× didn't move the headline metric. Both phenomena need structural fixes, which are captured in [`phase5-plan-c.md`](phase5-plan-c.md) as Plan C-1 (station post-pass redesign — expand move set or replace with exact solver) and Plan C-2 (lex tuple extension — add explicit `repeat_opp_count` slot). Plan C-1 first (recommended order); ~2-3 days total for both interventions plus eval re-runs.
 
 **Progress:**
 - ✅ **Phase 0** (Unified Stage 2 with true SA + lex semantics): complete. See `tests/phase0_unified/SUMMARY.md`, `tests/phase0a_lex/SUMMARY.md`, `tests/phase0b_cooldown/SUMMARY.md`, `tests/phase0c_targeted/SUMMARY.md`. Lex tuple is now authoritative; cooldown paramount; targeted move generator improves convergence on criterion #3.
@@ -10,7 +10,9 @@
 - ✅ **Phase 2** (station post-pass): complete. See `tests/phase2_station/SUMMARY.md`. ~30% reduction in `total_station_pen` on the reference fixture; max_station_spread drops 4→2. 12 commutativity property tests.
 - ✅ **Phase 3** (hard cooldown enforcement): complete. `_swap_preserves_cooldown` filters violations BEFORE state mutation. ~5x SA speedup. Self-healing for construction-phase bugs.
 - ✅ **Phase 4** (quality presets): complete. `app/quality_presets.py` defines fair (50K) / good (500K) / best (2M) / maximum (5M). UI dropdown wired. Iteration ceiling documented in `ITERATION_CEILING.md`.
-- ⏳ **Phase 5** (decision point): pending.
+- ✅ **Phase 5 diagnostic** (Plan A): complete 2026-05-10. Two experiments on Stark, 30 min wall-clock. Conclusion: station post-pass is move-set-limited (not budget-limited); lex tuple opp-formulation insufficient (sum-of-squares satisfied but pair counts still poor). Plan C is the path.
+- ⏳ **Plan C-1** (station post-pass redesign): pending. See `phase5-plan-c.md`.
+- ⏳ **Plan C-2** (lex tuple extension): pending. See `phase5-plan-c.md`.
 
 **Beyond the original plan, also shipped this session:**
 - ✅ Iteration sweep + K* analysis (30 trials × 7 levels on Stark)
