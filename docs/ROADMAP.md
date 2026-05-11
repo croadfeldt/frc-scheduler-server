@@ -132,8 +132,13 @@ Line items:
 - ☐ Abstract Schedule Library (Phase 2) — curate FRC-common
   shapes at maximum budget. ~1 weekend of Stark compute + ~1 day
   review.
-- ☐ Schedule Quality Reporting (Phase A) — unified `app/quality.py`
-  module consolidating today's four scoring systems. ~2 days.
+- ✓ Schedule Quality Reporting (Phase A) — unified `app/quality.py`
+  module consolidating today's four scoring systems. Done
+  2026-05-11: re-exports the harness's `metrics.py` primitives,
+  adds `compute_diversity_report()` / `analyze_against_thresholds()`
+  / `composite_score()` with shape-agnostic input handling, and
+  the `/diversity-report` endpoint becomes a thin wrapper. 47 new
+  test assertions in `tests/test_quality.py`.
 - ☐ Schedule Quality Reporting (Phase B) — server API:
   `/api/schedules/{id}/quality-report` endpoint + enrichment of
   existing responses + `quality_composite` column. ~1 day.

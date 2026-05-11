@@ -5,9 +5,9 @@ project. Practical, terse, code-anchored — same convention as the rest of
 `docs/`. Read this first if you're new to the codebase or coming back
 after a gap.
 
-Last updated: 2026-05-10, end of day. Continued multi-thread session
-that, in addition to the work already summarized below, captured two
-new v1.1 workstreams: `workstreams/abstract-library.md` (pre-computed
+Last updated: 2026-05-11. Continued multi-thread session that, in
+addition to the work already summarized below, captured two new v1.1
+workstreams: `workstreams/abstract-library.md` (pre-computed
 best-known abstracts per FRC fixture shape, lookup-first / cache-on-
 miss) and `workstreams/schedule-quality-reporting.md` (unified quality
 framework, consolidating the four overlapping scoring systems and
@@ -16,6 +16,16 @@ exposing them in the UI). The latter supersedes
 ROADMAP rewritten around these two; the browser scheduler retirement
 (ADR 006) is now ~half a day instead of 2-3 days because of the
 library work simplifying it.
+
+Then **shipped Phase A of `workstreams/schedule-quality-reporting.md`**:
+`app/quality.py` is the new canonical entry point that the four
+quality systems route through. Re-exports the harness primitives,
+adds application-friendly entry points (`compute_diversity_report`,
+`analyze_against_thresholds`, `composite_score`), and the
+`/api/abstract-schedules/{id}/diversity-report` endpoint shrinks from
+~145 lines of inline computation to a 13-line wrapper. Frontend
+response shape preserved exactly; `renderDiversityCard()` untouched.
+13 test suites green (12 existing + new `tests/test_quality.py`).
 
 ---
 
@@ -54,6 +64,8 @@ all surface FRC compliance state to the user.
 | **Seed UI removal** (this session, follow-up to ADR 004)         | ✓ | The "seed:" and "assign seed:" copy-able displays removed from the share bar in `static/index.html`. `copySeed()` / `copyAssignSeed()` helpers deleted. `?seed=` and `?aseed=` no longer emitted in URLs. Autoload-from-seed-only path dropped (sid/aid is the canonical share pointer). Schedule ID and Assignment ID kept — those are DB primary keys, useful. README's URL-parameter table updated. ADR 004 action items marked done. |
 | **Browser scheduler retirement** (this session) — promoted       | ☐ | Was a Backlog one-liner; now a v1.1 line item with ADR 006 capturing the Option A decision (server-only construction, browser becomes presentation). Code work not yet started. §5.1 rewritten to reference the ADR. |
 | **Abstract library cache-always policy** (this session)          | ✓ | `workstreams/abstract-library.md` clarified to make cache-hit-below-preset-quality explicit. Added Case 3 policy: a user paying for higher preset than the cached entry's budget regenerates and supersedes if better. Every `best`-preset Generate is now an implicit curation run. ROADMAP v1.1 gains a "suggested sequencing when work starts" block making the order explicit. |
+| **Schedule Quality Reporting — Phase A** (this session)          | ✓ | `app/quality.py` consolidates the four overlapping quality systems behind one canonical entry point. Re-exports `THRESHOLDS`/`MetricResult`/`AnalysisReport` from `scripts/scheduler_eval/metrics.py`; adds `compute_diversity_report()` (the structures the editor's Quality card needs — pair histograms, theoretical floors, per-slot tables, worst-pair callouts), `analyze_against_thresholds()` (app-friendly wrapper around the harness analyzer), and `composite_score()` (single-number ranking, matches the harness's runner formula). Shape-agnostic input: accepts DB dicts, `app.scheduler.Match` NamedTuples, and `harness_types.Match` dataclasses interchangeably. The `/api/abstract-schedules/{id}/diversity-report` endpoint shrinks from ~145 lines of inline computation to a 13-line thin wrapper; response JSON shape preserved exactly for `renderDiversityCard()` compatibility. New `tests/test_quality.py` (47 assertions across 6 sections) covers shape-agnostic input, frontend-shape contract, harness-equivalence, composite score, theoretical floors, pair-table sanity. First step of `workstreams/schedule-quality-reporting.md` per the v1.1 sequencing in ROADMAP. |
+| **Schedule Quality Reporting Phase A** (this session)            | ✓ | `app/quality.py` created — unified scoring module consolidating today's four overlapping quality systems. Re-exports from `scripts/scheduler_eval/metrics.py` (THRESHOLDS, MetricResult, AnalysisReport, harness analyze). Adds shape-agnostic input (`_normalize_match` accepts dict/NamedTuple/dataclass), `DiversityReport` with `to_dict()` producing the legacy endpoint JSON shape exactly, `compute_diversity_report` and `analyze_against_thresholds` as application-friendly entry points, `composite_score` matching the runner's formula. `/api/abstract-schedules/{id}/diversity-report` refactored from 145 inline lines down to a 5-line `compute_diversity_report` call. New `tests/test_quality.py` (45+ checks) covers shape-agnostic inputs, frontend JSON contract preservation, threshold-analysis equivalence with direct harness call, theoretical floors, and pair-table sanity. All 13 test suites pass. |
 | **v1.1 architecture confirmed** (this session)                   | ✓ | Confirmed the two foundational workstreams for v1.1: abstract schedule library (lookup-first, cache-always-on-miss) and unified schedule-quality scoring (one canonical framework consumed by API, UI, eval harness, and library). Both docs already existed from a prior session; this session re-verified the structure, sharpened the "always cache" emphasis in `workstreams/abstract-library.md`, and confirmed both are referenced from v1.1 of ROADMAP. ADR 006's retirement work simplifies to ~half a day once the library lands. |
 | **Abstract library + quality reporting** (this session)          | ☐ | Two new v1.1 workstreams captured. `workstreams/abstract-library.md` defines a lookup-first/cache-on-miss library of pre-computed best-known abstracts per FRC fixture shape; `workstreams/schedule-quality-reporting.md` defines a unified quality framework consolidating today's four overlapping scoring systems with tiered UI exposure. Latter supersedes `ui-quality-exposure.md`. ROADMAP v1.1 rewritten around them. Code work not yet started; design captured for follow-up. |
 | Schedule lifecycle (Phases A/B/C/E shipped; D/F/G open)          | ◐ | Auth-mandatory + fork + structural-immutability + is_admin shipped. `event_audit_events` table, lock TTL/heartbeat, lifecycle response field deferred. See `docs/workstreams/schedule-lifecycle.md` and §5.7. |
