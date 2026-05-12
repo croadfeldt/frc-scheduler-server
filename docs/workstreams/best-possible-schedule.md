@@ -309,7 +309,7 @@ Final package (planned, ship together for review):
 These ship together as a package. No code, just decisions. **You
 review and approve the package before Phase 2 begins.**
 
-### In-progress sub-deliverables (2026-05-11 session)
+### In-progress sub-deliverables (2026-05-11 / 2026-05-12 sessions)
 
 - ✓ `scripts/cp_sat/pairing_optimum.py` — first-cut CP-SAT model for
   Stage 1 pairing. Proves OPTIMAL on 6t×4MPT; finds feasible on
@@ -324,6 +324,12 @@ review and approve the package before Phase 2 begins.**
   finding F5-1 (no infeasibility at typical cooldown in
   FRC-common space); identifies follow-up Stark job F5-a
   (quality-vs-cooldown sweep).
+- ✓ `scheduler/phase1-q4-construction-quality.md` — Q4 first-cut
+  finding: greedy construction has 0-17% malformation rate on tight
+  fixtures (10t × 6MPT, 12t × 7MPT highest). Defensive fix shipped
+  (`ConstructionMalformedError` + caller-side retry). Suggests Q4
+  architectural answer: CP-SAT for tight fixtures, greedy+SA for
+  larger ones — but contingent on F1 succeeding.
 
 These ship piecemeal during the investigation and consolidate into the
 final review package when Phase 1 concludes.

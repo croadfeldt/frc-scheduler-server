@@ -92,6 +92,30 @@ class ScheduleResult(NamedTuple):
     score:            float
 
 
+class ConstructionMalformedError(ValueError):
+    """Raised when the greedy construction phase produces a match with
+    fewer than `teams_per_alliance` teams on one alliance.
+
+    This is a known issue on tight fixtures (small n, MPT close to
+    cooldown_max). The construction phase's greedy choices can paint the
+    algorithm into a corner where the last match can't be completed.
+    Empirically measured malformation rates (2026-05-12, seeds 0-29):
+
+        8t × 6MPT:    0% malformed
+        10t × 6MPT:   13% malformed
+        12t × 6MPT:   3% malformed
+        12t × 7MPT:   17% malformed
+        16t+ × ≥6MPT: 0% malformed
+
+    Production fixtures (≥36 teams) are not affected. The deeper fix
+    (better construction algorithm or CP-SAT single-stage replacement
+    for tight fixtures) is captured in Phase 1 Q4 of
+    `docs/workstreams/best-possible-schedule.md`. Callers facing this
+    error on tight fixtures should retry with a different seed.
+    """
+    pass
+
+
 _MASKS_3_OF_6 = [m for m in range(64) if bin(m).count('1') == 3]
 
 _SPLITS = [
@@ -167,6 +191,32 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
     # relabel before the SA phase
 
     ideal_gap = max(1, ideal_gap)
+
+    # ── Validate cooldown feasibility (Phase 1 Q5 finding) ────────────────
+    # The cooldown_max formula: for a fixture with M total matches and MPT
+    # matches per team, the minimum span of a team's plays is
+    # (MPT - 1) * cooldown, which must fit in [0, M-1]. So:
+    #     cooldown_max = floor((M - 1) / (MPT - 1))
+    # Requesting ideal_gap > cooldown_max produces no valid schedule; the
+    # legacy construction code would build malformed matches with short
+    # alliances, which later crashed the SA with IndexError. Fail fast with
+    # a clear error instead.
+    #
+    # See docs/scheduler/phase1-q5-cooldown-feasibility.md for the full
+    # FRC-common space table and rationale.
+    if matches_per_team >= 2:
+        _total_matches_check = math.ceil(num_teams * matches_per_team / 6)
+        _cooldown_max = (_total_matches_check - 1) // (matches_per_team - 1)
+        if ideal_gap > _cooldown_max:
+            raise ValueError(
+                f"ideal_gap={ideal_gap} exceeds cooldown_max={_cooldown_max} "
+                f"for fixture ({num_teams} teams × {matches_per_team} MPT, "
+                f"{_total_matches_check} total matches). No valid schedule "
+                f"exists at this cooldown. FRC §10.6.6 small-event exception "
+                f"allows back-to-back matches; use ideal_gap=1 for the "
+                f"tightest fixtures."
+            )
+
     rng = random.Random(seed)
 
     # Pull weights — runtime-overridable so the editor's "Advanced criteria"
@@ -734,6 +784,30 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         # We keep `sc` as-is (slot-indexed) since surrogate_count is documented
         # as such. Real-team consumers should derive surrogate count from the
         # red_surrogate / blue_surrogate flags on Match objects.
+
+    # ── Construction integrity check (Phase 1 Q4 finding) ──────────────────
+    # The greedy construction can paint itself into a corner on tight
+    # fixtures (small n, MPT near cooldown_max), producing a final match
+    # with fewer than tpa teams on one alliance. Empirical malformation
+    # rate measured 2026-05-12: 8t×6 0%, 10t×6 13%, 12t×6 3%, 12t×7 17%,
+    # ≥16 teams 0%. Larger fixtures unaffected.
+    #
+    # This is a Phase 1 Q4 data point: the SA-on-greedy-construction
+    # architecture has a quality gap on tight fixtures. The deeper fix
+    # (better construction or CP-SAT single-stage) is captured in the
+    # best-possible-schedule workstream. For now, raise a specific
+    # exception so callers can retry with a different seed.
+    expected_tpa = 3
+    for m_idx, m in enumerate(matches):
+        if len(m.red) != expected_tpa or len(m.blue) != expected_tpa:
+            raise ConstructionMalformedError(
+                f"Construction produced malformed match {m_idx}: "
+                f"red has {len(m.red)} teams, blue has {len(m.blue)} "
+                f"(expected {expected_tpa} each). This is a known "
+                f"construction-quality issue on tight fixtures "
+                f"(n={num_teams}, MPT={matches_per_team}). Caller should "
+                f"retry with a different seed."
+            )
 
     # ── SA optimization phase ──────────────────────────────────────────────
     # The construction phase produced a feasible schedule. Now optimize it
