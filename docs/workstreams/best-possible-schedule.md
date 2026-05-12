@@ -331,6 +331,18 @@ review and approve the package before Phase 2 begins.**
   as construction primitive for fixtures where SA fails. Also
   refines Q5: the cooldown_max formula is necessary but not
   sufficient at the boundary (16×6×3 counter-example).
+- ✓ `scheduler/phase1-f1a-sa-audit.md` — F1-a audit closed. **No
+  bug**: SA's `_lex_compare` and `_sa_optimize` accept/reject
+  logic correctly enforce paramount-cooldown per ADR 002. The
+  failure mode is **move-set-limited**: 2-swap neighborhood
+  cannot reduce cooldown below ~2 on 12×6×2 from typical greedy
+  construction starts. Empirically: 500K iterations drove cd
+  from 11→2 in the first 25K, then stuck at 2. Pattern matches
+  Phase 5 station post-pass diagnostic. Production fixtures (≥36
+  teams) reach cd=0 trivially. **Q4 architectural finding now
+  empirically airtight**: SA-on-greedy structurally cannot
+  satisfy FRC §10.5.2's paramount criterion on tight fixtures;
+  CP-SAT can. No code changes needed.
 - ✓ `scheduler/phase1-q5-cooldown-feasibility.md` — Q5 first-cut:
   closed-form feasibility formula; full FRC-common space table;
   finding F5-1 (no infeasibility at typical cooldown in
