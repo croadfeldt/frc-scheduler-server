@@ -1,0 +1,17 @@
+# Research-only dependencies. NOT installed in the production
+# container. Required for scripts under `scripts/cp_sat/` and any
+# other research/investigation work that needs additional tooling.
+#
+# To install:
+#     pip install -r requirements-research.txt
+#
+# These dependencies are Apache 2.0 (ortools) and compatible with our
+# GPL-3 codebase. See `docs/scheduler/REFERENCE_SCHEDULER_LICENSING.md`
+# for the project's licensing posture.
+
+# CP-SAT solver for Stage 1 pairing optimum investigation
+# Source: https://developers.google.com/optimization
+# License: Apache 2.0
+# Used by: scripts/cp_sat/pairing_optimum.py
+# Related: workstreams/best-possible-schedule.md Q2
+ortools==9.15.6755

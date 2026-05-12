@@ -298,16 +298,35 @@ stronger guarantees.
 
 ## Phase 1 deliverables
 
-Captured in a single review packet, not committed piecemeal:
+Final package (planned, ship together for review):
 
 - `decisions/007-lex-tuple-shape.md` — draft ADR per Q1 conclusion
 - `decisions/008-reproducibility.md` — draft ADR or "reaffirm ADR 004" memo per Q7
 - `decisions/003-three-layer-architecture.md` — possibly amended per Q4
-- `scheduler/best-possible-investigation.md` — measurement report covering Q2, Q3, Q5, Q6
+- `scheduler/best-possible-investigation.md` — consolidated measurement report covering Q2, Q3, Q5, Q6
 - Updated `scheduler/quality-metrics.md` if the tuple shape changes
 
 These ship together as a package. No code, just decisions. **You
 review and approve the package before Phase 2 begins.**
+
+### In-progress sub-deliverables (2026-05-11 session)
+
+- ✓ `scripts/cp_sat/pairing_optimum.py` — first-cut CP-SAT model for
+  Stage 1 pairing. Proves OPTIMAL on 6t×4MPT; finds feasible on
+  12t×6MPT but doesn't prove optimal in 180s.
+- ✓ `requirements-research.txt` — separate research-deps file (ortools)
+  to keep production container lean.
+- ✓ `scheduler/phase1-q2-first-cut.md` — Q2 first-cut findings; flags
+  F1-F4 follow-ups (encoding refinement, SA bug fix, R/B+station
+  CP-SAT formulation, feasibility-boundary documentation).
+- ✓ `scheduler/phase1-q5-cooldown-feasibility.md` — Q5 first-cut:
+  closed-form feasibility formula; full FRC-common space table;
+  finding F5-1 (no infeasibility at typical cooldown in
+  FRC-common space); identifies follow-up Stark job F5-a
+  (quality-vs-cooldown sweep).
+
+These ship piecemeal during the investigation and consolidate into the
+final review package when Phase 1 concludes.
 
 ---
 
