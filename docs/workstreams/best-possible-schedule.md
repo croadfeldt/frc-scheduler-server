@@ -314,22 +314,35 @@ review and approve the package before Phase 2 begins.**
 - ✓ `scripts/cp_sat/pairing_optimum.py` — first-cut CP-SAT model for
   Stage 1 pairing. Proves OPTIMAL on 6t×4MPT; finds feasible on
   12t×6MPT but doesn't prove optimal in 180s.
+- ✓ `scripts/cp_sat/pairing_optimum_v2.py` — F1 refinement with
+  tighter linear-reified indicator encoding, linear histogram
+  objective, and anchor-based symmetry breaking. ~2× speedup on
+  easy cases; no improvement on hard cases.
 - ✓ `requirements-research.txt` — separate research-deps file (ortools)
   to keep production container lean.
 - ✓ `scheduler/phase1-q2-first-cut.md` — Q2 first-cut findings; flags
   F1-F4 follow-ups (encoding refinement, SA bug fix, R/B+station
   CP-SAT formulation, feasibility-boundary documentation).
+- ✓ `scheduler/phase1-f1-cpsat-refinement.md` — F1 follow-up
+  findings. Encoding refinement modest. **Bigger finding: SA cannot
+  satisfy paramount-cooldown on 12×6×2 even at SA=2M × multiple
+  trials. CP-SAT can.** Direct Q4 architectural data: CP-SAT
+  feasibility frontier (24+ teams at 30s) is large enough to serve
+  as construction primitive for fixtures where SA fails. Also
+  refines Q5: the cooldown_max formula is necessary but not
+  sufficient at the boundary (16×6×3 counter-example).
 - ✓ `scheduler/phase1-q5-cooldown-feasibility.md` — Q5 first-cut:
   closed-form feasibility formula; full FRC-common space table;
   finding F5-1 (no infeasibility at typical cooldown in
   FRC-common space); identifies follow-up Stark job F5-a
-  (quality-vs-cooldown sweep).
+  (quality-vs-cooldown sweep). Updated with boundary-infeasibility
+  caveat from F1 work.
 - ✓ `scheduler/phase1-q4-construction-quality.md` — Q4 first-cut
   finding: greedy construction has 0-17% malformation rate on tight
   fixtures (10t × 6MPT, 12t × 7MPT highest). Defensive fix shipped
   (`ConstructionMalformedError` + caller-side retry). Suggests Q4
   architectural answer: CP-SAT for tight fixtures, greedy+SA for
-  larger ones — but contingent on F1 succeeding.
+  larger ones — corroborated by F1's SA-cooldown-failure finding.
 
 These ship piecemeal during the investigation and consolidate into the
 final review package when Phase 1 concludes.

@@ -39,6 +39,28 @@ cooldown_max = floor((M - 1) / (MPT - 1))
 where `M = ceil(n × MPT / (2 × tpa))`. For surrogate-free fixtures,
 `M = n × MPT / (2 × tpa)` exactly; with surrogates, M is the ceiling.
 
+> ⚠ **The formula gives a NECESSARY but not always SUFFICIENT
+> condition for feasibility.**
+>
+> At the cooldown_max boundary, the number of distinct play patterns
+> yielding exactly MPT plays may be smaller than n_teams, forcing
+> infeasibility despite span fitting. Surfaced empirically 2026-05-12
+> via CP-SAT during F1 work:
+>
+> **Example: 16t × 6MPT × cd=3.** Formula says cooldown_max=3 OK. But
+> at cd=3 with M=16 and MPT=6, the only play pattern yielding 6 plays
+> in 16 slots is `[0, 3, 6, 9, 12, 15]` — forced exact spacing.
+> Patterns starting at index 1 or 2 yield only 5 plays before running
+> out of slots. All 16 teams would need the same pattern, but a match
+> holds only 6 slots. **CP-SAT correctly reports INFEASIBLE.**
+>
+> **Mitigation:** treat the formula as a screening check. For boundary
+> cases (cooldown exactly at cooldown_max), additional verification
+> via CP-SAT or careful combinatorics is needed. Most fixtures
+> comfortably below cooldown_max are unaffected; only boundary cases
+> need this care. See `phase1-f1-cpsat-refinement.md` for the full
+> derivation of the counter-example.
+
 ---
 
 ## Empirical verification

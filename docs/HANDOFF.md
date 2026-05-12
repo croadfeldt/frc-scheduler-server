@@ -150,6 +150,42 @@ implication is that **CP-SAT's small-fixture optimality regime
 greedy+SA for the rest." Contingent on F1 (CP-SAT encoding
 refinement) succeeding. 13 test suites pass.
 
+Then in the same session picked up **F1** (refining the CP-SAT
+encoding). Built `pairing_optimum_v2.py` with three improvements:
+(1) tighter linear-reified indicator encoding (replacing
+`AddBoolAnd(...).OnlyEnforceIf(...)`); (2) linear histogram
+objective `Σ k² × count_at_k` (replacing
+`AddMultiplicationEquality`); (3) anchor-based symmetry breaking
+(team 1 plays in match 0 on side A). Tried a full lex-ordering
+symmetry break first, removed it after it returned INFEASIBLE on
+cases known to be feasible.
+
+**F1 encoding refinement was modest:** ~2× speedup on the easy
+6×4×1 case; no improvement on the hard 12×6×2 case (same par_quad
+= 192). Mapped CP-SAT's feasibility frontier: finds valid schedules
+on 14t/18t/20t/24t × 6MPT in 30s; correctly identifies 16t × 6MPT
+× cd=3 as INFEASIBLE (a Q5 boundary case the formula didn't catch).
+
+**The bigger F1 finding came from comparing against SA on
+12×6×2.** Across 18 SA=500K trials and 5 SA=2M trials, the SA
+**never** produced a schedule with cooldown_violations=0 on this
+fixture. Best SA result: par_quad=116 with cooldown_violations=31
+(invalid by paramount-cooldown). CP-SAT result: par_quad=192 with
+cooldown_violations=0 (valid). Per the lex tuple's paramount-
+cooldown rule, CP-SAT wins decisively even though its pairing is
+worse.
+
+This is direct Q4 architectural data: **on tight fixtures, our SA
+cannot satisfy the FRC §10.5.2 paramount cooldown criterion. CP-
+SAT can — even with sub-optimal pairing.** The architectural shape
+is becoming clear: CP-SAT construction for tight fixtures (where
+SA fails), SA refinement on top. New `scheduler/phase1-f1-cpsat-
+refinement.md` captures findings with F1-a (audit SA's accept/
+reject for paramount cooldown), F1-b (warm-start CP-SAT
+sequentially), F1-c (CP-SAT-construction prototype), and F1-d (Q5
+boundary-infeasibility caveat — landed). Q5 doc updated with the
+16×6×3 counter-example.
+
 ---
 
 ## 1 · Where we are
@@ -194,6 +230,7 @@ all surface FRC compliance state to the user.
 | **Direction change → Best Possible Schedule workstream** (this session) | ✓ | User redirected from time-bound "ship Plan C-1 first" toward long-term upper-bound feasibility study with FIRST-adoption-ready posture. New `docs/workstreams/best-possible-schedule.md` captures Phase 1 (research-only): 7 investigation questions covering lex tuple shape (count vs sum-of-squares vs Saxton role-imbalance), CP-SAT applicability frontier (Apache 2.0; approved as project dependency), methodology for declaring "best possible reached," two-stage architecture re-evaluation, cooldown's solution-space role, MPT vs quality ceiling, reproducibility guarantee. Phase 1 deliverable: ADR 007 (lex tuple shape) + ADR 008 (reproducibility) drafts plus a measurement report, ship as a single review package before any code lands. Phase 2-7 (lex tuple lands, algorithm overhaul with SA + CP-SAT tracks, max-effort Stark measurement, feasibility analysis, standards-quality documentation, library curation) all gate on Phase 1 review. Phase 5 Plan C doc marked historical (sequencing superseded); Plan C-3 (Saxton role-imbalance) added to that doc and folded into Best Possible Schedule Q1. ROADMAP v1.1 line items rewritten. Independent ship work preserved (Abstract Library Phase 1 infrastructure, Schedule Quality Reporting Phases B/C measurement). Principle: research before commitment — no code that we'll just replace once the investigation lands. **Four decisions locked in (D1-D4):** FIRST-adoption-ready treated as constraint (aspirational target); ~1-2 week Phase 1 budget accepted; days-not-hours Stark run for Phase 4 accepted; Phase 6 standards-quality documentation is a real deliverable (Saxton-equivalent paper for our algorithm). |
 | **Phase 1 kickoff — Q2 first-cut CP-SAT + Q5 cooldown formula** (this session) | ✓ | OR-Tools 9.15 installed via new `requirements-research.txt` (kept separate from production `requirements.txt` to avoid bloating the container with an 80MB research dep). First-cut CP-SAT model in `scripts/cp_sat/pairing_optimum.py` proves OPTIMAL on 6t×4MPT in 6.4s (model correctness confirmed); finds feasible on 12t×6MPT but doesn't prove optimal in 180s (encoding likely needs symmetry-breaking + reified constraints + warm-start). Five fixture runs measured; findings in `scheduler/phase1-q2-first-cut.md` with F1-F4 follow-ups. Closed-form Q5 cooldown feasibility formula derived: `cooldown_max = floor((M-1)/(MPT-1))`. Full FRC-common space tabulated; finding F5-1: no infeasibility at typical cooldown anywhere in FRC-common space (§10.6.6 handles the genuinely-tight small-event cases). F5-2: substantial headroom suggests quality-vs-cooldown is worth empirically testing (Stark candidate F5-a, ~3-5 hours). Captured in `scheduler/phase1-q5-cooldown-feasibility.md`. Workstream doc updated with in-progress sub-deliverables section. **No Stark job kicked off** — CP-SAT needs encoding refinement first; SA needs 12×6 bug fix first. Stark stays idle until F1 or F2 lands. |
 | **F2 → Q4 finding: construction-quality issue on tight fixtures** (this session) | ✓ | Picked up F2 (SA bug fix at 12×6). Discovered: SA was correct; **construction** was producing malformed matches with short alliances (e.g. blue=(11,9) — 2 teams instead of 3). Two fixes shipped: (1) cooldown feasibility validation at the top of `generate_matches` — raises ValueError if ideal_gap > cooldown_max with Q5's formula in the error message; (2) `ConstructionMalformedError` exception class — construction phase now detects malformed output and raises immediately so callers can retry with a different seed. Test helper `make_test_schedule` retries up to 20 times. Production fixtures (≥36 teams) unaffected; small fixtures (10t×6, 12t×7) have 13-17% malformation rate but tests + SA work end-to-end after the retry helper. New `docs/scheduler/phase1-q4-construction-quality.md` captures this as Phase 1 Q4 first-cut data: the SA-on-greedy-construction architecture has a known failure mode on tight fixtures. Architectural implication: **CP-SAT's small-fixture optimality regime (from Q2) overlaps exactly with where greedy construction fails (Q4)** — Q4's answer likely points to "CP-SAT for tight fixtures, greedy+SA for the rest," contingent on F1 (CP-SAT encoding refinement) succeeding. 13 test suites pass. |
+| **F1 → bigger Q4 finding: SA fails paramount cooldown on tight fixtures** (this session) | ✓ | Built `pairing_optimum_v2.py` with tighter linear-reified indicators, linear histogram objective `Σ k² × count_at_k`, and anchor-based symmetry breaking. Encoding refinement was modest (~2× speedup on 6×4×1, none on 12×6×2). **The bigger finding:** while comparing against SA on 12×6×2, discovered the SA cannot achieve `cooldown_violations=0` on this fixture — across 18 SA=500K trials + 5 SA=2M trials, every trial produced cooldown_violations≥30. CP-SAT achieves cooldown=0 trivially. Per paramount-cooldown rule (ADR 002), CP-SAT's `(0, 192, ...)` strictly beats SA's `(31, 116, ...)` even though SA wins on pairing. **Direct Q4 data: SA cannot satisfy FRC §10.5.2's paramount criterion on tight fixtures; CP-SAT can.** Also surfaced Q5 boundary-infeasibility refinement: cooldown_max formula is necessary but not sufficient at the boundary (16×6×3 counter-example — formula says feasible at cd=3 but only one play pattern yields 6 plays, so all 16 teams would need the same pattern → infeasibility). Q5 doc updated. CP-SAT feasibility frontier mapped (14-24 teams × 6MPT all find feasible in 30s). New `scheduler/phase1-f1-cpsat-refinement.md` captures findings + F1-a/b/c/d follow-ups. 13 test suites pass. |
 | **Schedule Quality Reporting Phase A** (this session)            | ✓ | `app/quality.py` created — unified scoring module consolidating today's four overlapping quality systems. Re-exports from `scripts/scheduler_eval/metrics.py` (THRESHOLDS, MetricResult, AnalysisReport, harness analyze). Adds shape-agnostic input (`_normalize_match` accepts dict/NamedTuple/dataclass), `DiversityReport` with `to_dict()` producing the legacy endpoint JSON shape exactly, `compute_diversity_report` and `analyze_against_thresholds` as application-friendly entry points, `composite_score` matching the runner's formula. `/api/abstract-schedules/{id}/diversity-report` refactored from 145 inline lines down to a 5-line `compute_diversity_report` call. New `tests/test_quality.py` (45+ checks) covers shape-agnostic inputs, frontend JSON contract preservation, threshold-analysis equivalence with direct harness call, theoretical floors, and pair-table sanity. All 13 test suites pass. |
 | **v1.1 architecture confirmed** (this session)                   | ✓ | Confirmed the two foundational workstreams for v1.1: abstract schedule library (lookup-first, cache-always-on-miss) and unified schedule-quality scoring (one canonical framework consumed by API, UI, eval harness, and library). Both docs already existed from a prior session; this session re-verified the structure, sharpened the "always cache" emphasis in `workstreams/abstract-library.md`, and confirmed both are referenced from v1.1 of ROADMAP. ADR 006's retirement work simplifies to ~half a day once the library lands. |
 | **Abstract library + quality reporting** (this session)          | ☐ | Two new v1.1 workstreams captured. `workstreams/abstract-library.md` defines a lookup-first/cache-on-miss library of pre-computed best-known abstracts per FRC fixture shape; `workstreams/schedule-quality-reporting.md` defines a unified quality framework consolidating today's four overlapping scoring systems with tiered UI exposure. Latter supersedes `ui-quality-exposure.md`. ROADMAP v1.1 rewritten around them. Code work not yet started; design captured for follow-up. |
