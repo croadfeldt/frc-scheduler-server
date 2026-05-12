@@ -331,18 +331,24 @@ review and approve the package before Phase 2 begins.**
   as construction primitive for fixtures where SA fails. Also
   refines Q5: the cooldown_max formula is necessary but not
   sufficient at the boundary (16×6×3 counter-example).
-- ✓ `scheduler/phase1-f1a-sa-audit.md` — F1-a audit closed. **No
-  bug**: SA's `_lex_compare` and `_sa_optimize` accept/reject
-  logic correctly enforce paramount-cooldown per ADR 002. The
-  failure mode is **move-set-limited**: 2-swap neighborhood
-  cannot reduce cooldown below ~2 on 12×6×2 from typical greedy
-  construction starts. Empirically: 500K iterations drove cd
-  from 11→2 in the first 25K, then stuck at 2. Pattern matches
-  Phase 5 station post-pass diagnostic. Production fixtures (≥36
-  teams) reach cd=0 trivially. **Q4 architectural finding now
-  empirically airtight**: SA-on-greedy structurally cannot
-  satisfy FRC §10.5.2's paramount criterion on tight fixtures;
-  CP-SAT can. No code changes needed.
+- ✓ `scheduler/phase1-f1a-sa-cooldown-audit.md` — F1-a audit closed.
+  **No bug**: SA's `_lex_compare`, `_swap_preserves_cooldown`, and
+  `_sa_optimize` accept/reject logic correctly enforce paramount-
+  cooldown per ADR 002. Confirmed via code review + 50K-swap
+  instrumented experiment: 0 swaps slipped past the filter,
+  defense-in-depth lex-compare reject never fired. The failure mode
+  is **move-set reachability**: from a typical greedy starting state
+  on 12×6×2 with cooldown_violations=50, only 0.034% of random
+  2-swaps reduce cooldown. Reducing from 50→0 needs ~300M attempts
+  at this rate; we run 2M. Second experiment: 200 construction
+  attempts on 12×6×2 produced ZERO schedules with cooldown=0
+  (distribution clustered tight at cd∈[49,54]). **Diagnosis (1)
+  confirmed: construction produces unsalvageable starting states;
+  SA's correct logic can't escape them.** Q4 architectural finding
+  is now empirically airtight: CP-SAT-as-construction for tight
+  fixtures, SA-refinement on top. New follow-up identified: F1-e
+  (audit eval methodology — schedules with cd>0 should be flagged
+  invalid, not aggregated as comparable data). No code changes.
 - ✓ `scheduler/phase1-q5-cooldown-feasibility.md` — Q5 first-cut:
   closed-form feasibility formula; full FRC-common space table;
   finding F5-1 (no infeasibility at typical cooldown in
