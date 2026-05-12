@@ -393,37 +393,40 @@ Captured here so it's unambiguous:
 
 ---
 
-## Open questions for review before Phase 1 starts
+## Decisions locked in (2026-05-11)
 
-A few things I want explicit answers on before starting Phase 1
-research:
+Four questions resolved by user direction before Phase 1 begins:
 
-**OQ1.** The "FIRST-adoption-ready posture" framing — is this a real
-design constraint, or aspirational? I've designed Phase 1 around it
-being real. If it's aspirational, Q4 and Q7 get less weight.
+**D1. FIRST-adoption-ready posture: aspirational, but treated as a
+constraint.** Phase 1 is designed around it as a real constraint —
+Q4 (two-stage architecture) and Q7 (reproducibility) get full weight.
+The "aspirational" framing means we don't pursue FIRST adoption
+actively; we make decisions that would *permit* it without
+foreclosing other paths. The bar is "good enough that FIRST could
+plausibly adopt," not "we're submitting for FIRST adoption."
 
-**OQ2.** The Phase 1 deliverable is a package of ADR drafts + a
-measurement report. Estimate: ~1-2 weeks of careful work if I can
-focus on it. Acceptable, or do you want to budget differently?
+**D2. Phase 1 budget: ~1-2 weeks of focused work accepted.** No
+budget pressure to cut scope. The investigation gets the time it
+needs to be thorough.
 
-**OQ3.** Phase 4's Stark run is going to be expensive — days of
-compute, not hours. Acceptable, or do you want to budget the run
-differently (smaller inventory, lower per-fixture max budget)? My
-recommendation: don't budget down. We're trying to find the
-ceiling; cutting the budget defeats the purpose.
+**D3. Phase 4 Stark budget: days-not-hours accepted; don't budget
+down.** We're trying to find the ceiling. Truncating the budget
+defeats the purpose of the measurement. Full max-effort runs.
 
-**OQ4.** Phase 6 (the standards-quality documentation) — is that a
-real deliverable, or is it implied by the rest of the work? My read:
-it's a real deliverable if FIRST-adoption is a real target.
+**D4. Phase 6 (standards-quality documentation): real deliverable.**
+A paper-quality description of the algorithm, equivalent in
+character to the Saxton white paper but for ours. This is what
+gets handed to anyone evaluating the work (FIRST or otherwise).
+Ships as part of v1.1 completion.
 
 ---
 
 ## What this commits to
 
-This workstream is committed to Phase 1 specifically: the four
+This workstream is committed to Phase 1 specifically: the seven
 investigation questions, the deliverable package, and the methodology
-documentation. Phase 2 onward is a current-best-guess plan, not a
-commitment. The Phase 1 review will refine or replace the plan.
+documentation. Phase 2 onward is a current-best-guess plan; Phase 1
+review will refine or replace it.
 
 The principle: **research before commitment.** We don't ship code
 that we'll just replace once the investigation lands.
@@ -432,5 +435,5 @@ that we'll just replace once the investigation lands.
 
 *Workstream drafted 2026-05-11 in response to "develop an algorithm
 that gets us to the best possible schedule period." FIRST-adoption-
-ready posture added per user direction. Phase 1 is research-only,
-no code. Subsequent phases gate on Phase 1 review.*
+ready posture treated as a constraint per D1. Phase 1 is research-
+only, no code. Subsequent phases gate on Phase 1 review.*
