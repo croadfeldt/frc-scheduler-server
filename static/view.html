@@ -399,16 +399,27 @@
      in the 3-up cells) so the whole roster fits within the card's
      content width. The 3-up's .compact modifier targets ~110px-wide
      cells; this rule targets the wider but still mobile-narrow
-     next-only block, so font sizes can stay closer to the default. */
+     next-only block, so font sizes can stay closer to the default.
+
+     Applied to both blocks that render a full-width alliance-line in
+     the iPhone-narrow status section:
+       - .status-next-only-alliances  (the "Next on schedule" cell in
+         the Field status card)
+       - .next-match-meta             (the per-team Next match section
+         in the team card)
+     Both overflow the same way at iPhone portrait widths. */
   @media (max-width: 480px) {
-    .status-next-only-alliances .alliance-line {
+    .status-next-only-alliances .alliance-line,
+    .next-match-meta .alliance-line {
       flex-direction: column;
       gap: 4px;
     }
-    .status-next-only-alliances .alliance-line .alliance-vs {
+    .status-next-only-alliances .alliance-line .alliance-vs,
+    .next-match-meta .alliance-line .alliance-vs {
       display: none;
     }
-    .status-next-only-alliances .alliance-line .alliance-block {
+    .status-next-only-alliances .alliance-line .alliance-block,
+    .next-match-meta .alliance-line .alliance-block {
       width: 100%;
     }
   }
