@@ -465,6 +465,97 @@ proven_optimal upgrades, expanded ~27-shape FRC inventory,
 post-pass tuning (the rb/station finding above), DB-backed
 library migration, CI integration of standards --strict.
 
+Then shipped the **metrics/scores split + creation provenance +
+auto-backfill + live rescore** refactor. Problem: Phase B was
+persisting the full `quality_report` (metrics AND scores) to DB.
+Phase C added scoring on top. That created a staleness trap —
+when scoring curves or default weights change, every stored row's
+embedded scores become incorrect, but the UI displays them anyway.
+The user's concern: "stale data causing issues evaluating the
+shown score." The fix: **persist only metrics; derive scores at
+every read**.
+
+`app/quality_report.py` rewritten into a clean three-function
+shape:
+  - `compute_metrics(matches, shape)` — pure, deterministic given
+    the matches; stable for the lifetime of an AbstractSchedule.
+    Output is what gets persisted.
+  - `apply_scores(metrics_report, weights, shape)` — derives
+    per-criterion + composite scores. Never persisted. Computed
+    at read time so displayed scores always reflect current
+    scoring code under current weights.
+  - `build_quality_report(...)` — convenience compose for API
+    response builders that want both in one call.
+
+All write paths updated to use `compute_metrics()` —
+`POST /api/schedules`, `POST /api/generate-abstract`, the
+canonical producer. The `abstract_schedules.quality_report`
+JSONB column now carries metrics only.
+
+`GET /api/abstract-schedules/{id}` calls `apply_scores()` against
+the stored metrics under the schedule's `quality_weights` (or
+DEFAULT_QUALITY_WEIGHTS if NULL). Scores in the response are
+always fresh — no staleness possible.
+
+**Auditability**: new `creation_provenance` JSONB column on
+`abstract_schedules`. Captures method (sa_generated /
+canonical_library / imported), SA iterations, seed, SA weights,
+canonical version, importer info, and the API path that created
+the row. NULL on pre-existing rows; populated for every new
+schedule. AbstractSchedule is immutable after creation, so
+creation-provenance is sufficient audit; AssignedSchedule
+mutations already have the `assigned_schedule_history` snapshot
+mechanism.
+
+**New endpoints**:
+  - `POST /api/abstract-schedules/{id}/backfill-metrics` —
+    idempotent; recomputes metrics from stored matches; `?force=true`
+    overrides existing. Used by the UI auto-backfill and by the
+    bulk CLI.
+  - `POST /api/score-preview` — stateless. Takes matches + shape
+    + weights, returns metrics + scores, persists nothing. For
+    editor what-if previews, import previews, and third-party
+    tool comparisons.
+
+**Canonical library rebuild**: all 5 canonical JSON files
+rebuilt as metrics-only. The embedded `scores` field is gone.
+Canonicals now store: matches + achieved_lex_tuple + metrics +
+summary + provenance. Scoring is applied at read/use time.
+
+**Bulk backfill script**: `scripts/backfill_quality_metrics.py`
+for one-time historical cleanup. Iterates abstract_schedules,
+identifies rows needing backfill (NULL, missing `metrics`, or
+carrying stale `scores`), rebuilds them metrics-only. CLI flags:
+`--dry-run`, `--force`, `--limit`, `--verbose`.
+
+**UI changes**:
+  - `loadDiversityReport()` auto-backfills when it sees a
+    schedule with NULL or metrics-less `quality_report`. Silent,
+    single round-trip, then re-renders. Legacy schedules get
+    scored on first view.
+  - Weights-editor sliders fire live debounced rescore (200ms)
+    via `scheduleQualityWeightsRescore()`. Scores update as the
+    user slides — no button press needed.
+  - "Re-score" button removed (now redundant). "Reset to
+    defaults" triggers immediate rescore.
+  - Weights-editor copy updated to reflect live behavior.
+
+**Tests**: new `tests/test_metrics_scores_split.py` with 30+
+assertions — metrics-only output, determinism, no-mutation of
+inputs, stale-scores replacement, build_quality_report
+composition, canonical-storage metrics-only check, multi-weight
+composite difference, shape-params fallback. Updated
+`tests/test_quality_scoring.py` real-canonical test to reflect
+metrics-only storage. New `docs/scheduler/metrics-scores-split.md`.
+
+**Outcome**: the staleness trap is closed. When we tune scoring
+curves (the rb_per_team post-pass weakness identified in Phase
+C, or future Phase D-driven adjustments), the next read reflects
+the new math everywhere — old schedules and new alike. Canonical
+re-curation on Stark won't need to coordinate with scoring code
+changes. The mental model is cleaner: metrics are facts,
+interpretations are derived. 18 test suites pass.
+
 ---
 
 ## 1 · Where we are
@@ -518,6 +609,7 @@ all surface FRC compliance state to the user.
 | **Schedule Quality Framework Phase B: canonical library + unified schedules endpoint** (this session) | ✓ | Built the canonical schedule library — pre-computed best-known schedules served instead of regenerating. **Components shipped**: (1) `app/canonical_library.py` JSON-file-backed loader with `CanonicalEntry` dataclass + load/save/list functions + 3-level confidence vocabulary (`proven_optimal` / `matches_floor` / `best_known`); (2) `app/quality_report.py` `build_quality_report()` builds per-metric reports (value/floor/distance/confidence/matches_floor) used by both producer and runtime; (3) `scripts/scheduler_eval/build_canonical.py` producer script — SA-best-of-N, captures provenance (git commit, timestamp, methodology) in each canonical; (4) `app/canonical_schedules/` directory with **5 canonicals built**: 12×6, 20×8 (surrogate-required), 24×8, 36×7, 60×12 all at cooldown=2; (5) `POST /api/schedules` new unified endpoint — body specifies fixture shape + `source_preference` ('auto' / 'canonical_library' / 'generated'); supports import path via caller-supplied `matches` + optional `source_url`; (6) `GET /api/canonical-schedules` lists shapes with available canonicals; (7) extended `GET /api/abstract-schedules/{id}` response with `source`, `source_url`, `quality_report` fields (NULL on legacy rows); (8) `POST /api/generate-abstract` preserved for UI back-compat, now populates `source='generated'` + `quality_report` on every new row; (9) schema migration adds `source` (VARCHAR(32)), `source_url` (TEXT), `quality_report` (JSONB) columns to `abstract_schedules` via the existing idempotent ADD COLUMN IF NOT EXISTS pattern; (10) UI Quality card extended with source banner (canonical/generated/imported with link) + collapsible "Theoretical floor comparison" section (per-metric value/floor/distance/confidence table); (11) `tests/test_canonical_library.py` with 50+ assertions covering save/load round-trip, missing-file handling, real-canonical rebuild round-trip. **v1.0 build budget**: 100K SA iter × 3 seeds per shape; canonicals achieving `best_known` confidence. 36×7 and 60×12 hit par_quad floor (252/252 and 720/720); 12×6 expected gap (192/84 floor) due to cooldown=2 structural constraint. **Future work** (Stark territory, v1.1+): re-curate at 2M iter × 100+ seeds, add CP-SAT producer for proven_optimal upgrades, migrate to DB-backed library per `abstract-library.md` workstream, expand to full ~27-shape FRC inventory. New `docs/scheduler/canonical-library.md`. 15 test suites pass. |
 | **Schedule Quality Framework Phase C: per-criterion scoring + organizer-tunable weights** (this session) | ✓ | Converts the Phase B `quality_report` per-metric data into 0-100 scores with a weighted composite. **Components shipped**: (1) `app/quality_scoring.py` — per-metric scoring curves (binary for cooldown, quadratic decay for par_quad/opp_quad, linear-bounded for rb/station/surrogate), `DEFAULT_QUALITY_WEIGHTS` (FRC §10.5.2 priority-derived: cooldown/partner/opponent at 1.0, surrogate/color/station at 0.5), `compute_scores()` calculator, `best_known_floors_from_canonical()` bridge to Phase B library; (2) **paramount gate**: invalid schedules (cooldown_violations > 0) get composite=0 regardless of other criteria; (3) **weight clamping**: range [0, 5], cooldown auto-clamped ≥ 1 (paramount can't be tuned away), unknown keys ignored; (4) **best-known floor scoring**: when a canonical exists for the shape, scoring uses the canonical's achieved values as the floor — meaningful for shapes with structural gaps (12×6 cd=2 par_quad floor=84 unachievable; best-known=192). (5) `build_quality_report()` extended to embed the full scoring data inline; (6) schema migration adds `quality_weights` JSONB column to `abstract_schedules`; (7) API: `POST /api/schedules` + `POST /api/generate-abstract` accept `quality_weights` field; **NEW** `POST /api/abstract-schedules/{id}/rescore` re-scores existing schedule under different weights without regenerating; (8) UI Quality card extended with **composite score badge** (color-graded: Excellent/Good/Acceptable/Poor/Paramount-invalid + "Weights" button), **quality weights editor panel** (6 per-criterion sliders, "Reset to defaults" + "Re-score" buttons), **Score column** added to floor comparison table (color-coded per-criterion 0-100). (9) All 5 canonicals rebuilt with Phase C scoring embedded — 36×7 scores 90.6/100 with default weights (par_quad at floor; opp/color/station above); 12×6 + 60×12 score 100/100 against their own best-known floors. `tests/test_quality_scoring.py` with 60+ assertions covering all curves, normalization, composite math, paramount gate, best-known override, integration. New `docs/scheduler/quality-scoring.md`. **Real finding surfaced**: the rb_per_team and station_per_team_spread post-passes at default 5000 iter aren't reaching their proven_optimal floors on larger fixtures (24×8 has rb=4 where floor=0). Will be flagged by Phase D standing eval. 16 test suites pass. **Phase A/B/C complete; Phase D (standing eval suite) is next.** |
 | **Schedule Quality Framework Phase D: standing eval suite** (this session) | ✓ | The runnable gate. **Components shipped**: (1) `scripts/scheduler_eval/standards.py` — runs production scheduler on proving inventory, N seeds per fixture, aggregates median composite + per-criterion, compares to bars, writes JSON + Markdown reports; (2) `scripts/scheduler_eval/standards_config.py` — bar definitions and inventory. Hard requirements (paramount-valid, cooldown=100) apply universally; soft thresholds (composite ≥ 80, per-criterion ≥ 50) overridable per-fixture; (3) `tests/test_standards_smoke.py` — framework-wiring smoke test (50+ assertions covering config, get_bars, run_one_seed, evaluate_fixture, run_standards_eval, unknown-fixture filter); (4) `docs/scheduler/quality-standards.md` — full doc with how to run, how to interpret, how to update bars. **CLI features**: `--fixtures`, `--seeds`, `--sa-iterations`, `--strict` (CI mode), `--smoke` (single-fixture sanity), `--no-report`. **Validated**: 12×6 cd=2 at 500K iter × 3 seeds passes (composite=100); 36×7 at 200K × 2 seeds passes (composite=100). Smoke fails by design (too few iter). Catches the Phase C-surfaced rb/station post-pass weakness as warnings on larger fixtures. **Schedule Quality Framework v1.0 is fully shipped**: Phase A (theoretical floors) + Phase B (canonical library + unified `POST /api/schedules`) + Phase C (per-criterion + composite scoring with organizer-tunable weights) + Phase D (standing eval suite). The framework is operationally useful: any future scheduling methodology runs through Phase D and gets compared on the same terms. 17 test suites pass. **v1.1+ roadmap**: higher-budget canonical re-curation on Stark, CP-SAT producer for proven_optimal upgrades, expanded ~27-shape inventory, post-pass tuning, DB-backed library migration, CI integration of standards --strict. |
+| **Metrics/scores split + creation provenance + auto-backfill + live rescore** (this session) | ✓ | Refactor that splits persisted *metrics* from derived *scores* — fixes the staleness trap where stored scores drift from updated scoring curves. **Persistence layer**: `app/quality_report.py` now exposes `compute_metrics()` (pure, persisted) and `apply_scores()` (derived at read time, never persisted). The legacy `build_quality_report()` becomes a thin compose for API responses. All write paths (`POST /api/schedules`, `POST /api/generate-abstract`, canonical producer) use `compute_metrics()`; the `abstract_schedules.quality_report` JSONB column now carries metrics only. **Read layer**: `GET /api/abstract-schedules/{id}` calls `apply_scores()` against the stored metrics under current code + weights — displayed scores always reflect current math, no possibility of staleness. **Auditability**: new `creation_provenance` JSONB column on `abstract_schedules` captures full creation context — method (sa_generated / canonical_library / imported), SA iterations, seed, SA weights, canonical version, importer info, created_via API path. NULL on legacy rows; populated for every new schedule. **New endpoints**: `POST /api/abstract-schedules/{id}/backfill-metrics` (idempotent, recomputes metrics from stored matches; `?force=true` to override existing); `POST /api/score-preview` (stateless: takes matches + shape + weights, returns metrics + scores, persists nothing — for editor what-if previews, import previews, third-party comparisons). **Canonical library rebuild**: all 5 canonical JSON files rebuilt as metrics-only; their embedded `scores` field is gone. **Bulk backfill script**: `scripts/backfill_quality_metrics.py` for one-time historical cleanup — `--dry-run` reports what would change, `--force` rebuilds every row, `--limit N` for staged rollout. **UI changes**: (1) `loadDiversityReport()` auto-backfills when it sees a schedule with NULL or metrics-less `quality_report` — silent, single round-trip, then re-renders. Legacy schedules get scored on first view. (2) Live debounced rescore: weights-editor sliders fire `applyQualityWeights()` via `scheduleQualityWeightsRescore()` debouncer (200ms) — scores update as you slide. (3) Removed "Re-score" button (now redundant). "Reset to defaults" triggers immediate rescore. (4) Updated weights-editor copy to reflect live behavior. **Tests**: new `tests/test_metrics_scores_split.py` with 30+ assertions covering metrics-only output, determinism, no-mutation of inputs, stale-scores replacement, build_quality_report composition, canonical-storage metrics-only check, multi-weight composite difference, shape-params fallback. Updated `tests/test_quality_scoring.py` real-canonical test to reflect metrics-only storage. New `docs/scheduler/metrics-scores-split.md`. 18 test suites pass. |
 | **Schedule Quality Reporting Phase A** (this session)            | ✓ | `app/quality.py` created — unified scoring module consolidating today's four overlapping quality systems. Re-exports from `scripts/scheduler_eval/metrics.py` (THRESHOLDS, MetricResult, AnalysisReport, harness analyze). Adds shape-agnostic input (`_normalize_match` accepts dict/NamedTuple/dataclass), `DiversityReport` with `to_dict()` producing the legacy endpoint JSON shape exactly, `compute_diversity_report` and `analyze_against_thresholds` as application-friendly entry points, `composite_score` matching the runner's formula. `/api/abstract-schedules/{id}/diversity-report` refactored from 145 inline lines down to a 5-line `compute_diversity_report` call. New `tests/test_quality.py` (45+ checks) covers shape-agnostic inputs, frontend JSON contract preservation, threshold-analysis equivalence with direct harness call, theoretical floors, and pair-table sanity. All 13 test suites pass. |
 | **v1.1 architecture confirmed** (this session)                   | ✓ | Confirmed the two foundational workstreams for v1.1: abstract schedule library (lookup-first, cache-always-on-miss) and unified schedule-quality scoring (one canonical framework consumed by API, UI, eval harness, and library). Both docs already existed from a prior session; this session re-verified the structure, sharpened the "always cache" emphasis in `workstreams/abstract-library.md`, and confirmed both are referenced from v1.1 of ROADMAP. ADR 006's retirement work simplifies to ~half a day once the library lands. |
 | **Abstract library + quality reporting** (this session)          | ☐ | Two new v1.1 workstreams captured. `workstreams/abstract-library.md` defines a lookup-first/cache-on-miss library of pre-computed best-known abstracts per FRC fixture shape; `workstreams/schedule-quality-reporting.md` defines a unified quality framework consolidating today's four overlapping scoring systems with tiered UI exposure. Latter supersedes `ui-quality-exposure.md`. ROADMAP v1.1 rewritten around them. Code work not yet started; design captured for follow-up. |

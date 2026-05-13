@@ -181,6 +181,13 @@ class AbstractSchedule(Base):
     # Keys: cooldown, partner, opponent, surrogate, color, station.
     # See app/quality_scoring.py for defaults and clamping rules.
     quality_weights:  Mapped[Any|None] = mapped_column(JSON, nullable=True)
+    # Auditability: full record of how this schedule came to exist.
+    # JSON shape varies by method:
+    #   {method: 'sa_generated', sa_iterations, sa_weights, seed, created_via}
+    #   {method: 'canonical_library', canonical_provenance, canonical_confidence, created_via}
+    #   {method: 'imported',          source_url, created_via}
+    # NULL on pre-Phase-B rows; populated for every new schedule.
+    creation_provenance: Mapped[Any|None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -586,6 +593,15 @@ async def init_db(retries: int = 10, delay: float = 2.0) -> None:
                 await conn.execute(text(
                     "ALTER TABLE abstract_schedules "
                     "ADD COLUMN IF NOT EXISTS quality_weights JSONB"
+                ))
+                # Auditability: capture how each AbstractSchedule came
+                # to exist (method, SA params, seed, canonical version,
+                # importer info, etc.). NULL on legacy rows. Populated
+                # for every new schedule via the unified endpoint and
+                # the legacy /api/generate-abstract.
+                await conn.execute(text(
+                    "ALTER TABLE abstract_schedules "
+                    "ADD COLUMN IF NOT EXISTS creation_provenance JSONB"
                 ))
                 # Interim admin flag — replaced by RBAC role grants
                 # (docs/workstreams/rbac.md) when that workstream lands.

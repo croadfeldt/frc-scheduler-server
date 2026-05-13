@@ -1020,18 +1020,17 @@ async def generate_abstract(
 
         try:
             async with AsyncSessionLocal() as db:
-                # Build the per-schedule quality report (Phase B of the
-                # Schedule Quality Framework). Embed it so the UI's
-                # Quality card can render floor-comparison data without
-                # an extra round-trip.
-                from app.quality_report import build_quality_report
-                quality_report = build_quality_report(
+                # Build the per-schedule metrics (Phase B). Scores are
+                # NOT persisted — they're derived at read time from
+                # these metrics under current scoring curves and weights
+                # (see app/quality_report.py for the split rationale).
+                from app.quality_report import compute_metrics
+                quality_metrics = compute_metrics(
                     matches=result["matches"],
                     n_teams=body.num_teams,
                     matches_per_team=body.matches_per_team,
                     teams_per_alliance=3,
                     cooldown=body.cooldown,
-                    weights=body.quality_weights,
                 )
                 sched = AbstractSchedule(
                     event_id=body.event_id, name=body.name,
@@ -1045,8 +1044,15 @@ async def generate_abstract(
                     weights=body.weights,  # None = FIRST defaults
                     source='generated',
                     source_url=None,
-                    quality_report=quality_report,
+                    quality_report=quality_metrics,
                     quality_weights=body.quality_weights,
+                    creation_provenance={
+                        'method':         'sa_generated',
+                        'sa_iterations':  body.iterations,
+                        'sa_weights':     body.weights,
+                        'seed':           body.seed,
+                        'created_via':    'POST /api/generate-abstract',
+                    },
                 )
                 db.add(sched)
                 await db.commit()
@@ -1140,7 +1146,7 @@ async def create_schedule(
     """
     # Late imports to avoid circular references at app startup.
     from app.canonical_library import load_canonical
-    from app.quality_report import build_quality_report
+    from app.quality_report import compute_metrics
 
     body.day_config = _normalize_dc(body.day_config)
 
@@ -1152,7 +1158,8 @@ async def create_schedule(
     matches:        list[dict] | None = None
     source:         str               = ''
     source_url:     str | None        = body.source_url
-    quality_report: dict              = {}
+    quality_metrics: dict             = {}
+    creation_provenance: dict         = {}
     surrogate_count_list: list[int] | None = None
     round_boundaries: dict[str, int] | None = None
     score:            float = 0.0
@@ -1163,16 +1170,22 @@ async def create_schedule(
     if body.matches is not None:
         matches    = body.matches
         source     = 'imported'
-        quality_report = build_quality_report(
+        # Compute metrics fresh from the imported matches (scores
+        # are derived at read time; not persisted).
+        quality_metrics = compute_metrics(
             matches=matches, n_teams=n, matches_per_team=mpt,
             teams_per_alliance=tpa, cooldown=cd,
-            weights=body.quality_weights,
         )
         surrogate_count_list = [
             sum(int(s) for s in (m.get('red_surrogate', []) + m.get('blue_surrogate', [])))
             for m in matches
         ]
         round_boundaries = {}
+        creation_provenance = {
+            'method':      'imported',
+            'source_url':  body.source_url,
+            'created_via': 'POST /api/schedules (import)',
+        }
 
     # 2. Canonical library hit.
     elif body.source_preference in ('auto', 'canonical_library'):
@@ -1180,28 +1193,28 @@ async def create_schedule(
         if entry is not None:
             matches        = entry.matches
             source         = 'canonical_library'
-            quality_report = entry.quality_report
-            # If the caller supplied custom quality_weights, re-score
-            # the canonical's quality_report under the new weights.
-            # (The canonical's stored scores are with DEFAULT_QUALITY_WEIGHTS;
-            # we don't rebuild the metrics, just the composite + per_criterion.)
-            if body.quality_weights:
-                from app.quality_scoring import compute_scores, best_known_floors_from_canonical
-                bk_floors = best_known_floors_from_canonical(n, mpt, tpa, cd)
-                rescored = compute_scores(
-                    quality_report,
-                    weights=body.quality_weights,
-                    best_known_floors=bk_floors,
-                )
-                # Shallow-copy to avoid mutating the canonical's stored report
-                quality_report = dict(quality_report)
-                quality_report['scores'] = rescored
-                quality_report['scores']['best_known_floors_used'] = bk_floors is not None
+            # Use only the metrics portion of the canonical's stored
+            # quality_report. The canonical's stored 'scores' (if any)
+            # is ignored — scores are derived at read time so they
+            # reflect current scoring curves.
+            stored = entry.quality_report or {}
+            quality_metrics = {
+                'achieved_lex_tuple': stored.get('achieved_lex_tuple'),
+                'is_valid_paramount': stored.get('is_valid_paramount'),
+                'metrics':            stored.get('metrics', {}),
+                'summary':            stored.get('summary', {}),
+            }
             surrogate_count_list = [
                 sum(int(s) for s in (m.get('red_surrogate', []) + m.get('blue_surrogate', [])))
                 for m in matches
             ]
             round_boundaries = {}
+            creation_provenance = {
+                'method':      'canonical_library',
+                'canonical_provenance': entry.provenance,
+                'canonical_confidence': entry.confidence,
+                'created_via': 'POST /api/schedules (canonical)',
+            }
         elif body.source_preference == 'canonical_library':
             raise HTTPException(
                 404,
@@ -1231,11 +1244,17 @@ async def create_schedule(
         best_iteration       = 0
         source               = 'generated'
 
-        quality_report = build_quality_report(
+        quality_metrics = compute_metrics(
             matches=matches, n_teams=n, matches_per_team=mpt,
             teams_per_alliance=tpa, cooldown=cd,
-            weights=body.quality_weights,
         )
+        creation_provenance = {
+            'method':         'sa_generated',
+            'sa_iterations':  body.sa_iterations,
+            'sa_weights':     body.weights,
+            'seed':           body.seed,
+            'created_via':    'POST /api/schedules (generate)',
+        }
 
     # Persist to database
     try:
@@ -1254,8 +1273,9 @@ async def create_schedule(
                 weights=body.weights,
                 source=source,
                 source_url=source_url,
-                quality_report=quality_report,
+                quality_report=quality_metrics,
                 quality_weights=body.quality_weights,
+                creation_provenance=creation_provenance,
             )
             db.add(sched)
             await db.commit()
@@ -1331,6 +1351,30 @@ async def get_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(get
     sched = await db.get(AbstractSchedule, schedule_id)
     if not sched:
         raise HTTPException(404, "Abstract schedule not found")
+
+    # Schedule Quality Framework: scores are DERIVED at read time, not
+    # stored. The persisted `quality_report` column carries only the
+    # metrics (deterministic given the matches); scoring curves and
+    # weights are applied here so the response always reflects current
+    # scoring code under current default weights. This avoids the
+    # staleness trap where stored scores drift from updated curves.
+    #
+    # If the schedule's quality_report is NULL (pre-Phase-B legacy row),
+    # the response carries quality_report=null and the UI's auto-
+    # backfill kicks in to populate it. If it's present but lacks
+    # 'metrics' (somehow malformed), same — UI prompts a backfill.
+    quality_report_out = sched.quality_report
+    if quality_report_out and 'metrics' in (quality_report_out or {}):
+        from app.quality_report import apply_scores
+        quality_report_out = apply_scores(
+            quality_report_out,
+            weights=sched.quality_weights,
+            n_teams=sched.num_teams,
+            matches_per_team=sched.matches_per_team,
+            teams_per_alliance=3,
+            cooldown=sched.cooldown,
+        )
+
     return {
         "id": sched.id, "name": sched.name, "event_id": sched.event_id,
         "num_teams": sched.num_teams, "matches_per_team": sched.matches_per_team,
@@ -1346,12 +1390,16 @@ async def get_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(get
         "weights": sched.weights,  # None means FIRST defaults were used
         # Schedule Quality Framework Phase B: provenance + quality report.
         # NULL on legacy rows; populated for every new schedule.
+        # quality_report carries METRICS (persisted) + SCORES (derived
+        # at this read time — see comment above).
         "source": sched.source,
         "source_url": sched.source_url,
-        "quality_report": sched.quality_report,
+        "quality_report": quality_report_out,
         # Schedule Quality Framework Phase C: organizer-tunable scoring
         # weights. NULL means DEFAULT_QUALITY_WEIGHTS were used.
         "quality_weights": sched.quality_weights,
+        # Auditability: full creation provenance (method, SA params, etc).
+        "creation_provenance": sched.creation_provenance,
         "created_at": sched.created_at.isoformat(),
     }
 
@@ -1364,7 +1412,7 @@ async def rescore_abstract_schedule(
 ):
     """Re-score an existing abstract schedule under different
     quality_weights. Returns the updated scores without modifying the
-    stored row (the schedule itself doesn't change, only how we score it).
+    stored row.
 
     Useful for "what does this schedule look like if I emphasize partner
     diversity?" — organizers can try different weight combinations
@@ -1373,35 +1421,169 @@ async def rescore_abstract_schedule(
     Body: `{"quality_weights": {"partner": 2.0, "station": 0.0, ...}}`
     Missing keys filled from DEFAULT_QUALITY_WEIGHTS. Cooldown clamped
     to ≥ 1 (paramount).
+
+    Note: since the GET endpoint now derives scores at read time,
+    /rescore is logically redundant with `GET ?quality_weights=...`
+    (which we don't expose due to URL-encoding awkwardness). It's
+    kept as the dedicated weight-override path for the UI's live
+    slider rescoring.
     """
     sched = await db.get(AbstractSchedule, schedule_id)
     if not sched:
         raise HTTPException(404, "Abstract schedule not found")
-    if not sched.quality_report:
+    if not sched.quality_report or 'metrics' not in (sched.quality_report or {}):
         raise HTTPException(
             400,
-            "Schedule has no quality_report (legacy row from before Phase B). "
-            "Regenerate to populate."
+            "Schedule has no quality_report metrics (legacy row). "
+            "Call POST /api/abstract-schedules/{id}/backfill-metrics first."
         )
 
     new_weights = (body or {}).get('quality_weights') if body else None
-    from app.quality_scoring import compute_scores, best_known_floors_from_canonical
-    bk_floors = best_known_floors_from_canonical(
-        sched.num_teams, sched.matches_per_team, 3, sched.cooldown
-    )
-    rescored = compute_scores(
+    from app.quality_report import apply_scores
+    scored = apply_scores(
         sched.quality_report,
         weights=new_weights,
-        best_known_floors=bk_floors,
+        n_teams=sched.num_teams,
+        matches_per_team=sched.matches_per_team,
+        teams_per_alliance=3,
+        cooldown=sched.cooldown,
     )
     return {
         "schedule_id":      schedule_id,
-        "scores":           rescored,
-        "best_known_floors_used": bk_floors is not None,
+        "scores":           scored['scores'],
+        "best_known_floors_used": scored['scores'].get('best_known_floors_used', False),
         # Echo the existing metrics so the caller can render the
         # full Quality card without a second fetch.
         "metrics":          sched.quality_report.get('metrics', {}),
         "is_valid_paramount": sched.quality_report.get('is_valid_paramount', True),
+    }
+
+
+@app.post("/api/abstract-schedules/{schedule_id}/backfill-metrics")
+async def backfill_abstract_metrics(
+    schedule_id: int,
+    force: bool = Query(False, description="Recompute even if metrics already exist"),
+    db: AsyncSession = Depends(get_session),
+):
+    """Compute the quality metrics for a schedule from its stored
+    matches and persist them.
+
+    Used for:
+      - Pre-Phase-B schedules with NULL quality_report (one-time
+        catch-up after the framework landed)
+      - Schedules created between Phase B and Phase C deploy that
+        have stale 'scores' embedded in their stored quality_report
+      - Force-recompute after a code change to compute_metrics() or
+        the fixture_floors() floors
+
+    Idempotent. Safe to call any number of times. Returns the new
+    quality_report (metrics + freshly-derived scores under default
+    weights).
+    """
+    sched = await db.get(AbstractSchedule, schedule_id)
+    if not sched:
+        raise HTTPException(404, "Abstract schedule not found")
+    if not sched.matches:
+        raise HTTPException(
+            400,
+            "Schedule has no matches data; nothing to compute metrics from."
+        )
+
+    has_metrics = sched.quality_report and 'metrics' in (sched.quality_report or {})
+    if has_metrics and not force:
+        # Already populated, no force flag — return current state.
+        # Apply scores fresh so the response is complete.
+        from app.quality_report import apply_scores
+        scored = apply_scores(
+            sched.quality_report,
+            weights=sched.quality_weights,
+            n_teams=sched.num_teams,
+            matches_per_team=sched.matches_per_team,
+            teams_per_alliance=3,
+            cooldown=sched.cooldown,
+        )
+        return {
+            "schedule_id":    schedule_id,
+            "backfilled":     False,
+            "reason":         "already has metrics; pass force=true to recompute",
+            "quality_report": scored,
+        }
+
+    from app.quality_report import compute_metrics, apply_scores
+    metrics_report = compute_metrics(
+        matches=sched.matches,
+        n_teams=sched.num_teams,
+        matches_per_team=sched.matches_per_team,
+        teams_per_alliance=3,
+        cooldown=sched.cooldown,
+    )
+    # Persist metrics-only (no scores — those are derived at read).
+    sched.quality_report = metrics_report
+    # Mark the JSON column dirty so SQLAlchemy persists the change.
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(sched, "quality_report")
+    await db.commit()
+    await db.refresh(sched)
+
+    # Build the response with derived scores.
+    scored = apply_scores(
+        metrics_report,
+        weights=sched.quality_weights,
+        n_teams=sched.num_teams,
+        matches_per_team=sched.matches_per_team,
+        teams_per_alliance=3,
+        cooldown=sched.cooldown,
+    )
+    return {
+        "schedule_id":    schedule_id,
+        "backfilled":     True,
+        "force":          force,
+        "quality_report": scored,
+    }
+
+
+class ScorePreviewRequest(BaseModel):
+    """Body for POST /api/score-preview — stateless scoring of a
+    schedule that may not be persisted (or that the caller is editing
+    interactively)."""
+    matches:            list[dict]
+    num_teams:          int   = Field(..., ge=6, le=120)
+    matches_per_team:   int   = Field(..., ge=1, le=50)
+    teams_per_alliance: int   = Field(3, ge=2, le=4)
+    cooldown:           int   = Field(2, ge=1, le=20)
+    quality_weights:    dict[str, float] | None = None
+
+
+@app.post("/api/score-preview")
+async def score_preview(body: ScorePreviewRequest):
+    """Stateless scoring endpoint.
+
+    Takes a matches list + fixture shape + (optional) quality weights.
+    Returns the full quality_report (metrics + scores). Persists
+    nothing.
+
+    Useful for:
+      - Editor what-if previews: "what would this schedule score if
+        I made this change?" without persisting the edit
+      - Import preview: score an imported schedule before deciding
+        to save it
+      - Third-party tools comparing their own schedule output
+
+    Always uses fresh scoring code under the request's weights (or
+    default weights if omitted). No staleness possible.
+    """
+    from app.quality_report import build_quality_report
+    report = build_quality_report(
+        matches=body.matches,
+        n_teams=body.num_teams,
+        matches_per_team=body.matches_per_team,
+        teams_per_alliance=body.teams_per_alliance,
+        cooldown=body.cooldown,
+        weights=body.quality_weights,
+    )
+    return {
+        "quality_report": report,
+        "weights_used":   report['scores']['weights_used'],
     }
 
 

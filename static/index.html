@@ -4196,6 +4196,19 @@ async function loadDiversityReport(scheduleId) {
         d._source         = sched.source         || null;
         d._source_url     = sched.source_url     || null;
         d._quality_report = sched.quality_report || null;
+
+        // Auto-backfill: if the schedule lacks usable quality data
+        // (NULL or missing metrics), call the backfill endpoint and
+        // re-fetch. Silent on failure — the card still renders without
+        // scoring data, just without the badge/floor sections.
+        var qr = d._quality_report;
+        var needsBackfill = !qr || !qr.metrics;
+        if (needsBackfill) {
+          var backfilled = await autoBackfillQualityMetrics(scheduleId);
+          if (backfilled) {
+            d._quality_report = backfilled;
+          }
+        }
       } catch (e) {
         console.warn('Schedule fetch json parse failed:', e);
       }
@@ -4696,7 +4709,7 @@ function renderDiversityCard(card, serverData) {
         '<input type="range" class="quality-weight-slider" data-criterion="' + key + '" ' +
         'min="' + min + '" max="5" step="0.1" value="' + val + '" ' +
         'style="width:120px;" ' +
-        'oninput="document.getElementById(\'qw_val_' + key + '\').textContent = this.value;">' +
+        'oninput="document.getElementById(\'qw_val_' + key + '\').textContent = this.value; scheduleQualityWeightsRescore();">' +
         '<span id="qw_val_' + key + '" style="width:2.5rem;text-align:right;font-variant-numeric:tabular-nums;font-size:0.85rem;">' + val.toFixed(1) + '</span>' +
         '</div>'
       );
@@ -4713,16 +4726,10 @@ function renderDiversityCard(card, serverData) {
       '<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">' +
       'Sliders adjust how each criterion contributes to the composite. ' +
       'Range 0-5; 0 means "ignore this criterion." ' +
-      'Cooldown is auto-clamped to ≥ 1 (paramount).' +
+      'Cooldown is auto-clamped to ≥ 1 (paramount). ' +
+      'Scores update live as you slide.' +
       '</div>' +
       sliderRows +
-      '<div style="display:flex;gap:0.5rem;margin-top:0.75rem;">' +
-      '<button onclick="applyQualityWeights()" style="background:var(--accent2);border:none;color:white;' +
-      'padding:0.4rem 0.75rem;border-radius:4px;cursor:pointer;">Re-score</button>' +
-      '<div style="font-size:0.75rem;color:var(--text-muted);align-self:center;">' +
-      'Re-scores this schedule without regenerating.' +
-      '</div>' +
-      '</div>' +
       '</div>';
   }
 
@@ -8333,16 +8340,31 @@ function resetQualityWeights() {
     if (slider) slider.value = defaults[k];
     if (label) label.textContent = defaults[k].toFixed(1);
   });
+  // Live rescore now that values are reset.
+  applyQualityWeights();
+}
+
+// Debounce timer for live slider rescoring.
+var _qwRescoreTimer = null;
+
+function scheduleQualityWeightsRescore() {
+  // Called from each slider's oninput. Debounces so we don't fire
+  // a network call on every pixel of slider movement. 200ms feels
+  // snappy while reliably coalescing rapid changes.
+  if (_qwRescoreTimer) clearTimeout(_qwRescoreTimer);
+  _qwRescoreTimer = setTimeout(function() {
+    _qwRescoreTimer = null;
+    applyQualityWeights();
+  }, 200);
 }
 
 async function applyQualityWeights() {
   // Read all slider values into a weights dict, POST to the rescore
-  // endpoint, and update the displayed scores.
+  // endpoint, and update the displayed scores in place. Triggered
+  // by debounced slider input (see scheduleQualityWeightsRescore)
+  // and by resetQualityWeights().
   var scheduleId = _currentAbstractScheduleId;
-  if (!scheduleId) {
-    alert('No schedule loaded.');
-    return;
-  }
+  if (!scheduleId) return;  // no schedule loaded — silent no-op
   var weights = {};
   document.querySelectorAll('.quality-weight-slider').forEach(function(s) {
     weights[s.dataset.criterion] = parseFloat(s.value);
@@ -8354,9 +8376,9 @@ async function applyQualityWeights() {
       body: JSON.stringify({ quality_weights: weights }),
     });
     if (!r.ok) {
-      var msg = 'Re-score failed: HTTP ' + r.status;
-      try { var err = await r.json(); if (err.detail) msg += ' — ' + err.detail; } catch(e) {}
-      alert(msg);
+      // Silent on failure for live rescoring — don't disrupt the user.
+      // Console warn so a dev can see it.
+      console.warn('Live rescore failed: HTTP', r.status);
       return;
     }
     var data = await r.json();
@@ -8368,7 +8390,27 @@ async function applyQualityWeights() {
     }
   } catch (e) {
     console.warn('rescore call failed:', e);
-    alert('Re-score failed: ' + e);
+  }
+}
+
+// Auto-backfill: when loadDiversityReport sees a schedule whose
+// quality_report is NULL or lacks 'metrics', call the backfill
+// endpoint to populate the data and re-render.
+async function autoBackfillQualityMetrics(scheduleId) {
+  try {
+    var r = await fetch(API + '/api/abstract-schedules/' + scheduleId + '/backfill-metrics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!r.ok) {
+      console.warn('auto-backfill failed: HTTP', r.status);
+      return null;
+    }
+    var data = await r.json();
+    return data.quality_report || null;
+  } catch (e) {
+    console.warn('auto-backfill failed:', e);
+    return null;
   }
 }
 

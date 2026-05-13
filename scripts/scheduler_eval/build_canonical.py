@@ -59,7 +59,7 @@ from app.canonical_library import (   # noqa: E402
     SCHEDULE_CONFIDENCE_BEST_KNOWN,
 )
 from app.quality_floors import fixture_floors   # noqa: E402
-from app.quality_report import build_quality_report  # noqa: E402
+from app.quality_report import compute_metrics  # noqa: E402
 
 
 def _matches_to_dicts(matches: list[Match]) -> list[dict[str, Any]]:
@@ -201,9 +201,11 @@ def build_canonical(n_teams: int, mpt: int, tpa: int, cooldown: int,
         verbose=verbose,
     )
 
-    # Compute quality report — this gives us the achieved metrics and
-    # floor comparison data that's embedded in the canonical entry.
-    quality_report = build_quality_report(
+    # Compute metrics — observed values vs theoretical floors. The
+    # canonical's stored quality_report carries METRICS ONLY; scores
+    # are derived at read time so canonical scoring always reflects
+    # current scoring curves. See app/quality_report.py for the split.
+    quality_metrics = compute_metrics(
         matches=_matches_to_dicts(matches),
         n_teams=n_teams,
         matches_per_team=mpt,
@@ -220,22 +222,22 @@ def build_canonical(n_teams: int, mpt: int, tpa: int, cooldown: int,
     #   proven_optimal-floor metric also hits its floor. That means
     #   the schedule is mathematically optimal under known lower bounds.
     # - 'best_known' otherwise.
-    all_matched = quality_report['summary']['all_proven_floors_matched']
-    par_quad_matched = quality_report['metrics']['par_quad']['matches_floor']
-    opp_quad_matched = quality_report['metrics']['opp_quad']['matches_floor']
+    all_matched = quality_metrics['summary']['all_proven_floors_matched']
+    par_quad_matched = quality_metrics['metrics']['par_quad']['matches_floor']
+    opp_quad_matched = quality_metrics['metrics']['opp_quad']['matches_floor']
     if all_matched and par_quad_matched and opp_quad_matched:
         confidence = SCHEDULE_CONFIDENCE_MATCHES_FLOOR
     else:
         confidence = SCHEDULE_CONFIDENCE_BEST_KNOWN
 
     if verbose:
-        achieved = quality_report['achieved_lex_tuple']
+        achieved = quality_metrics['achieved_lex_tuple']
         print(f"  achieved lex tuple: {achieved[:3]}...")
-        print(f"  par_quad: {quality_report['metrics']['par_quad']['value']} "
-              f"(floor {quality_report['metrics']['par_quad']['floor']}, "
+        print(f"  par_quad: {quality_metrics['metrics']['par_quad']['value']} "
+              f"(floor {quality_metrics['metrics']['par_quad']['floor']}, "
               f"matches: {par_quad_matched})")
-        print(f"  opp_quad: {quality_report['metrics']['opp_quad']['value']} "
-              f"(floor {quality_report['metrics']['opp_quad']['floor']}, "
+        print(f"  opp_quad: {quality_metrics['metrics']['opp_quad']['value']} "
+              f"(floor {quality_metrics['metrics']['opp_quad']['floor']}, "
               f"matches: {opp_quad_matched})")
         print(f"  confidence: {confidence}")
 
@@ -249,8 +251,8 @@ def build_canonical(n_teams: int, mpt: int, tpa: int, cooldown: int,
         cooldown           = cooldown,
         confidence         = confidence,
         matches            = _matches_to_dicts(matches),
-        achieved_lex_tuple = list(quality_report['achieved_lex_tuple']),
-        quality_report     = quality_report,
+        achieved_lex_tuple = list(quality_metrics['achieved_lex_tuple']),
+        quality_report     = quality_metrics,  # metrics-only; no scores
         provenance         = methodology,
     )
     return entry

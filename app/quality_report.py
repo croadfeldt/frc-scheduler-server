@@ -1,49 +1,61 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # FRC Match Scheduler
 # Copyright (C) 2025 FRC Match Scheduler Contributors
-"""Per-schedule quality report builder.
+"""Per-schedule quality data — split into:
 
-Constructs the rich `quality_report` dict embedded in canonical
-library entries and stored in the `quality_report` column of
-`abstract_schedules`. The report is the single source of truth for
-"how good is this schedule" — used by:
+  - compute_metrics(matches, shape): pure metrics calculation, persisted
+    to DB. Deterministic given the matches; stable for the lifetime
+    of an AbstractSchedule.
 
-  - canonical producer (build_canonical.py): captures the report at
-    library-build time so the API can serve it without recomputation
-  - /api/schedules endpoint: builds the report at generation time
-    for non-canonical schedules
-  - UI Quality card: consumes the report to display per-criterion
-    scores, floor comparisons, and confidence labels
+  - apply_scores(metrics_report, weights): derives the per-criterion +
+    composite scores. Never persisted. Computed at read time so that
+    evolving scoring curves don't strand stored scores in the past.
 
-Report shape:
+  - build_quality_report(matches, shape, weights): convenience compose
+    of the two for API response builders that want metrics + scores
+    in a single round trip.
+
+Why the split? Scoring curves and weight defaults will evolve as we
+learn more about what good schedules look like. If we persist
+scores, they go stale the moment we tune the curves. By persisting
+only the metrics (observed facts about the schedule, immutable given
+the schedule's matches) and deriving scores at every read, the
+displayed composite always reflects the current scoring code.
+
+Storage shape (metrics_report — what gets written to DB):
 
     {
-      "achieved_lex_tuple": [int, ...],     # 8-element from _score_from_state
-      "is_valid_paramount": bool,            # F1-e validity check
+      "achieved_lex_tuple": [int, ...],
+      "is_valid_paramount": bool,
       "metrics": {
-        "cooldown_violations": {
-          "value": int,
-          "floor": int,
-          "floor_confidence": "proven_optimal" | "proven_lower_bound",
-          "distance_from_floor": int,
-          "matches_floor": bool,
-        },
-        "par_quad": { ... },
-        "opp_quad": { ... },
-        "surrogate_count": { ... },
-        "rb_per_team": { ... },
-        "station_per_team_spread": { ... },
+        "cooldown_violations": {value, floor, floor_confidence,
+                                 distance_from_floor, matches_floor},
+        "par_quad":            {...},
+        "opp_quad":            {...},
+        "surrogate_count":     {...},
+        "rb_per_team":         {...},
+        "station_per_team_spread": {...},
       },
       "summary": {
-        "all_proven_floors_matched": bool,   # every proven_optimal floor hit
+        "all_proven_floors_matched": bool,
         "n_metrics_at_floor": int,
         "n_metrics_total": int,
       }
     }
 
-The report doesn't yet include the per-criterion 1-100 scoring (that's
-Phase C of the workstream). When Phase C lands, scoring fields are
-added to each metric dict.
+After apply_scores() adds the derived portion:
+
+    {
+      ...metrics_report...
+      "scores": {
+        "weights_used": {cooldown, partner, opponent, surrogate, color, station},
+        "per_criterion": {cooldown: {score, value, floor, weight, curve}, ...},
+        "composite": float,
+        "composite_uncapped": float,
+        "is_valid_paramount": bool,
+        "best_known_floors_used": bool,
+      }
+    }
 """
 
 from __future__ import annotations
@@ -57,23 +69,12 @@ from app.quality_floors import (
 )
 
 
-# Maps metric names in the floor catalog to where to find the corresponding
-# observed value in the lex tuple and other quality structures.
-# The lex tuple is, per app.scheduler._score_from_state:
-#   [0] cooldown_violations
-#   [1] par_quad
-#   [2] opp_quad
-#   [3] surrogate_count
-#   [4] rb_metric
-#   [5] station_pen
-#   [6] surrogate_spread (not yet in floor catalog)
-#   [7] match_equity (not yet in floor catalog)
+# ── Helpers ─────────────────────────────────────────────────────────────
 
 
 def _max_color_imbalance_per_team(matches: list[Any]) -> int:
-    """Max |red_count - blue_count| across teams. Used to compute
-    'rb_per_team' against its per-team floor.
-    """
+    """Max |red_count - blue_count| across teams. Computes the
+    'rb_per_team' observed value for the metrics dict."""
     if not matches:
         return 0
     red_counts: dict[int, int] = {}
@@ -94,11 +95,9 @@ def _max_color_imbalance_per_team(matches: list[Any]) -> int:
 
 def _max_station_spread_per_team(matches: list[Any]) -> int:
     """Max (max_pos_count - min_pos_count) across teams over the 6
-    station-color positions {R1, R2, R3, B1, B2, B3}.
-    """
+    station-color positions {R1, R2, R3, B1, B2, B3}."""
     if not matches:
         return 0
-    # counts[t] = [r1, r2, r3, b1, b2, b3]
     counts: dict[int, list[int]] = {}
     for m in matches:
         red  = m['red']  if isinstance(m, dict) else m.red
@@ -112,45 +111,30 @@ def _max_station_spread_per_team(matches: list[Any]) -> int:
     return max(max(c) - min(c) for c in counts.values())
 
 
-def build_quality_report(matches: list[Any],
-                         n_teams: int,
-                         matches_per_team: int,
-                         teams_per_alliance: int,
-                         cooldown: int,
-                         lex_tuple: tuple | list | None = None,
-                         weights: dict[str, float] | None = None,
-                         use_best_known_floors: bool = True,
-                         ) -> dict[str, Any]:
-    """Construct the quality_report dict for a schedule.
+# ── compute_metrics: pure, persisted ───────────────────────────────────
 
-    Args:
-        matches: list of Match-shaped dicts (red, blue, surrogate flags)
-                  or Match NamedTuples. Either accepted.
-        n_teams: number of teams in the fixture.
-        matches_per_team: MPT.
-        teams_per_alliance: TPA (typically 3 for FRC).
-        cooldown: paramount cooldown floor.
-        lex_tuple: optional pre-computed lex tuple. If None, computed
-                   from matches.
-        weights: optional quality_weights dict for scoring (Phase C). If
-                 None, FRC-priority-derived DEFAULT_QUALITY_WEIGHTS used.
-        use_best_known_floors: when True (default), the scoring layer
-                 looks up the fixture's canonical library entry and uses
-                 its achieved values as best-known floors. Set False for
-                 strict count-floor scoring.
 
-    Returns:
-        Quality report dict (see module docstring for shape) including
-        Phase C scoring fields: `scores.composite`, `scores.per_criterion`,
-        `scores.weights_used`.
+def compute_metrics(matches: list[Any],
+                     n_teams: int,
+                     matches_per_team: int,
+                     teams_per_alliance: int,
+                     cooldown: int,
+                     lex_tuple: tuple | list | None = None,
+                     ) -> dict[str, Any]:
+    """Pure metrics calculation.
+
+    Output is deterministic given the matches and is what gets
+    persisted to DB. No scoring data, no weights — just observations
+    of the schedule against the fixture's mathematical floors.
+
+    Callers persisting to DB MUST use this function (not
+    build_quality_report) so the stored data carries no scoring
+    artifacts that could go stale.
     """
-    # Compute lex tuple if not supplied. Late import to avoid app/quality.py
-    # → app/scheduler.py import cycle at module load (app.quality_report is
-    # imported by app.quality / app.main).
+    # Compute lex tuple if not supplied. Late imports avoid module
+    # load cycles (app.scheduler -> app.quality -> app.quality_report).
     if lex_tuple is None:
-        from app.scheduler import score_tuple_for_schedule
-        # Convert dict matches to Match NamedTuple if needed
-        from app.scheduler import Match
+        from app.scheduler import score_tuple_for_schedule, Match
         ms: list[Match] = []
         for m in matches:
             if isinstance(m, dict):
@@ -166,21 +150,13 @@ def build_quality_report(matches: list[Any],
                                               ideal_gap=cooldown)
     lex_tuple = list(lex_tuple)
 
-    # Compute the per-team max metrics that aren't directly in the lex tuple
     rb_max      = _max_color_imbalance_per_team(matches)
     station_max = _max_station_spread_per_team(matches)
 
-    # Look up floors
     ff: FixtureFloors = fixture_floors(
         n_teams, matches_per_team, teams_per_alliance, cooldown
     )
 
-    # Build per-metric dicts. For each, capture:
-    #   - observed value
-    #   - floor value
-    #   - floor confidence
-    #   - distance from floor
-    #   - matches_floor flag (value == floor)
     def _metric_record(metric_name: str, observed: int | float) -> dict[str, Any]:
         floor = ff.floors.get(metric_name)
         if floor is None:
@@ -209,7 +185,6 @@ def build_quality_report(matches: list[Any],
         'station_per_team_spread': _metric_record('station_per_team_spread', station_max),
     }
 
-    # Summary
     proven_optimal_floors = [m for m in metrics.values()
                              if m['floor_confidence'] == CONFIDENCE_PROVEN_OPTIMAL]
     all_proven_floors_matched = (
@@ -218,10 +193,9 @@ def build_quality_report(matches: list[Any],
     )
     n_at_floor = sum(1 for m in metrics.values() if m['matches_floor'])
 
-    # F1-e validity check: cooldown_violations == 0
     is_valid_paramount = metrics['cooldown_violations']['value'] == 0
 
-    report: dict[str, Any] = {
+    return {
         'achieved_lex_tuple':  lex_tuple,
         'is_valid_paramount':  is_valid_paramount,
         'metrics':             metrics,
@@ -232,24 +206,80 @@ def build_quality_report(matches: list[Any],
         },
     }
 
-    # ── Phase C: per-criterion scoring + composite ─────────────────────
-    # Compute 1-100 scores per criterion + a weighted composite. When
-    # use_best_known_floors=True and a canonical library entry exists
-    # for this shape, the canonical's achieved values are used as the
-    # floor for scoring purposes — meaningful for fixtures with
-    # structural gaps (e.g., 12×6 cd=2) where count-floors aren't
-    # achievable.
+
+# ── apply_scores: derived, never persisted ────────────────────────────
+
+
+def apply_scores(metrics_report: dict[str, Any],
+                  weights: dict[str, float] | None = None,
+                  *,
+                  n_teams: int | None = None,
+                  matches_per_team: int | None = None,
+                  teams_per_alliance: int | None = None,
+                  cooldown: int | None = None,
+                  use_best_known_floors: bool = True,
+                  ) -> dict[str, Any]:
+    """Derive per-criterion + composite scores from a metrics_report.
+
+    Returns a NEW dict; does not mutate input. The shape parameters
+    are used to look up canonical library entries for best-known
+    floor scoring; if any is missing, scoring falls back to
+    count-floors only.
+
+    This function is called at read time (GET endpoint, /rescore,
+    /score-preview) — never at write time. That guarantees displayed
+    scores always reflect current scoring code under current weights.
+    """
     from app.quality_scoring import compute_scores, best_known_floors_from_canonical
+
     bk_floors = None
-    if use_best_known_floors:
+    if use_best_known_floors and n_teams is not None and matches_per_team is not None:
         bk_floors = best_known_floors_from_canonical(
-            n_teams, matches_per_team, teams_per_alliance, cooldown
+            n_teams, matches_per_team,
+            teams_per_alliance if teams_per_alliance is not None else 3,
+            cooldown if cooldown is not None else 2,
         )
-    scores = compute_scores(report, weights=weights, best_known_floors=bk_floors)
-    report['scores'] = scores
-    report['scores']['best_known_floors_used'] = bk_floors is not None
+    scores = compute_scores(metrics_report, weights=weights,
+                             best_known_floors=bk_floors)
 
-    return report
+    out = dict(metrics_report)
+    # Defensive: if input had a stale 'scores' field (from pre-split
+    # persistence), the new derived one replaces it.
+    out['scores'] = dict(scores)
+    out['scores']['best_known_floors_used'] = bk_floors is not None
+    return out
 
 
-__all__ = ['build_quality_report']
+# ── build_quality_report: convenience compose ─────────────────────────
+
+
+def build_quality_report(matches: list[Any],
+                         n_teams: int,
+                         matches_per_team: int,
+                         teams_per_alliance: int,
+                         cooldown: int,
+                         lex_tuple: tuple | list | None = None,
+                         weights: dict[str, float] | None = None,
+                         use_best_known_floors: bool = True,
+                         ) -> dict[str, Any]:
+    """Convenience: compute metrics AND apply scores in one call.
+
+    Used by API response builders that want a complete view of a
+    schedule's quality data. Persistence callers should use
+    compute_metrics() directly — persisting the output of this
+    function would store derivable scoring data, defeating the
+    point of the split.
+    """
+    metrics_report = compute_metrics(
+        matches, n_teams, matches_per_team, teams_per_alliance, cooldown,
+        lex_tuple=lex_tuple,
+    )
+    return apply_scores(
+        metrics_report, weights=weights,
+        n_teams=n_teams, matches_per_team=matches_per_team,
+        teams_per_alliance=teams_per_alliance, cooldown=cooldown,
+        use_best_known_floors=use_best_known_floors,
+    )
+
+
+__all__ = ['compute_metrics', 'apply_scores', 'build_quality_report']

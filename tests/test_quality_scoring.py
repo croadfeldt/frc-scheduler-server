@@ -325,29 +325,31 @@ check("integrated with custom weights: weights_used.partner = 3",
 # 8. Real canonical scoring
 # ─────────────────────────────────────────────────────────────────────────
 
-print("\nReal canonical scoring:")
+print("\nReal canonical scoring (metrics-only storage; scores derived):")
 
 try:
     from app.canonical_library import load_canonical
+    from app.quality_report import apply_scores
     e = load_canonical(36, 7, 3, 2)
     if e is not None:
-        # The canonical's stored quality_report should have 'scores'.
-        check("36×7 canonical has scores",
-              'scores' in e.quality_report)
-        # Composite should be a sensible 0-100 number
-        comp = e.quality_report.get('scores', {}).get('composite')
-        check("36×7 canonical composite is sensible (0-100)",
+        # Canonical storage is metrics-only — no 'scores' in stored JSON.
+        check("36×7 canonical does NOT have stored scores (metrics-only)",
+              'scores' not in e.quality_report)
+        # Derive scores at read time
+        scored = apply_scores(e.quality_report,
+                               n_teams=36, matches_per_team=7,
+                               teams_per_alliance=3, cooldown=2)
+        comp = scored['scores']['composite']
+        check("36×7 derived composite is sensible (0-100)",
               isinstance(comp, (int, float)) and 0 <= comp <= 100,
               f"got {comp!r}")
-        # Re-scoring should be deterministic — but uses canonical's
-        # own values as best-known floor (the canonical is its own
-        # best-known). Need to pass best_known_floors explicitly to
-        # match how it was stored.
-        bk = best_known_floors_from_canonical(36, 7, 3, 2)
-        re_scored = compute_scores(e.quality_report, best_known_floors=bk)
-        check("re-scoring with best_known_floors matches stored",
-              abs(re_scored['composite'] - comp) < 0.1,
-              f"stored={comp} re-scored={re_scored['composite']}")
+        # Re-scoring same metrics yields same composite
+        scored2 = apply_scores(e.quality_report,
+                                n_teams=36, matches_per_team=7,
+                                teams_per_alliance=3, cooldown=2)
+        check("re-deriving scores is deterministic",
+              abs(scored2['scores']['composite'] - comp) < 0.01,
+              f"first={comp} second={scored2['scores']['composite']}")
 except Exception as exc:
     print(f"  (skipping real canonical test: {exc})")
 

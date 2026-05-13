@@ -340,70 +340,6 @@
       "all_proven_floors_matched": false,
       "n_metrics_at_floor": 2,
       "n_metrics_total": 6
-    },
-    "scores": {
-      "weights_used": {
-        "cooldown": 1.0,
-        "partner": 1.0,
-        "opponent": 1.0,
-        "surrogate": 0.5,
-        "color": 0.5,
-        "station": 0.5
-      },
-      "per_criterion": {
-        "cooldown": {
-          "metric": "cooldown_violations",
-          "value": 0,
-          "floor": 0,
-          "score": 100.0,
-          "weight": 1.0,
-          "curve": "binary"
-        },
-        "partner": {
-          "metric": "par_quad",
-          "value": 192,
-          "floor": 192,
-          "score": 100.0,
-          "weight": 1.0,
-          "curve": "quadratic"
-        },
-        "opponent": {
-          "metric": "opp_quad",
-          "value": 408,
-          "floor": 408,
-          "score": 100.0,
-          "weight": 1.0,
-          "curve": "quadratic"
-        },
-        "surrogate": {
-          "metric": "surrogate_count",
-          "value": 0,
-          "floor": 0,
-          "score": 100.0,
-          "weight": 0.5,
-          "curve": "linear"
-        },
-        "color": {
-          "metric": "rb_per_team",
-          "value": 2,
-          "floor": 2,
-          "score": 100.0,
-          "weight": 0.5,
-          "curve": "linear"
-        },
-        "station": {
-          "metric": "station_per_team_spread",
-          "value": 2,
-          "floor": 2,
-          "score": 100.0,
-          "weight": 0.5,
-          "curve": "linear"
-        }
-      },
-      "composite": 100.0,
-      "composite_uncapped": 100.0,
-      "is_valid_paramount": true,
-      "best_known_floors_used": true
     }
   },
   "provenance": {
@@ -413,8 +349,8 @@
     "successes": 2,
     "failures": 0,
     "best_seed": 30000,
-    "wall_clock_s": 1.6,
-    "generated_at": "2026-05-13T11:14:44.438031+00:00",
+    "wall_clock_s": 1.5,
+    "generated_at": "2026-05-13T13:06:28.528869+00:00",
     "git_commit": null
   }
 }
