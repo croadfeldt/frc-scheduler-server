@@ -324,13 +324,56 @@ forcing two non-interacting team groups. Re-exported through
 `app/quality.py` for application use. 50+ test assertions in
 `tests/test_quality_floors.py`. Full math derivations and proofs
 in `docs/scheduler/quality-floors.md`. **Phase A complete.**
-Phase B (canonical schedule library — pre-computed best-known
-schedules for the 5-shape proving inventory: 12×6, 24×8, 36×7,
-20×8 surrogate-required, 60×12 CP-SAT-infeasible), Phase C
-(scoring framework: per-criterion 1-100 distance-from-floor with
-organizer-tunable weights and weighted composite), and Phase D
-(standing eval suite) follow in subsequent sessions. 14 test
-suites pass.
+
+Then shipped **Phase B** (canonical schedule library + unified
+schedules endpoint). Built `app/canonical_library.py` (JSON-file-
+backed loader with `CanonicalEntry` dataclass + load/save/list +
+3-level confidence vocabulary `proven_optimal` / `matches_floor` /
+`best_known`); `app/quality_report.py` (`build_quality_report()`
+constructs per-metric reports with value/floor/distance/confidence/
+matches_floor); `scripts/scheduler_eval/build_canonical.py`
+producer with provenance capture. **Built 5 canonicals**: 12×6,
+20×8 (surrogate-required), 24×8, 36×7, 60×12 all at cooldown=2.
+36×7 and 60×12 hit their par_quad proven_lower_bound floors
+(252/252 and 720/720). 12×6 has the expected gap (192/84 floor)
+because cooldown=2 forces two non-interacting team groups.
+
+API: **new `POST /api/schedules` unified endpoint** with
+`source_preference` ('auto' / 'canonical_library' / 'generated')
+plus import path via caller-supplied `matches` + optional
+`source_url`. New `GET /api/canonical-schedules` lists available
+shapes. Extended `GET /api/abstract-schedules/{id}` with `source`,
+`source_url`, `quality_report` fields (NULL on legacy rows).
+`POST /api/generate-abstract` preserved for UI back-compat, now
+populates `source='generated'` + `quality_report`.
+
+Schema migration adds `source` (VARCHAR(32)), `source_url`
+(TEXT), `quality_report` (JSONB) columns to `abstract_schedules`
+via the project's idempotent ADD COLUMN IF NOT EXISTS pattern.
+SQLAlchemy model updated.
+
+UI Quality card extended: **source banner** at the top (canonical
+library / generated / imported with star/gear/arrow icon and
+optional source URL link); collapsible **"Theoretical floor
+comparison"** section with per-metric value/floor/distance/
+confidence table and summary banner showing N-of-M metrics
+at-floor. `loadDiversityReport()` now fetches the schedule object
+in parallel and merges `source` + `quality_report` so the card
+can render the new sections without an extra round-trip.
+
+`tests/test_canonical_library.py` with 50+ assertions covers
+save/load round-trip, missing-file handling, report shape, and
+real-canonical rebuild round-trip (every built canonical's
+quality_report rebuilds to exactly its stored values). New
+`docs/scheduler/canonical-library.md`. v1.0 build budget was
+100K SA iter × 3 seeds per shape (low for prototyping); higher-
+budget re-curation on Stark and CP-SAT producer mode for
+proven_optimal upgrades are scheduled for v1.1+. **Phase B
+complete.** 15 test suites pass.
+
+Phase C (per-criterion 1-100 scoring with organizer-tunable
+weights) and Phase D (standing eval suite) follow in subsequent
+sessions.
 
 ---
 
@@ -382,6 +425,7 @@ all surface FRC compliance state to the user.
 | **D5 decision: paramount cooldown = 2 project-wide, user-tunable** (this session) | ✓ | Verified actual FRC §10.5.2 text by fetching the 2026 Game Manual. Manual confirms cooldown is the #1 priority criterion, phrased as "at least the minimum required time between MATCHES (varies by event size)" — a **floor**, not a maximization target. No specific value or per-size table is published anywhere. Project commits to **cooldown=2** as our default value (high enough to forbid back-to-back; low enough that one-play-per-round is structurally always honored; leaves maximum search-space for criteria 2-6). **Cooldown remains user-tunable** in the API (`AbstractGenerateRequest`/`AssignRequest.cooldown`, range 1-20) and UI (cooldown + assignCooldown inputs). Updated 10 sites: `docs/scheduler/phase1-f1e-eval-methodology.md` (full project-policy section + caveat), `app/main.py:354,414` (API defaults), `static/index.html` (5 UI sites: input defaults, hint text, JS reset + parsing fallbacks), `app/schedule_derive.py:220` (derivation fallback), `app/frc_compliance.py` (`DEFAULT_COOLDOWN=2`; audit-trail key renamed `frc_default`→`project_default`), `docs/scheduler/FRC_COMPLIANCE.md` (request example + audit example + criteria mentions), `tests/test_match_sa.py:make_test_schedule` cap, `scripts/cp_sat/pairing_optimum.py` (function-sig + CLI default), `scripts/scheduler_eval/fixtures/2026mnst.json` (added `"cooldown": 2`). `tests/test_frc_compliance.py` updated: assertions converted from hard-coded `cooldown_used=3` to `DEFAULT_COOLDOWN`; key reference updated to `project_default`. D5 added to workstream `Decisions locked in` section alongside D1-D4. 13 test suites pass. |
 | **F1-c CP-SAT-as-construction prototype + Q4 closure + production bug fix** (this session) | ✓ | Built CP-SAT-as-construction prototype at `scripts/cp_sat/cpsat_construction_prototype.py`. Ran 6 fixtures × 2 arms (cpsat-then-sa vs greedy-then-sa) at D5 cooldown=2. **Surprising result**: identical lex tuples on every tested fixture where CP-SAT terminated (12×6: par_quad=192 both arms; 16×6: par_quad=106 both arms; 24×6: par_quad=144 both arms; 36×7: par_quad=252 both arms). CP-SAT killed by resource limits on 42×11 and 48×9; greedy-then-SA produces valid schedules at those scales in ~8s. **Q4 architectural answer: keep greedy-then-SA as production construction.** Discovered and fixed a production bug along the way: `_sa_optimize` called `_build_match_state(work)` without passing `ideal_gap`, so SA always ran with cooldown threshold=3 regardless of caller's intent. This affected every production schedule generated with cooldown≠3 (which is all of them since D5 set project default to 2). **Fix shipped**: `_sa_optimize` now accepts `ideal_gap` kwarg with default 3 (back-compat); both production callers (`generate_matches`, `_assign_unified`) pass through their `ideal_gap`. `_assign_unified` also fixed to pass `ideal_gap` to `score_tuple_for_schedule`. F1-a's "SA can't reach cd=0 on 12×6" finding was an artifact of this bug (was measuring cooldown=3 boundary infeasibility, not cooldown=2). New `docs/scheduler/phase1-f1c-cpsat-construction.md`. Q4 closed in workstream. 13 test suites pass. |
 | **Schedule Quality Framework Phase A: theoretical floors** (this session) | ✓ | New `app/quality_floors.py` module: computes mathematical lower bounds for every schedule-quality metric on any FRC fixture shape `(n, MPT, tpa, cooldown)`. Floors covered: cooldown_violations, surrogate_count, color_per_team, station_per_team_spread, partner_pair_count, par_quad, opponent_pair_count, opp_quad. Each floor carries a `confidence` label: `proven_optimal` (achievability proven by basic counting/pigeonhole — 6 of 8 metrics), `proven_lower_bound` (proven lower bound; achievability may be higher due to structural constraints — par_quad, opp_quad), or `best_known` (reserved for future use). Each `Floor` object includes a `proof_note` for auditability. **Validated against F1-c observations**: on 24×6 (par_quad floor=144, observed=144) and 36×7 (floor=252, observed=252) our scheduler hits the proven lower bound exactly. On 12×6 cooldown=2 there's a gap (floor=84, observed=192) due to the cooldown=2 structural constraint forcing two non-interacting team groups; floor is mathematically tight but the constraint-aware achievable minimum is higher. CP-SAT couldn't prove a tighter bound on 16×6 at 240s. New `app/quality_floors.py` (proper module), `tests/test_quality_floors.py` (50+ assertions covering math + serialization + confidence labels + cooldown feasibility), `docs/scheduler/quality-floors.md` (full math derivations + proofs + caveats for each floor + future work notes). Re-exported through `app/quality.py` so any caller can `from app.quality import fixture_floors`. 14 test suites pass. **Phase A complete; Phase B (canonical library), Phase C (scoring), Phase D (standing eval) follow.** |
+| **Schedule Quality Framework Phase B: canonical library + unified schedules endpoint** (this session) | ✓ | Built the canonical schedule library — pre-computed best-known schedules served instead of regenerating. **Components shipped**: (1) `app/canonical_library.py` JSON-file-backed loader with `CanonicalEntry` dataclass + load/save/list functions + 3-level confidence vocabulary (`proven_optimal` / `matches_floor` / `best_known`); (2) `app/quality_report.py` `build_quality_report()` builds per-metric reports (value/floor/distance/confidence/matches_floor) used by both producer and runtime; (3) `scripts/scheduler_eval/build_canonical.py` producer script — SA-best-of-N, captures provenance (git commit, timestamp, methodology) in each canonical; (4) `app/canonical_schedules/` directory with **5 canonicals built**: 12×6, 20×8 (surrogate-required), 24×8, 36×7, 60×12 all at cooldown=2; (5) `POST /api/schedules` new unified endpoint — body specifies fixture shape + `source_preference` ('auto' / 'canonical_library' / 'generated'); supports import path via caller-supplied `matches` + optional `source_url`; (6) `GET /api/canonical-schedules` lists shapes with available canonicals; (7) extended `GET /api/abstract-schedules/{id}` response with `source`, `source_url`, `quality_report` fields (NULL on legacy rows); (8) `POST /api/generate-abstract` preserved for UI back-compat, now populates `source='generated'` + `quality_report` on every new row; (9) schema migration adds `source` (VARCHAR(32)), `source_url` (TEXT), `quality_report` (JSONB) columns to `abstract_schedules` via the existing idempotent ADD COLUMN IF NOT EXISTS pattern; (10) UI Quality card extended with source banner (canonical/generated/imported with link) + collapsible "Theoretical floor comparison" section (per-metric value/floor/distance/confidence table); (11) `tests/test_canonical_library.py` with 50+ assertions covering save/load round-trip, missing-file handling, real-canonical rebuild round-trip. **v1.0 build budget**: 100K SA iter × 3 seeds per shape; canonicals achieving `best_known` confidence. 36×7 and 60×12 hit par_quad floor (252/252 and 720/720); 12×6 expected gap (192/84 floor) due to cooldown=2 structural constraint. **Future work** (Stark territory, v1.1+): re-curate at 2M iter × 100+ seeds, add CP-SAT producer for proven_optimal upgrades, migrate to DB-backed library per `abstract-library.md` workstream, expand to full ~27-shape FRC inventory. New `docs/scheduler/canonical-library.md`. 15 test suites pass. |
 | **Schedule Quality Reporting Phase A** (this session)            | ✓ | `app/quality.py` created — unified scoring module consolidating today's four overlapping quality systems. Re-exports from `scripts/scheduler_eval/metrics.py` (THRESHOLDS, MetricResult, AnalysisReport, harness analyze). Adds shape-agnostic input (`_normalize_match` accepts dict/NamedTuple/dataclass), `DiversityReport` with `to_dict()` producing the legacy endpoint JSON shape exactly, `compute_diversity_report` and `analyze_against_thresholds` as application-friendly entry points, `composite_score` matching the runner's formula. `/api/abstract-schedules/{id}/diversity-report` refactored from 145 inline lines down to a 5-line `compute_diversity_report` call. New `tests/test_quality.py` (45+ checks) covers shape-agnostic inputs, frontend JSON contract preservation, threshold-analysis equivalence with direct harness call, theoretical floors, and pair-table sanity. All 13 test suites pass. |
 | **v1.1 architecture confirmed** (this session)                   | ✓ | Confirmed the two foundational workstreams for v1.1: abstract schedule library (lookup-first, cache-always-on-miss) and unified schedule-quality scoring (one canonical framework consumed by API, UI, eval harness, and library). Both docs already existed from a prior session; this session re-verified the structure, sharpened the "always cache" emphasis in `workstreams/abstract-library.md`, and confirmed both are referenced from v1.1 of ROADMAP. ADR 006's retirement work simplifies to ~half a day once the library lands. |
 | **Abstract library + quality reporting** (this session)          | ☐ | Two new v1.1 workstreams captured. `workstreams/abstract-library.md` defines a lookup-first/cache-on-miss library of pre-computed best-known abstracts per FRC fixture shape; `workstreams/schedule-quality-reporting.md` defines a unified quality framework consolidating today's four overlapping scoring systems with tiered UI exposure. Latter supersedes `ui-quality-exposure.md`. ROADMAP v1.1 rewritten around them. Code work not yet started; design captured for follow-up. |

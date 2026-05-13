@@ -1018,6 +1018,18 @@ async def generate_abstract(
 
         try:
             async with AsyncSessionLocal() as db:
+                # Build the per-schedule quality report (Phase B of the
+                # Schedule Quality Framework). Embed it so the UI's
+                # Quality card can render floor-comparison data without
+                # an extra round-trip.
+                from app.quality_report import build_quality_report
+                quality_report = build_quality_report(
+                    matches=result["matches"],
+                    n_teams=body.num_teams,
+                    matches_per_team=body.matches_per_team,
+                    teams_per_alliance=3,
+                    cooldown=body.cooldown,
+                )
                 sched = AbstractSchedule(
                     event_id=body.event_id, name=body.name,
                     num_teams=body.num_teams, matches_per_team=body.matches_per_team,
@@ -1028,6 +1040,9 @@ async def generate_abstract(
                     round_boundaries={str(k): v for k, v in result["round_boundaries"].items()},
                     day_config=body.day_config,
                     weights=body.weights,  # None = FIRST defaults
+                    source='generated',
+                    source_url=None,
+                    quality_report=quality_report,
                 )
                 db.add(sched)
                 await db.commit()
@@ -1041,6 +1056,227 @@ async def generate_abstract(
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","Connection":"keep-alive"})
+
+
+# ── Schedule Quality Framework Phase B: unified schedules endpoint ──────────
+#
+# POST /api/schedules is the new unified entry point. It returns a
+# schedule for a fixture shape, sourced from the canonical library if
+# available, otherwise generated fresh.
+#
+# Difference from POST /api/generate-abstract (preserved for UI
+# backward-compat, eventual deprecation):
+#   - Synchronous (no SSE streaming); canonical-library hits are fast
+#     and generation paths complete in reasonable time
+#   - Source preference selectable; can force regeneration or
+#     force-library lookup
+#   - Response includes the full quality_report inline (provenance,
+#     per-metric values, floors, distance-from-floor, confidence)
+#   - Schedule is stored with source/source_url/quality_report fields
+#     populated for tracking and audit
+
+class UnifiedScheduleRequest(BaseModel):
+    """Request body for POST /api/schedules.
+
+    Either request a generated schedule (consults the canonical library
+    first, falls through to SA generation if no canonical exists), or
+    import an externally-sourced schedule (caller supplies the matches).
+    """
+    num_teams:          int        = Field(..., ge=6, le=120)
+    matches_per_team:   int        = Field(6, ge=1, le=50)
+    teams_per_alliance: int        = Field(3, ge=2, le=4)
+    cooldown:           int        = Field(2, ge=1, le=20)
+    # Source preference: 'auto' (canonical if available, else generate),
+    # 'canonical_library' (require library hit; 404 if none),
+    # 'generated' (force fresh generation, bypass library)
+    source_preference:  str        = Field('auto')
+    # Generation knobs (when not loading from library)
+    seed:               str | None = Field(None, max_length=16)
+    sa_iterations:      int        = Field(500_000, ge=0, le=5_000_000)
+    weights:            dict[str, float] | None = None
+    # Storage metadata
+    name:               str        = Field("Schedule", max_length=128)
+    event_id:           int | None = None
+    day_config:         Any        = None
+    # Imported schedules: caller supplies matches; source='imported'.
+    matches:            list[dict] | None = None
+    source_url:         str | None = Field(None, max_length=512)
+
+
+@app.post("/api/schedules")
+@limiter.limit("10/minute")
+async def create_schedule(
+    request: Request,
+    body: UnifiedScheduleRequest,
+    user: dict = Depends(require_auth),
+):
+    """Unified schedule endpoint. Returns an abstract schedule with
+    full provenance and quality report.
+
+    Source preference logic:
+      - 'auto' (default): check canonical library; if hit, serve it.
+        Otherwise generate via SA. Always returns a schedule.
+      - 'canonical_library': require canonical hit. 404 if no canonical
+        for the requested shape.
+      - 'generated': bypass library, always generate fresh.
+
+    If `body.matches` is non-None, source='imported' overrides
+    source_preference; the caller-supplied schedule is stored as-is
+    with the optional source_url for provenance.
+
+    Always returns a stored AbstractSchedule row's data, including
+    the quality_report and source/source_url fields.
+    """
+    # Late imports to avoid circular references at app startup.
+    from app.canonical_library import load_canonical
+    from app.quality_report import build_quality_report
+
+    body.day_config = _normalize_dc(body.day_config)
+
+    n   = body.num_teams
+    mpt = body.matches_per_team
+    tpa = body.teams_per_alliance
+    cd  = body.cooldown
+
+    matches:        list[dict] | None = None
+    source:         str               = ''
+    source_url:     str | None        = body.source_url
+    quality_report: dict              = {}
+    surrogate_count_list: list[int] | None = None
+    round_boundaries: dict[str, int] | None = None
+    score:            float = 0.0
+    iterations_run:   int   = 0
+    best_iteration:   int   = 0
+
+    # 1. Import path: caller supplied matches.
+    if body.matches is not None:
+        matches    = body.matches
+        source     = 'imported'
+        quality_report = build_quality_report(
+            matches=matches, n_teams=n, matches_per_team=mpt,
+            teams_per_alliance=tpa, cooldown=cd,
+        )
+        surrogate_count_list = [
+            sum(int(s) for s in (m.get('red_surrogate', []) + m.get('blue_surrogate', [])))
+            for m in matches
+        ]
+        round_boundaries = {}
+
+    # 2. Canonical library hit.
+    elif body.source_preference in ('auto', 'canonical_library'):
+        entry = load_canonical(n, mpt, tpa, cd)
+        if entry is not None:
+            matches        = entry.matches
+            source         = 'canonical_library'
+            quality_report = entry.quality_report
+            surrogate_count_list = [
+                sum(int(s) for s in (m.get('red_surrogate', []) + m.get('blue_surrogate', [])))
+                for m in matches
+            ]
+            round_boundaries = {}
+        elif body.source_preference == 'canonical_library':
+            raise HTTPException(
+                404,
+                f"No canonical library entry for {n}×{mpt}×{tpa} cooldown={cd}",
+            )
+
+    # 3. Generation path (no import, no canonical hit, or source_preference='generated')
+    if matches is None:
+        _seed_int = int(body.seed, 16) if body.seed else None
+        loop = asyncio.get_event_loop()
+        pool = get_pool()
+        try:
+            future = loop.run_in_executor(
+                pool, run_iterations_worker,
+                (n, mpt, cd, 1, 0, _seed_int, body.weights),
+            )
+            result = await future
+        except Exception as e:
+            log.error("Schedule generation error: %s", e)
+            raise HTTPException(500, f"Generation failed: {e}")
+
+        matches              = result["matches"]
+        surrogate_count_list = result["surrogate_count"]
+        round_boundaries     = {str(k): v for k, v in result["round_boundaries"].items()}
+        score                = result["score"]
+        iterations_run       = 1
+        best_iteration       = 0
+        source               = 'generated'
+
+        quality_report = build_quality_report(
+            matches=matches, n_teams=n, matches_per_team=mpt,
+            teams_per_alliance=tpa, cooldown=cd,
+        )
+
+    # Persist to database
+    try:
+        async with AsyncSessionLocal() as db:
+            sched = AbstractSchedule(
+                event_id=body.event_id, name=body.name,
+                num_teams=n, matches_per_team=mpt,
+                cooldown=cd, seed=body.seed,
+                iterations_run=iterations_run, best_iteration=best_iteration,
+                score=score,
+                created_by=user["sub"] if user else None,
+                matches=matches,
+                surrogate_count=surrogate_count_list,
+                round_boundaries=round_boundaries,
+                day_config=body.day_config,
+                weights=body.weights,
+                source=source,
+                source_url=source_url,
+                quality_report=quality_report,
+            )
+            db.add(sched)
+            await db.commit()
+            await db.refresh(sched)
+    except Exception as e:
+        log.error("Schedule DB error: %s", e)
+        raise HTTPException(500, f"Database error: {e}")
+
+    return {
+        "id":               sched.id,
+        "name":             sched.name,
+        "event_id":         sched.event_id,
+        "num_teams":        sched.num_teams,
+        "matches_per_team": sched.matches_per_team,
+        "cooldown":         sched.cooldown,
+        "seed":             sched.seed,
+        "score":            sched.score,
+        "matches":          sched.matches,
+        "surrogate_count":  sched.surrogate_count,
+        "round_boundaries": sched.round_boundaries,
+        "day_config":       normalize_to_v2(sched.day_config),
+        "weights":          sched.weights,
+        "source":           sched.source,
+        "source_url":       sched.source_url,
+        "quality_report":   sched.quality_report,
+        "created_at":       sched.created_at.isoformat(),
+    }
+
+
+@app.get("/api/canonical-schedules")
+async def list_canonical_schedules():
+    """List all canonical library entries available for serving.
+
+    Used by the UI to know which shapes have pre-computed canonicals.
+    Full schedule data is fetched via POST /api/schedules with
+    source_preference='canonical_library'.
+    """
+    from app.canonical_library import list_canonicals
+    entries = list_canonicals()
+    return [
+        {
+            "n_teams":            e.n_teams,
+            "matches_per_team":   e.matches_per_team,
+            "teams_per_alliance": e.teams_per_alliance,
+            "cooldown":           e.cooldown,
+            "confidence":         e.confidence,
+            "achieved_lex_tuple": e.achieved_lex_tuple,
+            "matches_floor":      e.quality_report.get('summary', {}).get('all_proven_floors_matched', False),
+        }
+        for e in entries
+    ]
 
 
 @app.get("/api/abstract-schedules")
@@ -1077,6 +1313,11 @@ async def get_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(get
         # contract V2-only. Idempotent on V2 inputs.
         "day_config": normalize_to_v2(sched.day_config),
         "weights": sched.weights,  # None means FIRST defaults were used
+        # Schedule Quality Framework Phase B: provenance + quality report.
+        # NULL on legacy rows; populated for every new schedule.
+        "source": sched.source,
+        "source_url": sched.source_url,
+        "quality_report": sched.quality_report,
         "created_at": sched.created_at.isoformat(),
     }
 

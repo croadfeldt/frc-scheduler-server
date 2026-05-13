@@ -160,6 +160,22 @@ class AbstractSchedule(Base):
     # custom weights stays consistent on reload. See app.scheduler for shape.
     weights:          Mapped[Any|None] = mapped_column(JSON, nullable=True)
 
+    # Schedule Quality Framework Phase B fields. NULL on legacy rows;
+    # populated for every schedule created after the migration.
+    # source: where this schedule came from. One of:
+    #   'generated'         - SA-generated fresh
+    #   'canonical_library' - served from app/canonical_schedules/
+    #   'imported'          - user-uploaded (PDF, xlsx, etc.)
+    source:           Mapped[str|None] = mapped_column(String(32), nullable=True)
+    # source_url: optional URL pointing at the schedule's external source
+    # (e.g., a Statbotics event page, an FRC event archive link, or any
+    # other public reference). Only meaningful when source='imported'.
+    source_url:       Mapped[str|None] = mapped_column(Text, nullable=True)
+    # quality_report: full per-metric report keyed to fixture floors.
+    # See app.quality_report.build_quality_report for the dict shape.
+    # NULL on legacy rows; populated for every new schedule.
+    quality_report:   Mapped[Any|None] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     event:              Mapped["Event|None"]              = relationship(back_populates="abstract_schedules")
@@ -533,6 +549,27 @@ async def init_db(retries: int = 10, delay: float = 2.0) -> None:
                 ))
                 await conn.execute(text(
                     "ALTER TABLE abstract_schedules ADD COLUMN IF NOT EXISTS weights JSONB"
+                ))
+                # Schedule Quality Framework Phase B: track where each
+                # schedule came from and embed its quality report so the
+                # UI can display per-criterion / floor-comparison data
+                # without recomputing. source values:
+                #   'generated'         (legacy + new generations)
+                #   'canonical_library' (served from pre-computed library)
+                #   'imported'          (uploaded by user; source_url optional)
+                # quality_report is the full dict from app.quality_report.build_quality_report
+                # — per-metric value, floor, distance, confidence, matches_floor.
+                await conn.execute(text(
+                    "ALTER TABLE abstract_schedules "
+                    "ADD COLUMN IF NOT EXISTS source VARCHAR(32)"
+                ))
+                await conn.execute(text(
+                    "ALTER TABLE abstract_schedules "
+                    "ADD COLUMN IF NOT EXISTS source_url TEXT"
+                ))
+                await conn.execute(text(
+                    "ALTER TABLE abstract_schedules "
+                    "ADD COLUMN IF NOT EXISTS quality_report JSONB"
                 ))
                 # Interim admin flag — replaced by RBAC role grants
                 # (docs/workstreams/rbac.md) when that workstream lands.

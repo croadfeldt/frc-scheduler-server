@@ -81,39 +81,36 @@ When this work is complete:
 
 ---
 
-### Phase B — Canonical schedule library
+### Phase B — Canonical schedule library ✓ COMPLETE (this session, partial)
 
-**Goal:** For each fixture in the proving inventory, find and cache
-the best-known schedule. Tag each with achievability confidence.
+**Deliverables shipped:**
+- `app/canonical_library.py` — JSON-file-backed loader with `load_canonical()`, `save_canonical()`, `list_canonicals()`, `CanonicalEntry` dataclass, and 3-level confidence vocabulary (proven_optimal / matches_floor / best_known).
+- `app/quality_report.py` — `build_quality_report()` constructs the rich per-metric report (value / floor / distance / confidence / matches_floor) embedded in every canonical entry and every newly-stored abstract schedule.
+- `scripts/scheduler_eval/build_canonical.py` — producer script that runs SA-best-of-N for any fixture shape and writes the canonical JSON.
+- `app/canonical_schedules/` — directory with 5 canonicals built (12×6, 20×8 surrogate, 24×8, 36×7, 60×12 at cooldown=2).
+- `POST /api/schedules` — new unified endpoint with `source_preference` ('auto' / 'canonical_library' / 'generated') and import path (caller supplies matches).
+- `GET /api/canonical-schedules` — list endpoint for available canonicals.
+- `GET /api/abstract-schedules/{id}` — extended response with `source`, `source_url`, `quality_report` fields (NULL on legacy rows).
+- `POST /api/generate-abstract` — preserved for UI back-compat; now populates `source='generated'` and `quality_report` on every new row.
+- Schema migration adds `source`, `source_url`, `quality_report` columns to `abstract_schedules` table.
+- UI Quality card extended: source banner showing where the schedule came from, plus collapsible "Theoretical floor comparison" section with per-metric value/floor/distance/confidence table.
+- `tests/test_canonical_library.py` — 50+ assertions covering save/load round-trip, missing-file handling, report shape, real-canonical round-trip.
+- `docs/scheduler/canonical-library.md` — full documentation.
 
-**Tasks:**
-- Build a producer script that, given a fixture shape, runs a deep
-  search (CP-SAT for small fixtures with optimality proof; large-
-  budget SA for large fixtures with best-known confidence).
-- Cache schedules as JSON files in `app/canonical_schedules/`,
-  named by shape (e.g., `12x6_cd2.json`, `60x12_cd2.json`).
-- Each canonical entry includes:
-  - The schedule matches
-  - Achieved lex tuple
-  - Achieved per-metric values
-  - Floors for the fixture
-  - Distance-from-floor per metric
-  - Generation methodology + provenance
-  - Confidence: `proven_optimal` if CP-SAT proved it, `best_known`
-    otherwise
-- API extension: `GET /api/canonical-schedules?n=12&mpt=6&cooldown=2`
-  returns the cached canonical when available.
-- Tests: each canonical's stored values match recomputation;
-  proven_optimal entries actually meet their floors.
+**v1.0 build budget**: 100K SA iterations × 3 seeds per shape (low for prototyping; production target is 500K-2M × 20+ seeds on Stark).
 
-**Proving inventory (build first):**
-1. 12×6×3 cooldown=2 — small, CP-SAT-provable, structurally tight
-2. 24×8×3 cooldown=2 — medium, CP-SAT-provable
-3. 36×7×3 cooldown=2 — medium-large, 2026mnst shape
-4. 20×8×3 cooldown=2 — exercises surrogate code path
-5. 60×12×3 cooldown=2 — large, CP-SAT-infeasible
+**Confidence achieved**:
+- 36×7 cd=2: par_quad floor matched (252/252); opp_quad above floor → `best_known`
+- 60×12 cd=2: par_quad floor matched (720/720); opp_quad above floor → `best_known`
+- 24×8 cd=2: par_quad close but not at floor (198/192) → `best_known`
+- 20×8 cd=2: par_quad close but not at floor (198/160) → `best_known` (surrogate handling validated)
+- 12×6 cd=2: par_quad expected gap (192/84) due to cooldown=2 structural constraint → `best_known`
 
-**After proving:** scale to the full 27-shape inventory.
+**Future work** (out of Phase B scope, scheduled for v1.1+):
+- Higher-budget re-curation on Stark
+- CP-SAT producer mode for small fixtures (proves optimality)
+- DB migration per `abstract-library.md` workstream
+- Comprehensive ~27-shape FRC plausible-shape inventory
 
 ---
 
