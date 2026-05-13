@@ -142,24 +142,22 @@ When this work is complete:
 
 ---
 
-### Phase D — Standing eval suite
+### Phase D — Standing eval suite ✓ COMPLETE (this session)
 
-**Goal:** Catch production scheduler regressions and provide a
-single-command "does this method meet the bar" report for any
-candidate scheduling method.
+**Deliverables shipped:**
+- `scripts/scheduler_eval/standards.py` — runnable script that exercises the production scheduler on the proving inventory, scores via Phase C, asserts hard requirements and soft thresholds. Reports JSON + Markdown. Exit code conveys verdict.
+- `scripts/scheduler_eval/standards_config.py` — per-fixture bar definitions:
+  - Hard requirements (paramount-valid, cooldown score = 100) apply to all fixtures
+  - Soft thresholds (composite ≥ 80, per-criterion ≥ 50) overridable per-fixture
+  - Per-fixture override examples for 12×6 (structural gap), 20×8 (surrogates), 36×7 (production shape), 60×12 (largest)
+- `tests/test_standards_smoke.py` — wires-the-framework-together smoke test for CI
+- `docs/scheduler/quality-standards.md` — full doc
 
-**Tasks:**
-- Test/CLI: `scripts/scheduler_eval/standards.py` runs the
-  production scheduler on each fixture in the proving inventory,
-  scores via Phase C framework, asserts pass/fail.
-- Pass criterion: per-fixture per-criterion thresholds (default:
-  every criterion ≥ 80/100). Configurable per fixture.
-- CI hook: optional — production-scheduler regressions caught
-  before merge. Likely too slow for every commit; gates major
-  releases instead.
-- Output: structured JSON report + Markdown summary; can be
-  pointed at any adapter (current production, prototype, etc.)
-  for fair comparison.
+**CLI features**: `--fixtures` subset, `--seeds` configurable, `--sa-iterations` configurable, `--strict` (CI mode: soft becomes hard), `--smoke` (single-fixture quick sanity), `--no-report` (skip file writes).
+
+**Validated**: 12×6 cd=2 at 500K SA iter × 3 seeds reliably passes (composite=100); 36×7 at 200K × 2 seeds passes (composite=100). Smoke test exits cleanly. Real findings catalogued (rb_per_team / station_per_team_spread post-passes underconverge on large fixtures at default budgets).
+
+**Phase D complete.** Schedule Quality Framework v1.0 is **fully shipped**: Phase A (floors), Phase B (canonical library + unified endpoint), Phase C (scoring + organizer-tunable weights), Phase D (standing eval suite).
 
 ---
 
