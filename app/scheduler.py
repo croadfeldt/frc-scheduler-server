@@ -817,7 +817,7 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
     #
     # Skip when n_sa_iterations == 0 (legacy behavior).
     if n_sa_iterations > 0 and len(matches) > 0:
-        matches = _sa_optimize(matches, n_sa_iterations, rng)
+        matches = _sa_optimize(matches, n_sa_iterations, rng, ideal_gap=ideal_gap)
 
     # ── Phase 1: Red/Blue balance post-pass ─────────────────────────────────
     # After the SA settles, run a separable pass that flips whole-match R/B
@@ -1896,7 +1896,8 @@ def _propose_targeted_move(state: dict, matches: list[Match],
 
 
 def _sa_optimize(matches: list[Match], n_iterations: int,
-                 rng: random.Random) -> list[Match]:
+                 rng: random.Random,
+                 ideal_gap: int = 3) -> list[Match]:
     """Run simulated annealing on a feasible Match list (FRC-paramount).
 
     Move generator: pick two random match positions (each is a (match, side, idx)
@@ -1924,13 +1925,25 @@ def _sa_optimize(matches: list[Match], n_iterations: int,
         at the least-significant differing element. This honors FRC's
         "listed in order of priority" guarantee.
 
+    Args:
+        matches: feasible starting Match list.
+        n_iterations: SA iteration budget.
+        rng: random.Random for reproducibility.
+        ideal_gap: cooldown floor. Must match the value used to construct
+            `matches` — passed through to `_build_match_state` so that
+            cooldown_violations is computed against the right threshold and
+            the `_swap_preserves_cooldown` filter rejects gap < ideal_gap
+            swaps. Defaults to 3 for back-compat with existing callers
+            (some of which used `_sa_optimize` before this kwarg existed).
+            **New callers**: pass the same value used during construction.
+
     Returns the best-tuple schedule encountered.
     """
     if not matches or n_iterations <= 0:
         return matches[:]
 
     work = list(matches)
-    state = _build_match_state(work)
+    state = _build_match_state(work, ideal_gap=ideal_gap)
     cur_tuple = _score_from_state(state)
     best_tuple = cur_tuple
     best_snapshot = list(work)
@@ -2119,7 +2132,7 @@ def _assign_unified(abstract_matches: list[dict],
     rng = random.Random(seed)
     matches = _abstract_to_matches(abstract_matches, team_numbers, num_teams)
     if sa_iterations > 0:
-        matches = _sa_optimize(matches, sa_iterations, rng)
+        matches = _sa_optimize(matches, sa_iterations, rng, ideal_gap=ideal_gap)
 
     # Phase 1: R/B balance post-pass (commutative with all other criteria)
     if rb_post_pass and len(matches) > 0:
@@ -2133,7 +2146,7 @@ def _assign_unified(abstract_matches: list[dict],
         matches, _stats = station_balance_sa(matches, n_iterations=5000, seed=seed)
 
     score = score_schedule(matches, num_teams)
-    score_tuple = list(score_tuple_for_schedule(matches, num_teams))
+    score_tuple = list(score_tuple_for_schedule(matches, num_teams, ideal_gap=ideal_gap))
     slot_map = _matches_to_slot_map(matches, team_numbers, num_teams)
 
     return {

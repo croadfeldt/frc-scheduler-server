@@ -362,6 +362,22 @@ review and approve the package before Phase 2 begins.**
   Production-side `app/quality.py` mirrors changes; new `cooldown`
   kwarg on `analyze_against_thresholds`. 11 new test assertions in
   `tests/test_quality.py`. F1-c is now methodology-clean to run.
+- ✓ `scheduler/phase1-f1c-cpsat-construction.md` — F1-c prototype
+  run and Q4 closure. **Surprising finding**: with D5's cooldown=2
+  properly threaded, **CP-SAT-as-construction provides NO measurable
+  quality advantage over greedy-then-SA on any tested fixture**
+  (12×6, 16×6, 24×6, 36×7 all converge to identical lex tuples).
+  CP-SAT fails outright on larger fixtures (42×11 and 48×9 killed
+  by resource limits) while greedy-then-SA scales cleanly in ~8s.
+  F1-a's "SA can't reach cd=0 on 12×6" was a production-bug
+  artifact: `_sa_optimize` called `_build_match_state(work)` without
+  passing `ideal_gap`, so SA always ran with cooldown threshold=3
+  regardless of caller's intent. **Production fix shipped**:
+  `_sa_optimize` now accepts `ideal_gap` kwarg, threaded from both
+  production call sites (`generate_matches`, `_assign_unified`).
+  Default 3 preserved for back-compat. **Q4 closed**: greedy-then-SA
+  stays as production construction; CP-SAT remains a research tool,
+  not a production component. ADR 003 stands. 13 test suites pass.
 - ✓ `scheduler/phase1-q5-cooldown-feasibility.md` — Q5 first-cut:
   closed-form feasibility formula; full FRC-common space table;
   finding F5-1 (no infeasibility at typical cooldown in
