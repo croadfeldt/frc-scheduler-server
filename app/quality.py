@@ -69,6 +69,16 @@ from scripts.scheduler_eval.harness_types import (
     Match as HarnessMatch,
     Schedule as HarnessSchedule,
 )
+# Re-export theoretical floors (Phase A of the schedule-quality framework).
+# Callers that need floor-aware scoring import these.
+from app.quality_floors import (
+    Floor,
+    FixtureFloors,
+    fixture_floors,
+    CONFIDENCE_PROVEN_OPTIMAL,
+    CONFIDENCE_PROVEN_LOWER,
+    CONFIDENCE_BEST_KNOWN,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -621,4 +631,11 @@ __all__ = [
     "compute_diversity_report",
     "analyze_against_thresholds",
     "composite_score",
+    # Theoretical floors (Phase A of the quality framework).
+    "Floor",
+    "FixtureFloors",
+    "fixture_floors",
+    "CONFIDENCE_PROVEN_OPTIMAL",
+    "CONFIDENCE_PROVEN_LOWER",
+    "CONFIDENCE_BEST_KNOWN",
 ]
