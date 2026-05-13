@@ -46,8 +46,10 @@ def make_test_schedule(num_teams: int, mpt: int, seed: int) -> list[Match]:
     """Build an abstract schedule for testing — slot indices as team numbers.
 
     Uses the largest feasible ideal_gap for the fixture per the Q5
-    cooldown feasibility formula. Caps at 3 (the typical FRC default for
-    larger events) so tests aren't using artificially loose cooldowns.
+    cooldown feasibility formula, capped at 2 (the project default per
+    F1-e methodology decision — paramount-as-a-floor, see
+    `docs/scheduler/phase1-f1e-eval-methodology.md`). This matches what
+    production schedules use unless the event organizer overrides.
 
     Retries on ConstructionMalformedError (known Q4 issue on tight
     fixtures, 0-17% rate depending on shape) up to 20 times with
@@ -57,7 +59,7 @@ def make_test_schedule(num_teams: int, mpt: int, seed: int) -> list[Match]:
     from app.scheduler import ConstructionMalformedError
     total_matches = _math.ceil(num_teams * mpt / 6)
     cooldown_max = (total_matches - 1) // (mpt - 1) if mpt >= 2 else total_matches
-    ideal_gap = min(3, cooldown_max) if cooldown_max >= 1 else 1
+    ideal_gap = min(2, cooldown_max) if cooldown_max >= 1 else 1
     for attempt in range(20):
         try:
             result = generate_matches(num_teams=num_teams, matches_per_team=mpt,

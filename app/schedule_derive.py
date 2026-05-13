@@ -217,7 +217,7 @@ def derive_parameters(
                     min_gap = gap
             last_seen[t] = mn
 
-    cooldown = min_gap if min_gap is not None else 3
+    cooldown = min_gap if min_gap is not None else 2
     # Cooldown derived from data is a tight lower bound — the original
     # constraint may have been ≥ this value. Confidence is "medium"
     # because we can't tell whether the minimum we observed is the

@@ -44,7 +44,8 @@ generation request. The UI checkbox locks both to True.
 ## What's audited but not a deviation
 
 - **Cooldown (`ideal_gap`)** — FRC says this varies by event size.
-  Stored separately in `audit_trail.cooldown` when non-default (3).
+  Stored separately in `audit_trail.cooldown` when non-default (2 per
+  project policy; see `phase1-f1e-eval-methodology.md`).
   Does NOT unset `competition_approved`.
 - **Iteration count / quality preset** — controls search thoroughness,
   not algorithm choice. Always stored in `audit_trail.iterations_used`
@@ -85,8 +86,8 @@ When cooldown is non-default:
 ```json
 "cooldown": {
   "value": 5,
-  "frc_default": 3,
-  "note": "Cooldown editable per FRC's 'varies by event size' guidance; not a deviation but recorded for audit"
+  "project_default": 2,
+  "note": "Cooldown editable per FRC §10.5.2 'varies by event size' guidance; project default is 2 per F1-e methodology decision (paramount-as-a-floor); not a deviation but recorded for audit"
 }
 ```
 
@@ -129,7 +130,7 @@ provenance of an externally-built schedule). UI renders this as
   "competition_approved": true,        // UI hint, server validates
   "rb_post_pass": true,                // checkbox locks this on
   "station_post_pass": true,           // checkbox locks this on
-  "cooldown": 3                        // editable, audited if != 3
+  "cooldown": 2                        // editable, audited if != 2 (project default per F1-e)
 }
 ```
 

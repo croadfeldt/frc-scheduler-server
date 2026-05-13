@@ -195,32 +195,40 @@ formula. No back-compat break.
 Existing fixtures: add `"cooldown": N` to the JSON for the event's
 required minimum gap between a team's consecutive matches.
 
-> **Note on cooldown values.** FRC §10.5.2 establishes
-> "minimum required time between MATCHES (varies by event size)" as
-> the paramount scheduling criterion, but **does not publish a
-> specific value or per-size table.** The manual refers readers to
-> Idle Loop software's documentation for the algorithm.
+> **Project policy (2026-05-12): paramount cooldown = 2.**
 >
-> Observed FRC-published schedules and community discussion suggest
-> a *convention* (not a rule) of cooldown=4 for typical regional/
-> district events; smaller events relax to lower values, as
-> §10.6.6's back-to-back exception permits when scheduling math
-> doesn't allow more. The Q5 cooldown_max formula
-> `floor((M-1)/(MPT-1))` defines the upper bound a fixture can
-> tolerate before becoming infeasible.
+> FRC §10.5.2 establishes "minimum required time between MATCHES
+> (varies by event size)" as the paramount scheduling criterion but
+> does **not** publish a specific value or per-size table. The
+> phrasing "**at least** the minimum required time" makes cooldown
+> a **floor** that must be satisfied, not a maximization target.
+> Once met, the lower-priority criteria (criteria 2-6 in the manual:
+> partner diversity, opponent diversity, surrogate minimization,
+> color balance, station distribution) optimize freely above it.
 >
-> **For F1-c and future fixtures**, set `cooldown` to a value the
-> event organizer actually requires. Don't read a number from
-> training-data folklore. When in doubt, leave the field unset
-> (None) — the harness preserves legacy behavior and doesn't apply
-> paramount filtering.
+> Our project commits to **cooldown=2 as the default value** —
+> i.e., the minimum acceptable gap is 2 match-indices (no team
+> plays two consecutive matches; one-play-per-round is structurally
+> always honored). This leaves the most search space for the
+> higher-quality work on criteria 2-6. Setting cooldown higher
+> (e.g. 3 or 4) is a constraint on the SA's neighborhood that
+> forces worse pairing/balance distributions for marginal
+> additional rest time.
+>
+> **Cooldown remains user-tunable** in the API (`app/main.py`
+> request models accept cooldown 1-20) and UI (`static/index.html`
+> cooldown input field). Event organizers who require a value
+> different from 2 can override per schedule generation request.
+> The default of 2 reflects the project's "best possible schedule"
+> goal where cooldown is paramount-as-a-floor, not maximized.
+>
+> **For F1-c and future fixtures**, set `cooldown: 2` in the
+> fixture JSON unless the event organizer has documented a
+> different requirement.
 
-The 2026mnst fixture (36 teams) doesn't have its event-required
-cooldown documented in our project. Setting `cooldown` for it
-should wait until we have a defensible source. Future synthetic
-tight fixtures (e.g. 12×6 for F1-c) should set cooldown to the
-specific value the F1-c experiment is testing against (likely
-cooldown=2, the cooldown_max for that fixture shape per Q5).
+The 2026mnst fixture (36 teams) is updated to `cooldown: 2`
+matching the project default. Per-fixture override only when an
+event organizer has explicitly documented a different requirement.
 
 ---
 

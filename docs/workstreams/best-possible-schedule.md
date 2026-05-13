@@ -488,6 +488,32 @@ character to the Saxton white paper but for ours. This is what
 gets handed to anyone evaluating the work (FIRST or otherwise).
 Ships as part of v1.1 completion.
 
+**D5. Paramount cooldown: project-wide default of 2; user-tunable.**
+(Added 2026-05-12.) FRC §10.5.2 makes cooldown paramount but
+"varies by event size" with no published table. Per the manual's
+phrasing — "**at least** the minimum required time between
+matches" — cooldown is a **floor**, not a maximization target.
+The project commits to **cooldown=2** as our default value:
+- High enough to forbid back-to-back (gap=1).
+- Low enough that one-play-per-round is structurally always
+  honored on any feasible fixture.
+- Leaves maximum search-space budget for criteria 2-6 (partner
+  diversity, opponent diversity, surrogate minimization, color
+  balance, station distribution).
+
+**Cooldown remains a user-tunable parameter** in both the API
+(`AbstractGenerateRequest.cooldown`, `AssignRequest.cooldown`,
+range 1-20) and the UI (cooldown input + assignCooldown input).
+Event organizers who require higher cooldown can override per
+request. The audit trail records cooldown when it differs from
+the project default (2), per `app/frc_compliance.py`.
+
+Implication for Phase 1+: all fixtures used in eval, F1-c
+prototype runs, and any future synthetic test cases should set
+`cooldown: 2` in their JSON unless an event organizer has
+explicitly documented a higher requirement. The 2026mnst fixture
+is updated accordingly.
+
 ---
 
 ## What this commits to

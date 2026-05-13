@@ -245,10 +245,13 @@ def build_pairing_model(n_teams: int,
 
 def solve_and_report(n_teams: int, matches_per_team: int,
                      teams_per_alliance: int = 3,
-                     cooldown: int = 3,
+                     cooldown: int = 2,
                      time_limit_s: float = 60.0,
                      n_workers: int = 8) -> dict:
-    """Build and solve. Returns a dict of results."""
+    """Build and solve. Returns a dict of results.
+
+    cooldown defaults to 2 per project policy (F1-e methodology decision).
+    """
     print(f"Building CP-SAT model for {n_teams}t × {matches_per_team}MPT × "
           f"{teams_per_alliance}tpa, cooldown={cooldown}...")
     t0 = time.time()
@@ -343,7 +346,9 @@ def main():
     ap.add_argument('--teams', type=int, required=True)
     ap.add_argument('--mpt', type=int, required=True)
     ap.add_argument('--tpa', type=int, default=3)
-    ap.add_argument('--cooldown', type=int, default=3)
+    ap.add_argument('--cooldown', type=int, default=2,
+                    help="Project default 2 per F1-e methodology; "
+                         "override for stress-testing tight fixtures.")
     ap.add_argument('--time-limit', type=float, default=60.0)
     ap.add_argument('--workers', type=int, default=8)
     args = ap.parse_args()

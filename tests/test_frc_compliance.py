@@ -71,7 +71,7 @@ def test_multiple_deviations_all_reported():
 
 
 def test_cooldown_is_audited_but_not_a_deviation():
-    """Cooldown != 3 should be in audit record but NOT in deviations list."""
+    """Cooldown != project default should be in audit record but NOT in deviations list."""
     print("── test_cooldown_is_audited_but_not_a_deviation ──")
     audit = build_audit_record(
         settings_used=dict(FRC_DEFAULTS),
@@ -80,33 +80,36 @@ def test_cooldown_is_audited_but_not_a_deviation():
         preset_used='good',
     )
     assert audit['competition_approved'] is True, \
-        "cooldown != 3 should NOT unset competition_approved"
+        "cooldown != project default should NOT unset competition_approved"
     assert audit['cooldown'] is not None, "cooldown record should be present"
     assert audit['cooldown']['value'] == 5
-    assert audit['cooldown']['frc_default'] == DEFAULT_COOLDOWN
+    # The audit-trail key is `project_default` (renamed from `frc_default` per
+    # F1-e methodology decision — FRC §10.5.2 doesn't publish a value, so
+    # "FRC default" was misleading; we record our project's default instead).
+    assert audit['cooldown']['project_default'] == DEFAULT_COOLDOWN
     assert 'editable' in audit['cooldown']['note'].lower()
     assert audit['deviations'] == []
     print(f"  cooldown=5 audited (not a deviation)  ✓")
 
 
 def test_default_cooldown_no_audit_record():
-    """When cooldown == 3 (default), audit record's cooldown field is None."""
+    """When cooldown == project default (2), audit record's cooldown field is None."""
     print("── test_default_cooldown_no_audit_record ──")
     audit = build_audit_record(
         settings_used=dict(FRC_DEFAULTS),
-        cooldown_used=3,
+        cooldown_used=DEFAULT_COOLDOWN,  # project default (2 per F1-e)
         iterations_used=500_000,
     )
     assert audit['cooldown'] is None
     assert audit['competition_approved'] is True
-    print(f"  cooldown=3 leaves audit.cooldown=None  ✓")
+    print(f"  cooldown={DEFAULT_COOLDOWN} (project default) leaves audit.cooldown=None  ✓")
 
 
 def test_audit_record_shape():
     print("── test_audit_record_shape ──")
     audit = build_audit_record(
         settings_used=dict(FRC_DEFAULTS),
-        cooldown_used=3,
+        cooldown_used=DEFAULT_COOLDOWN,
         iterations_used=2_000_000,
         preset_used='best',
     )
@@ -129,7 +132,7 @@ def test_audit_record_contains_frc_defaults_snapshot():
     print("── test_audit_record_contains_frc_defaults_snapshot ──")
     audit = build_audit_record(
         settings_used={'rb_post_pass': False, **dict(FRC_DEFAULTS)},
-        cooldown_used=3,
+        cooldown_used=DEFAULT_COOLDOWN,
     )
     snapshot = audit['frc_defaults_at_time_of_generation']
     # snapshot should be a deep copy, not a reference
@@ -141,7 +144,7 @@ def test_audit_settings_used_is_independent_copy():
     """settings_used should be a copy so caller's mutations don't bleed."""
     print("── test_audit_settings_used_is_independent_copy ──")
     settings = dict(FRC_DEFAULTS)
-    audit = build_audit_record(settings_used=settings, cooldown_used=3)
+    audit = build_audit_record(settings_used=settings, cooldown_used=DEFAULT_COOLDOWN)
     settings['rb_post_pass'] = 'mutated'
     assert audit['settings_used']['rb_post_pass'] is True, \
         "audit should not be affected by caller's later mutations"

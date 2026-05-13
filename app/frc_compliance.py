@@ -24,7 +24,7 @@ What DOES unset competition-approved:
 - Non-default surrogate handling
 
 What's audited but doesn't unset:
-- Cooldown != 3
+- Cooldown != 2 (project default per F1-e methodology decision)
 - Iteration count (any value)
 - Non-default quality preset
 """
@@ -48,8 +48,12 @@ FRC_DEFAULTS: dict[str, Any] = {
     'surrogate_handling': '3rd_match_as_surrogate',  # FRC standard
 }
 
-# Cooldown (ideal_gap) is FRC-editable but audited.
-DEFAULT_COOLDOWN = 3
+# Cooldown (ideal_gap) is project-default editable and audited. The value
+# 2 reflects the F1-e methodology decision (paramount-as-a-floor); FRC
+# §10.5.2 says cooldown "varies by event size" but doesn't publish a
+# specific table, so the project commits to 2 as our default value with
+# user-tunable override per event.
+DEFAULT_COOLDOWN = 2
 
 # Schema version for the audit JSON. Bump when settings_used shape changes.
 AUDIT_SCHEMA_VERSION = 1
@@ -137,10 +141,11 @@ def build_audit_record(settings_used: dict[str, Any],
     cooldown_audit = None
     if cooldown_used != DEFAULT_COOLDOWN:
         cooldown_audit = {
-            'value':       cooldown_used,
-            'frc_default': DEFAULT_COOLDOWN,
-            'note':        ("Cooldown editable per FRC's 'varies by event size' "
-                            "guidance; not a deviation but recorded for audit"),
+            'value':           cooldown_used,
+            'project_default': DEFAULT_COOLDOWN,
+            'note':            ("Cooldown editable per FRC §10.5.2 'varies by event size' "
+                                "guidance; project default is 2 per F1-e methodology "
+                                "decision; not a deviation but recorded for audit"),
         }
     return {
         'schema_version':                  AUDIT_SCHEMA_VERSION,

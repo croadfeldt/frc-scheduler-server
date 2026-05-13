@@ -351,7 +351,7 @@ class TeamIn(BaseModel):
 class AbstractGenerateRequest(BaseModel):
     num_teams:        int        = Field(..., ge=6, le=120)
     matches_per_team: int        = Field(6, ge=1, le=50)
-    cooldown:         int        = Field(3, ge=1, le=20)
+    cooldown:         int        = Field(2, ge=1, le=20)
     iterations:       int        = Field(1, ge=1, le=10000)
     seed:             str | None = Field(None, max_length=16)
     name:             str        = Field("Abstract Schedule", max_length=128)
@@ -411,8 +411,8 @@ class AssignRequest(BaseModel):
         description="Phase 1 R/B balance post-pass (FRC #5)")
     station_post_pass:    bool       = Field(True,
         description="Phase 2 station-balance post-pass (FRC #6)")
-    cooldown:             int        = Field(3, ge=1, le=20,
-        description="ideal_gap between matches per team (FRC: varies by event size)")
+    cooldown:             int        = Field(2, ge=1, le=20,
+        description="ideal_gap between matches per team; project default 2 per F1-e methodology decision (FRC §10.5.2 paramount-as-a-floor); user-tunable per event")
 
     def resolved_iterations(self) -> int:
         """Resolve the effective iteration count.

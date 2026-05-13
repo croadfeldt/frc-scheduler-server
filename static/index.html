@@ -2519,7 +2519,7 @@
           <div class="field-row" style="margin-top:0.5rem;">
             <div class="field" title="Minimum matches that must pass before a team can play again. Higher = fewer back-to-backs.">
               <label>Match Cooldown</label>
-              <input type="number" id="cooldown" value="3" min="1" max="20">
+              <input type="number" id="cooldown" value="2" min="1" max="20">
             </div>
             <div class="field" title="Minimum minutes remaining before a break or end of day to still schedule one more match.">
               <label>Break Buffer (min)</label>
@@ -2703,9 +2703,9 @@
             <div class="field-row single" style="margin-top:0.6rem;margin-bottom:0.25rem;">
               <div class="field">
                 <label>Cooldown (matches between team appearances)
-                  <span style="font-size:0.65rem;color:var(--text-muted);margin-left:0.3rem;">(FRC: varies by event size, default 3)</span>
+                  <span style="font-size:0.65rem;color:var(--text-muted);margin-left:0.3rem;">(FRC: varies by event size, project default 2)</span>
                 </label>
-                <input type="number" id="assignCooldown" value="3" min="1" max="20"
+                <input type="number" id="assignCooldown" value="2" min="1" max="20"
                   onchange="onCooldownChange()">
               </div>
             </div>
@@ -6116,7 +6116,7 @@ function fullReset(silent) {
   if (resetParams) {
     document.getElementById('numTeams').value       = '24';
     document.getElementById('matchesPerTeam').value = '8';
-    document.getElementById('cooldown').value       = '3';
+    document.getElementById('cooldown').value       = '2';
     document.getElementById('cycleTime').value      = '8';
     document.getElementById('numDays').value        = '2';
     // V2 reset — rebuild day blocks from scratch. The previous
@@ -11493,7 +11493,7 @@ async function generateSchedule() {
 
   const numTeams       = parseInt(document.getElementById('numTeams').value) || 0;
   const matchesPerTeam = parseInt(document.getElementById('matchesPerTeam').value) || 6;
-  const cooldown       = parseInt(document.getElementById('cooldown').value) || 3;
+  const cooldown       = parseInt(document.getElementById('cooldown').value) || 2;
   const iterations     = 1; // Stage 1 builds the template — one deterministic pass is all that's needed
   const seed = window._pendingSeed || randomSeed();
   _currentSeed = seed;
@@ -14564,7 +14564,7 @@ async function assignTeams() {
   const competitionApproved = document.getElementById('competitionApproved').checked;
   const rbPostPass          = document.getElementById('rbPostPass').checked;
   const stationPostPass     = document.getElementById('stationPostPass').checked;
-  const cooldown            = Math.max(1, parseInt(document.getElementById('assignCooldown').value) || 3);
+  const cooldown            = Math.max(1, parseInt(document.getElementById('assignCooldown').value) || 2);
 
   const assignSeed  = randomSeed();
   _currentAssignSeed = assignSeed;
