@@ -362,6 +362,8 @@ class AbstractGenerateRequest(BaseModel):
     # "Advanced criteria" panel uses this to let users tune scoring while
     # preserving reproducibility — the chosen weights round-trip through the URL.
     weights:          dict[str, float] | None = None
+    # Phase C quality scoring weights (separate from generation `weights`).
+    quality_weights:  dict[str, float] | None = None
 
     from pydantic import field_validator
 
@@ -1029,6 +1031,7 @@ async def generate_abstract(
                     matches_per_team=body.matches_per_team,
                     teams_per_alliance=3,
                     cooldown=body.cooldown,
+                    weights=body.quality_weights,
                 )
                 sched = AbstractSchedule(
                     event_id=body.event_id, name=body.name,
@@ -1043,6 +1046,7 @@ async def generate_abstract(
                     source='generated',
                     source_url=None,
                     quality_report=quality_report,
+                    quality_weights=body.quality_weights,
                 )
                 db.add(sched)
                 await db.commit()
@@ -1094,6 +1098,13 @@ class UnifiedScheduleRequest(BaseModel):
     seed:               str | None = Field(None, max_length=16)
     sa_iterations:      int        = Field(500_000, ge=0, le=5_000_000)
     weights:            dict[str, float] | None = None
+    # Phase C quality scoring weights — organizer-facing tunables for
+    # how the per-criterion 0-100 scores get combined into the composite.
+    # Keys: cooldown, partner, opponent, surrogate, color, station.
+    # Missing keys filled from DEFAULT_QUALITY_WEIGHTS. Cooldown auto-
+    # clamped to ≥ 1 (paramount). Separate from `weights` above (which
+    # influences SA generation).
+    quality_weights:    dict[str, float] | None = None
     # Storage metadata
     name:               str        = Field("Schedule", max_length=128)
     event_id:           int | None = None
@@ -1155,6 +1166,7 @@ async def create_schedule(
         quality_report = build_quality_report(
             matches=matches, n_teams=n, matches_per_team=mpt,
             teams_per_alliance=tpa, cooldown=cd,
+            weights=body.quality_weights,
         )
         surrogate_count_list = [
             sum(int(s) for s in (m.get('red_surrogate', []) + m.get('blue_surrogate', [])))
@@ -1169,6 +1181,22 @@ async def create_schedule(
             matches        = entry.matches
             source         = 'canonical_library'
             quality_report = entry.quality_report
+            # If the caller supplied custom quality_weights, re-score
+            # the canonical's quality_report under the new weights.
+            # (The canonical's stored scores are with DEFAULT_QUALITY_WEIGHTS;
+            # we don't rebuild the metrics, just the composite + per_criterion.)
+            if body.quality_weights:
+                from app.quality_scoring import compute_scores, best_known_floors_from_canonical
+                bk_floors = best_known_floors_from_canonical(n, mpt, tpa, cd)
+                rescored = compute_scores(
+                    quality_report,
+                    weights=body.quality_weights,
+                    best_known_floors=bk_floors,
+                )
+                # Shallow-copy to avoid mutating the canonical's stored report
+                quality_report = dict(quality_report)
+                quality_report['scores'] = rescored
+                quality_report['scores']['best_known_floors_used'] = bk_floors is not None
             surrogate_count_list = [
                 sum(int(s) for s in (m.get('red_surrogate', []) + m.get('blue_surrogate', [])))
                 for m in matches
@@ -1206,6 +1234,7 @@ async def create_schedule(
         quality_report = build_quality_report(
             matches=matches, n_teams=n, matches_per_team=mpt,
             teams_per_alliance=tpa, cooldown=cd,
+            weights=body.quality_weights,
         )
 
     # Persist to database
@@ -1226,6 +1255,7 @@ async def create_schedule(
                 source=source,
                 source_url=source_url,
                 quality_report=quality_report,
+                quality_weights=body.quality_weights,
             )
             db.add(sched)
             await db.commit()
@@ -1251,6 +1281,7 @@ async def create_schedule(
         "source":           sched.source,
         "source_url":       sched.source_url,
         "quality_report":   sched.quality_report,
+        "quality_weights":  sched.quality_weights,
         "created_at":       sched.created_at.isoformat(),
     }
 
@@ -1318,7 +1349,59 @@ async def get_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(get
         "source": sched.source,
         "source_url": sched.source_url,
         "quality_report": sched.quality_report,
+        # Schedule Quality Framework Phase C: organizer-tunable scoring
+        # weights. NULL means DEFAULT_QUALITY_WEIGHTS were used.
+        "quality_weights": sched.quality_weights,
         "created_at": sched.created_at.isoformat(),
+    }
+
+
+@app.post("/api/abstract-schedules/{schedule_id}/rescore")
+async def rescore_abstract_schedule(
+    schedule_id: int,
+    body: dict | None = None,
+    db: AsyncSession = Depends(get_session),
+):
+    """Re-score an existing abstract schedule under different
+    quality_weights. Returns the updated scores without modifying the
+    stored row (the schedule itself doesn't change, only how we score it).
+
+    Useful for "what does this schedule look like if I emphasize partner
+    diversity?" — organizers can try different weight combinations
+    without regenerating.
+
+    Body: `{"quality_weights": {"partner": 2.0, "station": 0.0, ...}}`
+    Missing keys filled from DEFAULT_QUALITY_WEIGHTS. Cooldown clamped
+    to ≥ 1 (paramount).
+    """
+    sched = await db.get(AbstractSchedule, schedule_id)
+    if not sched:
+        raise HTTPException(404, "Abstract schedule not found")
+    if not sched.quality_report:
+        raise HTTPException(
+            400,
+            "Schedule has no quality_report (legacy row from before Phase B). "
+            "Regenerate to populate."
+        )
+
+    new_weights = (body or {}).get('quality_weights') if body else None
+    from app.quality_scoring import compute_scores, best_known_floors_from_canonical
+    bk_floors = best_known_floors_from_canonical(
+        sched.num_teams, sched.matches_per_team, 3, sched.cooldown
+    )
+    rescored = compute_scores(
+        sched.quality_report,
+        weights=new_weights,
+        best_known_floors=bk_floors,
+    )
+    return {
+        "schedule_id":      schedule_id,
+        "scores":           rescored,
+        "best_known_floors_used": bk_floors is not None,
+        # Echo the existing metrics so the caller can render the
+        # full Quality card without a second fetch.
+        "metrics":          sched.quality_report.get('metrics', {}),
+        "is_valid_paramount": sched.quality_report.get('is_valid_paramount', True),
     }
 
 

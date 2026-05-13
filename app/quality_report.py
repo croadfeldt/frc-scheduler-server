@@ -118,6 +118,8 @@ def build_quality_report(matches: list[Any],
                          teams_per_alliance: int,
                          cooldown: int,
                          lex_tuple: tuple | list | None = None,
+                         weights: dict[str, float] | None = None,
+                         use_best_known_floors: bool = True,
                          ) -> dict[str, Any]:
     """Construct the quality_report dict for a schedule.
 
@@ -130,9 +132,17 @@ def build_quality_report(matches: list[Any],
         cooldown: paramount cooldown floor.
         lex_tuple: optional pre-computed lex tuple. If None, computed
                    from matches.
+        weights: optional quality_weights dict for scoring (Phase C). If
+                 None, FRC-priority-derived DEFAULT_QUALITY_WEIGHTS used.
+        use_best_known_floors: when True (default), the scoring layer
+                 looks up the fixture's canonical library entry and uses
+                 its achieved values as best-known floors. Set False for
+                 strict count-floor scoring.
 
     Returns:
-        Quality report dict (see module docstring for shape).
+        Quality report dict (see module docstring for shape) including
+        Phase C scoring fields: `scores.composite`, `scores.per_criterion`,
+        `scores.weights_used`.
     """
     # Compute lex tuple if not supplied. Late import to avoid app/quality.py
     # → app/scheduler.py import cycle at module load (app.quality_report is
@@ -211,7 +221,7 @@ def build_quality_report(matches: list[Any],
     # F1-e validity check: cooldown_violations == 0
     is_valid_paramount = metrics['cooldown_violations']['value'] == 0
 
-    return {
+    report: dict[str, Any] = {
         'achieved_lex_tuple':  lex_tuple,
         'is_valid_paramount':  is_valid_paramount,
         'metrics':             metrics,
@@ -221,6 +231,25 @@ def build_quality_report(matches: list[Any],
             'n_metrics_total':           len(metrics),
         },
     }
+
+    # ── Phase C: per-criterion scoring + composite ─────────────────────
+    # Compute 1-100 scores per criterion + a weighted composite. When
+    # use_best_known_floors=True and a canonical library entry exists
+    # for this shape, the canonical's achieved values are used as the
+    # floor for scoring purposes — meaningful for fixtures with
+    # structural gaps (e.g., 12×6 cd=2) where count-floors aren't
+    # achievable.
+    from app.quality_scoring import compute_scores, best_known_floors_from_canonical
+    bk_floors = None
+    if use_best_known_floors:
+        bk_floors = best_known_floors_from_canonical(
+            n_teams, matches_per_team, teams_per_alliance, cooldown
+        )
+    scores = compute_scores(report, weights=weights, best_known_floors=bk_floors)
+    report['scores'] = scores
+    report['scores']['best_known_floors_used'] = bk_floors is not None
+
+    return report
 
 
 __all__ = ['build_quality_report']

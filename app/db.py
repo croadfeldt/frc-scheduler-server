@@ -175,6 +175,12 @@ class AbstractSchedule(Base):
     # See app.quality_report.build_quality_report for the dict shape.
     # NULL on legacy rows; populated for every new schedule.
     quality_report:   Mapped[Any|None] = mapped_column(JSON, nullable=True)
+    # Schedule Quality Framework Phase C: organizer-supplied scoring
+    # weights. NULL means DEFAULT_QUALITY_WEIGHTS were used. Stored so
+    # that re-rendering the schedule produces the same composite score.
+    # Keys: cooldown, partner, opponent, surrogate, color, station.
+    # See app/quality_scoring.py for defaults and clamping rules.
+    quality_weights:  Mapped[Any|None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -570,6 +576,16 @@ async def init_db(retries: int = 10, delay: float = 2.0) -> None:
                 await conn.execute(text(
                     "ALTER TABLE abstract_schedules "
                     "ADD COLUMN IF NOT EXISTS quality_report JSONB"
+                ))
+                # Schedule Quality Framework Phase C: per-criterion
+                # scoring with organizer-tunable weights. The weights
+                # dict shape is {cooldown, partner, opponent, surrogate,
+                # color, station} → float in [0, 5]. NULL means
+                # DEFAULT_QUALITY_WEIGHTS were used (FRC-priority-derived).
+                # See app/quality_scoring.py.
+                await conn.execute(text(
+                    "ALTER TABLE abstract_schedules "
+                    "ADD COLUMN IF NOT EXISTS quality_weights JSONB"
                 ))
                 # Interim admin flag — replaced by RBAC role grants
                 # (docs/workstreams/rbac.md) when that workstream lands.

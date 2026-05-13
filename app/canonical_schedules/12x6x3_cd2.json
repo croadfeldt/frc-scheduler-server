@@ -7,57 +7,13 @@
   "matches": [
     {
       "red": [
-        10,
-        11,
-        8
-      ],
-      "blue": [
         9,
-        12,
-        2
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        1,
-        5,
-        3
-      ],
-      "blue": [
-        4,
-        7,
-        6
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        2,
-        8,
+        10,
         11
       ],
       "blue": [
-        10,
-        9,
+        7,
+        2,
         12
       ],
       "red_surrogate": [
@@ -74,100 +30,12 @@
     {
       "red": [
         5,
-        3,
+        8,
         6
       ],
       "blue": [
-        7,
         1,
-        4
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        12,
-        2,
-        10
-      ],
-      "blue": [
-        11,
-        9,
-        8
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        3,
-        1,
-        7
-      ],
-      "blue": [
-        6,
         4,
-        5
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        11,
-        12,
-        10
-      ],
-      "blue": [
-        8,
-        2,
-        9
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        5,
-        7,
-        4
-      ],
-      "blue": [
-        1,
-        6,
         3
       ],
       "red_surrogate": [
@@ -183,13 +51,57 @@
     },
     {
       "red": [
+        12,
+        11,
+        7
+      ],
+      "blue": [
         10,
         9,
         2
       ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        4,
+        5,
+        3
+      ],
       "blue": [
-        12,
         8,
+        1,
+        6
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        9,
+        12,
+        10
+      ],
+      "blue": [
+        2,
+        7,
         11
       ],
       "red_surrogate": [
@@ -205,14 +117,14 @@
     },
     {
       "red": [
-        7,
-        6,
+        8,
+        1,
         5
       ],
       "blue": [
         4,
         3,
-        1
+        6
       ],
       "red_surrogate": [
         false,
@@ -227,13 +139,13 @@
     },
     {
       "red": [
-        8,
+        7,
         9,
-        12
+        2
       ],
       "blue": [
-        2,
         11,
+        12,
         10
       ],
       "red_surrogate": [
@@ -249,14 +161,102 @@
     },
     {
       "red": [
+        3,
         6,
-        4,
         1
+      ],
+      "blue": [
+        4,
+        8,
+        5
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        10,
+        2,
+        12
+      ],
+      "blue": [
+        9,
+        11,
+        7
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        1,
+        6,
+        4
       ],
       "blue": [
         3,
         5,
+        8
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        2,
+        9,
+        11
+      ],
+      "blue": [
+        12,
+        10,
         7
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        6,
+        3,
+        8
+      ],
+      "blue": [
+        5,
+        4,
+        1
       ],
       "red_surrogate": [
         false,
@@ -275,8 +275,8 @@
     192,
     408,
     0,
-    32,
-    8,
+    38,
+    10,
     0,
     0
   ],
@@ -286,8 +286,8 @@
       192,
       408,
       0,
-      32,
-      8,
+      38,
+      10,
       0,
       0
     ],
@@ -340,17 +340,81 @@
       "all_proven_floors_matched": false,
       "n_metrics_at_floor": 2,
       "n_metrics_total": 6
+    },
+    "scores": {
+      "weights_used": {
+        "cooldown": 1.0,
+        "partner": 1.0,
+        "opponent": 1.0,
+        "surrogate": 0.5,
+        "color": 0.5,
+        "station": 0.5
+      },
+      "per_criterion": {
+        "cooldown": {
+          "metric": "cooldown_violations",
+          "value": 0,
+          "floor": 0,
+          "score": 100.0,
+          "weight": 1.0,
+          "curve": "binary"
+        },
+        "partner": {
+          "metric": "par_quad",
+          "value": 192,
+          "floor": 192,
+          "score": 100.0,
+          "weight": 1.0,
+          "curve": "quadratic"
+        },
+        "opponent": {
+          "metric": "opp_quad",
+          "value": 408,
+          "floor": 408,
+          "score": 100.0,
+          "weight": 1.0,
+          "curve": "quadratic"
+        },
+        "surrogate": {
+          "metric": "surrogate_count",
+          "value": 0,
+          "floor": 0,
+          "score": 100.0,
+          "weight": 0.5,
+          "curve": "linear"
+        },
+        "color": {
+          "metric": "rb_per_team",
+          "value": 2,
+          "floor": 2,
+          "score": 100.0,
+          "weight": 0.5,
+          "curve": "linear"
+        },
+        "station": {
+          "metric": "station_per_team_spread",
+          "value": 2,
+          "floor": 2,
+          "score": 100.0,
+          "weight": 0.5,
+          "curve": "linear"
+        }
+      },
+      "composite": 100.0,
+      "composite_uncapped": 100.0,
+      "is_valid_paramount": true,
+      "best_known_floors_used": true
     }
   },
   "provenance": {
     "method": "sa_best_of_n",
-    "sa_iterations": 100000,
-    "n_seeds": 3,
-    "successes": 3,
+    "sa_iterations": 50000,
+    "n_seeds": 2,
+    "successes": 2,
     "failures": 0,
     "best_seed": 30000,
-    "wall_clock_s": 4.0,
-    "generated_at": "2026-05-13T03:36:32.306737Z",
+    "wall_clock_s": 1.6,
+    "generated_at": "2026-05-13T11:14:44.438031+00:00",
     "git_commit": null
   }
 }

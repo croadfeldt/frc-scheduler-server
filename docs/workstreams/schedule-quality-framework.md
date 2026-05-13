@@ -114,35 +114,31 @@ When this work is complete:
 
 ---
 
-### Phase C — Scoring framework
+### Phase C — Scoring framework ✓ COMPLETE (this session)
 
-**Goal:** Convert per-fixture floors + observed metrics into
-human-interpretable 1-100 scores. Let organizers weight criteria
-per their event's priorities.
+**Deliverables shipped:**
+- `app/quality_scoring.py` — per-criterion 0-100 scoring + weighted composite
+  - Per-metric curves: binary (cooldown), quadratic decay (par_quad/opp_quad), linear-bounded (rb/station/surrogate)
+  - `DEFAULT_QUALITY_WEIGHTS` — FRC §10.5.2 priority-derived
+  - `compute_scores()` — per-criterion + composite calculator
+  - `best_known_floors_from_canonical()` — bridge to Phase B library for shape-aware scoring
+  - Paramount gate: invalid schedules get composite=0
+  - Weight normalization: clamping `[0, 5]`, cooldown auto-clamped ≥ 1, unknown keys ignored
+- `app/quality_report.py` extended — `build_quality_report()` now embeds the full scoring data (`scores.composite`, `scores.per_criterion`, `scores.weights_used`, `scores.best_known_floors_used`)
+- Schema migration: new `quality_weights` JSONB column on `abstract_schedules` (NULL = DEFAULT_QUALITY_WEIGHTS used)
+- API:
+  - `POST /api/schedules` and `POST /api/generate-abstract` accept `quality_weights` body field
+  - **NEW** `POST /api/abstract-schedules/{id}/rescore` — re-score existing schedule under different weights without regenerating
+  - `GET /api/abstract-schedules/{id}` returns `quality_weights` alongside `quality_report`
+- UI Quality card extended:
+  - **Composite score badge** with color-graded label (Excellent/Good/Acceptable/Poor/Paramount-invalid) and `[Weights]` button
+  - **Quality weights editor panel** — 6 per-criterion sliders (range 0-5, step 0.1), "Reset to defaults" button, "Re-score" button that calls /rescore endpoint and updates display in place
+  - **Score column** added to floor comparison table — color-coded per-criterion 0-100 score alongside achieved/floor/confidence
+- All 5 canonicals rebuilt with Phase C scoring embedded
+- `tests/test_quality_scoring.py` — 60+ assertions covering per-metric curves, weights normalization (clamping, defaults fill-in, cooldown auto-clamp), composite math, paramount gate, best_known_floors override, build_quality_report integration, real canonical re-scoring
+- `docs/scheduler/quality-scoring.md` — full doc
 
-**Tasks:**
-- Distance-from-floor function: maps each metric's observed value
-  + floor to a per-criterion 1-100 score. 100 = meets floor;
-  approaches 0 as the gap widens. Specific scaling per metric
-  (linear vs. quadratic decay, capping).
-- Weights dict: `{"cooldown": 1.0, "partner": 1.0, "opponent": 1.0,
-  "color": 0.5, "station": 0.5, ...}` — organizer-supplied,
-  defaulting to FRC §10.5.2 priority-derived weights.
-- Composite: weighted average of per-criterion scores.
-- API: extend `AssignRequest` with `quality_weights` dict; return
-  per-criterion scores + composite in the response.
-- UI: display per-criterion scores in the Quality card; expose a
-  weights editor for organizers.
-
-**Open question for Phase C kickoff:**
-- For metrics where the floor is `proven_lower_bound` (par_quad,
-  opp_quad), should the scoring use the floor (which may be
-  unachievable) or the best-known canonical (always achievable)?
-  Argument for floor: principled, fair across methods. Argument
-  for best-known: rewards matching what's actually achievable
-  rather than punishing for unreachable ideals.
-  Lean: use the floor; the score reflects distance from
-  *mathematical* optimum, not distance from someone else's effort.
+**Phase D (standing eval suite) follows next.**
 
 ---
 
