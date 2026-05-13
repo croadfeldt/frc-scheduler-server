@@ -154,6 +154,8 @@ def build_canonical(n_teams: int, mpt: int, tpa: int, cooldown: int,
                     method: str = 'auto',
                     sa_iterations: int = 500_000,
                     n_seeds: int = 5,
+                    cpsat_post_pass_budget_s: float = 600.0,
+                    skip_cpsat_post_pass: bool = False,
                     verbose: bool = True) -> CanonicalEntry:
     """Build a canonical library entry for the given shape.
 
@@ -164,11 +166,20 @@ def build_canonical(n_teams: int, mpt: int, tpa: int, cooldown: int,
       - 'sa': SA-best-of-N
       - 'cpsat': CP-SAT optimality (not yet implemented for surrogates)
 
+    After SA-best-of-N selects the winner, the CP-SAT post-passes
+    polish the R/B and station distributions to provably optimal
+    (within `cpsat_post_pass_budget_s` per subproblem; budget split
+    10% R/B + 90% station). Set skip_cpsat_post_pass=True to use
+    only SA post-passes (faster but may plateau on 30+ team
+    fixtures). Set the budget to 0 for the same effect.
+
     Returns the CanonicalEntry; caller saves it.
     """
     if verbose:
         print(f"Building canonical for {n_teams}×{mpt}×{tpa} cooldown={cooldown}")
         print(f"  method={method}, sa_iterations={sa_iterations}, n_seeds={n_seeds}")
+        if not skip_cpsat_post_pass and cpsat_post_pass_budget_s > 0:
+            print(f"  CP-SAT post-pass budget: {cpsat_post_pass_budget_s}s")
 
     # Compute floors first — they're cheap and we need them to decide
     # confidence labels at the end.
@@ -200,6 +211,49 @@ def build_canonical(n_teams: int, mpt: int, tpa: int, cooldown: int,
         n_seeds=n_seeds,
         verbose=verbose,
     )
+
+    # CP-SAT post-pass polish on the SA winner. The SA post-passes
+    # already ran (via generate_matches with rb_post_pass=True,
+    # station_post_pass=True); CP-SAT here can only match or improve.
+    # Empirical (2026-05-13 sweep): CP-SAT matches SA on most runs,
+    # finds composite-improving solutions where SA plateaus (~25% of
+    # 36×7 and 20×8 runs at 100K SA budget).
+    if not skip_cpsat_post_pass and cpsat_post_pass_budget_s > 0:
+        from app.post_passes.cpsat_post_passes import (
+            rb_balance_cpsat, station_balance_cpsat,
+        )
+        # Split budget: ~10% R/B (small subproblem), ~90% station.
+        rb_budget      = max(1.0, min(cpsat_post_pass_budget_s * 0.10, 60.0))
+        station_budget = max(1.0, cpsat_post_pass_budget_s - rb_budget)
+        if verbose:
+            print(f"  Applying CP-SAT R/B post-pass (budget={rb_budget:.0f}s)...")
+        polished, rb_stats = rb_balance_cpsat(matches, time_budget_s=rb_budget)
+        if verbose:
+            print(f"    status={rb_stats['status']} wall={rb_stats['wall_time_s']:.1f}s "
+                  f"max={rb_stats['max_before']}→{rb_stats['max_after']}")
+        if verbose:
+            print(f"  Applying CP-SAT station post-pass (budget={station_budget:.0f}s)...")
+        polished, st_stats = station_balance_cpsat(polished, time_budget_s=station_budget)
+        if verbose:
+            print(f"    status={st_stats['status']} wall={st_stats['wall_time_s']:.1f}s "
+                  f"max={st_stats['max_before']}→{st_stats['max_after']}")
+        matches = polished
+        # Record CP-SAT polish in methodology for auditability
+        methodology['cpsat_post_pass'] = {
+            'budget_s':       cpsat_post_pass_budget_s,
+            'rb_budget_s':    rb_budget,
+            'station_budget_s': station_budget,
+            'rb_status':      rb_stats['status'],
+            'rb_wall_s':      rb_stats['wall_time_s'],
+            'rb_max_before':  rb_stats['max_before'],
+            'rb_max_after':   rb_stats['max_after'],
+            'station_status': st_stats['status'],
+            'station_wall_s': st_stats['wall_time_s'],
+            'station_max_before': st_stats['max_before'],
+            'station_max_after':  st_stats['max_after'],
+        }
+    else:
+        methodology['cpsat_post_pass'] = None
 
     # Compute metrics — observed values vs theoretical floors. The
     # canonical's stored quality_report carries METRICS ONLY; scores
@@ -269,6 +323,13 @@ def main():
     ap.add_argument('--n-seeds', type=int, default=5)
     ap.add_argument('--tpa', type=int, default=3)
     ap.add_argument('--quiet', action='store_true')
+    ap.add_argument('--cpsat-post-pass-budget', type=float, default=600.0,
+                    help="CP-SAT post-pass total budget (s); applied to "
+                         "SA winner. Split 10%% R/B + 90%% station. "
+                         "Capped at 3600 by the solver. 0 to skip.")
+    ap.add_argument('--skip-cpsat-post-pass', action='store_true',
+                    help="Disable CP-SAT post-pass polish (SA only). "
+                         "Faster but may plateau on 30+ team fixtures.")
     args = ap.parse_args()
 
     try:
@@ -282,6 +343,8 @@ def main():
         n_teams=n_teams, mpt=mpt, tpa=args.tpa, cooldown=args.cooldown,
         method=args.method,
         sa_iterations=args.sa_iterations, n_seeds=args.n_seeds,
+        cpsat_post_pass_budget_s=args.cpsat_post_pass_budget,
+        skip_cpsat_post_pass=args.skip_cpsat_post_pass,
         verbose=not args.quiet,
     )
     path = save_canonical(entry)

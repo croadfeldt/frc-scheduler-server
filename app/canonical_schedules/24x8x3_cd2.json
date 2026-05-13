@@ -7,58 +7,14 @@
   "matches": [
     {
       "red": [
-        11,
-        21,
-        22
-      ],
-      "blue": [
-        8,
-        19,
-        7
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
         24,
-        10,
-        12
-      ],
-      "blue": [
-        5,
-        2,
-        9
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        15,
-        14,
-        1
+        21,
+        20
       ],
       "blue": [
         7,
-        6,
-        22
+        11,
+        17
       ],
       "red_surrogate": [
         false,
@@ -73,14 +29,14 @@
     },
     {
       "red": [
-        13,
-        4,
+        12,
+        23,
         8
       ],
       "blue": [
-        24,
-        21,
-        3
+        18,
+        13,
+        15
       ],
       "red_surrogate": [
         false,
@@ -95,13 +51,13 @@
     },
     {
       "red": [
-        10,
         1,
-        18
+        10,
+        22
       ],
       "blue": [
-        11,
-        17,
+        24,
+        6,
         2
       ],
       "red_surrogate": [
@@ -118,12 +74,56 @@
     {
       "red": [
         16,
-        6,
-        21
+        7,
+        4
       ],
       "blue": [
-        3,
-        4,
+        5,
+        8,
+        18
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        20,
+        19,
+        23
+      ],
+      "blue": [
+        13,
+        2,
+        3
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        6,
+        8,
+        9
+      ],
+      "blue": [
+        11,
+        16,
         15
       ],
       "red_surrogate": [
@@ -140,14 +140,14 @@
     {
       "red": [
         5,
-        11,
+        13,
+        21
+      ],
+      "blue": [
+        17,
+        18,
         1
       ],
-      "blue": [
-        13,
-        14,
-        18
-      ],
       "red_surrogate": [
         false,
         false,
@@ -161,36 +161,14 @@
     },
     {
       "red": [
-        21,
-        2,
-        20
-      ],
-      "blue": [
-        15,
-        23,
-        17
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        3,
-        13,
-        9
-      ],
-      "blue": [
-        14,
         11,
-        16
+        22,
+        14
+      ],
+      "blue": [
+        12,
+        24,
+        10
       ],
       "red_surrogate": [
         false,
@@ -205,13 +183,79 @@
     },
     {
       "red": [
-        7,
-        2,
+        19,
+        6,
         18
+      ],
+      "blue": [
+        20,
+        9,
+        3
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        2,
+        4,
+        23
       ],
       "blue": [
         8,
-        5,
+        24,
+        22
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        17,
+        20,
+        5
+      ],
+      "blue": [
+        19,
+        13,
+        14
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        2,
+        9,
+        15
+      ],
+      "blue": [
+        4,
+        10,
         21
       ],
       "red_surrogate": [
@@ -227,57 +271,189 @@
     },
     {
       "red": [
-        6,
         14,
-        3
-      ],
-      "blue": [
-        11,
-        10,
-        13
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        9,
-        19,
-        12
-      ],
-      "blue": [
-        18,
-        5,
-        20
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        2,
-        22,
+        24,
         16
       ],
       "blue": [
+        22,
         23,
-        24,
+        6
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        21,
+        2,
+        1
+      ],
+      "blue": [
+        9,
+        5,
+        11
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        23,
+        18,
+        10
+      ],
+      "blue": [
+        17,
+        3,
+        19
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        8,
+        16,
+        20
+      ],
+      "blue": [
+        1,
+        14,
+        5
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        23,
+        13,
+        7
+      ],
+      "blue": [
+        3,
+        21,
+        22
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        6,
+        14,
+        12
+      ],
+      "blue": [
+        1,
+        4,
+        24
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        5,
+        22,
+        19
+      ],
+      "blue": [
+        10,
+        7,
+        9
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        13,
+        16,
+        17
+      ],
+      "blue": [
+        8,
+        15,
+        4
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        18,
+        11,
+        2
+      ],
+      "blue": [
+        19,
+        12,
         7
       ],
       "red_surrogate": [
@@ -293,57 +469,35 @@
     },
     {
       "red": [
+        15,
         17,
-        18,
+        10
+      ],
+      "blue": [
+        23,
+        5,
+        16
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        22,
+        4,
         9
       ],
       "blue": [
         12,
-        13,
-        4
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        19,
         20,
-        11
-      ],
-      "blue": [
-        10,
-        7,
-        5
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        17,
-        8,
-        23
-      ],
-      "blue": [
-        22,
-        15,
         13
       ],
       "red_surrogate": [
@@ -359,13 +513,57 @@
     },
     {
       "red": [
-        10,
-        21,
-        19
+        8,
+        1,
+        3
       ],
       "blue": [
-        1,
+        21,
+        6,
+        17
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
         7,
+        15,
+        24
+      ],
+      "blue": [
+        20,
+        4,
+        14
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        9,
+        1,
+        13
+      ],
+      "blue": [
+        10,
+        19,
         16
       ],
       "red_surrogate": [
@@ -381,211 +579,13 @@
     },
     {
       "red": [
-        20,
-        9,
-        4
-      ],
-      "blue": [
-        2,
-        6,
-        8
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        19,
-        3,
-        15
-      ],
-      "blue": [
         12,
-        23,
-        10
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        22,
-        17,
-        5
-      ],
-      "blue": [
-        20,
-        14,
-        2
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        16,
-        12,
-        19
-      ],
-      "blue": [
-        4,
-        1,
-        6
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        8,
-        3,
-        10
-      ],
-      "blue": [
-        24,
-        18,
-        22
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        23,
-        5,
-        14
-      ],
-      "blue": [
-        17,
-        12,
-        1
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        13,
-        24,
-        2
-      ],
-      "blue": [
-        16,
-        20,
+        15,
         3
       ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        14,
-        7,
-        4
-      ],
-      "blue": [
-        9,
-        8,
-        11
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        1,
-        23,
-        13
-      ],
       "blue": [
         6,
-        15,
-        24
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        4,
-        16,
-        17
-      ],
-      "blue": [
-        10,
-        22,
+        11,
         20
       ],
       "red_surrogate": [
@@ -601,80 +601,14 @@
     },
     {
       "red": [
-        18,
-        19,
-        6
+        14,
+        2,
+        7
       ],
       "blue": [
-        21,
+        16,
         9,
-        14
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        23,
-        4,
-        22
-      ],
-      "blue": [
-        1,
-        3,
-        12
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        15,
-        20,
-        8
-      ],
-      "blue": [
-        19,
-        24,
-        17
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        12,
-        6,
-        5
-      ],
-      "blue": [
-        21,
-        18,
-        23
+        18
       ],
       "red_surrogate": [
         false,
@@ -690,13 +624,79 @@
     {
       "red": [
         11,
-        15,
-        7
+        12,
+        21
       ],
       "blue": [
-        9,
-        16,
+        15,
+        1,
+        23
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        10,
+        3,
+        6
+      ],
+      "blue": [
+        14,
+        17,
+        8
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        4,
+        19,
+        11
+      ],
+      "blue": [
+        18,
+        7,
+        21
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        3,
+        5,
         24
+      ],
+      "blue": [
+        2,
+        22,
+        12
       ],
       "red_surrogate": [
         false,
@@ -712,22 +712,22 @@
   ],
   "achieved_lex_tuple": [
     0,
-    206,
-    500,
+    192,
+    502,
     0,
-    4,
-    26,
+    2,
+    24,
     0,
     0
   ],
   "quality_report": {
     "achieved_lex_tuple": [
       0,
-      206,
-      500,
+      192,
+      502,
       0,
-      4,
-      26,
+      2,
+      24,
       0,
       0
     ],
@@ -741,17 +741,17 @@
         "matches_floor": true
       },
       "par_quad": {
-        "value": 206,
+        "value": 192,
         "floor": 192,
         "floor_confidence": "proven_lower_bound",
-        "distance_from_floor": 14,
-        "matches_floor": false
+        "distance_from_floor": 0,
+        "matches_floor": true
       },
       "opp_quad": {
-        "value": 500,
+        "value": 502,
         "floor": 312,
         "floor_confidence": "proven_lower_bound",
-        "distance_from_floor": 188,
+        "distance_from_floor": 190,
         "matches_floor": false
       },
       "surrogate_count": {
@@ -762,35 +762,48 @@
         "matches_floor": true
       },
       "rb_per_team": {
-        "value": 4,
+        "value": 2,
         "floor": 0,
         "floor_confidence": "proven_optimal",
-        "distance_from_floor": 4,
+        "distance_from_floor": 2,
         "matches_floor": false
       },
       "station_per_team_spread": {
-        "value": 2,
+        "value": 1,
         "floor": 1,
         "floor_confidence": "proven_optimal",
-        "distance_from_floor": 1,
-        "matches_floor": false
+        "distance_from_floor": 0,
+        "matches_floor": true
       }
     },
     "summary": {
       "all_proven_floors_matched": false,
-      "n_metrics_at_floor": 2,
+      "n_metrics_at_floor": 4,
       "n_metrics_total": 6
     }
   },
   "provenance": {
     "method": "sa_best_of_n",
-    "sa_iterations": 50000,
-    "n_seeds": 2,
-    "successes": 2,
+    "sa_iterations": 200000,
+    "n_seeds": 3,
+    "successes": 3,
     "failures": 0,
-    "best_seed": 30000,
-    "wall_clock_s": 5.0,
-    "generated_at": "2026-05-13T13:06:37.441492+00:00",
+    "best_seed": 45838,
+    "wall_clock_s": 21.1,
+    "cpsat_post_pass": {
+      "budget_s": 120.0,
+      "rb_budget_s": 12.0,
+      "station_budget_s": 108.0,
+      "rb_status": "OPTIMAL",
+      "rb_wall_s": 1.182422676,
+      "rb_max_before": 2,
+      "rb_max_after": 2,
+      "station_status": "OPTIMAL",
+      "station_wall_s": 1.4558389900000002,
+      "station_max_before": 3,
+      "station_max_after": 1
+    },
+    "generated_at": "2026-05-13T20:52:52.779640+00:00",
     "git_commit": null
   }
 }
