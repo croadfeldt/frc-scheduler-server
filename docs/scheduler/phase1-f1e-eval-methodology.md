@@ -38,14 +38,15 @@ thresholds — `min_match_gap ≥ 4` for "acceptable", `back_to_back ==
 0` for "no violations." There's no notion of "what cooldown was
 this schedule built for."
 
-For 36-team state events using cooldown=4 (FRC's typical default),
-a schedule with all gaps ≥ 4 is valid. The threshold-based check
-classifies it as "near-optimal" (because min_gap = 4 meets the
-acceptable threshold). For 12-team events using cooldown=1 (FRC
-§10.6.6 back-to-back exception), a schedule with min_gap=1 is
-valid; the threshold check classifies it as "poor." Same problem
-— the universal threshold doesn't track what the event's own rule
-permits.
+For a 36-team state event running with whatever cooldown the
+organizer requires (FRC §10.5.2 leaves this to per-event judgment),
+a schedule satisfying that cooldown is valid; the universal
+threshold check on `min_match_gap` doesn't know what the event's
+own rule was. For 12-team events using cooldown=1 (FRC §10.6.6
+back-to-back exception, when scheduling math forces it), a schedule
+with min_gap=1 is valid; the threshold check classifies it as
+"poor." Same problem — the universal threshold doesn't track what
+the event's own rule permits.
 
 ### Gap #2: no "invalid output" category in classification
 
@@ -191,21 +192,35 @@ formula. No back-compat break.
 
 ## How fixtures opt in
 
-Existing fixtures: add `"cooldown": N` to the JSON. The FRC default
-is **4 matches** for typical events; smaller events may relax to a
-lower value per FRC §10.6.6's back-to-back exception. Common
-practice:
+Existing fixtures: add `"cooldown": N` to the JSON for the event's
+required minimum gap between a team's consecutive matches.
 
-  - n ≤ 8 teams:   cooldown=1 (back-to-back required by capacity)
-  - 9 ≤ n ≤ 12:    cooldown=2 (small events permit relaxation)
-  - 13 ≤ n ≤ 24:   cooldown=3 (mid-size events)
-  - n ≥ 25:        cooldown=4 (FRC standard for typical events)
+> **Note on cooldown values.** FRC §10.5.2 establishes
+> "minimum required time between MATCHES (varies by event size)" as
+> the paramount scheduling criterion, but **does not publish a
+> specific value or per-size table.** The manual refers readers to
+> Idle Loop software's documentation for the algorithm.
+>
+> Observed FRC-published schedules and community discussion suggest
+> a *convention* (not a rule) of cooldown=4 for typical regional/
+> district events; smaller events relax to lower values, as
+> §10.6.6's back-to-back exception permits when scheduling math
+> doesn't allow more. The Q5 cooldown_max formula
+> `floor((M-1)/(MPT-1))` defines the upper bound a fixture can
+> tolerate before becoming infeasible.
+>
+> **For F1-c and future fixtures**, set `cooldown` to a value the
+> event organizer actually requires. Don't read a number from
+> training-data folklore. When in doubt, leave the field unset
+> (None) — the harness preserves legacy behavior and doesn't apply
+> paramount filtering.
 
-The 2026mnst fixture (36 teams) should set `cooldown: 4` per FRC's
-standard for events of that size. Future synthetic tight fixtures
-(e.g. 12×6 for F1-c) should set their appropriate value per the
-Q5 cooldown_max formula (`floor((M-1)/(MPT-1))`) — choose the
-largest feasible cooldown that doesn't violate §10.6.6.
+The 2026mnst fixture (36 teams) doesn't have its event-required
+cooldown documented in our project. Setting `cooldown` for it
+should wait until we have a defensible source. Future synthetic
+tight fixtures (e.g. 12×6 for F1-c) should set cooldown to the
+specific value the F1-c experiment is testing against (likely
+cooldown=2, the cooldown_max for that fixture shape per Q5).
 
 ---
 

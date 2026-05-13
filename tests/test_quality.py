@@ -362,11 +362,12 @@ check("no-cooldown fixture: composite_score is finite",
       composite_score(report_no_cd) < float("inf"),
       f"got {composite_score(report_no_cd)}")
 
-# When cooldown=4 is specified (FRC's typical default for ≥25-team
-# events) and the schedule satisfies it, is_valid_paramount=True.
-# Validity is data-dependent (the synthetic schedule in this test
-# may or may not hit gap ≥ 4 throughout); we check that the field
-# is set and consistent with the composite_score behavior.
+# When cooldown is specified, is_valid_paramount is bool (True or False)
+# and composite_score reflects validity. The specific value 4 is chosen
+# because the synthetic 24×6 schedule generated above plausibly violates
+# it (forcing the False branch to be exercised). FRC §10.5.2 doesn't
+# publish specific cooldown values; the value here is for test coverage,
+# not as a claim about what FRC requires.
 report_cd_typical = analyze_against_thresholds(
     matches_namedtuple, num_teams=24, matches_per_team=6,
     teams_per_alliance=3, team_numbers=list(range(101, 125)),
