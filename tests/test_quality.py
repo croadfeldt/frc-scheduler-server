@@ -340,6 +340,88 @@ check("total_pairs = C(24, 2) = 276",
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 8. Paramount-cooldown validity (F1-e methodology fix)
+# ─────────────────────────────────────────────────────────────────────────
+
+print("\nParamount-cooldown validity:")
+
+# When no cooldown is specified, is_valid_paramount is None and the
+# composite score is finite (legacy behavior preserved).
+report_no_cd = analyze_against_thresholds(
+    matches_namedtuple, num_teams=24, matches_per_team=6,
+    teams_per_alliance=3, team_numbers=list(range(101, 125)),
+    fixture_id="test-no-cd",
+)
+check("no-cooldown fixture: is_valid_paramount is None",
+      report_no_cd.is_valid_paramount is None,
+      f"got {report_no_cd.is_valid_paramount}")
+check("no-cooldown fixture: cooldown_violations is 0",
+      report_no_cd.cooldown_violations == 0,
+      f"got {report_no_cd.cooldown_violations}")
+check("no-cooldown fixture: composite_score is finite",
+      composite_score(report_no_cd) < float("inf"),
+      f"got {composite_score(report_no_cd)}")
+
+# When cooldown=4 is specified (FRC's typical default for ≥25-team
+# events) and the schedule satisfies it, is_valid_paramount=True.
+# Validity is data-dependent (the synthetic schedule in this test
+# may or may not hit gap ≥ 4 throughout); we check that the field
+# is set and consistent with the composite_score behavior.
+report_cd_typical = analyze_against_thresholds(
+    matches_namedtuple, num_teams=24, matches_per_team=6,
+    teams_per_alliance=3, team_numbers=list(range(101, 125)),
+    fixture_id="test-cd-typical",
+    cooldown=4,
+)
+check("cooldown=4 fixture: is_valid_paramount is set (bool)",
+      isinstance(report_cd_typical.is_valid_paramount, bool),
+      f"got {report_cd_typical.is_valid_paramount!r}")
+check("cooldown=4 fixture: cooldown_violations is non-negative int",
+      isinstance(report_cd_typical.cooldown_violations, int) and
+      report_cd_typical.cooldown_violations >= 0,
+      f"got {report_cd_typical.cooldown_violations!r}")
+
+# If the report is invalid, composite must be inf; if valid, finite.
+cs_cd_typical = composite_score(report_cd_typical)
+if report_cd_typical.is_valid_paramount is False:
+    check("paramount-invalid → composite_score is inf",
+          cs_cd_typical == float("inf"),
+          f"got {cs_cd_typical}")
+else:
+    check("paramount-valid → composite_score is finite",
+          cs_cd_typical < float("inf"),
+          f"got {cs_cd_typical}")
+
+# Force-construct a known-invalid case: cooldown=100 is way larger
+# than any plausible gap, so EVERY schedule violates it. is_valid_paramount
+# must be False and composite must be inf.
+report_cd_huge = analyze_against_thresholds(
+    matches_namedtuple, num_teams=24, matches_per_team=6,
+    teams_per_alliance=3, team_numbers=list(range(101, 125)),
+    fixture_id="test-cd-huge",
+    cooldown=100,  # impossibly high — all gaps violate
+)
+check("cooldown=100 fixture: is_valid_paramount is False (all gaps violate)",
+      report_cd_huge.is_valid_paramount is False,
+      f"got {report_cd_huge.is_valid_paramount!r}")
+check("cooldown=100 fixture: cooldown_violations > 0",
+      report_cd_huge.cooldown_violations > 0,
+      f"got {report_cd_huge.cooldown_violations}")
+check("cooldown=100 fixture: composite_score is inf",
+      composite_score(report_cd_huge) == float("inf"),
+      f"got {composite_score(report_cd_huge)}")
+
+# The to_dict() output exposes the new fields for downstream consumers
+d_dict = report_cd_huge.to_dict()
+check("to_dict includes is_valid_paramount",
+      "is_valid_paramount" in d_dict,
+      f"keys: {list(d_dict.keys())}")
+check("to_dict includes cooldown_violations",
+      "cooldown_violations" in d_dict,
+      f"keys: {list(d_dict.keys())}")
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Done
 # ─────────────────────────────────────────────────────────────────────────
 

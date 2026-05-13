@@ -349,6 +349,19 @@ review and approve the package before Phase 2 begins.**
   fixtures, SA-refinement on top. New follow-up identified: F1-e
   (audit eval methodology — schedules with cd>0 should be flagged
   invalid, not aggregated as comparable data). No code changes.
+- ✓ `scheduler/phase1-f1e-eval-methodology.md` — F1-e audit and fix.
+  **Methodology gap found**: harness had no per-fixture cooldown,
+  no "invalid output" classification, composite scoring didn't
+  penalize paramount violations, `_select_best` could pick invalid
+  output as winner. Scope: no past eval data contaminated (only
+  Phase 5 36-40t data on disk; tight-fixture runs hadn't happened
+  yet). **Fix shipped**: `Fixture.cooldown` field (optional,
+  legacy-compatible), `AnalysisReport.is_valid_paramount` +
+  `cooldown_violations` fields, `_composite_score` returns `inf`
+  for paramount-invalid, `_select_best` ranks valid-first.
+  Production-side `app/quality.py` mirrors changes; new `cooldown`
+  kwarg on `analyze_against_thresholds`. 11 new test assertions in
+  `tests/test_quality.py`. F1-c is now methodology-clean to run.
 - ✓ `scheduler/phase1-q5-cooldown-feasibility.md` — Q5 first-cut:
   closed-form feasibility formula; full FRC-common space table;
   finding F5-1 (no infeasibility at typical cooldown in

@@ -113,12 +113,27 @@ class MetricResult:
 
 @dataclass
 class AnalysisReport:
-    """All metrics for a single Schedule, plus aggregate roll-up."""
+    """All metrics for a single Schedule, plus aggregate roll-up.
+
+    `is_valid_paramount` reflects whether the schedule satisfies the
+    fixture's paramount cooldown rule per FRC §10.5.2. None means the
+    fixture didn't specify a cooldown so we can't judge; True means
+    no gap below cooldown; False means at least one team has at least
+    one gap < cooldown — the schedule is invalid output per ADR 002,
+    not just low-quality. Callers (composite scoring, trial selection,
+    cross-adapter comparison) should treat False as disqualifying.
+
+    `cooldown_violations` is the total count of (team, gap) pairs
+    where gap < fixture.cooldown. 0 when the fixture has no cooldown
+    set or when the schedule is fully compliant.
+    """
     fixture_id:    str
     adapter_name:  str
     metrics:       dict[str, MetricResult] = field(default_factory=dict)
     overall:       str = ""    # 'near_optimal', 'acceptable', 'poor'
     counts:        dict[str, int] = field(default_factory=dict)
+    is_valid_paramount: bool | None = None    # per FRC §10.5.2; None = unknown
+    cooldown_violations: int = 0              # count of gaps < fixture.cooldown
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -127,6 +142,8 @@ class AnalysisReport:
             "metrics":      {k: v.to_dict() for k, v in self.metrics.items()},
             "overall":      self.overall,
             "counts":       self.counts,
+            "is_valid_paramount":  self.is_valid_paramount,
+            "cooldown_violations": self.cooldown_violations,
         }
 
 
@@ -425,5 +442,28 @@ def analyze(schedule: Schedule, fixture: Fixture) -> AnalysisReport:
         report.overall = "acceptable"
     else:
         report.overall = "near_optimal"
+
+    # Paramount-cooldown check per FRC §10.5.2. The fixture's cooldown
+    # defines the minimum acceptable gap; any team-gap below that count
+    # is a violation. This is *separate* from the threshold-based
+    # classification because cooldown violations are categorically
+    # invalid output, not low-quality output. Callers should treat
+    # is_valid_paramount=False as disqualifying — see Phase 1 F1-e.
+    if fixture.cooldown is not None:
+        team_idx = _team_match_index(schedule)
+        violations = 0
+        for t, matches in team_idx.items():
+            if len(matches) < 2:
+                continue
+            nums = [m.match_num for m in matches]
+            for i in range(1, len(nums)):
+                if nums[i] - nums[i - 1] < fixture.cooldown:
+                    violations += 1
+        report.cooldown_violations = violations
+        report.is_valid_paramount = (violations == 0)
+    else:
+        # Fixture didn't specify cooldown — preserve legacy "don't judge"
+        report.cooldown_violations = 0
+        report.is_valid_paramount = None
 
     return report

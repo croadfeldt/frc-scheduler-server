@@ -148,9 +148,18 @@ def _run_one(args: tuple) -> dict:
 def _select_best(results: list[dict]) -> dict | None:
     """Of N trial results for one (fixture, adapter), return the best.
 
-    "Best" = lowest count of 'poor' classifications, then highest count
-    of 'near_optimal' classifications. Ties broken by lower
-    repeat_partners count, then lower max_color_imbalance.
+    "Best" = paramount-valid over paramount-invalid first (per FRC
+    §10.5.2 — an invalid schedule can't be "best" even if its other
+    metrics look better than a valid one's), then lowest count of 'poor'
+    classifications, then highest count of 'near_optimal' classifications.
+    Ties broken by lower repeat_partners count, then lower
+    max_color_imbalance.
+
+    The paramount-valid preference matters when comparing adapters on
+    tight fixtures: if one adapter consistently produces cooldown=0
+    output and another consistently violates cooldown, the cooldown=0
+    one wins regardless of pairing quality (per ADR 002). See Phase 1
+    F1-e for the methodology rationale.
     """
     successful = [r for r in results if r.get("ok")]
     if not successful:
@@ -160,7 +169,12 @@ def _select_best(results: list[dict]) -> dict | None:
         rep = r["report"]
         counts = rep.get("counts", {})
         metrics = rep.get("metrics", {})
+        # is_valid_paramount: True/None ranks before False (None preserves
+        # legacy behavior — fixtures without declared cooldown all rank
+        # at the same is_valid level). 0 = valid/unknown, 1 = invalid.
+        invalid_flag = 1 if rep.get("is_valid_paramount") is False else 0
         return (
+            invalid_flag,                            # valid before invalid
             counts.get("poor", 0),                  # fewer poor → better
             -counts.get("near_optimal", 0),         # more near-optimal → better
             metrics.get("repeat_partners", {}).get("value", 9999),
@@ -186,10 +200,19 @@ def _composite_score(result: dict) -> float:
 
     A schedule with all near-optimal metrics scores 0; one with everything
     poor scores ~110. The middle band 5-25 is "mixed."
+
+    Paramount-cooldown handling (per Phase 1 F1-e): when the report's
+    `is_valid_paramount` is False — the fixture had an explicit cooldown
+    and the schedule violates it — return `inf`. Such schedules are
+    invalid output per FRC §10.5.2 and shouldn't be aggregated alongside
+    valid schedules. None (legacy fixture, no cooldown declared)
+    preserves the old behavior. True is the standard score.
     """
     if not result or not result.get("ok"):
         return float("inf")
     rep = result.get("report", {})
+    if rep.get("is_valid_paramount") is False:
+        return float("inf")
     counts = rep.get("counts", {})
     metrics = rep.get("metrics", {})
     return (

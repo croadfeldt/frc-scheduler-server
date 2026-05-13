@@ -518,6 +518,7 @@ def analyze_against_thresholds(matches: list[Any], num_teams: int,
                                 team_numbers: list[int] | None = None,
                                 fixture_id: str = "ad-hoc",
                                 adapter_name: str = "frc-scheduler-server",
+                                cooldown: int | None = None,
                                 ) -> AnalysisReport:
     """Run every threshold-based metric against the harness analyzer.
 
@@ -532,6 +533,14 @@ def analyze_against_thresholds(matches: list[Any], num_teams: int,
     as the list of real team identifiers in slot order, or leave None
     if you want the slot indices themselves treated as team numbers
     (the analyzer doesn't care about identity beyond uniqueness).
+
+    When `cooldown` is provided, the returned report's
+    `is_valid_paramount` reflects whether the schedule satisfies FRC
+    §10.5.2's paramount cooldown rule (any gap < cooldown → invalid
+    output). When None (default), the legacy behavior is preserved —
+    the report's `is_valid_paramount` is None and composite scoring
+    doesn't reject the schedule. See Phase 1 F1-e for methodology
+    rationale.
     """
     harness_matches = _to_harness_matches(matches)
     # Build the fixture's teams list. For an abstract schedule (no team
@@ -543,6 +552,7 @@ def analyze_against_thresholds(matches: list[Any], num_teams: int,
         teams=teams,
         matches_per_team=matches_per_team,
         teams_per_alliance=teams_per_alliance,
+        cooldown=cooldown,
     )
     schedule = HarnessSchedule(
         fixture_id=fixture_id,
@@ -571,7 +581,16 @@ def composite_score(report: AnalysisReport) -> float:
         acceptable   → 3.0
         poor         → 10.0
         descriptive  → 0 (informational only)
+
+    Paramount-cooldown handling (per Phase 1 F1-e): when the report's
+    `is_valid_paramount` is explicitly False, return `inf`. Schedules
+    that violate FRC §10.5.2 paramount cooldown are invalid output, not
+    low-quality output, and shouldn't be ranked alongside valid
+    schedules. None (legacy, no cooldown declared in fixture) preserves
+    the old behavior; True is the standard score.
     """
+    if getattr(report, "is_valid_paramount", None) is False:
+        return float("inf")
     total = 0.0
     for m in report.metrics.values():
         c = m.classification

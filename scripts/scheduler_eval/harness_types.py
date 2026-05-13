@@ -61,6 +61,15 @@ class Fixture:
     `breaks` is a list of break specifications using the reference scheduler's -k
     syntax conceptually — match number after which to insert a break.
     Used for lunch breaks in multi-block days.
+
+    `cooldown` is the event's required minimum gap between a team's
+    consecutive matches, in units of match indices. Per FRC §10.5.2 this
+    is **paramount**: schedules with any gap below `cooldown` violate the
+    rule and are invalid output. Default `None` means "don't enforce" —
+    existing fixtures predating ADR 002 don't surface a cooldown check.
+    New fixtures should set this explicitly to enable the
+    `is_valid_paramount` flag in `AnalysisReport`. See Phase 1 F1-e
+    investigation (`docs/scheduler/phase1-f1e-eval-methodology.md`).
     """
     fixture_id:        str             # stable ID used in filenames and reports
     name:              str             # human-readable label for reports
@@ -72,6 +81,11 @@ class Fixture:
     # NOT a configuration knob for schedulers (they handle this themselves)
     surrogate_first_match: int | None = None  # 1-indexed match number
     surrogate_count:       int = 0            # total slot-fills (≤5 per FRC convention)
+
+    # Paramount-cooldown spec — None means "don't enforce" (legacy);
+    # an int N means schedules with any gap < N are invalid output
+    # per FRC §10.5.2.
+    cooldown:          int | None = None
 
     # Optional metadata — useful for fixture provenance and reports
     source:            str = "synthetic"   # 'tba', 'mnhsl', 'synthetic', 'live'
