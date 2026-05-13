@@ -1375,6 +1375,50 @@ async def get_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(get
             cooldown=sched.cooldown,
         )
 
+    # Diagnostic detail (histogram, worst-pairs, pairs-never-met,
+    # per-slot station table). Used by the UI's expandable detail
+    # section to ground the framework metrics. Cheap to compute,
+    # serves single-fetch consolidation: caller doesn't need a
+    # separate /diversity-report round trip. The /diversity-report
+    # endpoint still exists for back-compat.
+    diagnostic = None
+    if sched.matches:
+        try:
+            from app.quality import compute_diversity_report
+            diversity = compute_diversity_report(
+                sched.matches,
+                num_teams=sched.num_teams,
+                matches_per_team=sched.matches_per_team,
+                teams_per_alliance=3,
+            )
+            d_dict = diversity.to_dict()
+            diagnostic = {
+                "partner_histogram":    d_dict["partner"]["histogram"],
+                "partner_max":          d_dict["partner"]["max"],
+                "partner_floor":        d_dict["partner"]["floor"],
+                "partner_average":      d_dict["partner"]["average"],
+                "partner_zero_pairs":   d_dict["partner"]["zero_pairs"],
+                "partner_worst_pairs":  d_dict["partner"]["worst_pairs"],
+                "opponent_histogram":   d_dict["opponent"]["histogram"],
+                "opponent_max":         d_dict["opponent"]["max"],
+                "opponent_floor":       d_dict["opponent"]["floor"],
+                "opponent_average":     d_dict["opponent"]["average"],
+                "opponent_zero_pairs":  d_dict["opponent"]["zero_pairs"],
+                "opponent_worst_pairs": d_dict["opponent"]["worst_pairs"],
+                "total_pairs":          d_dict["total_pairs"],
+                "slot_table":           d_dict["slots"],
+                "stations_summary":     d_dict["stations"],
+                "surrogates_summary":   d_dict["surrogates"],
+            }
+        except Exception as e:
+            # Diagnostic data is best-effort; don't fail the whole GET.
+            import logging
+            logging.getLogger(__name__).warning(
+                "Diagnostic computation failed for schedule %d: %s",
+                schedule_id, e,
+            )
+            diagnostic = None
+
     return {
         "id": sched.id, "name": sched.name, "event_id": sched.event_id,
         "num_teams": sched.num_teams, "matches_per_team": sched.matches_per_team,
@@ -1400,6 +1444,10 @@ async def get_abstract_schedule(schedule_id: int, db: AsyncSession = Depends(get
         "quality_weights": sched.quality_weights,
         # Auditability: full creation provenance (method, SA params, etc).
         "creation_provenance": sched.creation_provenance,
+        # Diagnostic detail (histogram, worst-pairs, etc) — used by UI's
+        # expandable detail section. Single-fetch consolidation: the
+        # caller doesn't need to also call /diversity-report.
+        "diagnostic": diagnostic,
         "created_at": sched.created_at.isoformat(),
     }
 
@@ -3729,6 +3777,14 @@ class PdfImportCommitRequest(BaseModel):
     # the cached parse contained (empty list for sources without practice).
     practice:      list[dict] | None = None
     day_config:    Any = None
+    # Import mode:
+    #   'new_schedule'     — create a new AssignedSchedule in the event
+    #                        (default; preserves any existing schedules)
+    #   'replace_schedule' — replace the matches of an existing
+    #                        AssignedSchedule, snapshotting history first
+    # When 'replace_schedule', target_schedule_id is required.
+    import_mode:   str = Field("new_schedule")
+    target_schedule_id: int | None = None
 
 
 @app.post("/api/schedules/import-pdf")
@@ -4547,7 +4603,26 @@ async def commit_pdf_import(
     calling this. We DON'T auto-commit — bad parses can corrupt schedules
     and the cost of a manual review step is small vs the cost of importing
     a wrong schedule.
+
+    Import modes:
+      - 'new_schedule' (default): create a new AssignedSchedule + the
+        underlying AbstractSchedule in the event. Any existing active
+        schedule on the event is deactivated but preserved.
+      - 'replace_schedule': replace the matches of body.target_schedule_id
+        with the imported ones, snapshotting history first. Refuses on
+        locked / official schedules consistent with PATCH semantics.
     """
+    # Validate import mode
+    if body.import_mode not in ('new_schedule', 'replace_schedule'):
+        raise HTTPException(
+            400, f"Invalid import_mode={body.import_mode!r}; "
+                  "expected 'new_schedule' or 'replace_schedule'"
+        )
+    if body.import_mode == 'replace_schedule' and not body.target_schedule_id:
+        raise HTTPException(
+            400, "import_mode='replace_schedule' requires target_schedule_id"
+        )
+
     # Normalize day_config to V2 shape + validate. PDF imports build
     # day_config from the parser's output (pdf_dayplan emits V2
     # natively post-phase-1) but the user may have edited it during
@@ -4641,19 +4716,7 @@ async def commit_pdf_import(
         db.add(sched)
         await db.flush()
 
-        # Deactivate any prior active schedule on this event
-        await db.execute(
-            update(AssignedSchedule)
-            .where(AssignedSchedule.event_id == body.event_id)
-            .values(is_active=False)
-        )
-        # Practice matches — prefer the user-edited list from the request
-        # body (the preview UI sends them through as `practice`). Fall back
-        # to the cached parse for backward-compat with clients that only
-        # send the qual `matches` field. Empty list is the no-practice
-        # default. Stored with real team numbers (not slot indices) for
-        # imported schedules; _resolve_practice_matches falls through to
-        # identity mapping for unknown slots so this round-trips.
+        # Build practice matches once — used by both modes
         if body.practice is not None:
             practice_parsed = body.practice
         else:
@@ -4670,6 +4733,89 @@ async def commit_pdf_import(
                 "red_surrogate":  pm.get("red_surrogate")  or [False] * len(red),
                 "blue_surrogate": pm.get("blue_surrogate") or [False] * len(blue),
             })
+
+        if body.import_mode == 'replace_schedule':
+            # Replace path: load the target AssignedSchedule, snapshot
+            # history, swap in the new abstract + slot_map + practice.
+            # The lock / official guards from PATCH apply — refuse if
+            # the target schedule is locked by someone else or has ever
+            # been marked official.
+            target = await db.get(AssignedSchedule, body.target_schedule_id)
+            if not target:
+                raise HTTPException(404, f"Target schedule {body.target_schedule_id} not found")
+            if target.event_id != body.event_id:
+                raise HTTPException(
+                    400,
+                    f"Target schedule {body.target_schedule_id} belongs to "
+                    f"event {target.event_id}, not {body.event_id}"
+                )
+            # Official-fingerprint check (matches PATCH semantics).
+            if await _was_ever_official(db, target):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Target schedule was marked official and is "
+                           "structurally immutable. Fork it to make changes."
+                )
+            # Lock guard — same logic as PATCH.
+            if target.locked_at is not None:
+                if not user or target.locked_by_user_id != user.get("uid"):
+                    raise HTTPException(
+                        status_code=423,
+                        detail=f"Target schedule is locked by "
+                               f"{target.locked_by_name or 'another user'}.",
+                    )
+
+            # Snapshot BEFORE mutating so the history row carries the
+            # prior state. If the commit later fails, the history insert
+            # rolls back with the rest of the transaction.
+            await _snapshot_schedule_history(db, target, action="patch", user=user)
+
+            # Swap in the new abstract schedule + slot_map + practice.
+            # The OLD AbstractSchedule remains in the DB (referenced by
+            # the history snapshot via abstract_schedule_id); only the
+            # live target's reference moves to the new one.
+            target.abstract_schedule_id = sched.id
+            target.slot_map = slot_map
+            target.day_config = body.day_config
+            target.practice_matches = practice_for_db
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(target, "slot_map")
+            flag_modified(target, "day_config")
+            flag_modified(target, "practice_matches")
+
+            # Replace MatchRow records for queryability
+            await db.execute(
+                MatchRow.__table__.delete().where(
+                    MatchRow.assigned_schedule_id == target.id
+                )
+            )
+            slot_map_int = {int(k): v for k, v in slot_map.items()}
+            for i, am in enumerate(abstract_matches, start=1):
+                db.add(MatchRow(
+                    assigned_schedule_id=target.id, match_num=i,
+                    red1=slot_map_int[am["red"][0]], red2=slot_map_int[am["red"][1]], red3=slot_map_int[am["red"][2]],
+                    blue1=slot_map_int[am["blue"][0]], blue2=slot_map_int[am["blue"][1]], blue3=slot_map_int[am["blue"][2]],
+                ))
+
+            await db.commit()
+
+            return {
+                "abstract_schedule_id": sched.id,
+                "assigned_schedule_id": target.id,
+                "name":                 target.name,
+                "matches_imported":     len(matches),
+                "teams":                N,
+                "import_mode":          "replace_schedule",
+                "replaced_schedule_id": target.id,
+            }
+
+        # new_schedule mode (default): create a new AssignedSchedule.
+        # Deactivate any prior active schedule on this event.
+        await db.execute(
+            update(AssignedSchedule)
+            .where(AssignedSchedule.event_id == body.event_id)
+            .values(is_active=False)
+        )
 
         assigned = AssignedSchedule(
             abstract_schedule_id=sched.id, event_id=body.event_id,
@@ -4704,6 +4850,7 @@ async def commit_pdf_import(
             "name":                 assigned.name,
             "matches_imported":     len(matches),
             "teams":                N,
+            "import_mode":          "new_schedule",
         }
 
 

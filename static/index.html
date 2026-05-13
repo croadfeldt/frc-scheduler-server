@@ -2432,6 +2432,38 @@
             <table id="pdfImportPracticeTable" class="pdf-import-table"></table>
           </div>
         </div>
+
+        <!-- Import mode picker — appears just above the footer's
+             Confirm button. Two radio options: new schedule in this
+             event (default), or replace the currently-loaded schedule
+             on this event. Replace is only enabled when there's a
+             current schedule loaded; refreshPdfImportModeUI() handles
+             enable/disable + label updates based on _currentAssignedScheduleId. -->
+        <div id="pdfImportModeBox" style="margin-top:1rem;padding:0.75rem;background:var(--bg-elevated);border-radius:6px;border:1px solid var(--border);">
+          <div style="font-size:0.78rem;font-weight:600;margin-bottom:0.5rem;color:var(--text);">
+            Import as
+          </div>
+          <label style="display:flex;align-items:flex-start;gap:0.5rem;margin-bottom:0.5rem;cursor:pointer;font-size:0.85rem;">
+            <input type="radio" name="pdfImportMode" value="new_schedule" id="pdfImportModeNew" checked
+                   onchange="refreshPdfImportModeUI()">
+            <div>
+              <div style="font-weight:600;">Create new schedule in this event</div>
+              <div style="font-size:0.72rem;color:var(--text-muted);">
+                Adds a new schedule alongside any existing ones. The current schedule (if any) is deactivated but preserved.
+              </div>
+            </div>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:0.5rem;cursor:pointer;font-size:0.85rem;" id="pdfImportModeReplaceLabel">
+            <input type="radio" name="pdfImportMode" value="replace_schedule" id="pdfImportModeReplace"
+                   onchange="refreshPdfImportModeUI()">
+            <div>
+              <div style="font-weight:600;" id="pdfImportModeReplaceTitle">Replace current schedule</div>
+              <div style="font-size:0.72rem;color:var(--text-muted);" id="pdfImportModeReplaceHint">
+                Replaces the current schedule's matches with the imported ones. A history snapshot is saved so you can restore the previous state.
+              </div>
+            </div>
+          </label>
+        </div>
       </div>
 
       <!-- Stage 3 footer (sticks to bottom of modal) -->
@@ -3578,6 +3610,12 @@ function renderPdfImportPreview(d) {
   document.getElementById('pdfImportStage3').style.display = '';
   document.getElementById('pdfImportStage3Footer').style.display = 'flex';
 
+  // Reflect whether "Replace current schedule" is available based on
+  // whether the editor has a schedule loaded. Called every time we
+  // show the preview so a user who opened import twice with different
+  // editor state gets consistent UI both times.
+  if (typeof refreshPdfImportModeUI === 'function') refreshPdfImportModeUI();
+
   // Branch by what the backend extracted. Match-list PDFs go through the
   // existing detailed preview with editable per-match cells. Day-plan PDFs
   // (event-day programs, MSHSL itinerary) get a simpler preview with a
@@ -4025,45 +4063,104 @@ function revalidatePdfImport() {
   btn.style.opacity = errors.length > 0 ? '0.5' : '1';
 }
 
+// Reflect the availability of "Replace current schedule" — only
+// usable when there's a schedule currently loaded in the editor.
+// Called when the PDF import modal opens to its preview stage, and
+// when radio buttons change.
+function refreshPdfImportModeUI() {
+  var hasCurrent = !!_currentAssignedScheduleId;
+  var replaceRadio = document.getElementById('pdfImportModeReplace');
+  var replaceLabel = document.getElementById('pdfImportModeReplaceLabel');
+  var replaceTitle = document.getElementById('pdfImportModeReplaceTitle');
+  var replaceHint  = document.getElementById('pdfImportModeReplaceHint');
+  if (!replaceRadio || !replaceLabel) return;
+  if (hasCurrent) {
+    replaceRadio.disabled = false;
+    replaceLabel.style.opacity = '1';
+    replaceLabel.style.cursor  = 'pointer';
+    if (replaceTitle) replaceTitle.textContent = 'Replace current schedule (#' + _currentAssignedScheduleId + ')';
+    if (replaceHint)  replaceHint.textContent  = "Replaces the current schedule's matches with the imported ones. A history snapshot is saved so you can restore the previous state.";
+  } else {
+    replaceRadio.disabled = true;
+    replaceRadio.checked  = false;
+    replaceLabel.style.opacity = '0.5';
+    replaceLabel.style.cursor  = 'not-allowed';
+    if (replaceTitle) replaceTitle.textContent = 'Replace current schedule';
+    if (replaceHint)  replaceHint.textContent  = 'No schedule currently loaded — pick a schedule in the editor first to enable this option.';
+    // Default radio back to new_schedule if it had been on replace.
+    var newRadio = document.getElementById('pdfImportModeNew');
+    if (newRadio) newRadio.checked = true;
+  }
+}
+
 async function confirmPdfImport() {
   if (!_pdfImportState || !_currentEventId) return;
   const btn = document.getElementById('pdfImportConfirmBtn');
   btn.disabled = true;
   btn.textContent = 'Importing…';
+
+  // Read selected import mode (default 'new_schedule').
+  var modeRadio = document.querySelector('input[name="pdfImportMode"]:checked');
+  var importMode = modeRadio ? modeRadio.value : 'new_schedule';
+  var targetScheduleId = (importMode === 'replace_schedule') ? _currentAssignedScheduleId : null;
+
   try {
     const headers = { 'Content-Type': 'application/json' };
     const tok = getToken(); if (tok) headers['Authorization'] = 'Bearer ' + tok;
+    var body = {
+      pdf_import_id: _pdfImportState.pdf_import_id,
+      event_id:      parseInt(_currentEventId),
+      name:          'PDF Import ' + new Date().toLocaleString(),
+      matches:       _pdfImportState.matches,
+      // Practice matches — included when the source had a Practice
+      // sheet (XLSX/CSV imports). Backend stores them on the
+      // assigned schedule's practice_matches column. Empty array
+      // is a no-op (existing behavior preserved for sources
+      // without practice).
+      practice:      _pdfImportState.practice || [],
+      // Send V2 day_config natively — backend accepts both shapes
+      // (server-side normalize handles V1 input) but emitting V2
+      // direct skips a redundant migration round-trip and matches
+      // the API's canonical shape.
+      day_config:    (typeof collectDayConfigV2 === 'function')
+                       ? collectDayConfigV2()
+                       : collectDayConfig(),
+      import_mode:   importMode,
+    };
+    if (targetScheduleId) body.target_schedule_id = targetScheduleId;
+
     const r = await fetch(API + '/api/schedules/import-pdf/commit', {
       method: 'POST',
       headers: headers,
-      body: JSON.stringify({
-        pdf_import_id: _pdfImportState.pdf_import_id,
-        event_id:      parseInt(_currentEventId),
-        name:          'PDF Import ' + new Date().toLocaleString(),
-        matches:       _pdfImportState.matches,
-        // Practice matches — included when the source had a Practice
-        // sheet (XLSX/CSV imports). Backend stores them on the
-        // assigned schedule's practice_matches column. Empty array
-        // is a no-op (existing behavior preserved for sources
-        // without practice).
-        practice:      _pdfImportState.practice || [],
-        // Send V2 day_config natively — backend accepts both shapes
-        // (server-side normalize handles V1 input) but emitting V2
-        // direct skips a redundant migration round-trip and matches
-        // the API's canonical shape.
-        day_config:    (typeof collectDayConfigV2 === 'function')
-                         ? collectDayConfigV2()
-                         : collectDayConfig(),
-      }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) {
-      const errText = await r.text();
-      throw new Error(errText || ('HTTP ' + r.status));
+      // Special-case the lock/official guards on replace mode for
+      // user-readable messages. The backend returns 409 (was-ever-
+      // official: structurally immutable) and 423 (locked by another
+      // user) — both common, both worth surfacing clearly rather
+      // than as raw HTTP codes.
+      var errMsg = '';
+      try {
+        var errBody = await r.json();
+        errMsg = errBody.detail || JSON.stringify(errBody);
+      } catch (e) {
+        try { errMsg = await r.text(); } catch (e2) { errMsg = 'HTTP ' + r.status; }
+      }
+      if (r.status === 409) {
+        throw new Error(errMsg || 'Target schedule is structurally immutable (marked official).');
+      } else if (r.status === 423) {
+        throw new Error(errMsg || 'Target schedule is locked by another user.');
+      }
+      throw new Error(errMsg || ('HTTP ' + r.status));
     }
     const d = await r.json();
     closePdfImportModal();
-    showApiStatus('✓ Imported ' + d.matches_imported + ' matches for ' + d.teams + ' teams');
-    // Reload the imported schedule into the editor
+    var msg = importMode === 'replace_schedule'
+      ? '✓ Replaced schedule #' + d.replaced_schedule_id + ' with ' + d.matches_imported + ' matches'
+      : '✓ Imported ' + d.matches_imported + ' matches for ' + d.teams + ' teams';
+    showApiStatus(msg);
+    // Reload the (possibly replaced) schedule into the editor
     await loadAssignedSchedule(d.assigned_schedule_id, collectDayConfig());
   } catch (e) {
     btn.disabled = false;
@@ -4167,60 +4264,76 @@ async function loadDiversityReport(scheduleId) {
     card.innerHTML = '';
     return;
   }
-  // The card may already be rendered from _finishGenerationInner
-  // with client-side data (B2B / Surrogates / basic facts). Don't
-  // wipe it with a "Loading…" placeholder — that flickered before
-  // and, worse, left the card blank if the fetch failed. Instead,
-  // fetch silently and re-render only on success. On failure the
-  // existing client-side render stays put.
   card.style.display = 'block';
   try {
-    // Phase B: fetch the schedule itself (for source/quality_report)
-    // in parallel with the diversity report. Either may fail
-    // independently; render with whichever succeeds.
-    const [drResp, schedResp] = await Promise.all([
-      fetch(API + '/api/abstract-schedules/' + scheduleId + '/diversity-report'),
-      fetch(API + '/api/abstract-schedules/' + scheduleId),
-    ]);
-    if (!drResp.ok) {
-      console.warn('Diversity report fetch returned HTTP', drResp.status);
+    // Single fetch — GET /api/abstract-schedules/{id} now carries
+    // both the quality_report (metrics + derived scores) AND the
+    // diagnostic detail (histograms, worst-pairs, slot table)
+    // inline. The legacy /diversity-report endpoint still exists
+    // for back-compat but we don't call it.
+    const r = await fetch(API + '/api/abstract-schedules/' + scheduleId);
+    if (!r.ok) {
+      console.warn('Schedule fetch returned HTTP', r.status);
       return;
     }
-    const d = await drResp.json();
-    // Merge in source + quality_report from the schedule response.
-    // Old schedules (pre-Phase-B) have null/missing values; the
-    // renderer handles that gracefully.
-    if (schedResp.ok) {
-      try {
-        const sched = await schedResp.json();
-        d._source         = sched.source         || null;
-        d._source_url     = sched.source_url     || null;
-        d._quality_report = sched.quality_report || null;
+    const sched = await r.json();
+    // Assemble the data shape renderDiversityCard expects.
+    // The diagnostic block carries the legacy-style detail content;
+    // _quality_report carries the framework metrics + scores.
+    const d = sched.diagnostic ? {
+      num_teams:         sched.num_teams,
+      matches_per_team:  sched.matches_per_team,
+      total_pairs:       sched.diagnostic.total_pairs,
+      partner: {
+        histogram:   sched.diagnostic.partner_histogram,
+        max:         sched.diagnostic.partner_max,
+        floor:       sched.diagnostic.partner_floor,
+        average:     sched.diagnostic.partner_average,
+        zero_pairs:  sched.diagnostic.partner_zero_pairs,
+        worst_pairs: sched.diagnostic.partner_worst_pairs,
+      },
+      opponent: {
+        histogram:   sched.diagnostic.opponent_histogram,
+        max:         sched.diagnostic.opponent_max,
+        floor:       sched.diagnostic.opponent_floor,
+        average:     sched.diagnostic.opponent_average,
+        zero_pairs:  sched.diagnostic.opponent_zero_pairs,
+        worst_pairs: sched.diagnostic.opponent_worst_pairs,
+      },
+      stations:   sched.diagnostic.stations_summary,
+      surrogates: sched.diagnostic.surrogates_summary,
+      slots:      sched.diagnostic.slot_table,
+    } : {
+      // Fallback when diagnostic isn't available (legacy row, error)
+      num_teams:        sched.num_teams,
+      matches_per_team: sched.matches_per_team,
+      total_pairs:      0,
+      partner:    { histogram: {}, max: 0, average: 0, zero_pairs: 0, worst_pairs: [] },
+      opponent:   { histogram: {}, max: 0, average: 0, zero_pairs: 0, worst_pairs: [] },
+      stations:   { max_imbalance: 0, imbalanced_slots: 0 },
+      surrogates: { total: 0, max_per_slot: 0, concentrated_slots: 0 },
+      slots:      [],
+    };
+    d._source         = sched.source         || null;
+    d._source_url     = sched.source_url     || null;
+    d._quality_report = sched.quality_report || null;
 
-        // Auto-backfill: if the schedule lacks usable quality data
-        // (NULL or missing metrics), call the backfill endpoint and
-        // re-fetch. Silent on failure — the card still renders without
-        // scoring data, just without the badge/floor sections.
-        var qr = d._quality_report;
-        var needsBackfill = !qr || !qr.metrics;
-        if (needsBackfill) {
-          var backfilled = await autoBackfillQualityMetrics(scheduleId);
-          if (backfilled) {
-            d._quality_report = backfilled;
-          }
-        }
-      } catch (e) {
-        console.warn('Schedule fetch json parse failed:', e);
+    // Auto-backfill: if the schedule lacks usable framework data
+    // (NULL or missing metrics), call the backfill endpoint and
+    // re-fetch. Silent on failure — the card still renders without
+    // scoring data.
+    var qr = d._quality_report;
+    var needsBackfill = !qr || !qr.metrics;
+    if (needsBackfill) {
+      var backfilled = await autoBackfillQualityMetrics(scheduleId);
+      if (backfilled) {
+        d._quality_report = backfilled;
       }
     }
-    // Re-render via renderDiversityCard so the headline tiles get
-    // the richer server-side detail (avg partner/opponent, station
-    // imbalance specifics) AND the histogram/issues sections appear.
-    // The function stashes d on window._latestDiversityData so
-    // subsequent updateB2BStat calls keep the server data visible.
+
     renderDiversityCard(card, d);
   } catch (e) {
-    console.warn('Diversity report fetch failed:', e);
+    console.warn('Schedule fetch failed:', e);
     // Same logic — leave whatever client-side render exists.
   }
 }
@@ -4280,38 +4393,81 @@ function renderDiversityCard(card, serverData) {
   var b2bColor = b2bCount === 0 ? 'var(--accent3)' : b2bCount <= 2 ? 'var(--amber)' : 'var(--danger)';
 
   // ── Headline tiles ───────────────────────────────────────────────
-  // Always shown. Server data adds richer detail (partner/opponent
-  // averages, station imbalance specifics) but the client-side
-  // fallback values are enough to populate basic tiles.
+  // Framework-aligned: one tile per FRC §10.5.2 criterion plus
+  // operational tiles (B2B, Surrogates). Tiles show score / value /
+  // floor inline so each tile is self-contained and actionable —
+  // user can read it and know whether the criterion needs attention.
+  //
+  // Six framework tiles (Cooldown, Partner, Opponent, Surrogate, Color,
+  // Station) only render when quality_report.metrics is present. The
+  // operational tiles (B2B, Surrogates count) always render — they're
+  // computed client-side and link to filtering behavior in the editor.
   var tiles = [];
 
-  if (d) {
-    var p = d.partner, o = d.opponent;
-    tiles.push(
-      '<div class="dr-stat">' +
-      '  <div class="dr-stat-label">Avg partner repeats</div>' +
-      '  <div class="dr-stat-value">' + p.average + '</div>' +
-      '  <div class="dr-stat-detail">floor: ' + (p.floor === 0 ? '0' : p.floor) + ' \u00b7 max: ' + p.max + '</div>' +
-      '</div>',
-      '<div class="dr-stat">' +
-      '  <div class="dr-stat-label">Avg opponent repeats</div>' +
-      '  <div class="dr-stat-value">' + o.average + '</div>' +
-      '  <div class="dr-stat-detail">floor: ' + (o.floor === 0 ? '0' : o.floor) + ' \u00b7 max: ' + o.max + '</div>' +
-      '</div>',
-      '<div class="dr-stat">' +
-      '  <div class="dr-stat-label">Pairs never met</div>' +
-      '  <div class="dr-stat-value">' + p.zero_pairs + '</div>' +
-      '  <div class="dr-stat-detail">of ' + d.total_pairs + ' possible</div>' +
-      '</div>',
-      '<div class="dr-stat">' +
-      '  <div class="dr-stat-label">Station balance</div>' +
-      '  <div class="dr-stat-value">' + (d.stations.max_imbalance === 0 ? '\u2713' : '\u00b1' + d.stations.max_imbalance) + '</div>' +
-      '  <div class="dr-stat-detail">' + (d.stations.imbalanced_slots > 0 ? d.stations.imbalanced_slots + ' uneven' : 'all 6 balanced') + '</div>' +
-      '</div>'
-    );
+  // Framework tiles — one per FRC §10.5.2 criterion.
+  if (d && d._quality_report && d._quality_report.metrics) {
+    var qr = d._quality_report;
+    var perCrit = (qr.scores && qr.scores.per_criterion) || {};
+    var criteria = [
+      {key:'cooldown',  label:'Cooldown',  frc:'#1 paramount',  metric:'cooldown_violations'},
+      {key:'partner',   label:'Partner',   frc:'#2',            metric:'par_quad'},
+      {key:'opponent',  label:'Opponent',  frc:'#3',            metric:'opp_quad'},
+      {key:'surrogate', label:'Surrogate', frc:'#4',            metric:'surrogate_count'},
+      {key:'color',     label:'Color',     frc:'#5 R/B balance',metric:'rb_per_team'},
+      {key:'station',   label:'Station',   frc:'#6',            metric:'station_per_team_spread'},
+    ];
+    for (var i = 0; i < criteria.length; i++) {
+      var c = criteria[i];
+      var m = qr.metrics[c.metric];
+      if (!m) continue;
+      var crit = perCrit[c.key] || {};
+      var score = (typeof crit.score === 'number') ? crit.score : null;
+      var scoreColor = score === null ? 'var(--text-muted)' :
+                        score >= 90 ? 'var(--accent3)' :
+                        score >= 70 ? 'var(--amber)' :
+                        score >= 50 ? '#e07d2e' : 'var(--danger)';
+      var confLabel = '';
+      if (m.floor_confidence === 'proven_optimal') {
+        confLabel = 'proven';
+      } else if (m.floor_confidence === 'proven_lower_bound') {
+        confLabel = 'lower bound';
+      } else if (m.floor_confidence === 'best_known') {
+        confLabel = 'best-known';
+      }
+      var matchesFloor = m.matches_floor;
+      var dist = m.distance_from_floor;
+      var floorText = 'floor: ' + (m.floor !== null && m.floor !== undefined ? m.floor : '—');
+      if (!matchesFloor && typeof dist === 'number' && dist > 0) {
+        floorText += ' (+' + dist + ')';
+      } else if (matchesFloor) {
+        floorText += ' \u2713';  // checkmark
+      }
+      var tooltipText = c.label + ' — FRC §10.5.2 ' + c.frc + '. ' +
+        'Floor: ' + confLabel + '. ' +
+        'Score reflects distance from the floor; higher is better.';
+      tiles.push(
+        '<div class="dr-stat" title="' + tooltipText.replace(/"/g, '&quot;') + '" ' +
+        'style="border-left:3px solid ' + scoreColor + ';">' +
+        '<div class="dr-stat-label">' + c.label +
+        ' <span style="color:var(--text-muted);font-weight:400;font-size:0.7rem;">' + c.frc + '</span></div>' +
+        '<div class="dr-stat-value" style="color:' + scoreColor + ';">' +
+        (score === null ? '—' : score.toFixed(0)) +
+        '<span style="font-size:0.7rem;color:var(--text-muted);font-weight:400;">/100</span></div>' +
+        '<div class="dr-stat-detail">' +
+        'value: ' + m.value + ' \u00b7 ' + floorText +
+        '<span style="color:var(--text-muted);font-size:0.7rem;"> \u00b7 ' + confLabel + '</span>' +
+        '</div>' +
+        '</div>'
+      );
+    }
   }
 
-  // B2B and Surrogates tiles — always shown, computed client-side.
+  // Operational tiles (B2B, Surrogates count). These are NOT
+  // framework scores — they're client-side facts about the schedule
+  // useful in the editor (click to filter). Keeping them adjacent
+  // to the framework tiles is OK; they have different labels and
+  // visual style (no score, no floor) so they don't get confused.
+  //
   // IDs preserved (#statB2BContainer / #statB2B / #statSurrogates*)
   // so toggleStatFilter and any other code that targets them keeps
   // working.
@@ -4335,7 +4491,7 @@ function renderDiversityCard(card, serverData) {
     '  <div class="dr-stat-detail">' + (b2bCount === 0 ? 'none' : 'click to filter') + '</div>' +
     '</div>',
     '<div class="dr-stat stat-clickable" id="statSurrogatesContainer" onclick="toggleStatFilter(\'surrogate\')" title="A surrogate plays an extra match to fill a structural gap in the schedule. Click to filter surrogate matches.">' +
-    '  <div class="dr-stat-label">Surrogates</div>' +
+    '  <div class="dr-stat-label">Surrogate matches</div>' +
     '  <div class="dr-stat-value" id="statSurrogates" style="color:' + surColor + ';">' + surTotal + '</div>' +
     '  <div class="dr-stat-detail" id="statSurrogatesMin">' + surDetail + '</div>' +
     '</div>'
@@ -4423,6 +4579,21 @@ function renderDiversityCard(card, serverData) {
       '  <span class="dr-legend-item"><span class="dr-legend-swatch" style="background:var(--danger);"></span>Two+ above floor</span>' +
       '</div>';
     sectionsHtml =
+      '<details style="margin-top:1rem;">' +
+      '<summary style="cursor:pointer;font-size:0.9rem;font-weight:600;margin-bottom:0.5rem;">' +
+      'Diagnostic detail — pair distribution + worst pairs' +
+      '</summary>' +
+      // Pairs-never-met callout (was a top-level legacy tile;
+      // demoted here because it's a property of the distribution
+      // rather than a headline score).
+      '<div style="display:flex;gap:1rem;margin-bottom:0.75rem;font-size:0.85rem;">' +
+      '<div><strong>' + (d.partner.zero_pairs || 0) + '</strong> partner pair' +
+      ((d.partner.zero_pairs || 0) === 1 ? '' : 's') +
+      ' never met <span style="color:var(--text-muted);">of ' + d.total_pairs + '</span></div>' +
+      '<div><strong>' + (d.opponent.zero_pairs || 0) + '</strong> opponent pair' +
+      ((d.opponent.zero_pairs || 0) === 1 ? '' : 's') +
+      ' never met <span style="color:var(--text-muted);">of ' + d.total_pairs + '</span></div>' +
+      '</div>' +
       '<div class="dr-section">' +
       '  <h3 style="margin-bottom:0.4rem;">Pair repeat distribution</h3>' +
       // Inline help: not every reader knows what a "pair" is in
@@ -4458,7 +4629,8 @@ function renderDiversityCard(card, serverData) {
       '  </div>' +
            legendHtml +
       '</div>' +
-      issuesHtml;
+      issuesHtml +
+      '</details>';
   }
 
   // ── Phase B: source banner + floor comparison ────────────────────
@@ -4552,135 +4724,14 @@ function renderDiversityCard(card, serverData) {
       '</div>';
   }
 
-  // Floor-comparison section: shows per-metric value vs theoretical
-  // floor, with confidence labels. Only renders if a quality_report
-  // is available.
+  // Floor comparison previously lived here as a separate collapsible
+  // section. Phase 4 (single-display consolidation) moved that
+  // information into each criterion tile's detail line (value, floor,
+  // confidence label). The detailed pair-distribution histograms +
+  // worst-pairs list still live in the Diagnostic Detail section
+  // below — those answer "why is this score what it is?" rather
+  // than "what's the score?".
   var floorComparisonHtml = '';
-  if (d && d._quality_report && d._quality_report.metrics) {
-    var qr = d._quality_report;
-    var summary = qr.summary || {};
-    var nAtFloor = summary.n_metrics_at_floor || 0;
-    var nTotal   = summary.n_metrics_total || 0;
-    var allMatched = summary.all_proven_floors_matched;
-
-    // Phase C: per-criterion score lookup. The scoring layer uses
-    // weight_key → metric_name mapping (see app/quality_scoring.py:
-    // WEIGHT_KEY_TO_METRIC); we go the reverse direction here.
-    var perCriterion = (qr.scores && qr.scores.per_criterion) || {};
-    var metricToWeightKey = {
-      'cooldown_violations':     'cooldown',
-      'par_quad':                'partner',
-      'opp_quad':                'opponent',
-      'surrogate_count':         'surrogate',
-      'rb_per_team':             'color',
-      'station_per_team_spread': 'station',
-    };
-
-    // Map internal metric keys to friendly labels
-    var labelMap = {
-      'cooldown_violations':     'Cooldown violations',
-      'par_quad':                'Partner sum² (par_quad)',
-      'opp_quad':                'Opponent sum² (opp_quad)',
-      'surrogate_count':         'Surrogate slots',
-      'rb_per_team':             'Red/blue imbalance (per team)',
-      'station_per_team_spread': 'Station spread (per team)',
-    };
-
-    var rows = [];
-    Object.keys(labelMap).forEach(function(k) {
-      var m = qr.metrics[k];
-      if (!m) return;
-      var label = labelMap[k];
-      var value = m.value;
-      var floor = m.floor;
-      var dist  = m.distance_from_floor;
-      var matchesFloor = m.matches_floor;
-      var confLabel = '';
-      if (m.floor_confidence === 'proven_optimal') {
-        confLabel = '<span title="Floor is the proven achievable minimum" ' +
-                    'style="color:var(--text-muted);font-size:0.7rem;">proven</span>';
-      } else if (m.floor_confidence === 'proven_lower_bound') {
-        confLabel = '<span title="Floor is a proven mathematical lower bound; achievability may be higher" ' +
-                    'style="color:var(--text-muted);font-size:0.7rem;">lower bound</span>';
-      } else if (m.floor_confidence === 'best_known') {
-        confLabel = '<span title="Best known floor; may improve over time" ' +
-                    'style="color:var(--text-muted);font-size:0.7rem;">best-known</span>';
-      }
-      var statusIcon = matchesFloor
-        ? '<span style="color:var(--accent3);" title="Matches the theoretical floor">\u2713</span>'
-        : '<span style="color:var(--amber);" title="Above floor by ' + dist + '">\u25b3</span>';
-      var distText = matchesFloor ? '' :
-        '<span style="color:var(--text-muted);font-size:0.8rem;"> (+' + dist + ')</span>';
-
-      // Phase C: per-criterion score column
-      var wKey = metricToWeightKey[k];
-      var critScore = wKey && perCriterion[wKey] ? perCriterion[wKey].score : null;
-      var scoreCell;
-      if (critScore === null || critScore === undefined) {
-        scoreCell = '<span style="color:var(--text-muted);">—</span>';
-      } else {
-        var scoreColor = critScore >= 90 ? 'var(--accent3)' :
-                         critScore >= 70 ? 'var(--amber)' :
-                         critScore >= 50 ? '#e07d2e' : 'var(--danger)';
-        scoreCell = '<span style="color:' + scoreColor + ';font-weight:600;">' +
-                    critScore.toFixed(0) + '</span>';
-      }
-
-      rows.push(
-        '<tr>' +
-        '<td style="padding:0.25rem 0.5rem;">' + statusIcon + ' ' + label + '</td>' +
-        '<td style="padding:0.25rem 0.5rem;text-align:right;font-variant-numeric:tabular-nums;">' +
-          value + distText +
-        '</td>' +
-        '<td style="padding:0.25rem 0.5rem;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted);">' +
-          floor +
-        '</td>' +
-        '<td style="padding:0.25rem 0.5rem;text-align:right;font-variant-numeric:tabular-nums;">' +
-          scoreCell +
-        '</td>' +
-        '<td style="padding:0.25rem 0.5rem;text-align:right;">' + confLabel + '</td>' +
-        '</tr>'
-      );
-    });
-
-    var summaryBanner = '';
-    if (allMatched) {
-      summaryBanner =
-        '<div style="margin-bottom:0.5rem;color:var(--accent3);font-weight:600;font-size:0.9rem;">' +
-        '\u2605 Matches theoretical floor on every proven-optimal metric (' + nAtFloor + '/' + nTotal + ' total)' +
-        '</div>';
-    } else {
-      summaryBanner =
-        '<div style="margin-bottom:0.5rem;color:var(--text-muted);font-size:0.9rem;">' +
-        nAtFloor + ' of ' + nTotal + ' metrics at theoretical floor' +
-        '</div>';
-    }
-
-    floorComparisonHtml =
-      '<div style="margin-bottom:1rem;">' +
-      '<details>' +
-      '<summary style="cursor:pointer;font-size:0.9rem;font-weight:600;margin-bottom:0.5rem;">' +
-      'Theoretical floor comparison' +
-      '</summary>' +
-      summaryBanner +
-      '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">' +
-      '<thead><tr style="border-bottom:1px solid var(--border);color:var(--text-muted);font-size:0.75rem;">' +
-      '<th style="padding:0.25rem 0.5rem;text-align:left;">Metric</th>' +
-      '<th style="padding:0.25rem 0.5rem;text-align:right;">Achieved</th>' +
-      '<th style="padding:0.25rem 0.5rem;text-align:right;">Floor</th>' +
-      '<th style="padding:0.25rem 0.5rem;text-align:right;">Score</th>' +
-      '<th style="padding:0.25rem 0.5rem;text-align:right;">Confidence</th>' +
-      '</tr></thead>' +
-      '<tbody>' + rows.join('') + '</tbody>' +
-      '</table>' +
-      '<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-muted);">' +
-      'Floor confidence: "proven" = mathematically achievable; ' +
-      '"lower bound" = proven minimum but actual achievable may be higher. ' +
-      'Score: per-criterion 0-100 distance-from-floor (Phase C).' +
-      '</div>' +
-      '</details>' +
-      '</div>';
-  }
 
   // Phase C: weights editor panel — hidden by default, toggled by
   // the "Weights" button in the composite badge. Provides per-criterion
