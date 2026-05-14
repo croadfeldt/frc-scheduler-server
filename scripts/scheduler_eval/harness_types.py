@@ -105,14 +105,32 @@ class Fixture:
         each team plays matches_per_team times, so:
 
             total_team_slots = num_teams × matches_per_team
-            total_matches    = total_team_slots / (2 × teams_per_alliance)
+            total_matches    = ceil(total_team_slots / (2 × teams_per_alliance))
 
-        This must come out to an integer. If it doesn't, the fixture is
-        unschedulable as-stated and a surrogate round can balance it.
+        For fixtures where total_slots doesn't divide evenly into matches
+        (e.g., 51 teams × 9 MPT = 459 slots, 6 slots/match = 76.5 matches),
+        the remainder is absorbed by surrogate slot-fills in the final
+        round. Those extra slots are filled by teams playing a 10th match
+        (their surrogate appearance per FRC §10.5.2). So a "51×9" fixture
+        produces 77 matches, not 76 — the 77th match includes 3 surrogate
+        teams to fill out the alliances.
+
+        Historical note (fixed 2026-05-13): this property previously used
+        floor division (`//`), which produced an off-by-one underestimate
+        for surrogate-required fixtures. That caused the matchmaker adapter
+        to reject MatchMaker's (correct) output for the 51/55/61-team MN
+        regionals — MatchMaker produced 77/83/92 matches and we expected
+        76/82/91. Reported as "exit 255" originally (the wrong frame);
+        actual diagnosis showed MatchMaker exits cleanly and the parser
+        rejection raised the ValueError that became the error. See
+        docs/scheduler/construction-malformation.md for the parallel
+        construction-side fix in the same investigation.
         """
         slots_per_match = 2 * self.teams_per_alliance
         total_slots = self.num_teams * self.matches_per_team
-        return total_slots // slots_per_match
+        # Ceil division: (a + b - 1) // b is equivalent to math.ceil(a/b)
+        # without importing math or doing float arithmetic.
+        return (total_slots + slots_per_match - 1) // slots_per_match
 
     @property
     def needs_surrogate(self) -> bool:

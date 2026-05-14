@@ -492,44 +492,73 @@ results would have been nearly as good.
 
 ### 1. Surrogate handling for odd team counts (3 fixtures still errored)
 
-**[PARTIAL FIX 2026-05-09; STILL ERRORING 2026-05-10]** Fixtures 2023mnmi (61 teams),
-2024mndu (55 teams), 2025mnmi (51 teams) failed with `MatchMaker exited 255`.
+**[RESOLVED 2026-05-14]** Fixtures 2023mnmi (61 teams), 2024mndu (55 teams),
+2025mnmi (51 teams) failed with `MatchMaker exited 255` in earlier eval
+reports. The actual root cause was **NOT** in MatchMaker.
 
-**First attempted fix (2026-05-09)**: the adapter previously passed
-`fixture.surrogate_round` (a match number, mislabeled as a round) to
-MatchMaker's `-u` flag, which expected a 1-indexed round number.
-Match 22 in a 9-round event isn't a valid round, so MatchMaker
-rejected the configuration. Fix: the adapter now omits `-u` entirely,
-letting MatchMaker use its built-in default of round 3 (FIRST's
-convention since 2008). The field on Fixture is renamed
-`surrogate_first_match` for clarity.
+**Full diagnostic chain** (uncovered 2026-05-14):
 
-**Re-run finding (2026-05-10)**: the post-fix eval re-run on the same
-fixtures **still produced exit-255 errors**, indicating either (a) a
-second distinct root cause beyond the `-u` flag, or (b) the fix
-didn't ship in the binary path used for the re-run. The error
-message was not captured in actionable detail at that time —
-MatchMaker may write its error to stdout rather than stderr, and
-the adapter's exception capture only excerpted stderr.
+1. The original eval reports said "exit 255" because the adapter's
+   error capture was shallow — it caught the exception and tagged it
+   with the type/message but downstream report renderers compressed
+   that to "ERROR" with no context.
+2. MatchMaker actually exits cleanly with a valid schedule for all
+   three fixtures.
+3. The matchmaker adapter then runs `_parse_output()` which validates
+   `len(matches) == fixture.total_matches`. This check **failed**
+   because `Fixture.total_matches` had an off-by-one bug.
+4. The failed validation raised `ValueError("MatchMaker output has
+   N matches; fixture expects N-1")`. The runner wrapped that as
+   the run's `error` field, which the reports rendered as "ERROR".
+5. The earlier session-recorded fix from 2026-05-09 (omit `-u` flag)
+   was correct but addressed a different (earlier) failure mode.
+   Once that fix landed, MatchMaker started producing output but
+   then hit the total_matches mismatch.
 
-**Diagnostic capture upgraded (2026-05-13)**: the matchmaker adapter
-now captures both stdout and stderr (last 500 bytes each) when
-MatchMaker exits non-zero, raising a RuntimeError with the full
-diagnostic context. The next eval run that includes these three
-fixtures will surface the actual reason MatchMaker is rejecting them.
+**Root cause**: `Fixture.total_matches` in
+`scripts/scheduler_eval/harness_types.py` used floor division:
 
-**Our scheduler is not affected** by this issue. The frc-scheduler-server
-adapter generates valid schedules for all three fixture shapes (51,
-55, 61 teams at MPT=7). Construction reliability was separately
-improved in this same session — see
-`docs/scheduler/construction-malformation.md`.
+    return (num_teams * matches_per_team) // (2 * teams_per_alliance)
 
-To make progress on the matchmaker side, the next steps are:
-  1. Run the eval on a machine with the MatchMaker binary installed
-     against these three fixtures.
-  2. Capture the new diagnostic output (includes stdout excerpt).
-  3. Either patch the adapter to handle whatever MatchMaker is
-     complaining about, or document the fixture-shape limitation.
+For fixtures where `N×MPT` doesn't divide evenly into `2×TPA`, the
+floor gives one fewer match than the schedule actually contains —
+because the extra `N×MPT mod 6` slots are filled by surrogate
+appearances in an additional final round. Examples:
+
+    51×9 = 459 slots / 6 = 76.5 → floor 76, actual 77 (3 surrogates)
+    55×9 = 495 slots / 6 = 82.5 → floor 82, actual 83 (3 surrogates)
+    61×9 = 549 slots / 6 = 91.5 → floor 91, actual 92 (3 surrogates)
+
+The docstring even acknowledged this: "if it doesn't come out to an
+integer, a surrogate round can balance it" — but the code didn't
+actually do the round-up.
+
+**Fix**: change `total_matches` to use ceil division:
+
+    return (total_slots + slots_per_match - 1) // slots_per_match
+
+**Diagnostic improvements that exposed this**:
+
+1. 2026-05-13: matchmaker adapter `_build_command` already correctly
+   omitted `-u` per the 2026-05-09 fix.
+2. 2026-05-13: error capture beefed up to include both stdout AND
+   stderr (last 500 bytes each) on non-zero exit. This was a
+   pre-condition for actually seeing what MatchMaker outputs.
+3. 2026-05-14: live re-run on Stark showed MatchMaker producing
+   77/83/92 matches with full schedules; the rejection came from
+   our adapter's parser, not from MatchMaker.
+
+**Test coverage**: new `tests/test_fixture_total_matches.py` with
+24 assertions covering even-division shapes (12×6, 36×7, etc.) and
+surrogate-required shapes (51×9, 55×9, 61×9, plus MPT=7/8 variants).
+Includes the structural invariant `total_matches × 6 ≥ num_teams ×
+matches_per_team` so we can't off-by-one in the other direction
+either.
+
+**Our scheduler was not affected by this specific bug** but did have
+a parallel construction-malformation issue on the same fixture shapes
+— see `docs/scheduler/construction-malformation.md`. Both fixes
+landed in the same session.
 
 ### 2. Per-metric "where each adapter struggles" view
 
