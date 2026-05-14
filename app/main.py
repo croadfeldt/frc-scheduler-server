@@ -364,6 +364,13 @@ class AbstractGenerateRequest(BaseModel):
     weights:          dict[str, float] | None = None
     # Phase C quality scoring weights (separate from generation `weights`).
     quality_weights:  dict[str, float] | None = None
+    # CP-SAT exact post-pass budget in seconds. 0 = SA post-passes only
+    # (legacy behavior). Positive = run CP-SAT R/B + station polish on
+    # the winner after SA. Capped at 3600 (1 hour). Empirically: 60s
+    # reliably hits composite=100 on the standards inventory; 5-10 min
+    # for fixtures larger than the inventory. See
+    # docs/scheduler/exact-post-passes.md.
+    cpsat_post_pass_budget_s: float = Field(0.0, ge=0.0, le=3600.0)
 
     from pydantic import field_validator
 
@@ -1002,12 +1009,25 @@ async def generate_abstract(
 
     async def stream() -> AsyncGenerator[str, None]:
         yield ": connected\n\n"
+        # Phase signal: tells the UI roughly what to expect. With CP-SAT
+        # polish, the worker may run for many minutes; without it, just
+        # SA (seconds). The UI uses this to set progress UI mode.
+        if body.cpsat_post_pass_budget_s > 0:
+            phase_msg = json.dumps({
+                'type':'phase', 'phase':'sa+cpsat_polish',
+                'cpsat_budget_s': body.cpsat_post_pass_budget_s,
+            })
+        else:
+            phase_msg = json.dumps({'type':'phase', 'phase':'sa'})
+        yield f"data: {phase_msg}\n\n"
         sem = get_generation_semaphore()
         async with sem:
             try:
                 future = loop.run_in_executor(
                     pool, run_iterations_worker,
-                    (body.num_teams, body.matches_per_team, body.cooldown, 1, 0, _seed_int, body.weights),
+                    (body.num_teams, body.matches_per_team, body.cooldown,
+                     1, 0, _seed_int, body.weights,
+                     body.cpsat_post_pass_budget_s),
                 )
                 while not future.done():
                     await asyncio.sleep(0.5)
@@ -1051,6 +1071,7 @@ async def generate_abstract(
                         'sa_iterations':  body.iterations,
                         'sa_weights':     body.weights,
                         'seed':           body.seed,
+                        'cpsat_post_pass_budget_s': body.cpsat_post_pass_budget_s,
                         'created_via':    'POST /api/generate-abstract',
                     },
                 )
@@ -1111,6 +1132,13 @@ class UnifiedScheduleRequest(BaseModel):
     # clamped to ≥ 1 (paramount). Separate from `weights` above (which
     # influences SA generation).
     quality_weights:    dict[str, float] | None = None
+    # CP-SAT exact post-pass budget in seconds. 0 = SA post-passes only
+    # (legacy fast path). Positive = run CP-SAT R/B + station polish on
+    # the winner after SA. Capped at 3600 (1 hour). See
+    # docs/scheduler/exact-post-passes.md for budget-vs-quality data;
+    # briefly: 60s reliably reaches composite=100 on the standards
+    # inventory.
+    cpsat_post_pass_budget_s: float = Field(0.0, ge=0.0, le=3600.0)
     # Storage metadata
     name:               str        = Field("Schedule", max_length=128)
     event_id:           int | None = None
@@ -1229,7 +1257,8 @@ async def create_schedule(
         try:
             future = loop.run_in_executor(
                 pool, run_iterations_worker,
-                (n, mpt, cd, 1, 0, _seed_int, body.weights),
+                (n, mpt, cd, 1, 0, _seed_int, body.weights,
+                 body.cpsat_post_pass_budget_s),
             )
             result = await future
         except Exception as e:
@@ -1253,6 +1282,7 @@ async def create_schedule(
             'sa_iterations':  body.sa_iterations,
             'sa_weights':     body.weights,
             'seed':           body.seed,
+            'cpsat_post_pass_budget_s': body.cpsat_post_pass_budget_s,
             'created_via':    'POST /api/schedules (generate)',
         }
 

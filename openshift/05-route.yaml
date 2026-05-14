@@ -7,7 +7,15 @@ metadata:
   labels:
     app: NAMESPACE_PLACEHOLDER-git
   annotations:
-    haproxy.router.openshift.io/timeout: 120s
+    # Timeout must exceed the maximum CP-SAT post-pass budget (3600s)
+    # plus headroom for upstream SA (~3 min on largest fixtures) plus
+    # request handling overhead. 4000s = ~67 min, safely covering
+    # the 60-min CP-SAT cap. Without this bump, the SSE stream from
+    # /api/generate-abstract would die at the route layer mid-solve
+    # for any budget > 2 min, even though the SSE keep-alive pings
+    # keep the TCP socket alive — haproxy's timeout is wall-clock,
+    # not idle.
+    haproxy.router.openshift.io/timeout: 4000s
 spec:
   to:
     kind: Service

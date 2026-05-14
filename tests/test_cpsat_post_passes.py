@@ -257,6 +257,101 @@ check("CP-SAT station max ≤ SA station max",
 
 
 # ─────────────────────────────────────────────────────────────────────
+# 8. generate_matches integration: budget kwarg flows through
+# ─────────────────────────────────────────────────────────────────────
+
+print("\ngenerate_matches integration:")
+# Default (no budget): should match the legacy SA-only behavior. The
+# returned schedule should be identical between budget=0.0 and the
+# old call signature, given the same seed and SA iter count.
+no_polish = generate_matches(
+    num_teams=12, matches_per_team=6, ideal_gap=2,
+    seed=0xcafe1, n_sa_iterations=5000,
+)
+no_polish_explicit_zero = generate_matches(
+    num_teams=12, matches_per_team=6, ideal_gap=2,
+    seed=0xcafe1, n_sa_iterations=5000,
+    cpsat_post_pass_budget_s=0.0,
+)
+check("budget=0 matches old behavior (same matches given same seed)",
+      no_polish.matches == no_polish_explicit_zero.matches)
+
+# With a small budget, the result should be ≤ SA-only score on the
+# lex tuple (i.e., not worse). 5 second budget is plenty for 12×6.
+with_polish = generate_matches(
+    num_teams=12, matches_per_team=6, ideal_gap=2,
+    seed=0xcafe1, n_sa_iterations=5000,
+    cpsat_post_pass_budget_s=5.0,
+)
+# Score is a single float here (legacy display); structural quality
+# is captured in the lex tuple. We just verify it didn't crash and
+# returned a valid schedule.
+check("budget=5 produces a complete schedule",
+      len(with_polish.matches) == len(no_polish.matches))
+check("budget=5 preserves total team play counts",
+      _team_play_counts(with_polish.matches) == _team_play_counts(no_polish.matches))
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 9. run_iterations_worker accepts budget (API path)
+# ─────────────────────────────────────────────────────────────────────
+
+print("\nrun_iterations_worker accepts CP-SAT budget:")
+from app.scheduler import run_iterations_worker
+
+# 8-tuple form (the new shape with CP-SAT budget)
+result_with_budget = run_iterations_worker(
+    (12, 6, 2, 1, 0, 0xbeef, None, 5.0)
+)
+check("8-tuple call returns matches",
+      'matches' in result_with_budget and len(result_with_budget['matches']) > 0)
+
+# 7-tuple form (legacy with weights but no budget)
+result_legacy_7 = run_iterations_worker(
+    (12, 6, 2, 1, 0, 0xbeef, None)
+)
+check("7-tuple call still works (backwards compat)",
+      'matches' in result_legacy_7 and len(result_legacy_7['matches']) > 0)
+
+# 6-tuple form (oldest, no weights, no budget)
+result_legacy_6 = run_iterations_worker(
+    (12, 6, 2, 1, 0, 0xbeef)
+)
+check("6-tuple call still works (oldest backwards compat)",
+      'matches' in result_legacy_6 and len(result_legacy_6['matches']) > 0)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 10. Pydantic models accept the new field
+# ─────────────────────────────────────────────────────────────────────
+# We can't import app.main here (requires httpx), so we re-declare the
+# minimal Pydantic shape and confirm it accepts the new field with
+# bounds validation.
+
+print("\nAPI request models accept budget field:")
+from pydantic import BaseModel, Field, ValidationError
+
+class _MockReq(BaseModel):
+    """Mirrors the cpsat_post_pass_budget_s field shape from
+    AbstractGenerateRequest / UnifiedScheduleRequest."""
+    cpsat_post_pass_budget_s: float = Field(0.0, ge=0.0, le=3600.0)
+
+check("default is 0.0", _MockReq().cpsat_post_pass_budget_s == 0.0)
+check("accepts 60", _MockReq(cpsat_post_pass_budget_s=60).cpsat_post_pass_budget_s == 60.0)
+check("accepts 3600 (max)", _MockReq(cpsat_post_pass_budget_s=3600).cpsat_post_pass_budget_s == 3600.0)
+try:
+    _MockReq(cpsat_post_pass_budget_s=3601)
+    check("rejects 3601 (above cap)", False, "no validation error raised")
+except ValidationError:
+    check("rejects 3601 (above cap)", True)
+try:
+    _MockReq(cpsat_post_pass_budget_s=-1)
+    check("rejects negative", False, "no validation error raised")
+except ValidationError:
+    check("rejects negative", True)
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Done
 # ─────────────────────────────────────────────────────────────────────
 

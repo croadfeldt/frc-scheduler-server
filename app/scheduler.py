@@ -139,7 +139,9 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                      team_numbers: list[int] | None = None,
                      n_sa_iterations: int = 0,
                      rb_post_pass: bool = True,
-                     station_post_pass: bool = True) -> ScheduleResult:
+                     station_post_pass: bool = True,
+                     cpsat_post_pass_budget_s: float = 0.0,
+                     ) -> ScheduleResult:
     """Generate one schedule iteration.
 
     Args:
@@ -847,6 +849,34 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         from app.post_passes.station_balance import station_balance_sa
         matches, _st_stats = station_balance_sa(matches, n_iterations=5000, seed=seed)
 
+    # ── CP-SAT exact-optimization polish (optional) ─────────────────────
+    # When budget > 0, run CP-SAT exact solvers on the same subproblems
+    # the SA post-passes operate on. SA gives a good starting point;
+    # CP-SAT proves optimality (or gets closer than SA can within
+    # budget). Provably preserves all upstream criteria (partner pairs,
+    # opponent pairs, cooldown, surrogate counts).
+    #
+    # See docs/scheduler/exact-post-passes.md for the budget-vs-quality
+    # data. Briefly: 60s total budget reliably hits composite=100 on
+    # the standards inventory. Budget is split 10% R/B + 90% station
+    # (R/B is a much smaller subproblem and converges fast).
+    #
+    # On UNKNOWN status (solver couldn't find a feasible solution in
+    # the budget — rare), the input is returned unchanged. Caller
+    # silently gets the SA result, no failure mode.
+    if cpsat_post_pass_budget_s > 0 and len(matches) > 0:
+        from app.post_passes.cpsat_post_passes import (
+            rb_balance_cpsat, station_balance_cpsat,
+        )
+        rb_budget      = max(1.0, min(cpsat_post_pass_budget_s * 0.10, 60.0))
+        station_budget = max(1.0, cpsat_post_pass_budget_s - rb_budget)
+        matches, _cpsat_rb_stats = rb_balance_cpsat(
+            matches, time_budget_s=rb_budget,
+        )
+        matches, _cpsat_st_stats = station_balance_cpsat(
+            matches, time_budget_s=station_budget,
+        )
+
     return ScheduleResult(
         matches=matches,
         surrogate_count=sc,
@@ -1219,8 +1249,25 @@ def _summary_score_from_tuple(score_tuple: tuple) -> float:
 
 
 def run_iterations_worker(args: tuple) -> dict:
-    # Unpack with backwards-compatible weights tuple (old callers send 6-tuple)
-    if len(args) == 7:
+    """Worker entrypoint for /api/generate-abstract and /api/schedules.
+
+    Args tuple supports three lengths for backwards compatibility:
+      6: (num_teams, matches_per_team, ideal_gap, n_iterations, worker_id, seed)
+         — no weights, no CP-SAT
+      7: + weights
+      8: + cpsat_post_pass_budget_s (0.0 disables; positive enables polish)
+
+    The CP-SAT polish runs ONCE per worker on the best schedule the
+    worker found, not on every iteration. SA finds the diversity
+    structure; CP-SAT polishes R/B + station to optimal on the winner.
+    Running it inside the loop would be wasted compute on schedules
+    we're going to throw away anyway.
+    """
+    cpsat_post_pass_budget_s = 0.0
+    if len(args) == 8:
+        (num_teams, matches_per_team, ideal_gap, n_iterations,
+         worker_id, seed, weights, cpsat_post_pass_budget_s) = args
+    elif len(args) == 7:
         num_teams, matches_per_team, ideal_gap, n_iterations, worker_id, seed, weights = args
     else:
         num_teams, matches_per_team, ideal_gap, n_iterations, worker_id, seed = args
@@ -1229,12 +1276,36 @@ def run_iterations_worker(args: tuple) -> dict:
 
     for i in range(n_iterations):
         iter_seed = (seed ^ (worker_id * 1000 + i)) if seed is not None else None
-        result = generate_matches(num_teams, matches_per_team, ideal_gap, iter_seed, weights)
+        # Inside the loop: SA + SA post-passes only (cheap, fast). CP-SAT
+        # polish happens on the winner below.
+        result = generate_matches(num_teams, matches_per_team, ideal_gap, iter_seed, weights,
+                                   cpsat_post_pass_budget_s=0.0)
         if best is None or result.score > best.score:
             best = result
 
     if best is None:
         return {'worker_id': worker_id, 'score': -1e18, 'matches': [], 'surrogate_count': [], 'round_boundaries': {}}
+
+    # CP-SAT polish on the winner. Re-runs the post-pass subproblems
+    # exactly. Provably preserves partner pairs, opponent pairs, cooldown,
+    # surrogate counts, alliance composition — only R/B labels and station
+    # permutations within alliances change.
+    if cpsat_post_pass_budget_s > 0 and best.matches:
+        from app.post_passes.cpsat_post_passes import (
+            rb_balance_cpsat, station_balance_cpsat,
+        )
+        rb_budget      = max(1.0, min(cpsat_post_pass_budget_s * 0.10, 60.0))
+        station_budget = max(1.0, cpsat_post_pass_budget_s - rb_budget)
+        polished_matches, _ = rb_balance_cpsat(list(best.matches),
+                                                time_budget_s=rb_budget)
+        polished_matches, _ = station_balance_cpsat(polished_matches,
+                                                     time_budget_s=station_budget)
+        best = ScheduleResult(
+            matches=polished_matches,
+            surrogate_count=best.surrogate_count,
+            round_boundaries=best.round_boundaries,
+            score=score_schedule(polished_matches, num_teams),
+        )
 
     return {
         'worker_id':        worker_id,
@@ -2114,13 +2185,16 @@ def _assign_unified(abstract_matches: list[dict],
                     sa_iterations: int,
                     seed: int | None,
                     rb_post_pass: bool = True,
-                    station_post_pass: bool = True) -> dict:
+                    station_post_pass: bool = True,
+                    cpsat_post_pass_budget_s: float = 0.0) -> dict:
     """Run Phase 0+1+2 unified assignment.
 
     Takes a saved abstract schedule (slot indices), relabels with real
     teams, runs SA optimization, runs the R/B post-pass (Phase 1) and
-    station balance post-pass (Phase 2). Returns a dict with the same
-    shape as the legacy assign_teams output.
+    station balance post-pass (Phase 2). When cpsat_post_pass_budget_s
+    is positive, follows with CP-SAT exact polish (provably optimal
+    R/B + station given the upstream diversity choices). Returns a
+    dict with the same shape as the legacy assign_teams output.
     """
     if len(team_numbers) != num_teams:
         raise ValueError(
@@ -2144,6 +2218,18 @@ def _assign_unified(abstract_matches: list[dict],
     if station_post_pass and len(matches) > 0:
         from app.post_passes.station_balance import station_balance_sa
         matches, _stats = station_balance_sa(matches, n_iterations=5000, seed=seed)
+
+    # CP-SAT exact polish (optional). Same subproblems as the SA
+    # post-passes; CP-SAT proves optimality where SA plateaus.
+    # Budget split: 10% R/B, 90% station.
+    if cpsat_post_pass_budget_s > 0 and len(matches) > 0:
+        from app.post_passes.cpsat_post_passes import (
+            rb_balance_cpsat, station_balance_cpsat,
+        )
+        rb_budget      = max(1.0, min(cpsat_post_pass_budget_s * 0.10, 60.0))
+        station_budget = max(1.0, cpsat_post_pass_budget_s - rb_budget)
+        matches, _ = rb_balance_cpsat(matches, time_budget_s=rb_budget)
+        matches, _ = station_balance_cpsat(matches, time_budget_s=station_budget)
 
     score = score_schedule(matches, num_teams)
     score_tuple = list(score_tuple_for_schedule(matches, num_teams, ideal_gap=ideal_gap))

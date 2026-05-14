@@ -121,19 +121,74 @@ canonical JSON file in `app/canonical_schedules/`.
 
 Every cache hit in production serves a CP-SAT-polished canonical.
 
-### Live interactive generation (not yet wired)
+### Live interactive generation
 
-The current `generate_matches` API path uses SA post-passes only.
-Wiring CP-SAT into the live path requires:
+`generate_matches()` accepts `cpsat_post_pass_budget_s: float = 0.0`
+(default off for backwards compatibility). When positive, the function
+runs SA construction + SA optimization + SA post-passes as usual, then
+applies CP-SAT polish on the result. Budget split: 10% R/B, 90%
+station.
 
-- Async job handling (CP-SAT can take minutes; HTTP timeouts in
-  reverse proxy, OpenShift route, and browser fetch all need
-  consideration)
-- UI control with budget picker
-- Progress reporting (CP-SAT emits solver callbacks)
+The API request bodies for the live-generation endpoints carry the
+field:
 
-That work is planned but not in this drop. For now, production
-users get CP-SAT-quality schedules via canonical library cache hits.
+- `POST /api/generate-abstract` (legacy, SSE): `cpsat_post_pass_budget_s`
+- `POST /api/schedules` (unified): `cpsat_post_pass_budget_s`
+
+Pydantic validates `0 ≤ budget ≤ 3600`. The worker dispatches both
+SA and CP-SAT phases; SSE `phase` event is emitted before the worker
+starts so the UI can show appropriate progress copy:
+
+```
+data: {"type":"phase","phase":"sa+cpsat_polish","cpsat_budget_s":300}
+```
+
+The progress label updates: "Generating schedule, then CP-SAT polish
+(up to 5 min)…" so the user knows the wait is expected.
+
+The UI's Generate panel includes a "Quality polish" picker:
+
+- **Off (default)** — SA only. Fastest. Use this for quick iteration.
+- **Quick polish (~60s)** — Reliable composite=100 on most fixtures.
+- **Thorough (~5 min)** — Recommended for 30+ team fixtures.
+- **Deep (~15 min)** — Gives CP-SAT room to prove optimal on large fixtures.
+- **Maximum (~60 min)** — For results that will be cached and shared.
+- **Custom…** — 1-3600 seconds.
+
+The hint text under the picker updates as the user selects, surfacing
+the expected wall-time impact.
+
+### Operational consideration: OpenShift route timeout
+
+`openshift/05-route.yaml` carries `haproxy.router.openshift.io/timeout:
+4000s`. This MUST exceed the maximum CP-SAT budget (3600s) plus
+upstream SA wall time, otherwise haproxy will kill the SSE stream
+mid-solve. The SSE keep-alive pings keep TCP alive but haproxy's
+timeout is wall-clock-based, not idle-based.
+
+If you bump `MAX_BUDGET_SECONDS` above 3600 in the future, bump the
+route timeout correspondingly. Headroom of 5-10% over the budget
+cap is sufficient.
+
+### Auditability
+
+Schedules generated with CP-SAT polish have the budget recorded in
+their `creation_provenance` JSONB column:
+
+```json
+{
+  "method": "sa_generated",
+  "sa_iterations": 500000,
+  "sa_weights": null,
+  "seed": "abc123",
+  "cpsat_post_pass_budget_s": 300,
+  "created_via": "POST /api/schedules (generate)"
+}
+```
+
+Canonical library entries built via the producer have the more
+detailed `cpsat_post_pass` block (status, wall time, before/after
+imbalances) — see the producer integration section above.
 
 ### Experiment harness
 
@@ -192,10 +247,14 @@ the framework. Cache hits in production serve these polished entries.
 
 Future work:
 
-1. **Live generation CP-SAT** — wire into `generate_matches` with
-   async job + UI budget picker + progress reporting.
-2. **Larger fixtures** — 80+ teams may need >60s budgets to reach
+1. **Larger fixtures** — 80+ teams may need >60s budgets to reach
    OPTIMAL; characterize on Stark.
-3. **Upstream SA improvements** — the post-pass solvers can't help
+2. **Upstream SA improvements** — the post-pass solvers can't help
    with par_quad/opp_quad gaps. The 20×8 fixture's 99.4 ceiling at
    100K SA suggests upstream optimization is the next bottleneck.
+3. **Cancellation** — currently if the browser closes mid-solve,
+   the worker thread keeps running until done (result discarded).
+   CP-SAT supports interruption via `StopSearch()`; wiring this is
+   straightforward but requires a way to signal from the async
+   request handler to the executor thread (e.g., a shared
+   threading.Event).

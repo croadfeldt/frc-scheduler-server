@@ -2716,6 +2716,41 @@
             </div>
             <div id="iterationEstimate" style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
 
+            <!-- ── CP-SAT polish budget ──
+                 After SA finishes, optionally run a CP-SAT exact solver
+                 on the R/B and station post-pass subproblems. Provably
+                 optimal at the chosen budget; cap at 60 minutes (3600s).
+                 Empirically: 60s reliably hits composite=100 on
+                 standards inventory. 5 min handles larger fixtures. -->
+            <div class="field-row single" style="margin-bottom:0.5rem;">
+              <div class="field">
+                <label>Quality polish
+                  <span style="font-size:0.65rem;color:var(--text-muted);margin-left:0.3rem;">(CP-SAT exact solver; runs after SA)</span>
+                </label>
+                <select id="cpsatBudget" onchange="onCpsatBudgetChange()">
+                  <option value="0" selected>Off (SA only — fastest)</option>
+                  <option value="60">Quick polish (~60s — reliable for most fixtures)</option>
+                  <option value="300">Thorough (~5 min — recommended for 30+ teams)</option>
+                  <option value="900">Deep (~15 min — gives the solver room to prove optimal)</option>
+                  <option value="3600">Maximum (~60 min — for production-grade caching)</option>
+                  <option value="custom">Custom… (seconds, 1-3600)</option>
+                </select>
+              </div>
+            </div>
+            <div id="customCpsatBudgetRow" class="field-row single" style="display:none;margin-bottom:0.25rem;">
+              <div class="field">
+                <label>Custom CP-SAT budget (seconds)
+                  <span style="font-size:0.65rem;color:var(--text-muted);margin-left:0.3rem;">(1 to 3600)</span>
+                </label>
+                <input type="number" id="cpsatBudgetCustom" value="60" min="1" max="3600">
+              </div>
+            </div>
+            <div id="cpsatBudgetHint" style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.5rem;line-height:1.4;">
+              CP-SAT polishes the SA result on R/B balance and station distribution to provably optimal.
+              Provably preserves partner pairs, opponent pairs, cooldown, and surrogate counts.
+              Results are cached, so generous budgets pay off across future cache hits.
+            </div>
+
             <!-- ── Algorithm toggles ──
                  Editing any of these UNCHECKS the FRC approval box. -->
             <div style="margin-top:0.5rem;font-size:0.7rem;color:var(--text-muted);letter-spacing:0.04em;">Algorithm settings (changing these unsets FRC approval)</div>
@@ -5561,6 +5596,55 @@ function onQualityPresetChange() {
     }
   }
   updateIterationEstimate();
+}
+
+function onCpsatBudgetChange() {
+  // CP-SAT quality polish picker. 'custom' reveals the custom input.
+  // Other values are used directly. Update the hint text to reflect
+  // chosen budget's expected behavior.
+  var picker = document.getElementById('cpsatBudget');
+  var customRow = document.getElementById('customCpsatBudgetRow');
+  var hint = document.getElementById('cpsatBudgetHint');
+  if (!picker) return;
+  if (picker.value === 'custom') {
+    if (customRow) customRow.style.display = '';
+  } else {
+    if (customRow) customRow.style.display = 'none';
+  }
+  // Update guidance to reflect chosen budget. Static-but-budget-aware
+  // copy is more useful than generic — the user sees explicit time
+  // expectations.
+  if (!hint) return;
+  var budgetSec = getCpsatBudgetForRequest();
+  if (budgetSec === 0) {
+    hint.textContent = "SA only — fastest. Use 'Quick polish' or higher if quality matters for cached results.";
+  } else if (budgetSec <= 60) {
+    hint.textContent = "Quick polish — ~60s adds to wall time. Reliably hits composite=100 on most fixtures.";
+  } else if (budgetSec <= 300) {
+    hint.textContent = "Thorough — up to ~5 min of CP-SAT work after SA. Recommended for 30+ team fixtures.";
+  } else if (budgetSec <= 900) {
+    hint.textContent = "Deep — up to ~15 min of CP-SAT work. Gives the solver enough room to prove optimal on large fixtures.";
+  } else {
+    hint.textContent = "Maximum — up to 60 min of CP-SAT work. For when the result will be cached and shared widely.";
+  }
+}
+
+function getCpsatBudgetForRequest() {
+  // Resolve the CP-SAT picker's current value into a seconds budget.
+  // 0 = no polish. Returns clamped to [0, 3600].
+  var picker = document.getElementById('cpsatBudget');
+  if (!picker) return 0;
+  if (picker.value === 'custom') {
+    var input = document.getElementById('cpsatBudgetCustom');
+    var v = input ? parseInt(input.value, 10) : 0;
+    if (isNaN(v) || v < 0) return 0;
+    if (v > 3600) return 3600;
+    return v;
+  }
+  var v = parseFloat(picker.value);
+  if (isNaN(v) || v < 0) return 0;
+  if (v > 3600) return 3600;
+  return v;
 }
 
 function onCooldownChange() {
@@ -12037,6 +12121,7 @@ async function generateSchedule() {
         event_id: _currentEventId ? parseInt(_currentEventId) : null,
         day_config: dayConfig,
         weights: getWeightsForRequest(),  // null = backend uses FIRST defaults
+        cpsat_post_pass_budget_s: getCpsatBudgetForRequest(),
       }),
     });
 
@@ -12078,6 +12163,18 @@ async function generateSchedule() {
         let msg; try { msg = JSON.parse(line.slice(6)); } catch(e) { continue; }
         if (msg.type === 'done')  { doneMsg = msg; break outer; }
         if (msg.type === 'error') { throw new Error(msg.message); }
+        if (msg.type === 'phase') {
+          // The backend tells us upfront whether CP-SAT polish is in
+          // the plan. Surface that in the progress label so the user
+          // knows to expect a longer wait.
+          var lbl = document.getElementById('progressLabel');
+          if (msg.phase === 'sa+cpsat_polish' && msg.cpsat_budget_s && lbl) {
+            var budgetSec = msg.cpsat_budget_s;
+            var budgetMin = (budgetSec / 60).toFixed(budgetSec >= 60 ? 1 : 2);
+            lbl.textContent = 'Generating schedule, then CP-SAT polish (up to ' +
+              (budgetSec >= 60 ? budgetMin + ' min' : Math.round(budgetSec) + 's') + ')\u2026';
+          }
+        }
       }
     }
     // Flush any remainder (stream may close before final newline)
