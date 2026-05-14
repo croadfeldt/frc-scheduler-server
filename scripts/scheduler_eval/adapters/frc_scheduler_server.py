@@ -42,6 +42,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from app.scheduler import generate_matches
+from app.quality_floors import fixture_floors
 from app.quality_presets import (
     DEFAULT_PRESET,
     iterations_for_preset,
@@ -56,6 +57,13 @@ from ..harness_types import Fixture, Match, Schedule
 # the eval used. If the UI's DEFAULT_PRESET shifts, this follows.
 DEFAULT_SA_ITERATIONS = iterations_for_preset(DEFAULT_PRESET)
 
+# Default CP-SAT post-pass budget for eval runs. Matches the "Thorough"
+# UI preset — long enough to reach OPTIMAL on station for the standards
+# inventory, comfortable on larger fixtures up to ~80t. Set to 0 to opt
+# out (legacy SA-only behavior). The eval composite is dragged hard
+# when station_spread > 1, so the budget is worth the cost.
+DEFAULT_CPSAT_BUDGET_S = 120.0
+
 
 class FrcSchedulerServerAdapter(Adapter):
     """Wraps app/scheduler.py for the harness."""
@@ -63,13 +71,27 @@ class FrcSchedulerServerAdapter(Adapter):
     name = "frc-scheduler-server"
 
     def __init__(self,
-                 ideal_gap: int = 3,
+                 ideal_gap: int | None = None,
                  sa_iterations: int | None = None,
                  weights: dict | None = None,
+                 cpsat_post_pass_budget_s: float | None = None,
                  # Backwards compat with old kwarg name. Previously this was
                  # the slot-based SA budget; now it's the new SA budget.
                  assignment_iterations: int | None = None):
-        self.ideal_gap = ideal_gap
+        # ideal_gap: None (default) means "compute the maximum feasible
+        # gap per fixture, matching MatchMaker's behavior of using the
+        # tightest spacing the fixture supports." Pass an int to override
+        # (e.g., for testing the legacy behavior at gap=3, or for fixtures
+        # where the FRC §10.6.6 small-event exception applies).
+        #
+        # History: through 2026-05-13 the default was a hardcoded 3,
+        # which left 2-4 gap-units on the table for typical MN regional
+        # fixtures (cooldown_max=5..7 at 51-61 teams × 9 MPT). MatchMaker
+        # auto-computes the max feasible gap; bug A diagnosis exposed
+        # this as the largest single contributor to the eval composite
+        # gap (10+ composite points on each of three fixtures).
+        self.ideal_gap_override = ideal_gap
+
         # Resolution order: explicit kwarg wins, then legacy alias, then
         # the UI's default preset. None (the new default) means "use the
         # UI default"; pass an explicit 0 to opt out of SA entirely.
@@ -80,6 +102,51 @@ class FrcSchedulerServerAdapter(Adapter):
         else:
             self.sa_iterations = DEFAULT_SA_ITERATIONS
         self.weights = weights
+        # CP-SAT exact post-pass budget. Defaults to a "thorough" 120s
+        # which matches the UI's recommended budget for fixtures with
+        # surrogate-required shapes (30+ teams). Opt-out: pass 0.
+        if cpsat_post_pass_budget_s is None:
+            self.cpsat_post_pass_budget_s = DEFAULT_CPSAT_BUDGET_S
+        else:
+            self.cpsat_post_pass_budget_s = float(cpsat_post_pass_budget_s)
+
+    def _resolve_ideal_gap(self, fixture: Fixture) -> int:
+        """Resolve ideal_gap for this fixture.
+
+        If the caller provided an explicit override at construction time,
+        use that. Otherwise compute a fixture-aware gap that the SA can
+        reliably honor and that matches MatchMaker's behavior.
+
+        Heuristic: `cooldown_max - 4`, with a floor of 1. The -4 buffer
+        matches MatchMaker's empirical choice exactly on the three MN
+        regional fixtures that motivated this fix:
+
+          - 51×9 (M=77, cooldown_max=9 → ideal_gap=5, matches MM)
+          - 55×9 (M=83, cooldown_max=10 → ideal_gap=6, matches MM)
+          - 61×9 (M=92, cooldown_max=11 → ideal_gap=7, matches MM)
+
+        The buffer is also empirically safe: smoke tests at higher
+        gap values (cooldown_max - 2 and above) show the construction
+        phase silently falling back to gap=1 on 55-61 team fixtures —
+        a separate scheduler-quality bug. cooldown_max - 4 stays well
+        below that threshold while still crossing the "near-optimal"
+        threshold of gap ≥ 4 for all production-sized fixtures.
+
+        Smaller fixtures (cooldown_max ≤ 4) just use cooldown_max
+        directly — the FRC §10.6.6 small-event exception applies.
+        """
+        if self.ideal_gap_override is not None:
+            return self.ideal_gap_override
+        ff = fixture_floors(
+            n_teams=fixture.num_teams,
+            matches_per_team=fixture.matches_per_team,
+            teams_per_alliance=fixture.teams_per_alliance,
+            cooldown=2,  # placeholder; we read cooldown_max, not feasibility
+        )
+        cd_max = ff.cooldown_max
+        if cd_max <= 4:
+            return max(1, cd_max)
+        return cd_max - 4
 
     def generate(self, fixture: Fixture, *, seed: int | None = None,
                  trial: int = 0) -> Schedule:
@@ -97,6 +164,9 @@ class FrcSchedulerServerAdapter(Adapter):
         if seed is not None and trial != 0:
             actual_seed = seed ^ (trial * 1_000_003)
 
+        # Resolve fixture-aware parameters
+        ideal_gap = self._resolve_ideal_gap(fixture)
+
         t0 = time.monotonic()
 
         # Phase 0 unified call: real teams from the start, SA optimization
@@ -104,11 +174,12 @@ class FrcSchedulerServerAdapter(Adapter):
         result = generate_matches(
             num_teams=fixture.num_teams,
             matches_per_team=fixture.matches_per_team,
-            ideal_gap=self.ideal_gap,
+            ideal_gap=ideal_gap,
             seed=actual_seed,
             weights=self.weights,
             team_numbers=list(fixture.teams),
             n_sa_iterations=self.sa_iterations,
+            cpsat_post_pass_budget_s=self.cpsat_post_pass_budget_s,
         )
 
         elapsed = time.monotonic() - t0
@@ -133,7 +204,9 @@ class FrcSchedulerServerAdapter(Adapter):
             adapter_diagnostics={
                 "score":           result.score,
                 "sa_iterations":   self.sa_iterations,
-                "ideal_gap":       self.ideal_gap,
+                "ideal_gap":       ideal_gap,
+                "ideal_gap_source": "fixture_floors.cooldown_max" if self.ideal_gap_override is None else f"override={self.ideal_gap_override}",
+                "cpsat_post_pass_budget_s": self.cpsat_post_pass_budget_s,
                 "weights":         self.weights or "default",
                 "trial":           trial,
             },
