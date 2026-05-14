@@ -160,6 +160,91 @@ _PERM3 = [
 ]
 
 
+# ── CP-SAT polish helper ────────────────────────────────────────────────
+# Three sites in this file call the CP-SAT post-passes. Each does the
+# same dance: import the module, split the budget, run R/B then station,
+# capture the result. Factored into a single helper so the
+# error-handling and budget-splitting logic stay consistent.
+#
+# The import is intentionally inside the function (not at module top):
+# CP-SAT is optional. If ortools isn't installed in the runtime
+# environment — production should have it via requirements.txt, but
+# worker processes spawned by multiprocessing in non-fork mode may
+# not inherit the parent's sys.path correctly — we'd rather silently
+# fall back to the SA result than crash the worker. A WARN-level log
+# fires once per failure so the operator sees it.
+#
+# Note: the adapter-side `_ortools_available()` probe handles the
+# common case (eval harness directly calling generate_matches in the
+# same process), but doesn't help when workers are involved. This
+# helper is the second line of defense.
+
+import logging
+_log = logging.getLogger(__name__)
+
+
+def _apply_cpsat_polish(matches: list,
+                         budget_s: float,
+                         ) -> tuple[list, dict[str, str]]:
+    """Apply CP-SAT R/B + station post-passes to a schedule.
+
+    Returns the polished matches (or input matches if anything failed)
+    plus a small status dict for caller-side diagnostics:
+        {'cpsat_status': 'applied'|'skipped_no_budget'|'skipped_no_ortools'|
+                         'skipped_empty'|'failed',
+         'cpsat_reason': str}
+
+    Budget split: 10% R/B (capped at 60s), 90% station.
+
+    Failure modes handled silently (return input unchanged):
+      - ortools not installed in this Python environment
+      - rb_balance_cpsat / station_balance_cpsat raise any exception
+        (e.g., solver returned UNKNOWN status with no feasible)
+
+    Anything more catastrophic (assertion failures, MemoryError) will
+    propagate — those represent real bugs that we want to crash on.
+    """
+    if budget_s <= 0:
+        return matches, {'cpsat_status': 'skipped_no_budget',
+                         'cpsat_reason': f'budget={budget_s}'}
+    if not matches:
+        return matches, {'cpsat_status': 'skipped_empty',
+                         'cpsat_reason': 'no matches to polish'}
+
+    # Lazy import — ortools may be missing in some runtime environments.
+    try:
+        from app.post_passes.cpsat_post_passes import (
+            rb_balance_cpsat, station_balance_cpsat,
+        )
+    except ImportError as e:
+        _log.warning(
+            "CP-SAT polish requested (budget=%.1fs) but ortools not "
+            "importable in this process: %s. Returning SA result.",
+            budget_s, e,
+        )
+        return matches, {'cpsat_status': 'skipped_no_ortools',
+                         'cpsat_reason': str(e)}
+
+    rb_budget      = max(1.0, min(budget_s * 0.10, 60.0))
+    station_budget = max(1.0, budget_s - rb_budget)
+    try:
+        polished, _rb_stats = rb_balance_cpsat(
+            matches, time_budget_s=rb_budget,
+        )
+        polished, _st_stats = station_balance_cpsat(
+            polished, time_budget_s=station_budget,
+        )
+        return polished, {'cpsat_status': 'applied',
+                          'cpsat_reason': ''}
+    except Exception as e:
+        _log.warning(
+            "CP-SAT polish failed during solve: %s. Returning SA result.",
+            e,
+        )
+        return matches, {'cpsat_status': 'failed',
+                         'cpsat_reason': str(e)}
+
+
 def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
                      seed: int | None = None,
                      weights: dict | None = None,
@@ -938,21 +1023,12 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
     # the standards inventory. Budget is split 10% R/B + 90% station
     # (R/B is a much smaller subproblem and converges fast).
     #
-    # On UNKNOWN status (solver couldn't find a feasible solution in
-    # the budget — rare), the input is returned unchanged. Caller
-    # silently gets the SA result, no failure mode.
-    if cpsat_post_pass_budget_s > 0 and len(matches) > 0:
-        from app.post_passes.cpsat_post_passes import (
-            rb_balance_cpsat, station_balance_cpsat,
-        )
-        rb_budget      = max(1.0, min(cpsat_post_pass_budget_s * 0.10, 60.0))
-        station_budget = max(1.0, cpsat_post_pass_budget_s - rb_budget)
-        matches, _cpsat_rb_stats = rb_balance_cpsat(
-            matches, time_budget_s=rb_budget,
-        )
-        matches, _cpsat_st_stats = station_balance_cpsat(
-            matches, time_budget_s=station_budget,
-        )
+    # _apply_cpsat_polish handles three failure modes gracefully:
+    # ortools not importable in this process (returns SA result),
+    # CP-SAT solver returns UNKNOWN (returns SA result), unexpected
+    # exception in solve (returns SA result + WARN log). No failure
+    # mode crashes the worker.
+    matches, _cpsat_status = _apply_cpsat_polish(matches, cpsat_post_pass_budget_s)
 
     return ScheduleResult(
         matches=matches,
@@ -1367,16 +1443,12 @@ def run_iterations_worker(args: tuple) -> dict:
     # exactly. Provably preserves partner pairs, opponent pairs, cooldown,
     # surrogate counts, alliance composition — only R/B labels and station
     # permutations within alliances change.
+    # Uses _apply_cpsat_polish for graceful degradation when ortools
+    # isn't available in this worker process.
     if cpsat_post_pass_budget_s > 0 and best.matches:
-        from app.post_passes.cpsat_post_passes import (
-            rb_balance_cpsat, station_balance_cpsat,
+        polished_matches, _ = _apply_cpsat_polish(
+            list(best.matches), cpsat_post_pass_budget_s,
         )
-        rb_budget      = max(1.0, min(cpsat_post_pass_budget_s * 0.10, 60.0))
-        station_budget = max(1.0, cpsat_post_pass_budget_s - rb_budget)
-        polished_matches, _ = rb_balance_cpsat(list(best.matches),
-                                                time_budget_s=rb_budget)
-        polished_matches, _ = station_balance_cpsat(polished_matches,
-                                                     time_budget_s=station_budget)
         best = ScheduleResult(
             matches=polished_matches,
             surrogate_count=best.surrogate_count,
@@ -2298,15 +2370,9 @@ def _assign_unified(abstract_matches: list[dict],
 
     # CP-SAT exact polish (optional). Same subproblems as the SA
     # post-passes; CP-SAT proves optimality where SA plateaus.
-    # Budget split: 10% R/B, 90% station.
-    if cpsat_post_pass_budget_s > 0 and len(matches) > 0:
-        from app.post_passes.cpsat_post_passes import (
-            rb_balance_cpsat, station_balance_cpsat,
-        )
-        rb_budget      = max(1.0, min(cpsat_post_pass_budget_s * 0.10, 60.0))
-        station_budget = max(1.0, cpsat_post_pass_budget_s - rb_budget)
-        matches, _ = rb_balance_cpsat(matches, time_budget_s=rb_budget)
-        matches, _ = station_balance_cpsat(matches, time_budget_s=station_budget)
+    # Budget split: 10% R/B, 90% station. Graceful fallback if ortools
+    # isn't importable in this process (see _apply_cpsat_polish docstring).
+    matches, _ = _apply_cpsat_polish(matches, cpsat_post_pass_budget_s)
 
     score = score_schedule(matches, num_teams)
     score_tuple = list(score_tuple_for_schedule(matches, num_teams, ideal_gap=ideal_gap))

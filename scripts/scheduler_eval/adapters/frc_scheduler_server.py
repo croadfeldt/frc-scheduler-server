@@ -65,6 +65,29 @@ DEFAULT_SA_ITERATIONS = iterations_for_preset(DEFAULT_PRESET)
 DEFAULT_CPSAT_BUDGET_S = 120.0
 
 
+# Cached probe — only check the first time, and only inside a function
+# so the import-time cost is zero. importlib.util.find_spec returns None
+# when the package isn't installed and a ModuleSpec when it is; no
+# actual import side-effect.
+_ORTOOLS_PROBED: bool | None = None
+
+
+def _ortools_available() -> bool:
+    """Return True if `ortools` (used by the CP-SAT post-pass) can be
+    imported. Cached so subsequent calls are O(1).
+
+    The eval may run on machines (CI, lightweight dev containers)
+    without ortools installed. Without this probe, the first call to
+    generate_matches with a positive CP-SAT budget would raise
+    ModuleNotFoundError inside the worker process, breaking the run.
+    """
+    global _ORTOOLS_PROBED
+    if _ORTOOLS_PROBED is None:
+        import importlib.util
+        _ORTOOLS_PROBED = importlib.util.find_spec("ortools") is not None
+    return _ORTOOLS_PROBED
+
+
 class FrcSchedulerServerAdapter(Adapter):
     """Wraps app/scheduler.py for the harness."""
 
@@ -105,10 +128,33 @@ class FrcSchedulerServerAdapter(Adapter):
         # CP-SAT exact post-pass budget. Defaults to a "thorough" 120s
         # which matches the UI's recommended budget for fixtures with
         # surrogate-required shapes (30+ teams). Opt-out: pass 0.
+        #
+        # Defensive: check whether ortools is actually installed in this
+        # Python environment. If not, the import inside generate_matches
+        # would fail at runtime when budget > 0, producing
+        # ModuleNotFoundError and breaking the eval. Detect at adapter
+        # init and silently fall back to SA-only with a one-time warning.
+        # This keeps the eval working on machines where ortools isn't
+        # installed (CI, lightweight dev containers) while preserving
+        # the CP-SAT improvements on machines where it is.
         if cpsat_post_pass_budget_s is None:
-            self.cpsat_post_pass_budget_s = DEFAULT_CPSAT_BUDGET_S
+            requested_budget = DEFAULT_CPSAT_BUDGET_S
         else:
-            self.cpsat_post_pass_budget_s = float(cpsat_post_pass_budget_s)
+            requested_budget = float(cpsat_post_pass_budget_s)
+
+        if requested_budget > 0 and not _ortools_available():
+            import warnings
+            warnings.warn(
+                "frc-scheduler-server adapter: ortools not installed; "
+                "falling back to SA-only post-pass. Install ortools "
+                "(`pip install ortools`) to enable CP-SAT polish — "
+                "expected ~10 composite-point improvement on 30+ team "
+                "fixtures.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            requested_budget = 0.0
+        self.cpsat_post_pass_budget_s = requested_budget
 
     def _resolve_ideal_gap(self, fixture: Fixture) -> int:
         """Resolve ideal_gap for this fixture.
@@ -207,6 +253,7 @@ class FrcSchedulerServerAdapter(Adapter):
                 "ideal_gap":       ideal_gap,
                 "ideal_gap_source": "fixture_floors.cooldown_max" if self.ideal_gap_override is None else f"override={self.ideal_gap_override}",
                 "cpsat_post_pass_budget_s": self.cpsat_post_pass_budget_s,
+                "cpsat_available": _ortools_available(),
                 "weights":         self.weights or "default",
                 "trial":           trial,
             },

@@ -66,10 +66,36 @@ Three metrics drove the 20-point gap:
    time. Override via `cpsat_post_pass_budget_s=` kwarg (pass 0 to
    opt out).
 
-3. **Diagnostic enrichment.** Adapter now records both `ideal_gap`
-   and `ideal_gap_source` ("fixture_floors.cooldown_max" or
-   "override=N") plus `cpsat_post_pass_budget_s` in
-   `Schedule.adapter_diagnostics`. Makes per-run audit cleaner.
+3. **Graceful ortools fallback.** Module-level `_ortools_available()`
+   probe uses `importlib.util.find_spec` (no import side-effect,
+   cached). When ortools isn't installed and CP-SAT was requested,
+   adapter init emits a one-time `RuntimeWarning` and silently sets
+   the budget to 0. The eval keeps working on machines that don't
+   have ortools; only quality regresses.
+
+4. **Diagnostic enrichment.** Adapter now records `ideal_gap`,
+   `ideal_gap_source` ("fixture_floors.cooldown_max" or
+   "override=N"), `cpsat_post_pass_budget_s`, and `cpsat_available`
+   (the result of the probe) in `Schedule.adapter_diagnostics`.
+   Makes per-run audit cleaner and exposes when CP-SAT silently
+   downgraded.
+
+`requirements.txt`:
+
+5. **ortools promoted from `requirements-research.txt` to
+   `requirements.txt`.** When CP-SAT became part of the live
+   Generate path via `app/post_passes/cpsat_post_passes.py`, the
+   "research-only" classification became wrong — the production
+   container needs ortools too. The `Containerfile`'s existing
+   `pip install -r requirements.txt` step now picks it up
+   automatically.
+
+`scripts/setup-venv.sh` (new):
+
+6. **Local venv helper.** Idempotent script that creates `.venv`,
+   installs `requirements.txt`, and verifies the imports work.
+   Convenient for Stark and dev machines; production container
+   builds don't use it.
 
 ## Predicted post-fix metrics (validated locally at 500K SA + 120s CP-SAT)
 
@@ -101,16 +127,44 @@ The constrained-er construction trades opponent variety for gap
 satisfaction. `max_opponent_repeats` also goes 2 → 3 across all
 three fixtures.
 
-Possible causes:
-- The SA's weights favor gap over opponent-pair diversity at high
-  gap. Weights tuning could rebalance.
-- The construction phase's greedy choices become more deterministic
-  at high gap, leaving less room for opponent-spread.
-- This may be an architecture-level limitation that needs CP-SAT
-  construction (not just CP-SAT post-pass) to address.
+**Weight sensitivity ruled out (2026-05-14)**: sweep on 61×9 at
+ideal_gap=7, 500K SA iters, seed=42, varying `W_OPPONENT` from
+default (60) to 6.7×:
 
-This is captured for the Best Possible Schedule workstream Phase 1
-Q4 (CP-SAT single-stage for tight fixtures).
+| W_OPPONENT | repeat_opp | max_opp_rep |
+|---|---|---|
+| 60 (default) | 93 | 3 |
+| 100 | 88 | 3 |
+| 200 | 90 | 3 |
+| 400 | 91 | **4** (worse) |
+
+repeat_opp wiggles in a ±3 band across a 6.7× range of opponent
+weighting. That's noise. **The SA is structurally gap-constrained
+at this fixture shape and gap setting**, not under-weighting
+opponents. There aren't unfound swaps to make; the legal-swap
+space is just too small. At W_OPPONENT=400 the `max_opp_rep`
+actually got worse, the classic sign of overweighting one
+objective — SA finds a local minimum that's "buying" diversity in
+some places by accepting worse outcomes elsewhere.
+
+This rules out parameter tuning as the lever. The remaining
+options are:
+  - **Algorithmic**: reimplement construction in MM's style
+    (Caleb Sykes' approach, which achieves repeat_opp=15 at gap=7
+    on this same fixture). Substantial work.
+  - **Constraint relaxation**: lower the default ideal_gap target
+    in the adapter (e.g., cooldown_max - 5 instead of - 4) to give
+    SA more diversity room. Trades a known good metric (gap) for
+    progress on a bad one (opp diversity).
+  - **CP-SAT post-pass for opponents**: not designed yet. The
+    R/B and station post-passes work because those subproblems
+    are tightly constrained (purely local swaps). Opponent
+    diversity is a global property; CP-SAT would have to operate
+    on a much bigger model. Plausible but expensive.
+
+The right next step is the Best Possible Schedule workstream
+Phase 1 Q4 (CP-SAT single-stage construction for tight fixtures),
+which addresses this directly.
 
 ### Question 2: Harness's station metric differs from framework's
 
