@@ -99,17 +99,44 @@ class ConstructionMalformedError(ValueError):
     This is a known issue on tight fixtures (small n, MPT close to
     cooldown_max). The construction phase's greedy choices can paint the
     algorithm into a corner where the last match can't be completed.
-    Empirically measured malformation rates (2026-05-12, seeds 0-29):
 
-        8t × 6MPT:    0% malformed
-        10t × 6MPT:   13% malformed
-        12t × 6MPT:   3% malformed
-        12t × 7MPT:   17% malformed
-        16t+ × ≥6MPT: 0% malformed
+    Empirically measured malformation rates (2026-05-13, 30-300 seeds
+    per shape, post-fix):
 
-    Production fixtures (≥36 teams) are not affected. The deeper fix
-    (better construction algorithm or CP-SAT single-stage replacement
-    for tight fixtures) is captured in Phase 1 Q4 of
+        Tight tiny fixtures (where this is expected):
+            10t × 6MPT (cd=1):  13% malformed — pool too small to recover
+            12t × 6MPT (cd=2):   3% malformed
+            12t × 7MPT (cd=2):  17% malformed — known plateau
+            16t × 6MPT (cd=2): ~11% malformed (over 300 seeds)
+
+        Production fixtures (should be 0%):
+            36t × 7MPT (cd=2):   0% malformed
+            51t × 7MPT (cd=2):   0% malformed
+            55t × 7MPT (cd=2):   0% malformed
+            55t × 8MPT (cd=2):   0% malformed
+            61t × 7MPT (cd=2):   0% malformed
+            61t × 8MPT (cd=2):   0% malformed
+
+    History note: prior to 2026-05-13, 51/55/61-team fixtures at MPT=7
+    had 20-30% malformation rates because the FIRST surrogate model
+    didn't normalize team_score by target_count, letting surrogate
+    teams burn through their quota too fast. Fixed by:
+      1. Normalizing team_score by target_count[t] (so MPT+1 surrogate
+         teams advance at the same proportional rate as MPT regular
+         teams).
+      2. Falling back to at-quota teams when under_quota drops below 6
+         (FIRST §10.5.2 surrogate placement is preferred but emergency
+         over-quota appearances are strictly better than a malformed
+         match — the SA phase MAY rebalance).
+    See tests/test_construction_reliability.py for the regression guard
+    and docs/scheduler/construction-malformation.md for the full
+    investigation.
+
+    Production fixtures (≥36 teams) at standard MPT (6-8) should not
+    hit this error post-fix. Tiny fixtures (≤16 teams) may still
+    occasionally malform due to the fundamentally-tight nature of the
+    fixture; the deeper fix (CP-SAT single-stage construction) is
+    captured in Phase 1 Q4 of
     `docs/workstreams/best-possible-schedule.md`. Callers facing this
     error on tight fixtures should retry with a different seed.
     """
@@ -295,7 +322,29 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
         gap = now - lp[t]
         if gap < ideal_gap:
             return -1000 * (ideal_gap - gap)
-        return gap * w_gap - mc[t] * w_count
+        # Use normalized progress (mc/target) rather than raw mc so that
+        # pre-picked surrogate teams (target = MPT+1) don't burn through
+        # their quota faster than regular teams (target = MPT). Without
+        # normalization, mc values are compared apples-to-oranges:
+        # surrogate team at mc=3 reads as "less full" than regular team
+        # at mc=4, even though the surrogate is 3/8=37.5% full while the
+        # regular is 4/7=57.1%. That ordering makes surrogate teams
+        # advance ahead of schedule, exiting under_quota early, leading
+        # to malformed last matches on odd-team-count fixtures where
+        # surrogates exist. See 2026-05-13 investigation in
+        # docs/scheduler/construction-malformation.md.
+        #
+        # Fast path: when target_count[t] equals matches_per_team (no
+        # pre-picked surrogate), the normalized form simplifies to
+        # mc[t] exactly. We special-case this to (a) avoid float
+        # division, and (b) preserve bit-identical behavior for non-
+        # surrogate fixtures — a/b*b can differ from a by FP error,
+        # which can change sort tiebreaks and thus the seed-determined
+        # schedule (regression observed 2026-05-13 on 16×6).
+        if target_count[t] == matches_per_team:
+            return gap * w_gap - mc[t] * w_count
+        progress = mc[t] / target_count[t]
+        return gap * w_gap - progress * matches_per_team * w_count
 
     def surrogate_score(t: int, now: int) -> float:
         return -sc[t] * w_sur_rpt + (now - lp[t]) * 2
@@ -559,14 +608,42 @@ def generate_matches(num_teams: int, matches_per_team: int, ideal_gap: int,
             # teams have target MPT+1 so they remain in the pool until their
             # extra appearance is scheduled. Their 3rd appearance (mc[t] == 2
             # → 3 after this commit) is automatically marked as the surrogate
-            # match. No special end-of-schedule "draft surrogate teams from
-            # at-quota pool" handling — surrogate placement is uniform with
-            # everyone else's, just with a different target count.
+            # match.
             under_quota = sorted(
                 [t for t in teams if mc[t] < target_count[t]],
                 key=lambda t: (-team_score(t, now), rng.random())
             )
-            reg_pool = under_quota[:max(12, 6)]
+
+            # Emergency fallback: if greedy under-quota draining left
+            # fewer than 6 teams in the pool, draw from at-quota teams
+            # to fill out the match. Pure under-quota draws are
+            # preferred — they keep each team at its FIRST-aligned
+            # target — but allowing emergency over-quota appearances
+            # is strictly better than a malformed match (which the SA
+            # phase can't repair). The SA phase MAY rebalance the
+            # excess appearance into an earlier match via team swaps,
+            # but this isn't guaranteed.
+            #
+            # Empirical (2026-05-13): without this fallback, 51-61
+            # team fixtures at MPT=7 fail to construct in 20-30% of
+            # seeds; the malformed-match check at the bottom of this
+            # function then raises ConstructionMalformedError. With
+            # the fallback, those rates drop to single digits.
+            # See docs/scheduler/construction-malformation.md.
+            if len(under_quota) < 6:
+                at_quota = sorted(
+                    [t for t in teams if mc[t] >= target_count[t]],
+                    key=lambda t: (-team_score(t, now), rng.random())
+                )
+                # Top up the pool to at least 12 teams so best_of_attempts
+                # has enough candidates to find a good alliance. The
+                # under-quota teams retain priority (they're listed first
+                # in `reg_pool`).
+                needed = max(0, 12 - len(under_quota))
+                reg_pool = under_quota + at_quota[:needed]
+            else:
+                reg_pool = under_quota[:max(12, 6)]
+
             red, blue = best_of_attempts(reg_pool, 6, [], 0, False, now)
 
             # Surrogate flag: this match is t's surrogate iff t is pre-picked

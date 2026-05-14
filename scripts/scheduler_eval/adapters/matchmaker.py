@@ -180,10 +180,23 @@ class MatchMakerAdapter(Adapter):
         elapsed = time.monotonic() - t0
 
         if proc.returncode != 0:
+            # On non-zero exit, capture BOTH stdout and stderr so we can
+            # see what MatchMaker actually told us. Some MatchMaker
+            # versions write the error message to stdout (after the
+            # header lines) before exiting non-zero — capturing only
+            # stderr leaves the failure indistinguishable from a clean
+            # crash. Historical context (2026-05-10): three odd-team
+            # MN regional fixtures (2023mnmi 61t, 2024mndu 55t,
+            # 2025mnmi 51t) reported exit 255 with no actionable
+            # error message; this expanded capture is the diagnostic
+            # hook for the next eval run that includes these shapes.
+            stdout_excerpt = proc.stdout.strip()[-500:] if proc.stdout else ""
+            stderr_excerpt = proc.stderr.strip()[-500:] if proc.stderr else ""
             raise RuntimeError(
                 f"MatchMaker exited {proc.returncode} for {fixture.fixture_id}.\n"
                 f"cmd:    {' '.join(cmd)}\n"
-                f"stderr: {proc.stderr.strip()[:500]}"
+                f"stdout (last 500 bytes): {stdout_excerpt or '<empty>'}\n"
+                f"stderr (last 500 bytes): {stderr_excerpt or '<empty>'}"
             )
 
         matches = self._parse_output(proc.stdout, fixture)

@@ -492,22 +492,44 @@ results would have been nearly as good.
 
 ### 1. Surrogate handling for odd team counts (3 fixtures still errored)
 
-**[FIXED 2026-05-09]** Fixtures 2023mnmi (61 teams), 2024mndu (55 teams),
-2025mnmi (51 teams) previously failed with `the reference scheduler exited 255`. Root
-cause: the adapter passed `fixture.surrogate_round` (a match number,
-mislabeled as a round) to the reference scheduler's `-u` flag, which expected a
-1-indexed round number. Match 22 in a 9-round event isn't a valid
-round, so the reference scheduler rejected the configuration.
+**[PARTIAL FIX 2026-05-09; STILL ERRORING 2026-05-10]** Fixtures 2023mnmi (61 teams),
+2024mndu (55 teams), 2025mnmi (51 teams) failed with `MatchMaker exited 255`.
 
-Fix: the adapter now omits `-u` entirely, letting the reference scheduler use its
-built-in default of round 3 (FIRST's convention since 2008). The field
-on Fixture is renamed `surrogate_first_match` for clarity (it was
-always a match number; the old name was misleading) and is now
-descriptive metadata, not a CLI flag input. Backward-compat preserved:
-`Fixture.from_json_dict` accepts old `surrogate_round` JSON keys.
+**First attempted fix (2026-05-09)**: the adapter previously passed
+`fixture.surrogate_round` (a match number, mislabeled as a round) to
+MatchMaker's `-u` flag, which expected a 1-indexed round number.
+Match 22 in a 9-round event isn't a valid round, so MatchMaker
+rejected the configuration. Fix: the adapter now omits `-u` entirely,
+letting MatchMaker use its built-in default of round 3 (FIRST's
+convention since 2008). The field on Fixture is renamed
+`surrogate_first_match` for clarity.
 
-Re-run the eval to populate matchmaker results for the 3 previously-
-errored fixtures.
+**Re-run finding (2026-05-10)**: the post-fix eval re-run on the same
+fixtures **still produced exit-255 errors**, indicating either (a) a
+second distinct root cause beyond the `-u` flag, or (b) the fix
+didn't ship in the binary path used for the re-run. The error
+message was not captured in actionable detail at that time —
+MatchMaker may write its error to stdout rather than stderr, and
+the adapter's exception capture only excerpted stderr.
+
+**Diagnostic capture upgraded (2026-05-13)**: the matchmaker adapter
+now captures both stdout and stderr (last 500 bytes each) when
+MatchMaker exits non-zero, raising a RuntimeError with the full
+diagnostic context. The next eval run that includes these three
+fixtures will surface the actual reason MatchMaker is rejecting them.
+
+**Our scheduler is not affected** by this issue. The frc-scheduler-server
+adapter generates valid schedules for all three fixture shapes (51,
+55, 61 teams at MPT=7). Construction reliability was separately
+improved in this same session — see
+`docs/scheduler/construction-malformation.md`.
+
+To make progress on the matchmaker side, the next steps are:
+  1. Run the eval on a machine with the MatchMaker binary installed
+     against these three fixtures.
+  2. Capture the new diagnostic output (includes stdout excerpt).
+  3. Either patch the adapter to handle whatever MatchMaker is
+     complaining about, or document the fixture-shape limitation.
 
 ### 2. Per-metric "where each adapter struggles" view
 
