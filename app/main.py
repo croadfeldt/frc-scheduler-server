@@ -68,6 +68,8 @@ from app.auth import (
     _oauth_popup_response,
     JWT_SECRET,
 )
+from app import personal_access_tokens as pat_module
+from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -4978,6 +4980,158 @@ async def auth_me(current_user: dict | None = Depends(get_current_user)):
 @app.get("/auth/providers")
 async def auth_providers():
     return {"google": bool(GOOGLE_CLIENT_ID), "apple": bool(APPLE_CLIENT_ID)}
+
+
+# ── Personal Access Tokens ───────────────────────────────────────────────────
+#
+# CLI/API authentication. Users mint long-lived tokens via this endpoint,
+# then send them in `Authorization: Bearer frc_pat_...` headers from
+# scripts, CI/CD, or the standalone frc-scheduler-client CLI.
+#
+# Mint endpoints REQUIRE a JWT (interactive web auth) — you can't use
+# a PAT to mint another PAT. This prevents a leaked PAT from being
+# used to silently grow a token forest under the victim's account.
+
+
+class CreatePATRequest(BaseModel):
+    name:           str  = Field(..., min_length=1, max_length=128)
+    # Days until expiry; None means never. Negative or zero rejected.
+    expires_days:   int | None = Field(None, ge=1, le=3650)
+
+
+class PATCreateResponse(BaseModel):
+    # The plaintext value — returned ONCE at create time. Server stores
+    # only the SHA-256 hash; this field is the user's only chance to
+    # capture it.
+    token:        str
+    # All the public metadata about the row, for client convenience.
+    id:           int
+    name:         str
+    token_prefix: str
+    is_admin:     bool
+    expires_at:   str | None
+    created_at:   str
+
+
+class PATListItem(BaseModel):
+    id:           int
+    name:         str
+    token_prefix: str
+    is_admin:     bool
+    expires_at:   str | None
+    revoked_at:   str | None
+    last_used_at: str | None
+    created_at:   str
+
+
+def _pat_listitem(row) -> PATListItem:
+    """Serialize a PersonalAccessToken row to API shape."""
+    return PATListItem(
+        id=row.id, name=row.name, token_prefix=row.token_prefix,
+        is_admin=row.is_admin,
+        expires_at=row.expires_at.isoformat() if row.expires_at else None,
+        revoked_at=row.revoked_at.isoformat() if row.revoked_at else None,
+        last_used_at=row.last_used_at.isoformat() if row.last_used_at else None,
+        created_at=row.created_at.isoformat(),
+    )
+
+
+def _require_jwt_auth(user: dict = Depends(require_auth)) -> dict:
+    """Subset of require_auth: rejects PAT-authenticated requests.
+
+    Used for PAT management endpoints. Rationale: a leaked PAT shouldn't
+    let an attacker silently mint additional tokens or revoke ones the
+    legitimate user is depending on. PAT mint/list/revoke requires
+    re-authenticating with the OAuth flow (i.e., proving you have the
+    user's browser session).
+    """
+    if user.get("provider") == "pat":
+        raise HTTPException(
+            403,
+            "This endpoint requires interactive (OAuth/JWT) authentication. "
+            "Personal Access Tokens cannot be used to manage other tokens.",
+        )
+    return user
+
+
+@app.post("/api/me/tokens", response_model=PATCreateResponse, status_code=201)
+async def create_personal_access_token(
+    req: CreatePATRequest,
+    user: dict = Depends(_require_jwt_auth),
+    db: AsyncSession = Depends(get_session),
+):
+    """Mint a new personal access token for the calling user.
+
+    The plaintext token is returned ONCE in the response. The server
+    stores only the SHA-256 hash; the plaintext cannot be recovered.
+    Losing it = revoke + reissue.
+
+    Inherits the user's current is_admin status. Promotion AFTER mint
+    is NOT retroactive: existing tokens keep their original is_admin
+    snapshot. See PersonalAccessToken docstring for rationale.
+    """
+    expires_at = None
+    if req.expires_days:
+        from datetime import timedelta
+        expires_at = datetime.now(timezone.utc) + timedelta(days=req.expires_days)
+    plaintext, row = await pat_module.mint_pat(
+        user_id=user["uid"],
+        name=req.name,
+        is_admin=bool(user.get("is_admin")),
+        db=db,
+        expires_at=expires_at,
+    )
+    await db.commit()
+    await db.refresh(row)
+    return PATCreateResponse(
+        token=plaintext,
+        id=row.id, name=row.name, token_prefix=row.token_prefix,
+        is_admin=row.is_admin,
+        expires_at=row.expires_at.isoformat() if row.expires_at else None,
+        created_at=row.created_at.isoformat(),
+    )
+
+
+@app.get("/api/me/tokens", response_model=list[PATListItem])
+async def list_personal_access_tokens(
+    include_revoked: bool = Query(False, description="Include revoked tokens"),
+    user: dict = Depends(_require_jwt_auth),
+    db: AsyncSession = Depends(get_session),
+):
+    """List all PATs owned by the calling user, newest first.
+
+    Token plaintexts are NOT in the response; only metadata + the
+    12-character display prefix (e.g., "frc_pat_xJK3"). To verify
+    which token is which, compare against what your client has stored.
+    """
+    rows = await pat_module.list_pats(
+        user_id=user["uid"],
+        include_revoked=include_revoked,
+        db=db,
+    )
+    return [_pat_listitem(r) for r in rows]
+
+
+@app.delete("/api/me/tokens/{token_id}", status_code=204)
+async def revoke_personal_access_token(
+    token_id: int = Path(..., ge=1),
+    user: dict = Depends(_require_jwt_auth),
+    db: AsyncSession = Depends(get_session),
+):
+    """Revoke a PAT. After this returns 204, the token can no longer
+    authenticate. Idempotent: revoking an already-revoked token also
+    returns 204.
+
+    A 404 means the token doesn't exist OR isn't owned by the calling
+    user. We don't distinguish to avoid leaking token-id enumeration.
+    """
+    ok = await pat_module.revoke_pat(
+        token_id=token_id, user_id=user["uid"], db=db,
+    )
+    if not ok:
+        raise HTTPException(404, "Token not found")
+    await db.commit()
+    return Response(status_code=204)
 
 
 # ── Commit log ────────────────────────────────────────────────────────────────

@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import User, get_session
+from app.personal_access_tokens import PAT_PREFIX, verify_pat
 
 log = logging.getLogger(__name__)
 
@@ -97,11 +98,53 @@ _bearer = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+    db: AsyncSession = Depends(get_session),
 ) -> dict | None:
+    """Resolve the authenticated user from an Authorization header.
+
+    Supports two credential formats, dispatched by prefix:
+
+      1. PAT: `Authorization: Bearer frc_pat_<...>`
+         Looked up via DB (single indexed query). Carries the user's
+         is_admin status as snapshotted at mint time.
+
+      2. JWT: `Authorization: Bearer <three.segment.token>`
+         Decoded in-process (no DB). is_admin is in the claims.
+
+    Returns a dict shaped like the JWT claims regardless of which path
+    was taken — this way every downstream handler reads `user["uid"]`,
+    `user["is_admin"]`, etc., without caring whether they came from a
+    PAT or a JWT.
+
+    Returns None if no credentials, or credentials are malformed/expired/
+    revoked. Caller distinguishes "not authenticated" from "explicitly
+    unauthorized" by checking for None (see require_auth).
+    """
     if not credentials:
         return None
+    token = credentials.credentials
+    # Dispatch by prefix. PATs are recognizable by their `frc_pat_`
+    # marker; everything else gets treated as a JWT.
+    if token.startswith(PAT_PREFIX):
+        pat = await verify_pat(token, db=db)
+        if pat is None:
+            return None
+        # Shape this like a JWT claims dict so callers don't care which
+        # auth path the request came through. The "sub" claim normally
+        # encodes provider:external_id; for PAT-authenticated requests
+        # we use a synthetic "pat:<id>" so it's distinguishable in logs
+        # without leaking user identity.
+        return {
+            "sub":      f"pat:{pat.id}",
+            "uid":      pat.user_id,
+            "provider": "pat",
+            "email":    "",  # PATs don't carry user email; fetch from DB if needed
+            "is_admin": bool(pat.is_admin),
+            "pat_id":   pat.id,   # extra field for audit logging
+        }
+    # Fall through to JWT path
     try:
-        return decode_jwt(credentials.credentials)
+        return decode_jwt(token)
     except JWTError:
         return None
 

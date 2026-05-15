@@ -7,13 +7,79 @@
   "matches": [
     {
       "red": [
-        11,
-        10,
-        2
+        8,
+        12,
+        11
       ],
       "blue": [
         9,
-        7,
+        2,
+        10
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        5,
+        3,
+        4
+      ],
+      "blue": [
+        6,
+        1,
+        7
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        11,
+        10,
+        9
+      ],
+      "blue": [
+        2,
+        8,
+        12
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        4,
+        5,
+        7
+      ],
+      "blue": [
+        1,
+        6,
         3
       ],
       "red_surrogate": [
@@ -29,35 +95,13 @@
     },
     {
       "red": [
-        6,
-        5,
-        12
-      ],
-      "blue": [
-        1,
-        4,
-        8
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        3,
         11,
+        2,
         10
       ],
       "blue": [
-        2,
-        7,
+        8,
+        12,
         9
       ],
       "red_surrogate": [
@@ -73,13 +117,13 @@
     },
     {
       "red": [
-        5,
-        12,
+        7,
+        4,
         1
       ],
       "blue": [
-        4,
-        8,
+        3,
+        5,
         6
       ],
       "red_surrogate": [
@@ -95,145 +139,13 @@
     },
     {
       "red": [
-        7,
-        9,
-        11
-      ],
-      "blue": [
-        3,
-        2,
-        10
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        1,
-        8,
-        5
-      ],
-      "blue": [
-        12,
-        6,
-        4
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
         10,
-        2,
-        7
+        8,
+        12
       ],
       "blue": [
         9,
         11,
-        12
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        4,
-        3,
-        8
-      ],
-      "blue": [
-        6,
-        5,
-        1
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        2,
-        12,
-        7
-      ],
-      "blue": [
-        10,
-        1,
-        11
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        8,
-        6,
-        3
-      ],
-      "blue": [
-        5,
-        9,
-        4
-      ],
-      "red_surrogate": [
-        false,
-        false,
-        false
-      ],
-      "blue_surrogate": [
-        false,
-        false,
-        false
-      ]
-    },
-    {
-      "red": [
-        7,
-        1,
-        12
-      ],
-      "blue": [
-        11,
-        10,
         2
       ],
       "red_surrogate": [
@@ -249,12 +161,100 @@
     },
     {
       "red": [
+        3,
+        1,
+        5
+      ],
+      "blue": [
+        6,
+        7,
+        4
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        12,
+        11,
+        2
+      ],
+      "blue": [
+        10,
         9,
+        8
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        6,
+        7,
+        3
+      ],
+      "blue": [
+        5,
+        4,
+        1
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        2,
+        9,
+        8
+      ],
+      "blue": [
+        12,
+        10,
+        11
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        1,
         4,
         6
       ],
       "blue": [
-        8,
+        7,
         3,
         5
       ],
@@ -271,47 +271,47 @@
     }
   ],
   "achieved_lex_tuple": [
-    2,
-    156,
-    324,
     0,
-    28,
+    192,
+    408,
+    0,
+    34,
     8,
     0,
     0
   ],
   "quality_report": {
     "achieved_lex_tuple": [
-      2,
-      156,
-      324,
       0,
-      28,
+      192,
+      408,
+      0,
+      34,
       8,
       0,
       0
     ],
-    "is_valid_paramount": false,
+    "is_valid_paramount": true,
     "metrics": {
       "cooldown_violations": {
-        "value": 2,
+        "value": 0,
         "floor": 0,
         "floor_confidence": "proven_optimal",
-        "distance_from_floor": 2,
-        "matches_floor": false
+        "distance_from_floor": 0,
+        "matches_floor": true
       },
       "par_quad": {
-        "value": 156,
+        "value": 192,
         "floor": 84,
         "floor_confidence": "proven_lower_bound",
-        "distance_from_floor": 72,
+        "distance_from_floor": 108,
         "matches_floor": false
       },
       "opp_quad": {
-        "value": 324,
+        "value": 408,
         "floor": 192,
         "floor_confidence": "proven_lower_bound",
-        "distance_from_floor": 132,
+        "distance_from_floor": 216,
         "matches_floor": false
       },
       "surrogate_count": {
@@ -338,32 +338,32 @@
     },
     "summary": {
       "all_proven_floors_matched": false,
-      "n_metrics_at_floor": 1,
+      "n_metrics_at_floor": 2,
       "n_metrics_total": 6
     }
   },
   "provenance": {
     "method": "sa_best_of_n",
-    "sa_iterations": 5000,
-    "n_seeds": 2,
-    "successes": 2,
+    "sa_iterations": 200000,
+    "n_seeds": 3,
+    "successes": 3,
     "failures": 0,
     "best_seed": 30000,
-    "wall_clock_s": 0.5,
+    "wall_clock_s": 5.8,
     "cpsat_post_pass": {
-      "budget_s": 10.0,
-      "rb_budget_s": 1.0,
-      "station_budget_s": 9.0,
+      "budget_s": 60.0,
+      "rb_budget_s": 6.0,
+      "station_budget_s": 54.0,
       "rb_status": "OPTIMAL",
-      "rb_wall_s": 0.09148505600000001,
+      "rb_wall_s": 0.018337598,
       "rb_max_before": 2,
       "rb_max_after": 2,
       "station_status": "OPTIMAL",
-      "station_wall_s": 0.318271391,
+      "station_wall_s": 0.154664571,
       "station_max_before": 2,
       "station_max_after": 2
     },
-    "generated_at": "2026-05-15T14:06:39.030960+00:00",
+    "generated_at": "2026-05-13T20:52:11.849345+00:00",
     "git_commit": null
   }
 }

@@ -373,6 +373,75 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class PersonalAccessToken(Base):
+    """Long-lived API token for programmatic access.
+
+    Mint flow:
+      1. User authenticates via OAuth (JWT issued)
+      2. User calls POST /api/me/tokens with a name (and optional expiry)
+      3. Server generates a 32-byte random secret, returns the PLAINTEXT
+         token ONCE, stores only sha256(plaintext) in token_hash
+      4. Client persists the plaintext (it cannot be retrieved later;
+         losing it = revoke + reissue)
+
+    Use flow:
+      1. Client sends `Authorization: Bearer frc_pat_<plaintext>` on
+         every request
+      2. app/auth.py:get_current_user routes by prefix:
+         - Starts with `frc_pat_` → verify via DB lookup (this table)
+         - Otherwise → decode as JWT
+      3. DB lookup is a single indexed query by token_hash; last_used_at
+         updated asynchronously (not blocking the request)
+
+    Why SHA-256 and not bcrypt:
+      PATs are 256-bit cryptographically random secrets, not passwords.
+      No bruteforce concern. SHA-256 is fast (sub-millisecond per
+      verification) which matters when every authenticated API request
+      hits this path. bcrypt would add ~100ms per request — unacceptable
+      for an API.
+
+    Admin status:
+      Captured into is_admin at mint time. Means: if a user is promoted
+      to admin AFTER they minted a token, the token does NOT gain admin
+      privileges retroactively. Revoke + reissue to pick up new status.
+      Symmetric: if admin status is revoked, existing tokens DO retain
+      admin until manually revoked. This mirrors the JWT behavior
+      (is_admin embedded in claims, takes effect on next login).
+    """
+    __tablename__ = "personal_access_tokens"
+
+    id:            Mapped[int]      = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id:       Mapped[int]      = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Human-readable label, supplied by user. Not unique — same user can
+    # have two tokens named "laptop" if they want.
+    name:          Mapped[str]      = mapped_column(String(128), nullable=False)
+    # First 12 chars of the plaintext, stored to display in the UI so
+    # users can identify which token is which without revealing the
+    # full secret. Format example: "frc_pat_xJK3"
+    token_prefix:  Mapped[str]      = mapped_column(String(16), nullable=False)
+    # sha256(plaintext) — hex-encoded, 64 chars. Unique so a malformed
+    # client can't accidentally re-mint a colliding token.
+    token_hash:    Mapped[str]      = mapped_column(String(64), unique=True, index=True, nullable=False)
+    # JSON array of scope strings. Default ["*"] means "all endpoints".
+    # Scope enforcement is NOT implemented yet — schema is forward-
+    # compatible so we can narrow later without a migration.
+    scopes:        Mapped[Any]      = mapped_column(JSON, nullable=False, server_default='["*"]')
+    # Captured at mint time. See class docstring "Admin status" note for
+    # the rationale (effectively a JWT-like snapshot).
+    is_admin:      Mapped[bool]     = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    # Optional expiry. NULL means "never expires" (until revoked).
+    # When expires_at < now(), token is rejected with 401.
+    expires_at:    Mapped[datetime|None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Soft-delete: revoked tokens stay in the table for audit but no
+    # longer authenticate. Setting revoked_at to non-NULL = revoked.
+    revoked_at:    Mapped[datetime|None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Last successful auth use. Updated by get_current_user on every
+    # authenticated request via this token. Useful for the UI to surface
+    # "this token hasn't been used in 6 months — consider revoking?"
+    last_used_at:  Mapped[datetime|None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at:    Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class PdfImport(Base):
     """Cache of LLM-parsed schedule PDFs.
 

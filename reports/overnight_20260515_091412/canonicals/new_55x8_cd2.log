@@ -1,0 +1,36 @@
+Building canonical for 55×8×3 cooldown=2
+  method=sa, sa_iterations=2000000, n_seeds=20
+  CP-SAT post-pass budget: 600.0s
+  cooldown_max=10, surrogate_count=4, feasible=True
+  par_quad floor: 440 (proven_lower_bound)
+  opp_quad floor: 660 (proven_lower_bound)
+  seed=30000 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=37919 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=45838 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=53757 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=61676 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=69595 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=77514 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=85433 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=93352 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=101271 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=109190 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=117109 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=125028 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=132947 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=140866 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=148785 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=156704 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=164623 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=172542 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  seed=180461 → lex=(0, 444, 666)..., best so far=(0, 444, 666)
+  Applying CP-SAT R/B post-pass (budget=60s)...
+    status=OPTIMAL wall=57.8s max=2→2
+  Applying CP-SAT station post-pass (budget=540s)...
+    status=OPTIMAL wall=0.4s max=4→1
+  achieved lex tuple: [0, 444, 666]...
+  par_quad: 444 (floor 440, matches: False)
+  opp_quad: 666 (floor 660, matches: False)
+  confidence: best_known
+
+Canonical written to: /Users/chris/git/frc-scheduler-server/app/canonical_schedules/55x8x3_cd2.json
