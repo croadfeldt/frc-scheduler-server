@@ -1375,6 +1375,14 @@
     padding: 0.5rem 1rem; text-align: left; font-size: 13px;
     text-transform: uppercase; letter-spacing: 0.05em;
   }
+  /* Match-count suffix on day dividers — same color but subordinate
+     visual weight so the day label reads first. The count is informative
+     ("how big is this day") not navigational. */
+  tr.day-divider .day-divider-count {
+    font-weight: 500;
+    opacity: 0.85;
+    margin-left: 4px;
+  }
 
   /* ── Toolbar ─────────────────────────────────────────────────────────── */
   .toolbar {
@@ -1626,6 +1634,39 @@
     font-size: 10px; font-weight: 700; border-radius: 3px;
     vertical-align: middle;
   }
+
+  /* Cycle-time badge next to actual-time on completed match rows.
+     Shows the duration this match took relative to the previous
+     in-scope qual (replay/break boundaries excluded). The triangle
+     prefix indicates direction vs running mean — down arrow = faster,
+     up arrow = slower, no arrow = within ±30s.
+       cycle-fast → green (faster than mean by >30s)
+       cycle-on   → neutral grey (within ±30s of mean)
+       cycle-slow → amber (slower than mean by >30s)
+     Color choices mirror drift-* so the table visually distinguishes
+     "schedule drift" (clock vs plan) from "cycle drift" (cycle vs avg)
+     while keeping the same warm/cool/neutral language. */
+  .cycle-badge {
+    display: inline-block; margin-left: 4px; padding: 1px 5px;
+    font-size: 10px; font-weight: 700; border-radius: 3px;
+    vertical-align: middle; cursor: help;
+    font-variant-numeric: tabular-nums;
+  }
+  .cycle-badge.cycle-fast { color: var(--secondary); background: rgba(93,175,120,0.14); }
+  .cycle-badge.cycle-on   { color: var(--text-muted); background: var(--bg-alt); }
+  .cycle-badge.cycle-slow { color: #d97706; background: rgba(251,133,0,0.14); }
+  html[data-theme="dark"] .cycle-badge.cycle-on { background: rgba(255,255,255,0.05); }
+
+  /* Inline cycle delta/trend markers for the cycle-stats subtitles
+     (vs the per-row .cycle-badge above). Same color language, but
+     no background pill — they sit inside flowing subtitle text. */
+  .cycle-inline {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .cycle-inline.cycle-fast { color: var(--secondary); }
+  .cycle-inline.cycle-on   { color: var(--text-muted); }
+  .cycle-inline.cycle-slow { color: #d97706; }
 
   /* Queue status pills next to match numbers */
   .queue-pill {
@@ -4034,7 +4075,94 @@ function rerender() {
   let zebra = 0;
   let totalMatches = 0;
 
-  computed.forEach(entry => {
+  // Per-match cycle map — for each completed qual match with live
+  // actual_time, compute the elapsed time from the previous qual's
+  // actual_time to this one (the cycle time). Skips replays
+  // (out-of-order) and break boundaries (>15 min scheduled gap)
+  // since those would show as enormous "cycles" that aren't really
+  // ops cycles. The running mean is updated incrementally so each
+  // row can show a delta-vs-mean badge.
+  //
+  // Result is a map: matchNum → { cycleMin, deltaVsMeanMin, isOutlier,
+  //                                runningMeanMin, isReplay, isBreak }.
+  // Practice matches and matches without live data simply aren't keys.
+  //
+  // Cheap to compute (one pass over computed), so we do it on every
+  // render — keeps the badges fresh on each live-data refresh.
+  var _perMatchCycles = {};
+  (function _buildPerMatchCycles() {
+    if (!STATE.liveByMatch) return;
+    var lastActualSec = null, lastSchedSec = null;
+    var inScopeSum = 0, inScopeCount = 0;
+    for (var ci = 0; ci < computed.length; ci++) {
+      var ce = computed[ci];
+      if (ce.type !== 'match' || ce.isPractice) continue;
+      var clive = STATE.liveByMatch[ce.matchNum];
+      if (!clive || !clive.actual_time) continue;
+      var schedTs = _resolveMatchTimestamp(ce);
+      var schedSec = schedTs != null ? schedTs / 1000 : null;
+      if (lastActualSec == null) {
+        lastActualSec = clive.actual_time;
+        lastSchedSec  = schedSec;
+        continue;
+      }
+      var cycleMin = (clive.actual_time - lastActualSec) / 60;
+      var schedGapMin = (lastSchedSec != null && schedSec != null)
+        ? (schedSec - lastSchedSec) / 60 : null;
+      var info = { cycleMin: cycleMin };
+      if (cycleMin <= 0) {
+        info.isReplay = true;
+      } else if (schedGapMin != null && schedGapMin > 15) {
+        info.isBreak = true;
+      } else {
+        // Update running mean BEFORE computing delta so the delta is
+        // vs. the mean of prior cycles (including this one for the
+        // next row). Order: increment, then snapshot.
+        inScopeSum += cycleMin;
+        inScopeCount++;
+        var mean = inScopeSum / inScopeCount;
+        info.runningMeanMin   = mean;
+        info.deltaVsMeanMin   = cycleMin - mean;
+      }
+      _perMatchCycles[ce.matchNum] = info;
+      lastActualSec = clive.actual_time;
+      lastSchedSec  = schedSec;
+    }
+  })();
+
+  // Format an integer-or-fractional minute value as "M:SS" (e.g.
+  // 7.5 → "7:30", 0.85 → "0:51"). Used by the per-row cycle badge.
+  function _fmtMSS(min) {
+    if (min == null || !isFinite(min)) return '';
+    var negative = min < 0;
+    var abs = Math.abs(min);
+    var m = Math.floor(abs);
+    var s = Math.round((abs - m) * 60);
+    if (s === 60) { m += 1; s = 0; }
+    return (negative ? '-' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  // Pre-pass: count matches that fall under each day-divider so we
+  // can show "Day 2 · Qualification · Sat, Apr 4 · 48 matches" in the
+  // header row. Counts the planned matches (not just visible-after-
+  // filter ones) so the header reflects schedule shape, not what the
+  // user is currently filtering. Also tracks practice vs qual counts
+  // overall (used for the legacy practice/qual filter labels, where
+  // present).
+  // Map: STATE.computed index of the day-divider → number of matches
+  // between it and the next divider (exclusive).
+  var _matchesPerDivider = {};
+  for (var _di = 0; _di < computed.length; _di++) {
+    if (computed[_di].type !== 'day-divider') continue;
+    var _count = 0;
+    for (var _dj = _di + 1; _dj < computed.length; _dj++) {
+      if (computed[_dj].type === 'day-divider') break;
+      if (computed[_dj].type === 'match') _count++;
+    }
+    _matchesPerDivider[_di] = _count;
+  }
+
+  computed.forEach((entry, _idx) => {
     if (entry.type === 'match') totalMatches++;
     // Apply onlyMine filter. Day-dividers ALWAYS stay visible —
     // they're how the user sees Practice vs Day 1/Day 2 separation,
@@ -4047,7 +4175,17 @@ function rerender() {
       if (entry.type === 'break' || entry.type === 'info-block')      return;
     }
     if (entry.type === 'day-divider') {
-      html += '<tr class="day-divider"><td colspan="8">' + escapeHtml(entry.label) + '</td></tr>';
+      // Append "· N matches" to the divider label. Practice days
+      // typically have fewer matches than qual days, so this is also
+      // a quick legibility check — "Day 1 · Practice · 24 matches"
+      // vs "Day 2 · Qualification · 64 matches" makes the shape of
+      // the event obvious at a glance.
+      var _mc = _matchesPerDivider[_idx] || 0;
+      var _suffix = ' \u00b7 ' + _mc + ' match' + (_mc === 1 ? '' : 'es');
+      html += '<tr class="day-divider"><td colspan="8">'
+            + escapeHtml(entry.label)
+            + '<span class="day-divider-count">' + _suffix + '</span>'
+            + '</td></tr>';
       zebra = 0;
     } else if (entry.type === 'break') {
       // data-subtype drives the row color via CSS — alliance_selection,
@@ -4179,7 +4317,10 @@ function rerender() {
                val + (isSur ? '<span class="surr-flag">S</span>' : '') + '</td>';
       };
 
-      // Time cell — adds drift badge in live mode
+      // Time cell — adds drift badge in live mode and a cycle-time
+      // badge for completed qual matches that have a computable cycle
+      // (i.e. not the first match, not a replay, not the first match
+      // back from a break).
       let timeCell;
       if (status === 'completed' && live.actual_time) {
         // Show actual played time
@@ -4198,6 +4339,32 @@ function rerender() {
             const cls = drift > 0 ? 'drift-late' : 'drift-early';
             timeCell += ' <span class="drift-badge ' + cls + '">' + formatDriftBadge(drift) + '</span>';
           }
+        }
+      }
+
+      // Cycle-time badge — shown on completed qual rows when we have
+      // a meaningful cycle (skipped on replays and first-after-break).
+      // Color: faster than mean (green), within ±30s (neutral), slower
+      // than mean (amber). Tooltip carries the exact delta + running
+      // mean for hover detail.
+      if (status === 'completed' && !entry.isPractice
+          && _perMatchCycles[entry.matchNum]) {
+        var _cy = _perMatchCycles[entry.matchNum];
+        if (!_cy.isReplay && !_cy.isBreak) {
+          var _label = _fmtMSS(_cy.cycleMin);
+          var _delta = _cy.deltaVsMeanMin;
+          var _badgeCls = 'cycle-badge';
+          var _arrow = '';
+          if (_delta < -0.5) { _badgeCls += ' cycle-fast'; _arrow = '\u25BC'; }
+          else if (_delta > 0.5) { _badgeCls += ' cycle-slow'; _arrow = '\u25B2'; }
+          else { _badgeCls += ' cycle-on'; }
+          var _deltaLabel = _delta >= 0 ? '+' + _fmtMSS(_delta)
+                                        : _fmtMSS(_delta); // already has '-'
+          var _ttl = 'Cycle ' + _label
+                  + ' \u00b7 ' + _deltaLabel + ' vs avg '
+                  + _fmtMSS(_cy.runningMeanMin);
+          timeCell += ' <span class="' + _badgeCls + '" title="'
+                    + escapeHtml(_ttl) + '">' + _arrow + _label + '</span>';
         }
       }
 
@@ -5549,6 +5716,74 @@ function _tickCountdown() {
   el.classList.toggle('now',   ms <= 0);                          // starting
 }
 
+// ── Generic data-countdown-to ticker ────────────────────────────────
+//
+// The two render functions _renderNextOnly and _renderFieldThreeUp
+// produce countdown strings inline — without ticking. Rather than wire
+// per-function setInterval handles (and the lifecycle complexity that
+// comes with them), the render functions emit a span with two data
+// attributes:
+//
+//     <span data-countdown-to="<epoch-ms>"
+//           data-countdown-format="rel|tilde">…initial text…</span>
+//
+// A single 1Hz walker (this) re-formats every such span on the page.
+// New elements participate automatically the next tick; removed ones
+// are skipped (querySelectorAll re-walks each tick, so DOM churn is
+// fine).
+//
+// Format dialects:
+//   rel    — same shape as _formatCountdown: "in 2d 3h", "in 23m 45s",
+//            "in 45s", "STARTING NOW", then disappears.
+//   tilde  — coarser, used by 3-up cells where layout is tight:
+//            "in ~5 min", "in ~1 min", "in <1 min", "now".
+//
+// When the target is in the past beyond the small grace window
+// (handled per format), the span is cleared so stale text doesn't
+// linger.
+
+function _formatCountdownTilde(msRemaining) {
+  if (msRemaining <= 0) return 'now';
+  var min = msRemaining / 60000;
+  if (min < 1)  return 'in <1 min';
+  if (min < 60) return 'in ~' + Math.round(min) + ' min';
+  var hours = Math.floor(min / 60);
+  var rem   = Math.round(min - hours * 60);
+  return 'in ' + hours + 'h ' + (rem < 10 ? '0' : '') + rem + 'm';
+}
+
+var _liveCountdownHandle = null;
+function _ensureLiveCountdownTicker() {
+  if (_liveCountdownHandle) return;
+  _liveCountdownHandle = setInterval(_tickLiveCountdowns, 1000);
+  // Tick once immediately so we don't wait up to 1s for the first
+  // refresh after a render.
+  _tickLiveCountdowns();
+}
+function _tickLiveCountdowns() {
+  var els = document.querySelectorAll('[data-countdown-to]');
+  if (!els.length) return;
+  var now = Date.now();
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    var target = parseInt(el.getAttribute('data-countdown-to'), 10);
+    if (!target || isNaN(target)) continue;
+    var ms = target - now;
+    var fmt = el.getAttribute('data-countdown-format') || 'rel';
+    var text;
+    if (fmt === 'tilde') {
+      // 'tilde' format clears once we're more than 30s past target
+      if (ms < -30 * 1000) { el.textContent = ''; continue; }
+      text = _formatCountdownTilde(ms);
+    } else {
+      var t = _formatCountdown(ms);
+      if (t === null) { el.textContent = ''; continue; }
+      text = t;
+    }
+    if (el.textContent !== text) el.textContent = text;
+  }
+}
+
 // ── Field-level status updater ─────────────────────────────────────
 // Called from the table-render flow and from the live-poll refresh.
 // Reads STATE.liveByMatch + STATE.computed to decide whether a match
@@ -5997,7 +6232,13 @@ function _renderFieldThreeUp() {
         if (ts != null) {
           var rel = ts - Date.now();
           if (rel > 0 && rel < 60 * 60 * 1000) {
-            meta = '<em>in ~' + Math.round(rel / 60000) + ' min</em>';
+            // Live ticker — emits a 'tilde' format span that the 1Hz
+            // walker updates. "in ~5 min" → "in ~4 min" → "in ~1 min"
+            // → "in <1 min" → "now". Coarser format than _renderNextOnly
+            // because each 3-up cell is narrow (~110px).
+            meta = '<em><span data-countdown-to="' + ts
+                 + '" data-countdown-format="tilde">'
+                 + _formatCountdownTilde(rel) + '</span></em>';
           } else {
             meta = '<em>scheduled ' + _formatTimeOnly(ts) + '</em>';
           }
@@ -6010,6 +6251,9 @@ function _renderFieldThreeUp() {
       metaEl.innerHTML = '<em>' + s.fallback + '</em>';
     }
   });
+  // Some stages may now contain data-countdown-to spans (the scheduled-
+  // fallback path). Idempotent — no-op if already running.
+  _ensureLiveCountdownTicker();
 }
 
 // Compute live URLs for Phil's cycle-times tool (deep-linked by
@@ -6299,6 +6543,22 @@ function _computeCycleStats() {
   // outlier; that's fine, the panel reports the most recent reality.
   var lastCycleMin = cyclesInScope[cyclesInScope.length - 1].actualMin;
 
+  // Delta of the last cycle vs the overall in-scope mean. Positive
+  // = slowing down; negative = speeding up. Used by the panel to
+  // show "trending" without a chart.
+  var lastDeltaVsMeanMin = lastCycleMin - mean;
+
+  // Recent-trend signal: mean of the last 3 in-scope cycles compared
+  // to the overall mean. Captures "the last few have been slow" or
+  // "field has hit a rhythm" cleanly. Requires ≥4 in-scope cycles
+  // (so the recent-3 isn't just the whole sample) — otherwise null.
+  var recentTrendMin = null;
+  if (actualVals.length >= 4) {
+    var n = actualVals.length;
+    var rt3 = (actualVals[n-1] + actualVals[n-2] + actualVals[n-3]) / 3;
+    recentTrendMin = rt3 - mean;
+  }
+
   // Total played qual matches (for "Played 34 / 77" stat).
   var totalQual = 0;
   for (var q = 0; q < STATE.computed.length; q++) {
@@ -6314,6 +6574,8 @@ function _computeCycleStats() {
     max:            maxV,
     schedMean:      schedMean,
     lastCycleMin:   lastCycleMin,
+    lastDeltaVsMeanMin: lastDeltaVsMeanMin,
+    recentTrendMin: recentTrendMin,
     inScopeCount:   inScope.length,
     outlierCount:   outliers,
     breakSkipped:   breakSkipped,
@@ -6362,9 +6624,34 @@ function _renderCycleStats() {
   }
   document.getElementById('cycleAvgSub').textContent = avgSub;
 
-  // Median cell — value, last cycle as subtitle
+  // Median cell — value, last cycle as subtitle with delta vs mean
+  // and a small trend indicator when we have enough samples.
+  // Examples:
+  //   "last 7.5 min ▲ +0.8"     — last cycle was 48s slower than mean
+  //   "last 6.9 min ▼ −0.4"     — last cycle was 24s faster than mean
+  //   "last 7.2 min · trend ▲"  — recent 3-cycle avg trending slow
+  // Direction marker color is conveyed via the same cycle-fast /
+  // cycle-slow classes used by the per-row badges, for consistency.
   document.getElementById('cycleMedianValue').textContent = stats.median.toFixed(1) + ' min';
-  document.getElementById('cycleMedianSub').textContent = 'last ' + stats.lastCycleMin.toFixed(1);
+  var medSubHtml = 'last ' + stats.lastCycleMin.toFixed(1);
+  if (stats.lastDeltaVsMeanMin != null && Math.abs(stats.lastDeltaVsMeanMin) >= 0.1) {
+    var d = stats.lastDeltaVsMeanMin;
+    var dCls = d > 0.5 ? 'cycle-slow' : (d < -0.5 ? 'cycle-fast' : 'cycle-on');
+    var arrow = d > 0 ? '\u25B2' : '\u25BC';
+    medSubHtml += ' <span class="cycle-inline ' + dCls + '">'
+                + arrow + ' '
+                + (d > 0 ? '+' : '\u2212')
+                + Math.abs(d).toFixed(1)
+                + '</span>';
+  }
+  if (stats.recentTrendMin != null && Math.abs(stats.recentTrendMin) >= 0.3) {
+    var t = stats.recentTrendMin;
+    var tCls = t > 0 ? 'cycle-slow' : 'cycle-fast';
+    var tArrow = t > 0 ? '\u25B2' : '\u25BC';
+    medSubHtml += ' \u00b7 trend <span class="cycle-inline ' + tCls + '">'
+                + tArrow + '</span>';
+  }
+  document.getElementById('cycleMedianSub').innerHTML = medSubHtml;
 
   // Range cell — min / max
   document.getElementById('cycleRangeValue').textContent =
@@ -6501,12 +6788,22 @@ function _renderNextOnly() {
 
   // Meta line: countdown + provenance. Avoid double-formatting if
   // ETA is in the past (should be rare given the filter above).
+  //
+  // The countdown is emitted as a span with data-countdown-to so the
+  // generic ticker (_tickLiveCountdowns) refreshes its text every
+  // second without us having to re-run _renderNextOnly. Initial text
+  // is _formatCountdown's snapshot so there's no visible "—" flash
+  // before the first tick.
   var metaHtml = '';
   if (etaTs != null) {
     var rel = etaTs - nowMs;
     if (rel > 0) {
       var cdLabel = _formatCountdown(rel) || '';
-      if (cdLabel) metaHtml += cdLabel;
+      if (cdLabel) {
+        metaHtml += '<span data-countdown-to="' + etaTs
+                  + '" data-countdown-format="rel">'
+                  + cdLabel + '</span>';
+      }
     }
   }
   if (etaSource === 'last actual + avg cycle') {
@@ -6515,6 +6812,9 @@ function _renderNextOnly() {
     metaHtml += (metaHtml ? ' \u00b7 ' : '') + '<em>' + etaSource + '</em>';
   }
   meta.innerHTML = metaHtml;
+  // Make sure the 1Hz walker is running. It's idempotent — calling
+  // multiple times is a no-op after the first.
+  _ensureLiveCountdownTicker();
   return { rendered: true };
 }
 
