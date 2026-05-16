@@ -263,6 +263,177 @@
   html[data-compact="1"] .status-three-up { gap: 0.45rem; }
   html[data-compact="1"] .status-stage { padding: 0.4rem 0.55rem; }
 
+  /* ── Split-view layout (data-layout="split") ──────────────────────
+     A second top-level layout mode. When ON, the existing page nodes
+     are wrapped into a sticky-rail + scrolling-pane arrangement via
+     JS (_wrapForSplitLayout in this file). The CSS below provides
+     all the visual rules; OFF it's display:none on the shell.
+
+     The split layout composes with compact: turning on both gets the
+     densest possible view. The data-layout="split" hooks below assume
+     enough room for a 360px left rail, so on phones we fall back to
+     stacked.
+
+     What moves into where:
+       • #brandApprovalPill (new) lives in #brandHeader
+       • #frcBanner — hidden in split mode (pill takes over)
+       • #agendaFitPanel → moves into #eventTileBody
+       • #nextMatchCard children (delta box, 3-up, cycle stats,
+         next-only, links) → move into #fieldTileBody
+       • #teamCard children (input, filter, next-match section)
+         → move into #teamTileBody
+       • .match-table-wrap → moves into #schedulePane
+
+     All IDs persist; renderers keep writing to the same elements.
+  */
+
+  /* Brand strip approval pill — appears in the header even when split
+     is OFF, but in stacked layout the big #frcBanner is the primary
+     surface. In split layout, #frcBanner is hidden and only the pill
+     shows. */
+  #brandApprovalPill.approval-mini {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 7px; border-radius: 10px;
+    background: rgba(255,255,255,0.15);
+    font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+    cursor: pointer;
+    color: #fff;
+  }
+  #brandApprovalPill:hover { background: rgba(255,255,255,0.28); }
+  #brandApprovalPill .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #7cc88c;
+    flex-shrink: 0;
+  }
+  #brandApprovalPill.approved .dot { background: #7cc88c; }
+  #brandApprovalPill.deviates .dot { background: #e08080; }
+  #brandApprovalPill.unknown  .dot { background: #c2c2c2; }
+  /* In stacked layout, show the big banner AND the pill (pill is a
+     subtle add). In split layout, hide the banner — pill takes over. */
+  html[data-layout="split"] #frcBanner { display: none !important; }
+
+  /* Split shell — only visible when data-layout="split". The JS
+     toggles the inline style on #splitShell but we belt-and-brace
+     with a CSS guard so accidental flash-of-shell on first paint
+     can't happen. */
+  .split-shell {
+    display: none;
+    gap: 0.85rem;
+    margin-top: 0.5rem;
+  }
+  html[data-layout="split"] .split-shell {
+    display: grid;
+    grid-template-columns: 360px minmax(0, 1fr);
+    align-items: start;
+  }
+  @media (max-width: 850px) {
+    html[data-layout="split"] .split-shell {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* Hide the original card chrome in split layout — the children
+     have been moved into tiles, leaving the empty parent behind. We
+     keep the parent in the DOM (still carries its #teamCard /
+     #nextMatchCard ID and the .card-label child for unwrap), but
+     hide it from view. */
+  html[data-layout="split"] .action-grid { display: none; }
+  html[data-layout="split"] .status-section-header { display: none; }
+  html[data-layout="split"] #agendaFitPanel { margin-bottom: 0; }
+
+  /* Left rail — sticky so the tiles stay visible while the right
+     pane scrolls. On mobile this falls back to normal flow. */
+  .split-left {
+    display: flex; flex-direction: column; gap: 0.5rem;
+    position: sticky; top: 0.5rem;
+    align-self: start;
+    max-height: calc(100vh - 1rem);
+    overflow-y: auto;
+  }
+  @media (max-width: 850px) {
+    .split-left { position: static; max-height: none; }
+  }
+
+  /* Tile — collapsible status panel. Collapsed by default; header
+     click toggles. */
+  .tile {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .tile-header {
+    display: flex; align-items: center; gap: 0.45rem;
+    padding: 0.4rem 0.7rem;
+    background: var(--bg-alt);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    letter-spacing: 0.04em; text-transform: uppercase;
+    cursor: pointer;
+    user-select: none;
+  }
+  .tile-header:hover { background: var(--border); }
+  .tile-header .tile-title { color: var(--text-muted); }
+  .tile-header .tile-summary {
+    margin-left: auto; color: var(--text); font-weight: 500;
+    text-transform: none; letter-spacing: 0; font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tile-header .tile-chevron {
+    color: var(--text-muted); font-size: 10px;
+    transition: transform 0.15s ease;
+    margin-left: 0.25rem;
+  }
+  .tile[data-expanded="1"] .tile-header .tile-chevron {
+    transform: rotate(180deg);
+  }
+  .tile-body {
+    padding: 0.55rem 0.7rem;
+    display: none;
+  }
+  .tile[data-expanded="1"] .tile-body { display: block; }
+  /* When a tile is collapsed, the summary in the header serves as
+     the entire visible content of the tile — emphasize it. */
+  .tile:not([data-expanded="1"]) .tile-header .tile-summary {
+    font-weight: 600; color: var(--text);
+  }
+
+  /* Tile-specific live dot in the Field header. Reuses the same
+     animation as the existing status-live pill. */
+  .tile-header .tile-live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--secondary);
+    animation: tile-pulse 1.6s infinite;
+    flex-shrink: 0;
+  }
+  @keyframes tile-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* Schedule pane — the right column. */
+  .schedule-pane {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    min-height: 200px;
+  }
+  /* The slot is just a transparent passthrough where the existing
+     .match-table-wrap lands. We strip the section's own outer
+     padding so the pane's chrome can take over. */
+  #schedulePaneSlot > * {
+    margin: 0 !important;
+  }
+
+  /* Stacked-mode default: shell is hidden, everything renders as
+     before. Nothing extra needed. */
+
   /* ── Status section header — sits above the .action-grid and
        names the two-card row as "Status" with the field/linear
        toggle anchored to the right. Lightweight: no wrapper element,
@@ -2857,6 +3028,19 @@
             <span id="compactIcon">&#x21F5;</span>
             <span id="compactLabel">Compact</span>
           </button>
+          <!-- Split-layout toggle. When ON, the page reorganizes into
+               a sticky-rail + scrolling-pane layout with three
+               collapsible tiles (Event / Field / Team) on the left
+               and the schedule table on the right. The approval
+               status moves into the brand strip as a small pill.
+               Persists in localStorage. -->
+          <button class="btn btn-secondary" id="btnSplitLayoutToggle"
+                  onclick="toggleSplitLayout()"
+                  aria-pressed="false"
+                  title="Toggle split-view layout — sticky left rail with status tiles, scrolling schedule on the right">
+            <span id="splitLayoutIcon">&#x25EB;</span>
+            <span id="splitLayoutLabel">Split</span>
+          </button>
           <button class="btn btn-secondary" id="btnThemeToggle"
                   onclick="toggleTheme()"
                   title="Switch between light and dark theme">
@@ -3274,6 +3458,411 @@ function initCompactView() {
   }
 }
 
+// ── Split view layout + collapsible tiles ───────────────────────────
+// A second layout mode (in addition to compact) that re-arranges the
+// page into:
+//   • A small brand strip (compact, with approval status as a pill)
+//   • A two-column "split": left rail with three collapsible tiles
+//     (Event, Field, Team), right pane with the scrolling table
+//   • The tiles collapse to one-line summaries by default — tap the
+//     header to expand. Per-tile expansion state persists per user.
+//
+// Implementation strategy: keep ALL existing IDs intact (so the
+// existing renderers — _renderScheduleDelta, _renderFieldThreeUp,
+// updateNextMatch, renderFrcBanner, etc. — continue writing to the
+// same DOM elements). What changes is the surrounding chrome:
+//   • #frcBanner → wrap content rendered into the brand-strip pill
+//     instead of the standalone banner. The renderer (renderFrcBanner)
+//     gets a small extension to ALSO update the pill.
+//   • #teamCard → wrap in a .tile.team-tile with a collapsible header.
+//   • #nextMatchCard → split visually into Event tile (agenda summary)
+//     and Field tile (everything else). The cycle stats and 3-up keep
+//     their original IDs; agenda fit panel content gets a peer
+//     summary line in the Event tile header.
+//   • #agendaFitPanel → moves DOM-wise into the Event tile body, but
+//     all rendering code still finds it by ID and updates it normally.
+//   • Match-schedule pane gets a sticky header.
+//
+// Activation: html[data-layout="split"]. Opt-in via toolbar button.
+
+var SPLIT_LAYOUT_KEY = 'frc_view_split_layout';
+var TILE_STATE_KEY   = 'frc_view_tile_state';  // JSON: {event, field, team} → bool expanded
+
+function getSplitLayout() {
+  try { return localStorage.getItem(SPLIT_LAYOUT_KEY) === '1'; } catch(_) { return false; }
+}
+
+function setSplitLayout(on) {
+  on = !!on;
+  try { localStorage.setItem(SPLIT_LAYOUT_KEY, on ? '1' : '0'); } catch(_) {}
+  if (on) document.documentElement.setAttribute('data-layout', 'split');
+  else    document.documentElement.removeAttribute('data-layout');
+  // Sync toolbar button label.
+  var lab = document.getElementById('splitLayoutLabel');
+  if (lab) lab.textContent = on ? 'Stacked' : 'Split';
+  var btn = document.getElementById('btnSplitLayoutToggle');
+  if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  // Apply or unapply the DOM wrapping. Idempotent.
+  if (on) _wrapForSplitLayout();
+  else    _unwrapForSplitLayout();
+  // Update the approval pill regardless (so toggling shows/hides
+  // pill content immediately).
+  if (typeof renderFrcBanner === 'function') {
+    try { renderFrcBanner(); } catch(_) {}
+  }
+  // Recompute relocated field-view toggle (sticky-rail vs not).
+  _relocateFieldViewToggle();
+}
+
+function toggleSplitLayout() {
+  setSplitLayout(!getSplitLayout());
+}
+
+function initSplitLayout() {
+  setSplitLayout(getSplitLayout());
+}
+
+// Read per-tile expansion state from localStorage. Defaults to
+// collapsed for all three tiles. Returns an object {event, field, team}.
+function getTileState() {
+  try {
+    var raw = localStorage.getItem(TILE_STATE_KEY);
+    if (!raw) return { event: false, field: false, team: false };
+    var s = JSON.parse(raw);
+    return {
+      event: !!s.event,
+      field: !!s.field,
+      team:  !!s.team,
+    };
+  } catch(_) {
+    return { event: false, field: false, team: false };
+  }
+}
+
+function setTileExpanded(name, expanded) {
+  var s = getTileState();
+  s[name] = !!expanded;
+  try { localStorage.setItem(TILE_STATE_KEY, JSON.stringify(s)); } catch(_) {}
+  _applyTileState(s);
+}
+
+function toggleTile(name) {
+  var s = getTileState();
+  setTileExpanded(name, !s[name]);
+}
+
+function _applyTileState(s) {
+  ['event', 'field', 'team'].forEach(function(name) {
+    var t = document.querySelector('.tile.' + name + '-tile');
+    if (!t) return;
+    if (s[name]) t.setAttribute('data-expanded', '1');
+    else         t.removeAttribute('data-expanded');
+  });
+}
+
+// ── DOM wrapping for split layout ────────────────────────────────
+// Builds the split shell ONCE on first toggle, then toggling
+// html[data-layout="split"] just shows/hides it via CSS while the
+// underlying renderers keep writing to the same IDs.
+//
+// What we actually do:
+//   1. Build a hidden .split-shell with .split-left and .schedule-pane
+//      placeholders OUTSIDE the existing #mainContent flow.
+//   2. When split is on, MOVE the existing children of #mainContent
+//      into the appropriate split slots; when off, move them back.
+//   3. The shell remembers the original parent + next-sibling of each
+//      moved node so we can put them back exactly. This works because
+//      moving a DOM node preserves its event handlers, attributes,
+//      and (crucially) the IDs other code looks up.
+
+var _splitShellBuilt   = false;
+var _splitOriginals    = null;   // map: id → { parent, nextSibling }
+var _splitWrapped      = false;
+
+function _buildSplitShellOnce() {
+  if (_splitShellBuilt) return;
+  _splitShellBuilt = true;
+
+  // Brand-strip approval pill — added to the existing #brandHeader.
+  // The renderFrcBanner() extension below writes both the banner
+  // and the pill, so either layout shows the right info.
+  var brand = document.getElementById('brandHeader');
+  if (brand && !document.getElementById('brandApprovalPill')) {
+    var pill = document.createElement('span');
+    pill.id = 'brandApprovalPill';
+    pill.className = 'approval-mini';
+    pill.style.display = 'none';
+    pill.title = '';
+    pill.innerHTML = '<span class="dot"></span><span class="lbl"></span>';
+    pill.addEventListener('click', function() {
+      if (typeof openFrcAuditFromBanner === 'function') openFrcAuditFromBanner();
+    });
+    brand.appendChild(pill);
+  }
+
+  // Build the split shell as a sibling of #mainContent so we can
+  // move nodes in/out without disturbing the existing flow when
+  // off. The shell is itself inside #mainContent so the empty-state
+  // hiding logic keeps working.
+  var main = document.getElementById('mainContent');
+  if (!main) return;
+
+  var shell = document.createElement('div');
+  shell.className = 'split-shell';
+  shell.id = 'splitShell';
+  shell.style.display = 'none';  // CSS reveals when data-layout=split
+  shell.innerHTML =
+    '<div class="split-left" id="splitLeft">' +
+      '<div class="tile event-tile" data-tile="event">' +
+        '<div class="tile-header" onclick="toggleTile(\'event\')">' +
+          '<span class="tile-title">Event</span>' +
+          '<span class="tile-summary" id="eventTileSummary">—</span>' +
+          '<span class="tile-chevron">\u25BE</span>' +
+        '</div>' +
+        '<div class="tile-body" id="eventTileBody"></div>' +
+      '</div>' +
+      '<div class="tile field-tile" data-tile="field">' +
+        '<div class="tile-header" onclick="toggleTile(\'field\')">' +
+          '<span class="tile-live-dot"></span>' +
+          '<span class="tile-title">Field</span>' +
+          '<span class="tile-summary" id="fieldTileSummary">—</span>' +
+          '<span class="tile-chevron">\u25BE</span>' +
+        '</div>' +
+        '<div class="tile-body" id="fieldTileBody"></div>' +
+      '</div>' +
+      '<div class="tile team-tile" data-tile="team">' +
+        '<div class="tile-header" onclick="toggleTile(\'team\')">' +
+          '<span class="tile-title">Team</span>' +
+          '<span class="tile-summary" id="teamTileSummary">tap to set</span>' +
+          '<span class="tile-chevron">\u25BE</span>' +
+        '</div>' +
+        '<div class="tile-body" id="teamTileBody"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="schedule-pane" id="schedulePane">' +
+      // The match-table section moves here when split is on.
+      '<div id="schedulePaneSlot"></div>' +
+    '</div>';
+  main.appendChild(shell);
+}
+
+function _wrapForSplitLayout() {
+  _buildSplitShellOnce();
+  if (_splitWrapped) {
+    _applyTileState(getTileState());
+    _updateTileSummaries();
+    return;
+  }
+  _splitWrapped = true;
+  _splitOriginals = {};
+
+  // Helper: move a node into a target slot, remembering where it came
+  // from. The original parent + nextSibling pair is enough to restore
+  // its exact position on unwrap.
+  function move(id, slotId) {
+    var node = document.getElementById(id);
+    var slot = document.getElementById(slotId);
+    if (!node || !slot) return;
+    _splitOriginals[id] = { parent: node.parentNode, next: node.nextSibling };
+    slot.appendChild(node);
+  }
+
+  // Event tile body: agenda fit panel (existing #agendaFitPanel).
+  move('agendaFitPanel', 'eventTileBody');
+
+  // Field tile body: existing #nextMatchCard's CONTENT slot. The card
+  // wrapper has chrome we don't want; we move the inner pieces.
+  // Specifically: deltaBox, three-up wrap, next-only, cycle stats,
+  // cycle empty, field-status, status-links. We keep the card itself
+  // hidden as a parent (still in DOM with all its IDs intact).
+  var fieldTileBody = document.getElementById('fieldTileBody');
+  var fieldCard     = document.getElementById('nextMatchCard');
+  if (fieldCard && fieldTileBody) {
+    // Move all children of the card EXCEPT the card-label. The label
+    // information lives in the tile header now.
+    var moved = [];
+    Array.prototype.slice.call(fieldCard.children).forEach(function(child) {
+      if (child.classList && child.classList.contains('card-label')) return;
+      moved.push(child);
+    });
+    moved.forEach(function(child) {
+      _splitOriginals['__fc_' + child.id || ('__fc_' + moved.indexOf(child))] = {
+        parent: child.parentNode, next: child.nextSibling,
+      };
+      fieldTileBody.appendChild(child);
+    });
+    // Save the list of moved children so unwrap can put them back in
+    // order via the per-child entries above.
+    fieldCard.setAttribute('data-split-moved', '1');
+  }
+
+  // Team tile body: existing #teamCard's CONTENT (same pattern).
+  var teamTileBody = document.getElementById('teamTileBody');
+  var teamCard     = document.getElementById('teamCard');
+  if (teamCard && teamTileBody) {
+    Array.prototype.slice.call(teamCard.children).forEach(function(child) {
+      if (child.classList && child.classList.contains('card-label')) return;
+      _splitOriginals['__tc_' + child.id || ('__tc_' + Date.now())] = {
+        parent: child.parentNode, next: child.nextSibling,
+      };
+      teamTileBody.appendChild(child);
+    });
+    teamCard.setAttribute('data-split-moved', '1');
+  }
+
+  // Schedule pane: move the entire match-table section.
+  // The wrapper is .match-table-wrap (defined around #tableTitle and
+  // #matchesTbody). Identified by class; closest('section,div') is a
+  // fallback if anyone renames the wrapper.
+  var sched = document.querySelector('.match-table-wrap')
+           || (document.getElementById('tableTitle') &&
+               document.getElementById('tableTitle').closest('section,div,article'));
+  if (sched && sched.id !== 'splitShell' && !sched.contains(document.getElementById('splitShell'))) {
+    _splitOriginals['__sched'] = { parent: sched.parentNode, next: sched.nextSibling };
+    var slot = document.getElementById('schedulePaneSlot');
+    if (slot) slot.appendChild(sched);
+  }
+
+  // Reveal the shell.
+  document.getElementById('splitShell').style.display = '';
+
+  // Apply per-tile collapse state and seed the summary lines so
+  // collapsed tiles show useful info without needing user expansion.
+  _applyTileState(getTileState());
+  _updateTileSummaries();
+}
+
+function _unwrapForSplitLayout() {
+  if (!_splitWrapped) return;
+  _splitWrapped = false;
+
+  // Hide the shell first so visuals don't flash.
+  var shell = document.getElementById('splitShell');
+  if (shell) shell.style.display = 'none';
+
+  // Restore each moved node to its original parent + nextSibling.
+  // _splitOriginals also carries the __fc_/__tc_/__sched synthetic
+  // keys for inner-card and schedule-section moves.
+  Object.keys(_splitOriginals || {}).forEach(function(key) {
+    var entry = _splitOriginals[key];
+    var node;
+    if (key === '__sched') {
+      // Schedule section — find it via the slot we moved it into.
+      var slot = document.getElementById('schedulePaneSlot');
+      node = slot && slot.firstElementChild;
+    } else if (key.indexOf('__fc_') === 0 || key.indexOf('__tc_') === 0) {
+      // We can't reliably look these up by key, so re-discover by
+      // walking the tile bodies. The shape is "every child of the
+      // tile body that wasn't a label is a moved-in former card-
+      // child" — restore each into its remembered parent in order.
+      // (Handled in a separate pass below.)
+      return;
+    } else {
+      node = document.getElementById(key);
+    }
+    if (!node) return;
+    if (entry.next && entry.next.parentNode === entry.parent) {
+      entry.parent.insertBefore(node, entry.next);
+    } else if (entry.parent) {
+      entry.parent.appendChild(node);
+    }
+  });
+
+  // Restore card children: any node currently in #fieldTileBody or
+  // #teamTileBody goes back to its respective card.
+  ['fieldTileBody|nextMatchCard', 'teamTileBody|teamCard'].forEach(function(pair) {
+    var p = pair.split('|');
+    var body = document.getElementById(p[0]);
+    var card = document.getElementById(p[1]);
+    if (!body || !card) return;
+    while (body.firstChild) {
+      card.appendChild(body.firstChild);
+    }
+    card.removeAttribute('data-split-moved');
+  });
+
+  _splitOriginals = null;
+}
+
+// Update tile summary lines (the one-line "Q22 of 84" / "Q23 on field"
+// / "Team 2056 — next Q24 in 12 min") from the same data sources the
+// expanded views use. Called after split renders and again whenever
+// underlying data refreshes.
+function _updateTileSummaries() {
+  // Event summary
+  var es = document.getElementById('eventTileSummary');
+  if (es) {
+    var ev = STATE && STATE.event;
+    var sc = STATE && STATE.schedule;
+    var parts = [];
+    if (sc && sc.match_count != null) {
+      // Find max match number reached in liveByMatch
+      var lastPlayed = 0;
+      if (STATE.liveByMatch) {
+        Object.keys(STATE.liveByMatch).forEach(function(k) {
+          var l = STATE.liveByMatch[k];
+          if (l && l.comp_level === 'qm' && l.post_result_time && l.match_number > lastPlayed) {
+            lastPlayed = l.match_number;
+          }
+        });
+      }
+      if (lastPlayed > 0) {
+        parts.push('Q' + lastPlayed + ' of ' + sc.match_count);
+      } else {
+        parts.push(sc.match_count + ' matches');
+      }
+    }
+    if (ev && (ev.name || ev.short_name)) {
+      parts.push(ev.short_name || ev.name);
+    }
+    es.textContent = parts.length ? parts.join(' \u00b7 ') : '—';
+  }
+
+  // Field summary — derived from the same data _renderFieldThreeUp
+  // uses. Prefer "on-field" match number, fall back to delta.
+  var fs = document.getElementById('fieldTileSummary');
+  if (fs) {
+    var sum = '—';
+    if (typeof _findFieldThreeUp === 'function') {
+      try {
+        var t = _findFieldThreeUp();
+        if (t && t.field) {
+          var prefix = t.field.isPractice ? 'P' : 'Q';
+          sum = prefix + t.field.matchNum + ' on field';
+        } else if (t && t.deck) {
+          var p2 = t.deck.isPractice ? 'P' : 'Q';
+          sum = 'Up next: ' + p2 + t.deck.matchNum;
+        }
+      } catch(_) {}
+    }
+    // Append delta hint if non-trivial
+    if (typeof _computeScheduleDelta === 'function') {
+      try {
+        var d = _computeScheduleDelta();
+        if (d && Math.abs(d.minutes) >= 1) {
+          var verb = d.minutes > 0 ? 'behind' : 'ahead';
+          sum += '  \u00b7  ' + verb + ' ' + Math.round(Math.abs(d.minutes)) + 'm';
+        }
+      } catch(_) {}
+    }
+    fs.textContent = sum;
+  }
+
+  // Team summary
+  var ts = document.getElementById('teamTileSummary');
+  if (ts) {
+    if (!STATE.myTeams || STATE.myTeams.size === 0) {
+      ts.textContent = 'tap to set';
+      ts.style.fontStyle = 'italic';
+    } else {
+      var list = Array.from(STATE.myTeams).slice(0, 3).join(', ');
+      if (STATE.myTeams.size > 3) list += ' +' + (STATE.myTeams.size - 3);
+      ts.textContent = 'Team ' + list;
+      ts.style.fontStyle = '';
+    }
+  }
+}
+
 // When the .status-section-header is hidden (mobile or compact mode),
 // the "Field view" toggle button it normally contains becomes
 // inaccessible. We relocate the button into the .field-status-card's
@@ -3544,6 +4133,13 @@ async function boot() {
   // automatically and wide screens can opt in via this toggle.
   initCompactView();
 
+  // Initialize the split-layout toggle. When ON, wraps the existing
+  // cards / agenda / table into a sticky-rail + scrolling-pane
+  // arrangement with three collapsible tiles. Persists in
+  // localStorage. Safe to call after compact init since the two
+  // layouts compose orthogonally.
+  initSplitLayout();
+
   // Sync the field/linear view toggle label to the saved preference
   // (frc_field_view_mode in localStorage). The button itself only
   // surfaces once a schedule is loaded and the 3-up grid is visible.
@@ -3668,6 +4264,24 @@ function renderFrcBanner() {
   banner.style.border = '1px solid ' + border;
   banner.style.color = color;
   banner.textContent = label;
+
+  // Also update the brand-strip approval pill if it exists. The pill
+  // is created on first split-layout activation; here we just keep
+  // it in sync. In split layout, the big banner is hidden via CSS
+  // (data-layout="split" hides #frcBanner), and the pill takes over.
+  var pill = document.getElementById('brandApprovalPill');
+  if (pill) {
+    pill.classList.remove('approved', 'deviates', 'unknown');
+    var pillClass = approved === true ? 'approved'
+                  : approved === false ? 'deviates' : 'unknown';
+    pill.classList.add(pillClass);
+    var pillLabel = approved === true ? '\u00a7 10.5.2'
+                   : approved === false ? 'deviates' : '?';
+    var lblEl = pill.querySelector('.lbl');
+    if (lblEl) lblEl.textContent = pillLabel;
+    pill.title = label;
+    pill.style.display = '';
+  }
 }
 
 function openFrcAuditFromBanner() {
@@ -5314,6 +5928,11 @@ function rerender() {
   // re-run on every rerender (selection changes, live data changes,
   // etc.) so the team-marks stay in sync.
   renderAgendaFitView();
+
+  // Split-layout tile summaries — recompute from latest STATE so
+  // collapsed tiles show fresh info. No-op when split layout is off
+  // (the elements simply don't exist).
+  try { _updateTileSummaries(); } catch(_) {}
 }
 
 // ── Agenda fit panel renderer ─────────────────────────────────────────

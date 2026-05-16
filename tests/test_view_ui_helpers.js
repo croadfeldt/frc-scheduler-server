@@ -494,6 +494,53 @@ console.log('\nCompact view toggle:');
   });
 }
 
+// ── Split-layout plumbing ──────────────────────────────────────
+//
+// Source-substring guards for the split-view layout work. The
+// renderers themselves can't be unit-tested without a DOM, so we
+// verify the production source carries the expected plumbing:
+//   - Toggle / state functions exist
+//   - localStorage keys defined
+//   - Tile-summary updater hooks into rerender()
+//   - Wrap/unwrap reciprocity (every wrap has an unwrap path)
+//   - renderFrcBanner extended to update brand-strip pill
+//   - Toolbar button exists
+
+console.log('\nSplit-layout plumbing:');
+{
+  const guards = [
+    /function\s+getSplitLayout\s*\(/,
+    /function\s+setSplitLayout\s*\(/,
+    /function\s+toggleSplitLayout\s*\(/,
+    /function\s+initSplitLayout\s*\(/,
+    /function\s+toggleTile\s*\(/,
+    /function\s+_wrapForSplitLayout\s*\(/,
+    /function\s+_unwrapForSplitLayout\s*\(/,
+    /function\s+_updateTileSummaries\s*\(/,
+    /SPLIT_LAYOUT_KEY\s*=\s*['"]frc_view_split_layout['"]/,
+    /TILE_STATE_KEY\s*=\s*['"]frc_view_tile_state['"]/,
+    /id="btnSplitLayoutToggle"/,
+    /id="splitLayoutLabel"/,
+    /initSplitLayout\(\);/,
+    // Tile summaries refresh after every rerender
+    /_updateTileSummaries\(\)/,
+    // renderFrcBanner extended for the pill
+    /brandApprovalPill/,
+    /pill\.classList\.add\(\s*pillClass\s*\)/,
+    // CSS hooks for both layout activations
+    /html\[data-layout="split"\]\s*\.split-shell/,
+    /html\[data-layout="split"\]\s*#frcBanner/,
+    /\.tile\[data-expanded="1"\]\s*\.tile-body/,
+    // Sticky-rail rule
+    /\.split-left\s*\{[\s\S]{0,200}position:\s*sticky/,
+  ];
+  guards.forEach((re, i) => {
+    check('split-layout guard #' + (i + 1) + ': ' + re.source.slice(0, 60),
+          re.test(VIEW),
+          'did not match production source');
+  });
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();
