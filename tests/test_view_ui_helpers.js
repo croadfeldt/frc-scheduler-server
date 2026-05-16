@@ -802,17 +802,20 @@ console.log('\nStay-current scrolling:');
 // ── Mobile agenda dual-line indicators ──────────────────────────
 //
 // Two indicator lines on the agenda bar:
-//   - red (.m-agenda-now)     — wall clock position
-//   - blue (.m-agenda-sched)  — schedule position (= clock - delta)
-// When they overlap (|red - blue| < ~1.5% bar width), they collapse
-// into a single green pulse (.m-agenda-aligned) meaning "on time".
+//   - red (.m-agenda-now)     — wall clock position, ALWAYS visible
+//   - blue (.m-agenda-sched)  — schedule position (= clock - delta),
+//                                visible only when meaningfully
+//                                separated from red
+// When delta is small (within ~1.5% of bar width), blue is hidden
+// and red gets a .aligned modifier for a soft green halo glow.
+// The red line is never removed — user always sees clock position.
 
 console.log('\nMobile agenda dual-line indicators:');
 {
   check(
     'indicatorLines() helper exists',
     /function\s+indicatorLines\s*\(/.test(VIEW),
-    'helper renders red + blue + (optional) green-pulse alignment'
+    'helper renders red (always) + blue (when separated) + halo on align'
   );
   check(
     'schedule-delta consulted via _computeScheduleDelta',
@@ -830,15 +833,26 @@ console.log('\nMobile agenda dual-line indicators:');
     'blue line uses the alliance-blue token to stay theme-aware'
   );
   check(
-    'green aligned-line CSS exists with pulse animation',
-    /\.m-agenda-aligned\s*\{/.test(VIEW) &&
-    /m-agenda-aligned-pulse/.test(VIEW),
-    'pulsing green replaces red+blue when delta is near zero'
+    'red line .aligned modifier CSS exists with green halo + glow animation',
+    /\.m-agenda-now\.aligned\s*\{/.test(VIEW) &&
+    /m-agenda-aligned-glow/.test(VIEW) &&
+    /rgba\(45,\s*164,\s*78/.test(VIEW),
+    'green halo on the red line replaces the previous separate green-pulse element'
   );
   check(
     'alignment threshold is ~1.5% (Math.abs(er - sr) <= 0.015)',
     /Math\.abs\(er\s*-\s*sr\)\s*<=\s*0\.015/.test(VIEW),
-    'collapse threshold tuned to avoid showing two near-stacked lines'
+    'threshold for suppressing blue + adding red-line halo'
+  );
+  check(
+    'red line rendered unconditionally when day is today',
+    /m-agenda-now['"\s+]*\+\s*\(aligned\s*\?\s*['"]\s+aligned/.test(VIEW),
+    'red line must always emit; aligned only toggles a class modifier'
+  );
+  check(
+    'blue line suppressed when aligned',
+    /hasBlue\s*&&\s*!aligned/.test(VIEW),
+    'aligned state hides blue to avoid stacking with red'
   );
 }
 
@@ -974,6 +988,40 @@ console.log('\nSchedule-delta break-end anchor reset:');
     'overrides deltaMs/deltaMin when applicable',
     /breakAnchorMs\s*!=\s*null[\s\S]{0,300}deltaMs\s*=\s*nowMs\s*-\s*breakAnchorMs/.test(VIEW),
     'must rewrite deltaMs and deltaMin so consumers see the reset value'
+  );
+}
+
+// ── Today-detection bracket fallback ────────────────────────────
+//
+// When NO day-divider has a date plumbed through (older saves,
+// fresh imports without event.start_date), the primary date-string
+// match fails for every day, isThisDayToday stays false, and the
+// red now-line never renders. Fix: bracket nowMin against
+// day.start/end (minute-of-day) when no day has a date. Days
+// don't overlap in minute-of-day, so this is unambiguous.
+
+console.log('\nToday-detection bracket fallback:');
+{
+  check(
+    'agenda strip has todayByBracket fallback',
+    /todayByBracket\s*=\s*false/.test(VIEW)
+    && /todayByBracket\s*=\s*true/.test(VIEW),
+    'mobile agenda strip should fall back to minute bracketing when no day has a date'
+  );
+  check(
+    'agenda strip isThisDayToday honors bracket fallback',
+    /isThisDayToday\s*=[\s\S]{0,200}todayByBracket/.test(VIEW),
+    'segmentsFor should mark day as today via either signal'
+  );
+  check(
+    'phase resolver has anyDayHasDate gate',
+    /anyDayHasDate\s*=\s*false/.test(VIEW),
+    'phase resolver also needs the bracket-fallback path'
+  );
+  check(
+    'phase resolver brackets nowMin when no day has date',
+    /anyDayHasDate[\s\S]{0,400}nowMin\s*>=\s*e\.start[\s\S]{0,100}nowMin\s*<=\s*e\.end/.test(VIEW),
+    'phase resolver must bracket day-divider start/end vs nowMin in fallback path'
   );
 }
 

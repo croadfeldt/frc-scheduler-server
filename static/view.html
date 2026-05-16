@@ -670,21 +670,20 @@
     transform: translateX(-50%);
     pointer-events: none;
   }
-  /* Aligned indicator — replaces both red and blue when they're
-     within ~1.5% of each other (event on schedule). Green pulse
-     says "on time" rather than the alarming red-stacked-on-blue
-     look. Slightly wider (3px) and pulsing for legibility. */
-  .m-agenda-bar .m-agenda-aligned {
-    position: absolute; top: -2px; bottom: -2px;
-    width: 3px; background: #2da44e; z-index: 4;
-    transform: translateX(-50%);
-    pointer-events: none;
-    animation: m-agenda-aligned-pulse 1.6s infinite;
-    border-radius: 1px;
+  /* On-time alignment indicator. When the schedule-position would
+     have been within ~1.5% of the clock position (event running
+     near-on-time), we suppress the blue line entirely (it would
+     visually stack with red and just add noise) and decorate the
+     red line with a soft pulsing green halo. The red core stays
+     visible so the user always sees wall-clock position; the green
+     glow says "on schedule" as positive feedback. */
+  .m-agenda-bar .m-agenda-now.aligned {
+    box-shadow: 0 0 4px 1px rgba(45, 164, 78, 0.55);
+    animation: m-agenda-aligned-glow 1.6s infinite;
   }
-  @keyframes m-agenda-aligned-pulse {
-    0%, 100% { opacity: 1;   box-shadow: 0 0 0   0 rgba(45,164,78,0.0); }
-    50%      { opacity: 0.7; box-shadow: 0 0 4px 1px rgba(45,164,78,0.45); }
+  @keyframes m-agenda-aligned-glow {
+    0%, 100% { box-shadow: 0 0 4px 1px rgba(45, 164, 78, 0.45); }
+    50%      { box-shadow: 0 0 8px 2px rgba(45, 164, 78, 0.8);  }
   }
   .m-agenda-stat {
     font-size: 10px; color: var(--text-muted);
@@ -4742,6 +4741,17 @@ function _resolveAgendaPhase() {
   // Walk entries, scoped to today's day-divider. Match entries carry
   // startMin/endMin; break entries carry start/end. Day-divider entries
   // delimit but we only inspect the day matching today's date.
+  //
+  // Primary scoping is by `date === todayStr`. When NO day-divider has
+  // a date plumbed through (older saves / fresh imports lacking
+  // event.start_date), we fall back to bracketing the day-divider's
+  // own start/end against nowMin. Days don't overlap in minute-of-day,
+  // so this is unambiguous when one day contains nowMin.
+  var anyDayHasDate = false;
+  for (var pp = 0; pp < STATE.computed.length; pp++) {
+    var pe = STATE.computed[pp];
+    if (pe.type === 'day-divider' && pe.date) { anyDayHasDate = true; break; }
+  }
   var inToday = false;
   var currentEntry = null;
   var nextMatch    = null;
@@ -4749,7 +4759,14 @@ function _resolveAgendaPhase() {
   for (var i = 0; i < STATE.computed.length; i++) {
     var e = STATE.computed[i];
     if (e.type === 'day-divider') {
-      if (e.date && e.date === todayStr)        inToday = true;
+      var matchesToday;
+      if (anyDayHasDate) {
+        matchesToday = !!(e.date && e.date === todayStr);
+      } else {
+        matchesToday = (e.start != null && e.end != null
+                        && nowMin >= e.start && nowMin <= e.end);
+      }
+      if (matchesToday)                          inToday = true;
       else if (inToday)                          break;  // hit the next day
       continue;
     }
@@ -5181,17 +5198,41 @@ function _renderMobileAgendaStrip() {
     } catch(_) {}
   }
 
-  var todayIdx = 0;
-  // Walk to find a day whose date matches today. When no day matches
-  // (event hasn't started or already ended), fall back to days[0].
+  var todayIdx = -1;
+  // Primary: walk to find a day whose date matches today. Most events
+  // have explicit dates plumbed through (cfg.qualDays[i].date or
+  // event.start_date + day offset).
   for (var d = 0; d < days.length; d++) {
     if (days[d].date && days[d].date === todayStr) { todayIdx = d; break; }
-    // If we walk past the matching day, leave todayIdx pointing at the
-    // last seen day (so far-future "today" stays as the last day, and
-    // a pre-event view starts at day 0).
-    if (days[d].date && days[d].date > todayStr) { todayIdx = Math.max(0, d - 1); break; }
-    todayIdx = d;
+    // If we walk past the matching day, the matching day is the
+    // PREVIOUS one (events in the past sense).
+    if (days[d].date && days[d].date > todayStr) {
+      todayIdx = Math.max(0, d - 1);
+      break;
+    }
   }
+  // Fallback: if no day had a date that matched (or no day has a date
+  // at all — older saves / fresh imports without start_date), bracket
+  // nowMin against day.start/end. Days don't overlap in minute-of-day
+  // (practice runs evening, quals run morning/afternoon), so this is
+  // unambiguous when one day contains nowMin. Without this fallback,
+  // the red now-line is suppressed because isThisDayToday stays false
+  // for every day, leaving elapsedRatio null.
+  var todayByBracket = false;
+  if (todayIdx === -1) {
+    for (var d2 = 0; d2 < days.length; d2++) {
+      var dd = days[d2];
+      if (dd.start != null && dd.end != null
+          && nowMin >= dd.start && nowMin <= dd.end) {
+        todayIdx = d2;
+        todayByBracket = true;
+        break;
+      }
+    }
+  }
+  // Still nothing — fall back to days[0] for rendering purposes but
+  // don't mark any day as "today" (no red line will draw).
+  if (todayIdx === -1) todayIdx = 0;
   var today = days[todayIdx];
 
   // Build a list of (kind, weight) segments for a given day's entries.
@@ -5209,7 +5250,12 @@ function _renderMobileAgendaStrip() {
     // the left of elapsedRatio. Falls back to null when no delta is
     // known (no completed matches yet), which suppresses the blue
     // line entirely. Only meaningful on today's bar.
-    var isThisDayToday = day.date && day.date === todayStr;
+    // "Today" for this day's window: either its date matches today's
+    // string, OR (when no day has a date plumbed) we bracketed nowMin
+    // inside this specific day's start/end. todayByBracket flips when
+    // the outer loop matched by minute range.
+    var isThisDayToday = (day.date && day.date === todayStr) ||
+                         (todayByBracket && day === days[todayIdx]);
     var elapsedRatio  = null;
     var scheduleRatio = null;
     if (day.start != null && day.end != null && day.end > day.start) {
@@ -5349,25 +5395,29 @@ function _renderMobileAgendaStrip() {
     var sr = info.scheduleRatio;
     var hasRed  = er != null && er > 0 && er < 1;
     var hasBlue = sr != null && sr > 0 && sr < 1;
-    if (hasRed && hasBlue) {
-      // Threshold for "aligned" — 1.5% of bar width. Picked to feel
-      // generous: at a 600px bar, 1.5% = 9px, so even ±5min of
-      // delta on a 5-hour day reads as "aligned" rather than
-      // showing two lines almost-but-not-quite stacked.
-      if (Math.abs(er - sr) <= 0.015) {
-        var avg = ((er + sr) / 2 * 100).toFixed(2);
-        return '<span class="m-agenda-aligned" style="left:' + avg + '%"></span>';
-      }
-    }
+    // Red line (wall clock) is the primary anchor — ALWAYS visible
+    // when this day is today. Earlier versions merged red+blue into
+    // a green pulse on alignment, but that made the user lose their
+    // clock anchor when on schedule. We now keep red always; when
+    // blue is aligned within ~1.5% of red, the red line picks up an
+    // .aligned class so CSS can render a subtle green halo around
+    // it (signals "on time" without removing the red core).
+    if (!hasRed) return '';
+
+    var aligned = hasBlue && Math.abs(er - sr) <= 0.015;
     var out = '';
-    if (hasBlue) {
+    // Blue line is shown only when blue would be visibly distinct
+    // from red. When aligned (small delta), suppress blue entirely
+    // — its purpose is to signal an OFFSET; with no offset there's
+    // nothing for it to say, and stacking it under red just adds
+    // visual noise.
+    if (hasBlue && !aligned) {
       out += '<span class="m-agenda-sched" style="left:' +
              (sr * 100).toFixed(2) + '%" title="Event position"></span>';
     }
-    if (hasRed) {
-      out += '<span class="m-agenda-now" style="left:' +
-             (er * 100).toFixed(2) + '%" title="Wall clock"></span>';
-    }
+    out += '<span class="m-agenda-now' + (aligned ? ' aligned' : '') +
+           '" style="left:' + (er * 100).toFixed(2) + '%" ' +
+           'title="Wall clock' + (aligned ? ' \u2014 on time' : '') + '"></span>';
     return out;
   }
 
