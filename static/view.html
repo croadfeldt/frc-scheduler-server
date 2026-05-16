@@ -650,6 +650,13 @@
   .m-agenda-bar .m-agenda-now {
     position: absolute; top: -2px; bottom: -2px;
     width: 2px; background: #d44; z-index: 2;
+    /* Center the line on its left-percent position so a 2px stripe
+       at left:0% or left:100% still has 1px inside the bar (and the
+       bar's overflow:hidden won't clip the line entirely). The call
+       site already excludes 0%/100% to avoid even partial clipping,
+       but this safeguards intermediate small values. */
+    transform: translateX(-50%);
+    pointer-events: none;
   }
   .m-agenda-stat {
     font-size: 10px; color: var(--text-muted);
@@ -3405,6 +3412,19 @@
             <span id="mobileLayoutIcon">&#x1F4F1;</span>
             <span id="mobileLayoutLabel">Mobile</span>
           </button>
+          <!-- Stay-current toggle. When ON (default), the schedule
+               auto-scrolls so the row before the current match sits
+               at the top of the viewport, with the current and next
+               matches visible below. Manual scrolling temporarily
+               overrides; auto-scroll re-engages on the next match
+               change. Persists in localStorage. -->
+          <button class="btn btn-secondary" id="btnStayCurrentToggle"
+                  onclick="toggleStayCurrent()"
+                  aria-pressed="true"
+                  title="Auto-scroll the schedule to keep the current match in view (re-engages when the match changes)">
+            <span>&#x1F4CD;</span>
+            <span class="stay-current-label">Stay current</span>
+          </button>
           <button class="btn btn-secondary" id="btnThemeToggle"
                   onclick="toggleTheme()"
                   title="Switch between light and dark theme">
@@ -4690,6 +4710,149 @@ function _renderMobileFieldHeader() {
 // stat); Variant 2 = all days stacked. Reads the same per-day data the
 // full renderAgendaFitView consumes from STATE.computed so colors,
 // proportions, and the "now" marker stay in sync.
+// ── Stay-current schedule scrolling ─────────────────────────────
+//
+// Keep the schedule pane scrolled so the row BEFORE the current
+// match sits at the top of the visible area. Combined with the 3-up
+// (which shows on-field / on-deck / queueing), the table then reads
+// as a "what just happened + what's about to happen" ticker: the
+// user sees one completed row at top, the now-playing row, then the
+// upcoming rows below.
+//
+// Activation: toolbar toggle, default ON. Stored in localStorage
+// (key 'frc_stay_current'). When OFF, no auto-scroll happens — the
+// user controls scroll position entirely.
+//
+// Override: when the user manually scrolls, _stayCurrentOverride
+// is set on STATE and the auto-scroll is suppressed until the next
+// match-number change. This is how live-sports apps balance "lock
+// to current" with "let me browse past matches" — manual scroll
+// dampens auto-scroll briefly, but as a new match starts, the view
+// snaps back. Manual-scroll detection is wired up once at boot via
+// _installStayCurrentScrollListener.
+
+var STAY_CURRENT_KEY = 'frc_stay_current';
+
+function getStayCurrent() {
+  try {
+    var raw = localStorage.getItem(STAY_CURRENT_KEY);
+    // Default ON (return true when nothing stored)
+    return raw === null ? true : raw === '1';
+  } catch(_) { return true; }
+}
+
+function setStayCurrent(on) {
+  on = !!on;
+  try { localStorage.setItem(STAY_CURRENT_KEY, on ? '1' : '0'); } catch(_) {}
+  var btn = document.getElementById('btnStayCurrentToggle');
+  if (btn) {
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    var lab = btn.querySelector('.stay-current-label');
+    if (lab) lab.textContent = on ? 'Stay current' : 'Stay current (off)';
+  }
+  if (on) {
+    // Re-engage immediately on a state change.
+    STATE._stayCurrentOverride = false;
+    if (STATE.liveMode && STATE._lastScrolledTo) {
+      setTimeout(function() { scrollToStayCurrent(STATE._lastScrolledTo); }, 0);
+    }
+  }
+}
+
+function toggleStayCurrent() {
+  setStayCurrent(!getStayCurrent());
+}
+
+function initStayCurrent() {
+  // Reflect persisted state on the button at boot.
+  var on = getStayCurrent();
+  setStayCurrent(on);
+}
+
+// Identify the scroll container — in mobile layout it's the inner
+// .mobile-schedule-pane, otherwise it's the document (window).
+function _stayCurrentScrollContainer() {
+  if (document.documentElement.getAttribute('data-layout') === 'mobile') {
+    return document.querySelector('.mobile-schedule-pane');
+  }
+  return null;  // null means use window/document
+}
+
+// Scroll the schedule so the row BEFORE the current qual match sits
+// at the top of the schedule pane (or near the top of the viewport
+// in non-mobile layouts). Skips when stay-current is off or when
+// the user has manually overridden.
+function scrollToStayCurrent(nowMatchNum) {
+  if (!getStayCurrent()) return;
+  if (STATE._stayCurrentOverride) return;
+  if (!nowMatchNum) return;
+
+  // Locate the row before current. We prefer the immediately previous
+  // qual match (matchNum - 1). If that row isn't in the DOM (e.g.
+  // the current match is Q1 — no predecessor in the qual sequence),
+  // fall back to the current match itself.
+  var prevSelector = 'tr[data-match-num="' + (nowMatchNum - 1) + '"]' +
+                     '[data-is-practice="0"]';
+  var curSelector  = 'tr[data-match-num="' + nowMatchNum + '"]' +
+                     '[data-is-practice="0"]';
+  var target = document.querySelector(prevSelector) ||
+               document.querySelector(curSelector);
+  if (!target) return;
+
+  var container = _stayCurrentScrollContainer();
+  if (container) {
+    // Mobile: scroll INSIDE the container. Compute the row's offset
+    // relative to the container, accounting for the sticky thead.
+    var thead = container.querySelector('thead');
+    var stickyOffset = thead ? thead.offsetHeight : 0;
+    var containerRect = container.getBoundingClientRect();
+    var targetRect    = target.getBoundingClientRect();
+    var rel = targetRect.top - containerRect.top + container.scrollTop - stickyOffset;
+    // Only scroll if we'd move at least 8px (avoid jittery no-op
+    // scrolls on rerender when the row's already in place).
+    if (Math.abs(rel - container.scrollTop) >= 8) {
+      // Suppress the scroll listener's "user scrolled" detection
+      // during this programmatic scroll. The listener uses a sticky
+      // bit cleared by a microtask after the scroll completes.
+      STATE._stayCurrentProgrammaticScroll = true;
+      container.scrollTo({ top: rel, behavior: 'smooth' });
+      setTimeout(function() { STATE._stayCurrentProgrammaticScroll = false; }, 500);
+    }
+  } else {
+    // Non-mobile: scroll the document. Use scrollIntoView with
+    // block:'start' to put the row at the top of the viewport,
+    // then nudge up a bit so the row isn't flush against the page
+    // header.
+    var rect = target.getBoundingClientRect();
+    var desiredTop = window.pageYOffset + rect.top - 80; // ~80px nudge
+    if (Math.abs(desiredTop - window.pageYOffset) >= 8) {
+      STATE._stayCurrentProgrammaticScroll = true;
+      window.scrollTo({ top: desiredTop, behavior: 'smooth' });
+      setTimeout(function() { STATE._stayCurrentProgrammaticScroll = false; }, 500);
+    }
+  }
+}
+
+// Wire up a manual-scroll detector. Fired by user wheel/touch
+// scrolls; programmatic scrolls set _stayCurrentProgrammaticScroll
+// to avoid self-tripping. Once a manual scroll is detected, set
+// the override flag so auto-scroll stops re-engaging until the
+// match number changes.
+function _installStayCurrentScrollListener() {
+  function onScroll() {
+    if (STATE._stayCurrentProgrammaticScroll) return;
+    STATE._stayCurrentOverride = true;
+  }
+  // Listen on the inner mobile container AND the document — only
+  // one is the actual scroller depending on layout.
+  document.addEventListener('scroll', onScroll, { passive: true, capture: true });
+}
+
+
+// Render the compact agenda strip. Variant 1 = today only (single bar +
+// stat); Variant 2 = all days stacked. Reads the same per-day data the
+// full renderAgendaFitView consumes from STATE.computed so colors,
+// proportions, and the "now" marker stay in sync.
 function _renderMobileAgendaStrip() {
   var host = document.getElementById('mobileAgendaContent');
   if (!host) return;
@@ -4705,6 +4868,7 @@ function _renderMobileAgendaStrip() {
       cur = {
         dayNum: e.dayNum, label: e.label || ('Day ' + e.dayNum),
         start: e.start, end: e.end,
+        date:  e.date || '',
         entries: [],
       };
       days.push(cur);
@@ -4717,19 +4881,30 @@ function _renderMobileAgendaStrip() {
     return;
   }
 
-  // Compute "today" and "now" position. The day whose [start,end]
-  // bracket contains `nowMs` is today; if nowMs is before everything,
-  // today is days[0]; after everything, days[last]. (The full agenda
-  // renderer has more sophisticated logic; we keep it simple here
-  // because the strip is a glance, not the source of truth.)
-  var nowMs = Date.now();
+  // Compute "today" and "now" position. Day-divider entries carry
+  // `start` / `end` in MINUTES-SINCE-LOCAL-MIDNIGHT (the same scale
+  // the editor and the full agenda fit renderer use), not epoch ms.
+  // To find the now-line position we compute nowMin in the same
+  // scale; to pick today's day we match `d.date` (YYYY-MM-DD) against
+  // the device's local today string. Mismatching scales (the first
+  // version compared epoch ms to minutes) made the red "now" indicator
+  // sit at 100% — clipped off-screen by the bar's overflow:hidden.
+  var nowD     = new Date();
+  var todayStr = nowD.getFullYear() + '-' +
+                 String(nowD.getMonth() + 1).padStart(2, '0') + '-' +
+                 String(nowD.getDate()).padStart(2, '0');
+  var nowMin   = nowD.getHours() * 60 + nowD.getMinutes() + nowD.getSeconds() / 60;
+  var nowMs    = nowD.getTime();   // still used by clock-fallback in todayStat below
   var todayIdx = 0;
+  // Walk to find a day whose date matches today. When no day matches
+  // (event hasn't started or already ended), fall back to days[0].
   for (var d = 0; d < days.length; d++) {
-    if (days[d].start != null && days[d].end != null) {
-      if (nowMs >= days[d].start && nowMs <= days[d].end) { todayIdx = d; break; }
-      if (nowMs < days[d].start) { todayIdx = d; break; }
-      todayIdx = d;  // past this one; keep walking
-    }
+    if (days[d].date && days[d].date === todayStr) { todayIdx = d; break; }
+    // If we walk past the matching day, leave todayIdx pointing at the
+    // last seen day (so far-future "today" stays as the last day, and
+    // a pre-event view starts at day 0).
+    if (days[d].date && days[d].date > todayStr) { todayIdx = Math.max(0, d - 1); break; }
+    todayIdx = d;
   }
   var today = days[todayIdx];
 
@@ -4737,12 +4912,24 @@ function _renderMobileAgendaStrip() {
   function segmentsFor(day) {
     if (!day || !day.entries.length) return [];
     var segs = [];
-    var elapsed = day.start != null && nowMs >= day.start
-                ? Math.max(0, Math.min(nowMs, day.end || nowMs) - day.start)
-                : 0;
-    var total = (day.end != null && day.start != null)
-              ? Math.max(1, day.end - day.start)
-              : 0;
+    // Elapsed ratio for the now-line: only meaningful when this day's
+    // date == today's date AND we're inside the day's window. Outside
+    // (past day → ratio 1, future day → ratio 0), the now-line is hidden
+    // by the caller.
+    var isThisDayToday = day.date && day.date === todayStr;
+    var elapsedRatio = null;
+    if (day.start != null && day.end != null && day.end > day.start) {
+      if (isThisDayToday) {
+        if (nowMin <= day.start)      elapsedRatio = 0;
+        else if (nowMin >= day.end)   elapsedRatio = 1;
+        else                          elapsedRatio = (nowMin - day.start) / (day.end - day.start);
+      } else if (day.date && day.date < todayStr) {
+        elapsedRatio = 1;  // past day
+      } else if (day.date && day.date > todayStr) {
+        elapsedRatio = 0;  // future day
+      }
+    }
+    var isToday = isThisDayToday;
     day.entries.forEach(function(e) {
       var kind = 'match';
       // Duration source differs by entry type. Matches carry
@@ -4769,7 +4956,7 @@ function _renderMobileAgendaStrip() {
       }
       segs.push({ kind: kind, weight: minutes });
     });
-    return { segs: segs, elapsedRatio: total ? Math.min(1, elapsed / total) : 0 };
+    return { segs: segs, elapsedRatio: elapsedRatio, isToday: isToday };
   }
 
   // Stat string for the variant-1 right-side label: "Q22/48 · -4m"
@@ -4828,11 +5015,12 @@ function _renderMobileAgendaStrip() {
   function segmentsHtml(info) {
     if (!info || !info.segs || !info.segs.length) return '';
     var totalW = info.segs.reduce(function(s, x) { return s + x.weight; }, 0);
+    var elapsedRatio = info.elapsedRatio != null ? info.elapsedRatio : 0;
     var html = '';
     var cumulative = 0;
     info.segs.forEach(function(s) {
       var pct = (s.weight / totalW * 100).toFixed(2);
-      var isElapsed = (cumulative + s.weight / 2) / totalW < info.elapsedRatio;
+      var isElapsed = (cumulative + s.weight / 2) / totalW < elapsedRatio;
       cumulative += s.weight;
       html += '<span class="m-seg m-seg-' + s.kind +
               (isElapsed ? ' m-seg-elapsed' : '') +
@@ -4844,7 +5032,14 @@ function _renderMobileAgendaStrip() {
   if (variant === '1') {
     // Today's bar only.
     var info = segmentsFor(today);
-    var nowLeft = info && info.elapsedRatio != null
+    // The now-line is rendered only when this day IS today (not past
+    // or future) and elapsedRatio is strictly between 0 and 1 — at
+    // the bookends the line sits exactly at the edge where the bar's
+    // overflow:hidden would clip it. Centering via translateX(-50%)
+    // is set in CSS so the line is visible even when at extreme
+    // percentages without the bar clipping it.
+    var nowLeft = (info && info.isToday && info.elapsedRatio != null
+                   && info.elapsedRatio > 0 && info.elapsedRatio < 1)
                 ? (info.elapsedRatio * 100).toFixed(2)
                 : null;
     var stat = todayStat();
@@ -4862,8 +5057,8 @@ function _renderMobileAgendaStrip() {
     // All days stacked.
     var rows = days.map(function(day, idx) {
       var info = segmentsFor(day);
-      var isToday = idx === todayIdx;
-      var nowLeft = (isToday && info && info.elapsedRatio != null)
+      var nowLeft = (info && info.isToday && info.elapsedRatio != null
+                     && info.elapsedRatio > 0 && info.elapsedRatio < 1)
                   ? (info.elapsedRatio * 100).toFixed(2)
                   : null;
       var dayLabel = day.label.replace(/^Day\s+/i, 'D');
@@ -5128,6 +5323,14 @@ async function boot() {
   // both were set — the toggles are mutually exclusive in practice
   // but the html attribute is single-valued, so last-wins works).
   initMobileLayout();
+
+  // Initialize the stay-current schedule scrolling. Default ON.
+  // When ON, every rerender (and every match-number change) scrolls
+  // the schedule so the row before the current match sits at the
+  // top of the viewport. Manual scroll temporarily overrides this
+  // until the next match change.
+  initStayCurrent();
+  _installStayCurrentScrollListener();
 
   // Sync the field/linear view toggle label to the saved preference
   // (frc_field_view_mode in localStorage). The button itself only
@@ -6430,6 +6633,14 @@ function rerender() {
                      'box-shadow:inset 4px 0 0 rgba(127,127,127,0.6);"';
         }
       }
+      // Row identity for scroll-target lookup. The stay-current
+      // auto-scroll logic (and the legacy now-playing scroll-into-
+      // view) need a stable per-row attribute. Practice + qual matches
+      // share matchNum (P3 and Q3 both have matchNum=3), so we carry
+      // an is-practice flag too — selectors below use both.
+      var dataAttrs =
+        ' data-match-num="' + entry.matchNum + '"' +
+        ' data-is-practice="' + (entry.isPractice ? '1' : '0') + '"';
 
       // Per-team cell renderer — handles surrogate flag, my-team highlight,
       // and (for completed matches) winning-alliance bold styling.
@@ -6709,7 +6920,7 @@ function rerender() {
             '<span class="s-red'  + (winRed  ? ' winner-side' : '') + '">' + (r ?? '—') + '</span>';
 
           var _baseCls = cls.concat(['mode-b', 'has-stats-strip']).join(' ');
-          html += '<tr class="' + _baseCls + '"' + rowStyle + '>' +
+          html += '<tr class="' + _baseCls + '"' + rowStyle + dataAttrs + '>' +
                   '<td class="col-time">' + timeCell + '</td>' +
                   '<td class="col-match">' + _matchCellWithCheck + '</td>' +
                   '<td colspan="3" class="col-blue alliance-teams-row blue">' +
@@ -6733,7 +6944,7 @@ function rerender() {
           var _stripHtml = _composeStrip();
           var _scoreRowCls = cls.slice();
           if (_stripHtml) _scoreRowCls.push('has-stats-strip');
-          html += '<tr class="' + _scoreRowCls.join(' ') + '"' + rowStyle + '>' +
+          html += '<tr class="' + _scoreRowCls.join(' ') + '"' + rowStyle + dataAttrs + '>' +
                   '<td class="col-time">' + timeCell + '</td>' +
                   '<td class="col-match">' + _matchCellWithCheck + '</td>' +
                   '<td colspan="3" class="col-blue score-block' + (winBlue ? ' winner' : '') + '">' +
@@ -6754,7 +6965,7 @@ function rerender() {
           }
         }
       } else {
-        html += '<tr class="' + cls.join(' ') + '"' + rowStyle + '>' +
+        html += '<tr class="' + cls.join(' ') + '"' + rowStyle + dataAttrs + '>' +
                 '<td class="col-time">' + timeCell + '</td>' +
                 '<td class="col-match">' + matchCell + '</td>' +
                 td(entry.blue[0], entry.blueSur[0], 'blue') +
@@ -6904,13 +7115,34 @@ function rerender() {
     document.getElementById('editLink').href = '/?aid=' + encodeURIComponent(sch.id);
   }
 
-  // Live mode: scroll to current match if found (only on first detection)
-  if (STATE.liveMode && nowMatchNum && nowMatchNum !== STATE._lastScrolledTo) {
-    STATE._lastScrolledTo = nowMatchNum;
-    setTimeout(() => {
-      const el = document.querySelector('tr.now-playing');
-      if (el) el.scrollIntoView({behavior: 'smooth', block: 'center'});
-    }, 100);
+  // Live mode: stay-current auto-scroll.
+  //
+  // Default behavior: when stay-current is ON (the default), the
+  // schedule pane scrolls so that the row BEFORE the current match
+  // sits at the top of the visible area, with the current match and
+  // several upcoming matches below. This makes the table read as a
+  // running ticker — the user always sees what just finished + what's
+  // on field + what's queueing without having to scroll.
+  //
+  // The user can disable stay-current via the toolbar toggle. They
+  // can also temporarily override it by manually scrolling — but the
+  // override only lasts until the next match number change, at which
+  // point auto-scroll re-engages (the user clearly wants currency
+  // when matches turn over). This balances "stay locked on now" with
+  // "let me browse past matches" without competing with each input.
+  //
+  // The scroll target in mobile-layout is .mobile-schedule-pane
+  // (a scrollable container); outside mobile, it's the window itself.
+  if (STATE.liveMode && nowMatchNum && typeof scrollToStayCurrent === 'function') {
+    var matchChanged = nowMatchNum !== STATE._lastScrolledTo;
+    if (matchChanged) {
+      STATE._lastScrolledTo = nowMatchNum;
+      STATE._stayCurrentOverride = false;  // re-engage on match change
+    }
+    // Always attempt the scroll when stay-current is on (and not
+    // overridden by a manual scroll). The function itself decides
+    // whether the move is meaningful (skips if already on-target).
+    setTimeout(function() { scrollToStayCurrent(nowMatchNum); }, 100);
   }
 
   // Render the agenda fit panel above the table. Cheap enough to

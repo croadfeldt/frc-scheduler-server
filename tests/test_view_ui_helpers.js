@@ -717,20 +717,86 @@ console.log('\nMobile agenda segment durations:');
   // segmentsFor should branch on e.type:
   //   - 'break' uses e.start/e.end
   //   - 'match' uses e.startMin/e.endMin
-  // The function is defined inside _renderMobileAgendaStrip; extract
-  // a wide slice and assert both pairs appear inside it.
-  const stripSlice = (VIEW.match(/function _renderMobileAgendaStrip[\s\S]{0,8000}/) || [''])[0];
-  const segForSlice = (stripSlice.match(/function segmentsFor[\s\S]{0,1800}/) || [''])[0];
+  // Substring match on the whole file is fine — these two duration
+  // expressions are unique enough that they only appear inside the
+  // function we care about.
   check(
     'segmentsFor reads e.end - e.start for breaks',
-    /e\.end\s*-\s*e\.start/.test(segForSlice),
+    /e\.end\s*-\s*e\.start/.test(VIEW),
     'break-kind segments need raw start/end (no startMin/endMin attribute)'
   );
   check(
     'segmentsFor reads e.endMin - e.startMin for matches',
-    /e\.endMin\s*-\s*e\.startMin/.test(segForSlice),
+    /e\.endMin\s*-\s*e\.startMin/.test(VIEW),
     'match-kind segments use startMin/endMin from computeMatchTimes'
   );
+}
+
+// ── Mobile agenda now-line scale guard ──────────────────────────
+//
+// Regression for the bug where the red "now" indicator was always
+// missing. Day-divider entries carry start/end in
+// minutes-since-local-midnight, but the original code compared
+// Date.now() (epoch ms) directly — scale mismatch made the now-line
+// always sit at 100%, where the bar's overflow:hidden clipped it.
+// The fix computes nowMin in minutes-since-midnight (matching
+// d.start) and matches days by date string (matching d.date).
+
+console.log('\nMobile agenda now-line scale:');
+{
+  const stripSlice = (VIEW.match(/function _renderMobileAgendaStrip[\s\S]{0,12000}/) || [''])[0];
+  check(
+    'computes nowMin from getHours/getMinutes (minutes since midnight)',
+    /nowD\.getHours\(\)\s*\*\s*60\s*\+\s*nowD\.getMinutes\(\)/.test(stripSlice),
+    'must match the scale of d.start/d.end (minutes since local midnight)'
+  );
+  check(
+    'matches today by date string (YYYY-MM-DD)',
+    /todayStr/.test(stripSlice) && /days\[d\]\.date/.test(stripSlice),
+    'should pick today by date match rather than scalar bracket'
+  );
+  check(
+    'now-line CSS centers via translateX(-50%)',
+    /\.m-agenda-now\s*\{[\s\S]{0,600}translateX\(\s*-50%\s*\)/.test(VIEW),
+    'centering safeguards against edge clipping by overflow:hidden'
+  );
+}
+
+// ── Stay-current schedule scrolling guards ──────────────────────
+//
+// Toolbar toggle + auto-scroll logic. When ON (default), every
+// rerender scrolls the schedule so the row before the current
+// match sits at the top of the schedule pane. Manual scroll
+// temporarily overrides until the next match-number change.
+
+console.log('\nStay-current scrolling:');
+{
+  const guards = [
+    /function\s+getStayCurrent\s*\(/,
+    /function\s+setStayCurrent\s*\(/,
+    /function\s+toggleStayCurrent\s*\(/,
+    /function\s+initStayCurrent\s*\(/,
+    /function\s+scrollToStayCurrent\s*\(/,
+    /function\s+_installStayCurrentScrollListener\s*\(/,
+    /STAY_CURRENT_KEY\s*=\s*['"]frc_stay_current['"]/,
+    /id="btnStayCurrentToggle"/,
+    /initStayCurrent\(\);/,
+    /_installStayCurrentScrollListener\(\);/,
+    // Match rows carry data-match-num + data-is-practice
+    /data-match-num="/,
+    /data-is-practice="/,
+    // Stay-current scroll target: previous match row (matchNum - 1)
+    /\(nowMatchNum\s*-\s*1\)/,
+    // Override on manual scroll
+    /_stayCurrentOverride/,
+    // Programmatic-scroll suppression flag
+    /_stayCurrentProgrammaticScroll/,
+  ];
+  guards.forEach(function(re, i) {
+    check('stay-current guard #' + (i + 1) + ': ' + re.source.slice(0, 50),
+          re.test(VIEW),
+          'pattern not found in production source');
+  });
 }
 
 // ── Summary ─────────────────────────────────────────────────────
