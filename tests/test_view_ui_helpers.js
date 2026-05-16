@@ -799,6 +799,49 @@ console.log('\nStay-current scrolling:');
   });
 }
 
+// ── Mobile agenda dual-line indicators ──────────────────────────
+//
+// Two indicator lines on the agenda bar:
+//   - red (.m-agenda-now)     — wall clock position
+//   - blue (.m-agenda-sched)  — schedule position (= clock - delta)
+// When they overlap (|red - blue| < ~1.5% bar width), they collapse
+// into a single green pulse (.m-agenda-aligned) meaning "on time".
+
+console.log('\nMobile agenda dual-line indicators:');
+{
+  check(
+    'indicatorLines() helper exists',
+    /function\s+indicatorLines\s*\(/.test(VIEW),
+    'helper renders red + blue + (optional) green-pulse alignment'
+  );
+  check(
+    'schedule-delta consulted via _computeScheduleDelta',
+    /schedDeltaMin\s*=\s*null[\s\S]{0,400}_computeScheduleDelta\(\)/.test(VIEW),
+    'agenda strip should read delta once per render (not per-day)'
+  );
+  check(
+    'scheduleRatio computed as clock minus delta',
+    /var\s+schedMin\s*=\s*nowMin\s*-\s*schedDeltaMin/.test(VIEW),
+    'event-position = wall-clock - schedule-delta'
+  );
+  check(
+    'blue schedule-line CSS exists',
+    /\.m-agenda-sched\s*\{[\s\S]{0,400}background:\s*var\(--blue-alliance\)/.test(VIEW),
+    'blue line uses the alliance-blue token to stay theme-aware'
+  );
+  check(
+    'green aligned-line CSS exists with pulse animation',
+    /\.m-agenda-aligned\s*\{/.test(VIEW) &&
+    /m-agenda-aligned-pulse/.test(VIEW),
+    'pulsing green replaces red+blue when delta is near zero'
+  );
+  check(
+    'alignment threshold is ~1.5% (Math.abs(er - sr) <= 0.015)',
+    /Math\.abs\(er\s*-\s*sr\)\s*<=\s*0\.015/.test(VIEW),
+    'collapse threshold tuned to avoid showing two near-stacked lines'
+  );
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();
