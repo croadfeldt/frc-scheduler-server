@@ -541,6 +541,40 @@ console.log('\nSplit-layout plumbing:');
   });
 }
 
+// ── Nexus queue → liveByMatch merge ────────────────────────────
+//
+// The server returns matches[] (TBA: scores, actual_time, …) and
+// queue[] (Nexus: status per match number) as separate arrays. The
+// 3-up renderer reads liveByMatch[N].queue_status, so the client
+// must MERGE the Nexus queue rows into the corresponding match
+// entries. Without the merge, queue_status is never set anywhere
+// in liveByMatch and the 3-up never renders queued matches.
+//
+// Bug was: client wrote nothing onto liveByMatch from data.queue,
+// and the DB column is `status` not `queue_status` so even a naive
+// merge using the wrong field name would fail.
+//
+// Source guards confirm:
+//   - We walk data.queue and stamp q.status onto entry.queue_status
+//   - We CREATE a stub entry when Nexus has a match number not yet
+//     in TBA (common — Nexus reports staging before TBA picks up
+//     scoring)
+
+console.log('\nNexus queue → liveByMatch merge:');
+{
+  const guards = [
+    /\(data\.queue\s*\|\|\s*\[\]\)\.forEach\b/,
+    /entry\.queue_status\s*=\s*q\.status/,
+    /STATE\.liveByMatch\[q\.match_number\]\s*=\s*entry/,
+    /MERGE the Nexus queue/i,
+  ];
+  guards.forEach((re, i) => {
+    check('nexus-merge guard #' + (i + 1) + ': ' + re.source.slice(0, 60),
+          re.test(VIEW),
+          'did not match production source');
+  });
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();

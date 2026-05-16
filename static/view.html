@@ -9988,14 +9988,42 @@ async function pollLive() {
     STATE.live           = data;
     STATE.liveLastUpdate = new Date();
     STATE.liveError      = null;
-    // Index by match number (qual only — playoffs out of scope for view page)
+    // Index by match number (qual only — playoffs out of scope for view page).
+    // The server returns:
+    //   data.matches[] — TBA match results: scores, actual_time,
+    //     post_result_time, alliances. NO queue_status.
+    //   data.queue[]   — Nexus queue rows: { match_number, comp_level,
+    //     status (e.g. 'on_field' / 'on_deck' / 'now_queueing' /
+    //     'queueing_soon' / 'completed'), queue_time, updated_at }
+    //
+    // The 3-up renderer (_findFieldThreeUp) reads
+    // STATE.liveByMatch[N].queue_status. To make that work without
+    // re-plumbing every downstream consumer, we MERGE the Nexus queue
+    // status onto the corresponding match entry as a synthesized
+    // `queue_status` field. Matches that exist on Nexus but not yet
+    // on TBA get a stub liveByMatch entry created so the 3-up can
+    // still surface them as upcoming (Nexus often has staging data
+    // before TBA picks up the match).
     STATE.liveByMatch = {};
     (data.matches || []).forEach(m => {
       if (m.comp_level === 'qm') STATE.liveByMatch[m.match_number] = m;
     });
     STATE.liveQueueByMatch = {};
     (data.queue || []).forEach(q => {
-      if (q.comp_level === 'qm') STATE.liveQueueByMatch[q.match_number] = q;
+      if (q.comp_level !== 'qm') return;
+      STATE.liveQueueByMatch[q.match_number] = q;
+      // Merge: stamp Nexus's 'status' onto the TBA-sourced match entry
+      // (or create a stub if no TBA row exists yet).
+      var entry = STATE.liveByMatch[q.match_number];
+      if (!entry) {
+        entry = {
+          match_number: q.match_number,
+          comp_level:   q.comp_level,
+        };
+        STATE.liveByMatch[q.match_number] = entry;
+      }
+      entry.queue_status = q.status;
+      entry.queue_time   = q.queue_time;
     });
     STATE.liveRankByTeam = {};
     (data.rankings || []).forEach(r => {

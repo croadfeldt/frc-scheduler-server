@@ -556,12 +556,25 @@ def _to_min(v: Any) -> int:
 # Map Nexus's status strings (per https://frc.nexus/api/v1/docs) to our
 # internal codes. Nexus uses human-readable, capitalized phrases — not
 # kebab-case or camelCase. Documented values from the API spec samples:
+#   "Queuing soon" → early warning (~10+ min out); teams should head over
 #   "Now queuing"  → starting to call teams to the queue
 #   "On deck"      → next match is in the queue, awaiting field
 #   "On field"     → match is being played
-# We accept lowercase variants defensively; Nexus's spec shows capitalized
-# forms but real-world payloads sometimes vary.
+#   "Completed"    → done (rarely surfaced by Nexus; TBA tracks the
+#                    finalized result and we use post_result_time)
+#
+# We accept lowercase variants defensively; Nexus's spec shows
+# capitalized forms but real-world payloads sometimes vary. We ALSO
+# accept both US ("queuing") and UK ("queueing") spellings on each
+# state because the FRC ecosystem mixes them — TBA picks one, Nexus
+# the other, observers can't tell which is "official". Missing the
+# "Queuing soon" variant in the prior table caused the 3-up to silently
+# drop matches in that early-warning state — the bug surfaced when
+# users saw matches queued in Nexus but no row marked Queueing in
+# the view page.
 _NEXUS_STATUS_MAP = {
+    "queuing soon":  "queueing_soon",
+    "queueing soon": "queueing_soon",
     "now queuing":   "now_queueing",
     "now queueing":  "now_queueing",
     "on deck":       "on_deck",
