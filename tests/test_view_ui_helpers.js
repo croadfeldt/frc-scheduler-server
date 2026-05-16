@@ -338,6 +338,42 @@ console.log('\nDay-divider match counts:');
   check('Trailing day with one match counts 1', c3[0] === 1);
 }
 
+// ── Practice vs qual matchNum disambiguation ────────────────────
+//
+// Practice and qualification matches share numbering (P3 and Q3 both
+// have matchNum=3). The schedule-table row pill logic must compare
+// BOTH matchNum AND isPractice when deciding whether to apply the
+// on-field / on-deck / queueing pill. Without this, marking "P3 on
+// field" causes Q3 to inherit the pill — the bug visible when
+// practice was running and tomorrow's Q3/Q4/Q5 incorrectly showed
+// on-field/on-deck/queueing.
+//
+// We can't easily run renderTable in isolation; instead, source-
+// substring-guard that the production code carries the isPractice
+// comparison alongside the matchNum comparison for all three slots.
+
+console.log('\nProduction source guards (P-vs-Q pill disambiguation):');
+{
+  // The full guards check both that the pill assignment references
+  // an isPractice flag AND that each slot has its own *IsPractice
+  // tracking variable declared.
+  const guards = [
+    // Three *IsPractice tracking variables exist
+    /currentFieldIsPractice/,
+    /upcomingFieldIsPractice/,
+    /queueingFieldIsPractice/,
+    // And the pill comparison uses isPractice as part of the predicate
+    /currentFieldIsPractice\s*===\s*_entryIsPractice/,
+    /upcomingFieldIsPractice\s*===\s*_entryIsPractice/,
+    /queueingFieldIsPractice\s*===\s*_entryIsPractice/,
+  ];
+  guards.forEach((re, i) => {
+    check('production source guard #' + (i + 1) + ': ' + re.source.slice(0, 50),
+          re.test(VIEW),
+          'did not match production source');
+  });
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();

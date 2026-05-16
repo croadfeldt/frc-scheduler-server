@@ -4053,12 +4053,24 @@ function rerender() {
   let upcomingFieldMatchNum  = null;
   let queueingFieldMatchNum  = null;
   let fieldSource            = null;  // 'nexus' | 'scheduled' | null
+  // Track each slot's isPractice flag too, so the row-pill matching
+  // below can distinguish P3 from Q3 (both have matchNum 3). Without
+  // this, marking "P3 on field" caused Q3 to inherit the on-field
+  // pill since they share a number — the bug visible when practice
+  // is running and the table simultaneously highlighted tomorrow's
+  // Q3/Q4/Q5 as on-field/on-deck/queueing.
+  let currentFieldIsPractice = null;
+  let upcomingFieldIsPractice = null;
+  let queueingFieldIsPractice = null;
   if (typeof _findFieldThreeUp === 'function') {
     var _three = _findFieldThreeUp();
     fieldSource           = _three.source;
-    currentFieldMatchNum  = _three.field    ? _three.field.matchNum    : null;
-    upcomingFieldMatchNum = _three.deck     ? _three.deck.matchNum     : null;
-    queueingFieldMatchNum = _three.queueing ? _three.queueing.matchNum : null;
+    currentFieldMatchNum   = _three.field    ? _three.field.matchNum    : null;
+    upcomingFieldMatchNum  = _three.deck     ? _three.deck.matchNum     : null;
+    queueingFieldMatchNum  = _three.queueing ? _three.queueing.matchNum : null;
+    currentFieldIsPractice  = _three.field    ? !!_three.field.isPractice    : null;
+    upcomingFieldIsPractice = _three.deck     ? !!_three.deck.isPractice     : null;
+    queueingFieldIsPractice = _three.queueing ? !!_three.queueing.isPractice : null;
     if (_three.field && _three.field.matchNum && fieldSource === 'nexus') {
       // Treat the field-slot match as "now" for the visual NOW
       // line on the agenda bar. Only when we have nexus-grade data
@@ -4256,14 +4268,25 @@ function rerender() {
       // Source-aware: row gets .estimated when fieldSource is
       // 'scheduled' (no Nexus / TBA actuals — the highlight is a
       // clock-based guess). Pill rendering below mirrors the same.
+      //
+      // Practice and qualification matches share numbering (P3 and Q3
+      // both have matchNum=3), so we must compare BOTH the number and
+      // the isPractice flag. Without the isPractice check, marking
+      // "P3 on field" would also mark Q3 on field — the bug that
+      // surfaced when practice was running and tomorrow's Q3/Q4/Q5
+      // inherited the on-field/on-deck/queueing pills.
       var fieldPillKind = null;
-      if (entry.matchNum === currentFieldMatchNum) {
+      var _entryIsPractice = !!entry.isPractice;
+      if (entry.matchNum === currentFieldMatchNum
+          && currentFieldIsPractice === _entryIsPractice) {
         cls.push('current-match');
         fieldPillKind = 'on-field';
-      } else if (entry.matchNum === upcomingFieldMatchNum) {
+      } else if (entry.matchNum === upcomingFieldMatchNum
+                 && upcomingFieldIsPractice === _entryIsPractice) {
         cls.push('upcoming-match');
         fieldPillKind = 'on-deck';
-      } else if (entry.matchNum === queueingFieldMatchNum) {
+      } else if (entry.matchNum === queueingFieldMatchNum
+                 && queueingFieldIsPractice === _entryIsPractice) {
         cls.push('queueing-match');
         fieldPillKind = 'queueing';
       }
@@ -7259,9 +7282,17 @@ function updateFieldStatus() {
       _renderCycleEmpty('Cycle stats accumulating \u2014 need 2+ completed matches');
     }
   } else if (startingSoon) {
-    // State B — match imminent. Amber delta box from clock.
+    // State B — match imminent (within 15 min), no live data.
+    // Render BOTH the amber "starting soon" delta box AND the
+    // scheduled-source 3-up: the box says "match in N min" as the
+    // headline, and the 3-up surfaces the upcoming alliance rosters
+    // so users (especially audiences and drive teams) can see WHO
+    // is playing without scrolling to the schedule table. The 3-up's
+    // scheduled-fallback path is designed for exactly this scenario
+    // — its state machine (T-15 / T-5 / in-session) decides field /
+    // deck / queueing slots from the clock.
     try { _renderStartingSoon(); } catch(_) {}
-    // No 3-up, no next-only (the amber box already says "match in N min").
+    try { _renderFieldThreeUp(); } catch(_) {}
     _renderCycleEmpty("No cycle stats yet \u2014 first match hasn't run");
   } else {
     // State A — schedule view. No delta, no 3-up. Show next-only
