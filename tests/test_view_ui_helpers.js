@@ -658,6 +658,51 @@ console.log('\nField-status dispatcher 3-up wrap guard:');
   );
 }
 
+// ── Mobile-layout 3-up presentation guards ──────────────────────
+//
+// Verifies that mobile-layout overrides the generic max-width:480px
+// stack-vertically rule so the 3-up cells sit side-by-side (a single
+// timeline read: Field → Deck → Queueing). The original stack rule
+// is preserved for non-mobile-layout viewports (split, compact,
+// standard). Also verifies the "Next match expected" panel is
+// hidden in mobile layout to avoid redundancy with the 3-up
+// on-field cell.
+
+console.log('\nMobile 3-up presentation:');
+{
+  check(
+    '3-up side-by-side in mobile layout',
+    /html\[data-layout="mobile"\]\s*\.status-three-up\s*\{[\s\S]{0,200}grid-template-columns:\s*repeat\(3/.test(VIEW),
+    'mobile layout should override .status-three-up to repeat(3, 1fr)'
+  );
+  check(
+    'Next-only panel hidden in mobile layout',
+    /html\[data-layout="mobile"\]\s*#statusNextOnly\s*\{\s*display:\s*none/.test(VIEW),
+    'mobile layout should suppress #statusNextOnly to avoid 3-up duplication'
+  );
+}
+
+// ── _renderNextOnly Nexus-priority guard ────────────────────────
+//
+// When Nexus reports queue_status, _renderNextOnly should pick the
+// next match from Nexus pointers (on_deck → now_queueing →
+// queueing_soon) rather than the schedule-walker's "first
+// incomplete match." Without this, if Q12 is deferred and Q13 is
+// on the field, the panel says "Next: Q12" while the 3-up
+// correctly says "On field: Q13" — a contradiction.
+
+console.log('\n_renderNextOnly Nexus priority:');
+{
+  const nextOnlySlice = (VIEW.match(/function _renderNextOnly\(\)\s*\{[\s\S]{0,4000}/) || [''])[0];
+  check(
+    '_renderNextOnly checks queue_status on_deck/now_queueing/queueing_soon',
+    /on_deck/.test(nextOnlySlice) &&
+    /now_queueing/.test(nextOnlySlice) &&
+    /queueing_soon/.test(nextOnlySlice),
+    'should consult Nexus pointers before falling back to schedule walker'
+  );
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();

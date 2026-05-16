@@ -593,6 +593,13 @@
        on the 3-up grid. */
     display: none;
   }
+  /* Hide the "Next match expected / Next on schedule" panel in
+     mobile layout. The 3-up's on-field cell already shows the
+     same match (with rosters and timing). When both render, the
+     panel is redundant and dominates vertical space. The panel
+     stays present in the DOM so renderers continue to write to it
+     — only the visual is suppressed here. */
+  html[data-layout="mobile"] #statusNextOnly { display: none !important; }
   /* Show cycle stats / links INSIDE the expanded Cycle tile body. */
   html[data-layout="mobile"] #mobileCycleBody[data-expanded="1"] .status-cycle-stats,
   html[data-layout="mobile"] #mobileCycleBody[data-expanded="1"] .status-cycle-empty,
@@ -1014,10 +1021,35 @@
     color: var(--text-muted);
     line-height: 1.2;
   }
-  /* Mobile: stack the 3-up vertically when narrow */
+  /* Mobile: stack the 3-up vertically when narrow — UNLESS we're in
+     mobile-layout mode, where the compressed alliance-line allows
+     three cells to fit side-by-side at 414px. The vertical stack was
+     a safe default before mobile layout existed, with horizontal
+     alliance-lines that demanded ~320px each. Now that the 3-up
+     uses the compact stacked alliance-line (each cell ~120px), the
+     horizontal arrangement is preferred — three cells side-by-side
+     read as a single timeline (Field → Deck → Queueing) the way the
+     UI is conceptually designed. The override applies only when
+     html[data-layout="mobile"] is set; outside mobile layout the
+     original stack-at-480 behavior is preserved. */
   @media (max-width: 480px) {
     .status-three-up { grid-template-columns: 1fr; }
   }
+  html[data-layout="mobile"] .status-three-up {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.35rem;
+  }
+  /* Tighten internal sizing for the cramped side-by-side cells in
+     mobile layout. Team-cell numbers drop to 10px, station digits
+     to 7px, padding to 1px so three numbers fit on the alliance row. */
+  html[data-layout="mobile"] .status-three-up .alliance-line.compact .team-cell {
+    padding: 1px 2px;
+  }
+  html[data-layout="mobile"] .status-three-up .alliance-line.compact .team-cell .num { font-size: 10px; }
+  html[data-layout="mobile"] .status-three-up .alliance-line.compact .team-cell .station { font-size: 7px; }
+  html[data-layout="mobile"] .status-three-up .status-stage { padding: 0.35rem 0.4rem; }
+  html[data-layout="mobile"] .status-three-up .status-stage-label { font-size: 8px; letter-spacing: 0.04em; }
+  html[data-layout="mobile"] .status-three-up .status-stage-match { font-size: 14px; }
 
   /* Mobile: collapse the next-only alliance line to vertical-stack
      layout. The full Blue|vs|Red horizontal layout is ~320px wide
@@ -9114,16 +9146,59 @@ function _renderNextOnly() {
   // data (TBA/Nexus don't track practice and the colliding-matchNum
   // issue would otherwise pull in qual data via STATE.liveByMatch),
   // so practice falls through to the planned-timestamp path.
+  //
+  // Nexus queue_status takes precedence. When Nexus says Q13 is
+  // on_field and Q14 is on_deck, "next" is Q14 — NOT the lowest-
+  // numbered match that lacks post_result_time. The schedule-walker
+  // path is wrong when a match has been deferred/replayed and lives
+  // out of temporal order (e.g., Q12 hasn't been played yet but
+  // Q13 is on the field). Symptom: panel shows Q12 as "next" while
+  // the 3-up correctly shows Q13 on field — confusing.
+  //
+  // Logic: if Nexus is reporting queue status for any qual, find the
+  // on_deck match (or now_queueing / queueing_soon if no on_deck).
+  // That's the next match. Fall back to the schedule-walker only
+  // when Nexus has no queue data at all.
   var nowMs = Date.now();
   var nextEntry = null;
-  for (var i = 0; i < STATE.computed.length; i++) {
-    var e = STATE.computed[i];
-    if (e.type !== 'match') continue;
-    var live = (e.isPractice || !STATE.liveByMatch) ? null : STATE.liveByMatch[e.matchNum];
-    if (live && live.post_result_time) continue;
-    if (live) { nextEntry = e; break; }      // live, not completed
-    var ts = _resolveMatchTimestamp(e);
-    if (ts != null && ts > nowMs) { nextEntry = e; break; }
+
+  // Build matchNum → entry map for cross-reference with liveByMatch.
+  var _byNum = {};
+  for (var iByNum = 0; iByNum < STATE.computed.length; iByNum++) {
+    var eByNum = STATE.computed[iByNum];
+    if (eByNum.type === 'match' && !eByNum.isPractice) _byNum[eByNum.matchNum] = eByNum;
+  }
+  // Try Nexus first: prefer on_deck → now_queueing → queueing_soon.
+  // We pick the EARLIEST match number with the chosen status so multi-
+  // status feeds with duplicates resolve deterministically.
+  var nexusPick = null;
+  ['on_deck', 'now_queueing', 'queueing_soon'].forEach(function(want) {
+    if (nexusPick) return;
+    var picked = null;
+    for (var kNx in (STATE.liveByMatch || {})) {
+      var lvNx = STATE.liveByMatch[kNx];
+      if (!lvNx || lvNx.comp_level !== 'qm') continue;
+      if (lvNx.queue_status !== want) continue;
+      if (lvNx.post_result_time) continue;     // already done
+      var entNx = _byNum[lvNx.match_number];
+      if (!entNx) continue;
+      if (picked == null || lvNx.match_number < picked.matchNum) picked = entNx;
+    }
+    if (picked) nexusPick = picked;
+  });
+  if (nexusPick) {
+    nextEntry = nexusPick;
+  } else {
+    // Schedule-walker fallback (original logic).
+    for (var i = 0; i < STATE.computed.length; i++) {
+      var e = STATE.computed[i];
+      if (e.type !== 'match') continue;
+      var live = (e.isPractice || !STATE.liveByMatch) ? null : STATE.liveByMatch[e.matchNum];
+      if (live && live.post_result_time) continue;
+      if (live) { nextEntry = e; break; }      // live, not completed
+      var ts = _resolveMatchTimestamp(e);
+      if (ts != null && ts > nowMs) { nextEntry = e; break; }
+    }
   }
   if (!nextEntry) {
     box.style.display = 'none';
