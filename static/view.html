@@ -4745,6 +4745,13 @@ function _renderMobileAgendaStrip() {
               : 0;
     day.entries.forEach(function(e) {
       var kind = 'match';
+      // Duration source differs by entry type. Matches carry
+      // startMin/endMin (minutes since day start); breaks carry
+      // raw start/end (same scale). Using the wrong pair causes
+      // breaks to fall through to the default 1-minute weight,
+      // which makes them invisible next to 8-minute matches —
+      // the bar collapses to one big blue blob.
+      var minutes = 1;
       if (e.type === 'break') {
         var sub = (e.subtype || '').toLowerCase();
         var name = (e.name || '').toLowerCase();
@@ -4753,14 +4760,13 @@ function _renderMobileAgendaStrip() {
         else if (sub === 'ceremony' || /ceremony|opening|closing/.test(name))   kind = 'ceremony';
         else if (sub === 'playoff' || /playoff|finals?/.test(name))             kind = 'playoff';
         else                                                                    kind = 'break';
+        if (e.end != null && e.start != null) minutes = Math.max(0.5, e.end - e.start);
       } else if (e.type === 'match') {
         kind = e.isPractice ? 'practice' : 'match';
+        if (e.endMin != null && e.startMin != null) minutes = Math.max(0.5, e.endMin - e.startMin);
       } else {
         return;
       }
-      var minutes = (e.endMin != null && e.startMin != null)
-                  ? Math.max(0.5, e.endMin - e.startMin)
-                  : 1;
       segs.push({ kind: kind, weight: minutes });
     });
     return { segs: segs, elapsedRatio: total ? Math.min(1, elapsed / total) : 0 };

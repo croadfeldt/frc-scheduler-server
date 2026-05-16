@@ -1,0 +1,1425 @@
+{
+  "n_teams": 51,
+  "matches_per_team": 7,
+  "teams_per_alliance": 3,
+  "cooldown": 2,
+  "confidence": "best_known",
+  "matches": [
+    {
+      "red": [
+        48,
+        13,
+        39
+      ],
+      "blue": [
+        25,
+        1,
+        17
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        47,
+        9,
+        46
+      ],
+      "blue": [
+        16,
+        41,
+        7
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        42,
+        14,
+        49
+      ],
+      "blue": [
+        21,
+        23,
+        19
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "red": [
+        6,
+        2,
+        50
+      ],
+      "blue": [
+        10,
+        47,
+        25
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        36,
+        42,
+        44
+      ],
+      "blue": [
+        20,
+        27,
+        35
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        9,
+        21,
+        26
+      ],
+      "blue": [
+        8,
+        37,
+        23
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        true
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        50,
+        44,
+        33
+      ],
+      "blue": [
+        15,
+        24,
+        16
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        32,
+        20,
+        13
+      ],
+      "blue": [
+        47,
+        28,
+        14
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        17,
+        22,
+        51
+      ],
+      "blue": [
+        8,
+        36,
+        21
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        27,
+        30,
+        31
+      ],
+      "blue": [
+        49,
+        45,
+        35
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        39,
+        46,
+        6
+      ],
+      "blue": [
+        13,
+        19,
+        40
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        44,
+        16,
+        17
+      ],
+      "blue": [
+        29,
+        31,
+        42
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        48,
+        50,
+        12
+      ],
+      "blue": [
+        36,
+        30,
+        33
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        41,
+        28,
+        37
+      ],
+      "blue": [
+        10,
+        16,
+        49
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        3,
+        15,
+        22
+      ],
+      "blue": [
+        46,
+        7,
+        26
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        1,
+        5,
+        45
+      ],
+      "blue": [
+        11,
+        28,
+        12
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        44,
+        7,
+        48
+      ],
+      "blue": [
+        26,
+        10,
+        13
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        45,
+        27,
+        4
+      ],
+      "blue": [
+        50,
+        19,
+        51
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        41,
+        2,
+        30
+      ],
+      "blue": [
+        18,
+        44,
+        1
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        29,
+        12,
+        5
+      ],
+      "blue": [
+        13,
+        4,
+        50
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        37,
+        45,
+        3
+      ],
+      "blue": [
+        32,
+        6,
+        36
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        51,
+        24,
+        18
+      ],
+      "blue": [
+        9,
+        20,
+        15
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        23,
+        38,
+        27
+      ],
+      "blue": [
+        28,
+        46,
+        22
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        35,
+        34,
+        11
+      ],
+      "blue": [
+        14,
+        48,
+        41
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        2,
+        40,
+        7
+      ],
+      "blue": [
+        23,
+        33,
+        17
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        true
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        46,
+        37,
+        16
+      ],
+      "blue": [
+        4,
+        11,
+        30
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        22,
+        10,
+        42
+      ],
+      "blue": [
+        12,
+        9,
+        14
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        26,
+        47,
+        34
+      ],
+      "blue": [
+        17,
+        39,
+        29
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        25,
+        4,
+        28
+      ],
+      "blue": [
+        22,
+        18,
+        9
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        8,
+        19,
+        6
+      ],
+      "blue": [
+        36,
+        34,
+        1
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        37,
+        35,
+        24
+      ],
+      "blue": [
+        43,
+        12,
+        38
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        33,
+        3,
+        47
+      ],
+      "blue": [
+        44,
+        22,
+        27
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        13,
+        17,
+        8
+      ],
+      "blue": [
+        35,
+        32,
+        18
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        19,
+        3,
+        14
+      ],
+      "blue": [
+        37,
+        15,
+        2
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        18,
+        39,
+        10
+      ],
+      "blue": [
+        51,
+        35,
+        46
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        4,
+        47,
+        41
+      ],
+      "blue": [
+        45,
+        25,
+        26
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        16,
+        5,
+        38
+      ],
+      "blue": [
+        34,
+        2,
+        10
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        50,
+        18,
+        43
+      ],
+      "blue": [
+        1,
+        42,
+        48
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        20,
+        26,
+        24
+      ],
+      "blue": [
+        2,
+        13,
+        45
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        11,
+        7,
+        22
+      ],
+      "blue": [
+        30,
+        49,
+        44
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        15,
+        23,
+        51
+      ],
+      "blue": [
+        6,
+        38,
+        47
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        31,
+        26,
+        32
+      ],
+      "blue": [
+        27,
+        34,
+        24
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        7,
+        29,
+        36
+      ],
+      "blue": [
+        40,
+        21,
+        28
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        10,
+        41,
+        23
+      ],
+      "blue": [
+        4,
+        43,
+        32
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        21,
+        20,
+        42
+      ],
+      "blue": [
+        33,
+        11,
+        39
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        14,
+        1,
+        40
+      ],
+      "blue": [
+        3,
+        38,
+        49
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        28,
+        48,
+        2
+      ],
+      "blue": [
+        39,
+        51,
+        4
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        32,
+        49,
+        21
+      ],
+      "blue": [
+        38,
+        26,
+        15
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        30,
+        6,
+        9
+      ],
+      "blue": [
+        31,
+        17,
+        43
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        38,
+        32,
+        19
+      ],
+      "blue": [
+        5,
+        7,
+        20
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        43,
+        11,
+        1
+      ],
+      "blue": [
+        33,
+        40,
+        31
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        30,
+        16,
+        39
+      ],
+      "blue": [
+        27,
+        8,
+        5
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        24,
+        33,
+        29
+      ],
+      "blue": [
+        18,
+        3,
+        6
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        5,
+        25,
+        40
+      ],
+      "blue": [
+        21,
+        14,
+        37
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        34,
+        8,
+        46
+      ],
+      "blue": [
+        42,
+        50,
+        45
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        12,
+        51,
+        25
+      ],
+      "blue": [
+        7,
+        23,
+        43
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        49,
+        29,
+        19
+      ],
+      "blue": [
+        24,
+        9,
+        8
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        40,
+        36,
+        15
+      ],
+      "blue": [
+        41,
+        31,
+        34
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        25,
+        43,
+        35
+      ],
+      "blue": [
+        19,
+        5,
+        11
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        12,
+        31,
+        20
+      ],
+      "blue": [
+        48,
+        29,
+        3
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    }
+  ],
+  "achieved_lex_tuple": [
+    0,
+    360,
+    540,
+    3,
+    1,
+    51,
+    282,
+    0
+  ],
+  "quality_report": {
+    "achieved_lex_tuple": [
+      0,
+      360,
+      540,
+      3,
+      1,
+      51,
+      282,
+      0
+    ],
+    "is_valid_paramount": true,
+    "metrics": {
+      "cooldown_violations": {
+        "value": 0,
+        "floor": 0,
+        "floor_confidence": "proven_optimal",
+        "distance_from_floor": 0,
+        "matches_floor": true
+      },
+      "par_quad": {
+        "value": 360,
+        "floor": 357,
+        "floor_confidence": "proven_lower_bound",
+        "distance_from_floor": 3,
+        "matches_floor": false
+      },
+      "opp_quad": {
+        "value": 540,
+        "floor": 535,
+        "floor_confidence": "proven_lower_bound",
+        "distance_from_floor": 5,
+        "matches_floor": false
+      },
+      "surrogate_count": {
+        "value": 3,
+        "floor": 3,
+        "floor_confidence": "proven_optimal",
+        "distance_from_floor": 0,
+        "matches_floor": true
+      },
+      "rb_per_team": {
+        "value": 1,
+        "floor": 1,
+        "floor_confidence": "proven_optimal",
+        "distance_from_floor": 0,
+        "matches_floor": true
+      },
+      "station_per_team_spread": {
+        "value": 1,
+        "floor": 1,
+        "floor_confidence": "proven_optimal",
+        "distance_from_floor": 0,
+        "matches_floor": true
+      }
+    },
+    "summary": {
+      "all_proven_floors_matched": true,
+      "n_metrics_at_floor": 4,
+      "n_metrics_total": 6
+    }
+  },
+  "provenance": {
+    "method": "sa_best_of_n",
+    "sa_iterations": 2000000,
+    "n_seeds": 20,
+    "successes": 20,
+    "failures": 0,
+    "best_seed": 117109,
+    "wall_clock_s": 4303.2,
+    "cpsat_post_pass": {
+      "budget_s": 600.0,
+      "rb_budget_s": 60.0,
+      "station_budget_s": 540.0,
+      "rb_status": "OPTIMAL",
+      "rb_wall_s": 0.016357792,
+      "rb_max_before": 1,
+      "rb_max_after": 1,
+      "station_status": "OPTIMAL",
+      "station_wall_s": 0.35237771900000003,
+      "station_max_before": 2,
+      "station_max_after": 1
+    },
+    "generated_at": "2026-05-16T11:45:47.520916-05:00",
+    "git_commit": "75c045f"
+  }
+}

@@ -703,6 +703,36 @@ console.log('\n_renderNextOnly Nexus priority:');
   );
 }
 
+// ── Mobile agenda strip break-segment duration guard ────────────
+//
+// Regression for the bug where the mobile agenda strip's "Today"
+// bar showed a solid blue blob because `segmentsFor` was reading
+// `e.endMin - e.startMin` for ALL entries, but break entries
+// only carry `e.start` / `e.end` (not startMin/endMin). The
+// fallback to default 1-minute weight made breaks invisible next
+// to 8-minute matches, collapsing the bar to one color.
+
+console.log('\nMobile agenda segment durations:');
+{
+  // segmentsFor should branch on e.type:
+  //   - 'break' uses e.start/e.end
+  //   - 'match' uses e.startMin/e.endMin
+  // The function is defined inside _renderMobileAgendaStrip; extract
+  // a wide slice and assert both pairs appear inside it.
+  const stripSlice = (VIEW.match(/function _renderMobileAgendaStrip[\s\S]{0,8000}/) || [''])[0];
+  const segForSlice = (stripSlice.match(/function segmentsFor[\s\S]{0,1800}/) || [''])[0];
+  check(
+    'segmentsFor reads e.end - e.start for breaks',
+    /e\.end\s*-\s*e\.start/.test(segForSlice),
+    'break-kind segments need raw start/end (no startMin/endMin attribute)'
+  );
+  check(
+    'segmentsFor reads e.endMin - e.startMin for matches',
+    /e\.endMin\s*-\s*e\.startMin/.test(segForSlice),
+    'match-kind segments use startMin/endMin from computeMatchTimes'
+  );
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();

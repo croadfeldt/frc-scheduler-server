@@ -858,6 +858,68 @@ async def _process_nexus_match_status(db: AsyncSession, event_id: int, match: di
         if queue_time:
             row.queue_time = queue_time
 
+    # ── Synthesize MatchResult timestamps from Nexus status ─────
+    #
+    # When TBA hasn't reported actual_time / post_result_time for
+    # a match — common at events where FMS upload to TBA is lagging
+    # or broken — Nexus's queue_status carries enough info to
+    # populate the same fields heuristically:
+    #   status='on_field'  → match started — set actual_time
+    #   status='completed' → match finished — set post_result_time
+    #
+    # Only fill in when TBA hasn't already set the field. If TBA
+    # later returns real timestamps, they'll overwrite the
+    # Nexus-derived values via _upsert_matches (which only guards
+    # against null-overwrites, not non-null overwrites). Stats
+    # computed from these synthetic timestamps are approximate —
+    # Nexus's "on_field" is the moment FMS staged the match, not
+    # the moment the buzzer sounded — but they're far better than
+    # showing the user nothing while matches are visibly being
+    # played at the venue.
+    if status in ('on_field', 'completed'):
+        mres = await db.execute(
+            select(MatchResult).where(
+                MatchResult.event_id == event_id,
+                MatchResult.comp_level == comp_level,
+                MatchResult.match_number == match_num,
+                MatchResult.set_number == set_num,
+            )
+        )
+        mrow = mres.scalar_one_or_none()
+        if mrow is None:
+            mrow = MatchResult(
+                event_id=event_id, comp_level=comp_level,
+                match_number=match_num, set_number=set_num,
+            )
+            db.add(mrow)
+        # Pick a timestamp source. Nexus's `times.actualQueueTime` is
+        # when the match was first queued; we'd rather have the start
+        # time. Fall back to the QueueStatus row's queue_time (when we
+        # just observed the status flip) — that's a reasonable proxy
+        # for "the match is happening now" when nothing better exists.
+        synth_ts = None
+        actual_qt_ms = (match.get("times") or {}).get("actualQueueTime")
+        if actual_qt_ms:
+            try:
+                synth_ts = int(int(actual_qt_ms) / 1000)
+            except (TypeError, ValueError):
+                synth_ts = None
+        if synth_ts is None:
+            # Use current time as proxy — when status just flipped to
+            # on_field/completed, "now" is close enough to the truth.
+            synth_ts = int(datetime.now(timezone.utc).timestamp())
+
+        if status == 'on_field' and mrow.actual_time is None:
+            mrow.actual_time = synth_ts
+        if status == 'completed':
+            if mrow.actual_time is None:
+                mrow.actual_time = synth_ts
+            if mrow.post_result_time is None:
+                # Add a small offset so cycle-stat logic that depends
+                # on post_result_time > actual_time still works for
+                # back-to-back completed matches.
+                mrow.post_result_time = synth_ts
+
 
 # ── Schedule source detection ────────────────────────────────────────────────
 #
