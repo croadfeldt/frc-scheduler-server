@@ -575,6 +575,64 @@ console.log('\nNexus queue → liveByMatch merge:');
   });
 }
 
+// ── Mobile-first layout plumbing ─────────────────────────────────
+//
+// Source-substring guards for the mobile-first layout work. Like the
+// split-layout tests, we can't unit-test renderers without a DOM, so
+// we verify the production source carries the expected plumbing:
+//   - Toggle / state functions
+//   - localStorage keys
+//   - Agenda variant toggle (1/2)
+//   - Mobile shell DOM template
+//   - _updateMobileLayout called from rerender
+//   - 3-up forced unconditionally in mobile mode
+//   - Approval pill shared with split layout
+//   - CSS hooks for mobile activation
+
+console.log('\nMobile-first layout plumbing:');
+{
+  const guards = [
+    /function\s+getMobileLayout\s*\(/,
+    /function\s+setMobileLayout\s*\(/,
+    /function\s+toggleMobileLayout\s*\(/,
+    /function\s+initMobileLayout\s*\(/,
+    /function\s+toggleMobileTile\s*\(/,
+    /function\s+toggleMobileAgendaExpand\s*\(/,
+    /function\s+toggleAgendaVariant\s*\(/,
+    /function\s+_wrapForMobileLayout\s*\(/,
+    /function\s+_unwrapForMobileLayout\s*\(/,
+    /function\s+_updateMobileLayout\s*\(/,
+    /function\s+_renderMobileTileSummaries\s*\(/,
+    /function\s+_renderMobileFieldHeader\s*\(/,
+    /function\s+_renderMobileAgendaStrip\s*\(/,
+    /MOBILE_LAYOUT_KEY\s*=\s*['"]frc_view_mobile_layout['"]/,
+    /AGENDA_VARIANT_KEY\s*=\s*['"]frc_view_agenda_variant['"]/,
+    /id="btnMobileLayoutToggle"/,
+    /id="mobileLayoutLabel"/,
+    /shell\.id\s*=\s*['"]mobileShell['"]/,
+    /id="mobileFieldSection"/,
+    /id="mobileAgendaStrip"/,
+    /id="mobileSchedulePane"/,
+    /initMobileLayout\(\);/,
+    // _updateMobileLayout called from rerender alongside tile summaries
+    /_updateMobileLayout\(\)/,
+    // 3-up forced unconditionally in mobile mode
+    /3-up override/,
+    // CSS hooks
+    /html\[data-layout="mobile"\]\s*\.action-grid/,
+    /html\[data-layout="mobile"\]\s*\.brand-header/,
+    /html\[data-layout="mobile"\]\s*\.mobile-shell/,
+    /\.mobile-agenda-strip/,
+    /\.m-agenda-now/,
+    /agenda-variant-btn/,
+  ];
+  guards.forEach((re, i) => {
+    check('mobile-layout guard #' + (i + 1) + ': ' + re.source.slice(0, 60),
+          re.test(VIEW),
+          'did not match production source');
+  });
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();

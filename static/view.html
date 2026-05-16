@@ -434,6 +434,301 @@
   /* Stacked-mode default: shell is hidden, everything renders as
      before. Nothing extra needed. */
 
+  /* ── Mobile-first layout (data-layout="mobile") ────────────────────
+     A phone-optimized layout that compresses status info to ~200px at
+     the top and gives the schedule pane the rest of the viewport.
+     Activated either via the Mobile toolbar toggle (sets
+     html[data-layout="mobile"]) or automatically when the viewport
+     is under 750px wide AND the user hasn't opted out.
+
+     The shell (#mobileShell) is built once on first activation and
+     toggled by display:none/'' (driven by JS, with a CSS guard against
+     flash-of-shell on first paint). When the shell is shown, the
+     original page chrome (.action-grid, .agenda-fit-panel margin,
+     .status-section-header, .match-table-wrap as a standalone block)
+     is hidden via the rules below, so the mobile shell becomes the
+     visible representation of those same DOM nodes (now relocated). */
+
+  /* Hide the original chrome in mobile mode. */
+  html[data-layout="mobile"] .action-grid           { display: none; }
+  html[data-layout="mobile"] .status-section-header { display: none; }
+  html[data-layout="mobile"] #frcBanner             { display: none !important; }
+  /* The match-table-wrap is moved into #mobileSchedulePaneSlot in JS;
+     don't apply outer margin to its new home. */
+  html[data-layout="mobile"] #mobileSchedulePaneSlot .match-table-wrap {
+    margin: 0; border-radius: 0;
+  }
+  /* Brand header shrinks to a compact strip in mobile mode. */
+  html[data-layout="mobile"] .brand-header {
+    padding: 0.35rem 0.7rem;
+    margin: 0 -1rem 0;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  html[data-layout="mobile"] .brand-header .logo {
+    width: 22px; height: 22px; font-size: 10px;
+  }
+  html[data-layout="mobile"] .brand-header .logo img {
+    max-width: 22px; max-height: 22px;
+  }
+  html[data-layout="mobile"] .brand-header h1 {
+    font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0;
+  }
+  html[data-layout="mobile"] .brand-header .subtitle { display: none; }
+  /* The flex column wrapper around h1+subtitle becomes inline so the
+     truncated h1 takes the full horizontal space available. */
+  html[data-layout="mobile"] .brand-header > div {
+    flex: 1; min-width: 0;
+  }
+  html[data-layout="mobile"] #brandApprovalPill {
+    margin-left: auto;
+  }
+
+  /* The mobile shell — flex column that fills the viewport. */
+  .mobile-shell { display: none; }
+  html[data-layout="mobile"] .mobile-shell {
+    display: flex; flex-direction: column;
+    height: calc(100vh - 50px);  /* leave room for brand strip */
+    max-height: calc(100vh - 50px);
+    overflow: hidden;
+    margin: 0 -1rem;             /* extend to edge under the brand */
+    background: var(--bg-alt);
+  }
+
+  /* Tile row — Team + Cycle. Tap header to expand body inline. */
+  .mobile-tile-row {
+    display: grid; grid-template-columns: 1fr 1fr;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .mobile-tile-row .m-tile {
+    padding: 0.35rem 0.6rem; cursor: pointer; user-select: none;
+    display: flex; align-items: center; gap: 0.35rem;
+    font-size: 11px; min-width: 0;
+  }
+  .mobile-tile-row .m-tile + .m-tile { border-left: 1px solid var(--border); }
+  .mobile-tile-row .m-tile-label {
+    text-transform: uppercase; letter-spacing: 0.04em;
+    font-size: 9px; color: var(--text-muted); font-weight: 700;
+    flex-shrink: 0;
+  }
+  .mobile-tile-row .m-tile-summary {
+    font-weight: 600; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; flex: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .mobile-tile-row .m-tile-summary-empty {
+    font-style: italic; color: var(--text-muted); font-weight: 500;
+  }
+  .mobile-tile-row .m-tile-chev {
+    color: var(--text-muted); font-size: 9px; flex-shrink: 0;
+    transition: transform 0.15s ease;
+  }
+  .mobile-tile-row .m-tile[data-expanded="1"] .m-tile-chev {
+    transform: rotate(180deg);
+  }
+  /* Expanded tile bodies — hidden by default, shown when expanded. */
+  .m-tile-body { display: none; }
+  .m-tile-body[data-expanded="1"] {
+    display: block;
+    padding: 0.4rem 0.6rem 0.5rem 0.6rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Field section — header + 3-up grid. Always visible when mobile
+     layout is on; the 3-up's own internal display logic (managed by
+     _renderFieldThreeUp) decides whether the wrap shows. */
+  .mobile-field-section {
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 0.4rem 0.6rem 0.5rem 0.6rem;
+    flex-shrink: 0;
+  }
+  .mobile-field-header {
+    display: flex; align-items: center; gap: 0.4rem;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-muted); font-weight: 700;
+    margin-bottom: 0.35rem;
+  }
+  .mobile-field-live-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--secondary);
+    animation: mobile-pulse 1.6s infinite;
+    flex-shrink: 0;
+  }
+  @keyframes mobile-pulse {
+    0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+  }
+  .mobile-field-pill {
+    background: rgba(217,119,6,0.18); color: #b86604;
+    padding: 1px 6px; border-radius: 8px;
+    font-size: 9px; font-weight: 700;
+  }
+  .mobile-field-title { color: var(--text-muted); }
+  .mobile-field-ctx {
+    margin-left: auto; color: var(--text); font-weight: 600;
+    text-transform: none; letter-spacing: 0;
+  }
+  .mobile-field-ctx.warn { color: #b86604; }
+  /* Field body — the relocated nextMatchCard children sit here. We
+     tighten spacing on the children since they're inside a smaller
+     container than the original card. The 3-up wrap's own visibility
+     is governed by _renderFieldThreeUp's wrap.style.display logic
+     (none when nothing to show, '' otherwise). */
+  .mobile-field-body { font-size: 12px; }
+  .mobile-field-body .status-delta-box  { margin-top: 0; padding: 0.3rem 0.5rem; font-size: 12px; }
+  .mobile-field-body .status-three-up-wrap { margin-top: 0.35rem; }
+  .mobile-field-body .status-cycle-stats,
+  .mobile-field-body .status-cycle-empty,
+  .mobile-field-body .status-links {
+    /* Hide the panels that live in the Cycle tile in mobile layout —
+       the Cycle tile already shows the headline, and the rest is
+       accessible via tap-to-expand on the Cycle tile or in the
+       agenda strip's expanded panel. Keeps the Field section focused
+       on the 3-up grid. */
+    display: none;
+  }
+  /* Show cycle stats / links INSIDE the expanded Cycle tile body. */
+  html[data-layout="mobile"] #mobileCycleBody[data-expanded="1"] .status-cycle-stats,
+  html[data-layout="mobile"] #mobileCycleBody[data-expanded="1"] .status-cycle-empty,
+  html[data-layout="mobile"] #mobileCycleBody[data-expanded="1"] .status-links {
+    /* Cycle stats panels don't actually live in the mobile cycle body
+       — they stay in mobileFieldBody. This rule is here as a stub for
+       future migration; users see cycle details via the Field section
+       header context line for now. */
+    display: none;
+  }
+
+  /* Agenda strip — compact summary above the schedule pane.
+     Variants 1 and 2 share the strip container; the inner HTML
+     differs per variant. */
+  .mobile-agenda-strip {
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 0.3rem 0.6rem;
+    flex-shrink: 0; cursor: pointer; user-select: none;
+    display: flex; align-items: center; gap: 0.4rem;
+    min-height: 24px;
+  }
+  .mobile-agenda-content {
+    flex: 1; display: flex; align-items: center; gap: 0.4rem;
+    min-width: 0;
+  }
+  .m-agenda-label {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .m-agenda-bar {
+    flex: 1; height: 10px; position: relative;
+    border-radius: 2px; overflow: hidden;
+    background: var(--border);
+    display: flex;
+    min-width: 60px;
+  }
+  .m-agenda-bar-thin { height: 6px; }
+  .m-agenda-bar .m-seg              { height: 100%; }
+  .m-agenda-bar .m-seg-match        { background: var(--blue-alliance); }
+  .m-agenda-bar .m-seg-practice     { background: var(--secondary); }
+  .m-agenda-bar .m-seg-break        { background: #ec8a3f; }
+  .m-agenda-bar .m-seg-awards       { background: #d9a13e; }
+  .m-agenda-bar .m-seg-alliance     { background: #3fa6a0; }
+  .m-agenda-bar .m-seg-ceremony     { background: #dd7858; }
+  .m-agenda-bar .m-seg-playoff      { background: #bd92f0; }
+  .m-agenda-bar .m-seg-elapsed      { opacity: 0.45; }
+  .m-agenda-bar .m-agenda-now {
+    position: absolute; top: -2px; bottom: -2px;
+    width: 2px; background: #d44; z-index: 2;
+  }
+  .m-agenda-stat {
+    font-size: 10px; color: var(--text-muted);
+    font-variant-numeric: tabular-nums; flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .m-agenda-stat.warn { color: #b86604; font-weight: 600; }
+  .m-agenda-chev { color: var(--text-muted); font-size: 9px; flex-shrink: 0; }
+  .m-agenda-empty {
+    font-size: 11px; color: var(--text-muted); font-style: italic;
+    padding: 0.2rem 0;
+  }
+  /* Variant 2: stacked rows */
+  .m-agenda-stacked {
+    flex: 1; display: flex; flex-direction: column; gap: 2px;
+    min-width: 0;
+  }
+  .m-agenda-day-row { display: flex; align-items: center; gap: 0.4rem; }
+  .m-agenda-day-label {
+    font-size: 8px; font-weight: 700;
+    color: var(--text-muted); width: 24px; flex-shrink: 0;
+    text-align: right;
+  }
+  /* Variant-toggle button on the right of the agenda strip. */
+  .agenda-variant-btn {
+    background: var(--bg-alt); color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 3px;
+    padding: 1px 6px; font-size: 9px; font-weight: 600;
+    cursor: pointer; flex-shrink: 0; white-space: nowrap;
+  }
+  .agenda-variant-btn:hover { background: var(--border); }
+
+  /* Expand slot — when user taps the strip, the full agenda panel
+     (relocated from its original home) becomes visible here. Inline
+     between the strip and the schedule pane. */
+  .mobile-agenda-expand-slot {
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 0.4rem 0.6rem;
+    flex-shrink: 0;
+    max-height: 40vh; overflow-y: auto;
+  }
+  .mobile-agenda-expand-slot #agendaFitPanel {
+    margin: 0; border: 0; box-shadow: none; padding: 0;
+  }
+
+  /* Schedule pane — fills the rest of the viewport and scrolls
+     independently. Sticky table header inside. */
+  .mobile-schedule-pane {
+    flex: 1; overflow: auto; background: var(--bg); min-height: 0;
+  }
+  .mobile-schedule-pane .match-table-wrap {
+    /* Strip the wrap's outer chrome — the shell provides framing. */
+    background: var(--bg); border: 0; border-radius: 0; box-shadow: none;
+    padding: 0;
+  }
+  .mobile-schedule-pane .match-table-header {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--bg-alt);
+    padding: 0.3rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+  }
+
+  /* On mobile (auto-activated), tighten card-internal text so the
+     condensed Field body fits in ~125px without overflow. */
+  html[data-layout="mobile"] .alliance-line {
+    font-size: 10px; line-height: 1.25;
+  }
+  html[data-layout="mobile"] .status-stage {
+    padding: 0.3rem 0.35rem;
+  }
+  html[data-layout="mobile"] .status-stage-label { font-size: 8px; }
+  html[data-layout="mobile"] .status-stage-match { font-size: 14px; }
+  html[data-layout="mobile"] .status-stage-meta  { font-size: 10px; line-height: 1.25; }
+  html[data-layout="mobile"] .status-stage-meta-time { font-size: 9px; margin-top: 2px; }
+
+  /* Variant default attribute — strip honors data-agenda-variant.
+     Variant 1: hide stacked content. Variant 2: hide the today bar,
+     stat, and chev. The JS sets only one variant's content at a time
+     anyway, but the CSS guards against partial DOM. */
+  #mobileShell[data-agenda-variant="2"] .m-agenda-label,
+  #mobileShell[data-agenda-variant="2"] .m-agenda-stat {
+    display: none;
+  }
+
+
   /* ── Status section header — sits above the .action-grid and
        names the two-card row as "Status" with the field/linear
        toggle anchored to the right. Lightweight: no wrapper element,
@@ -3041,6 +3336,20 @@
             <span id="splitLayoutIcon">&#x25EB;</span>
             <span id="splitLayoutLabel">Split</span>
           </button>
+          <!-- Mobile-first layout toggle. When ON, restructures the
+               page into a brand strip + compact status region + a
+               schedule pane that fills the rest of the viewport.
+               Designed for phones; opt-in on desktop. Field section's
+               3-up is ALWAYS visible (no State A/B/C/D gating).
+               Agenda fit shrinks to a single-line strip with a
+               Today/All-days toggle. Persists in localStorage. -->
+          <button class="btn btn-secondary" id="btnMobileLayoutToggle"
+                  onclick="toggleMobileLayout()"
+                  aria-pressed="false"
+                  title="Toggle mobile-first layout — schedule pane fills the screen with status info compressed at the top">
+            <span id="mobileLayoutIcon">&#x1F4F1;</span>
+            <span id="mobileLayoutLabel">Mobile</span>
+          </button>
           <button class="btn btn-secondary" id="btnThemeToggle"
                   onclick="toggleTheme()"
                   title="Switch between light and dark theme">
@@ -3903,6 +4212,592 @@ function _cardLabelActionsWrap(cardLabel) {
   return wrap;
 }
 
+// ── Mobile-first layout (data-layout="mobile") ─────────────────────
+//
+// A phone-optimized layout where the schedule pane is the primary
+// surface and status info is compressed into a thin region at the top:
+//   1. Brand strip (~28px) with truncated h1 and approval pill
+//   2. Tile row (~28px) with Team + Cycle one-line summaries
+//   3. Field section (~125px) with the 3-up grid ALWAYS visible
+//   4. Agenda strip (~22px Variant 1 / ~36px Variant 2) — toggleable
+//   5. Schedule pane fills the remaining height with sticky header
+//
+// Rationale: on a 414×768 phone, the current stacked layout pushes the
+// schedule entirely below the fold. Mobile layout flips the priority —
+// schedule pane gets ~520px of viewport, status info is squeezed but
+// every piece (3-up rosters, cycle stats, agenda) remains accessible
+// either inline (3-up) or via tap-to-expand.
+//
+// Activation: opt-in via the existing Compact toggle's expanded
+// behavior (data-layout="mobile" + data-compact="1" together), AND
+// automatic via @media (max-width: 750px). Like split-layout, this
+// wraps the existing DOM rather than replacing it — IDs stay alive,
+// renderers continue writing to the same elements. The wrap is
+// reversible: toggling off restores nodes to their original parents.
+
+var MOBILE_LAYOUT_KEY    = 'frc_view_mobile_layout';
+var AGENDA_VARIANT_KEY   = 'frc_view_agenda_variant';  // '1' (today only) | '2' (all days)
+
+function getMobileLayout() {
+  try { return localStorage.getItem(MOBILE_LAYOUT_KEY) === '1'; } catch(_) { return false; }
+}
+
+function setMobileLayout(on) {
+  on = !!on;
+  try { localStorage.setItem(MOBILE_LAYOUT_KEY, on ? '1' : '0'); } catch(_) {}
+  if (on) document.documentElement.setAttribute('data-layout', 'mobile');
+  else if (document.documentElement.getAttribute('data-layout') === 'mobile') {
+    document.documentElement.removeAttribute('data-layout');
+  }
+  var lab = document.getElementById('mobileLayoutLabel');
+  if (lab) lab.textContent = on ? 'Standard' : 'Mobile';
+  var btn = document.getElementById('btnMobileLayoutToggle');
+  if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  if (on) _wrapForMobileLayout();
+  else    _unwrapForMobileLayout();
+  if (typeof renderFrcBanner === 'function') {
+    try { renderFrcBanner(); } catch(_) {}
+  }
+  // Force a tile-summary + agenda refresh so the freshly-built shell
+  // populates immediately instead of waiting for the next rerender().
+  try { _updateMobileLayout(); } catch(_) {}
+}
+
+function toggleMobileLayout() {
+  setMobileLayout(!getMobileLayout());
+}
+
+function initMobileLayout() {
+  setMobileLayout(getMobileLayout());
+}
+
+function getAgendaVariant() {
+  try {
+    var v = localStorage.getItem(AGENDA_VARIANT_KEY);
+    if (v === '1' || v === '2') return v;
+  } catch(_) {}
+  return '1';
+}
+
+function setAgendaVariant(v) {
+  if (v !== '1' && v !== '2') v = '1';
+  try { localStorage.setItem(AGENDA_VARIANT_KEY, v); } catch(_) {}
+  var shell = document.getElementById('mobileShell');
+  if (shell) shell.setAttribute('data-agenda-variant', v);
+  var btn = document.getElementById('btnAgendaVariant');
+  if (btn) {
+    var lab = btn.querySelector('.agenda-variant-label');
+    if (lab) lab.textContent = v === '1' ? 'Today' : 'All days';
+  }
+  // Re-render the agenda strip with the new shape.
+  try { _renderMobileAgendaStrip(); } catch(_) {}
+}
+
+function toggleAgendaVariant() {
+  setAgendaVariant(getAgendaVariant() === '1' ? '2' : '1');
+}
+
+// ── DOM wrapping for mobile layout ──────────────────────────────
+// Builds the mobile shell ONCE on first toggle, then toggling
+// data-layout="mobile" via CSS reveals/hides it. The existing DOM
+// nodes (#teamCard, #nextMatchCard, #agendaFitPanel, match-table-wrap)
+// are moved into the shell when on, restored to their original parents
+// when off. All IDs preserved so existing renderers keep writing to
+// the same elements.
+
+var _mobileShellBuilt = false;
+var _mobileOriginals  = null;
+var _mobileWrapped    = false;
+
+function _buildMobileShellOnce() {
+  if (_mobileShellBuilt) return;
+  _mobileShellBuilt = true;
+
+  // Ensure the brand-strip approval pill exists. Created here too in
+  // case split-layout wasn't activated first — the renderFrcBanner
+  // extension updates it whenever it's present in the DOM.
+  var brand = document.getElementById('brandHeader');
+  if (brand && !document.getElementById('brandApprovalPill')) {
+    var pill = document.createElement('span');
+    pill.id = 'brandApprovalPill';
+    pill.className = 'approval-mini';
+    pill.style.display = 'none';
+    pill.innerHTML = '<span class="dot"></span><span class="lbl"></span>';
+    pill.addEventListener('click', function() {
+      if (typeof openFrcAuditFromBanner === 'function') openFrcAuditFromBanner();
+    });
+    brand.appendChild(pill);
+  }
+
+  var main = document.getElementById('mainContent');
+  if (!main) return;
+
+  var shell = document.createElement('div');
+  shell.className = 'mobile-shell';
+  shell.id = 'mobileShell';
+  shell.setAttribute('data-agenda-variant', getAgendaVariant());
+  shell.style.display = 'none';  // CSS reveals when data-layout=mobile
+  shell.innerHTML =
+    // Tile row — Team + Cycle, one-line summaries (tap header to
+    // toggle the expanded body for that tile inline).
+    '<div class="mobile-tile-row">' +
+      '<div class="m-tile" data-mtile="team" onclick="toggleMobileTile(\'team\')">' +
+        '<span class="m-tile-label">Team</span>' +
+        '<span class="m-tile-summary" id="mobileTeamSummary">tap to set</span>' +
+        '<span class="m-tile-chev">\u25BE</span>' +
+      '</div>' +
+      '<div class="m-tile" data-mtile="cycle" onclick="toggleMobileTile(\'cycle\')">' +
+        '<span class="m-tile-label">Cycle</span>' +
+        '<span class="m-tile-summary" id="mobileCycleSummary">no data yet</span>' +
+        '<span class="m-tile-chev">\u25BE</span>' +
+      '</div>' +
+    '</div>' +
+    // Expanded bodies (hidden by default; revealed when [data-expanded=1]).
+    '<div class="m-tile-body" id="mobileTeamBody"></div>' +
+    '<div class="m-tile-body" id="mobileCycleBody"></div>' +
+    // Field section — header + 3-up grid ALWAYS visible
+    '<div class="mobile-field-section" id="mobileFieldSection">' +
+      '<div class="mobile-field-header">' +
+        '<span class="mobile-field-live-dot" id="mobileFieldLiveDot" style="display:none;"></span>' +
+        '<span class="mobile-field-pill"     id="mobileFieldPill"    style="display:none;"></span>' +
+        '<span class="mobile-field-title">Field</span>' +
+        '<span class="mobile-field-ctx"      id="mobileFieldCtx"></span>' +
+      '</div>' +
+      '<div class="mobile-field-body" id="mobileFieldBody"></div>' +
+    '</div>' +
+    // Agenda strip — tappable to expand (full agenda panel relocates here)
+    '<div class="mobile-agenda-strip" id="mobileAgendaStrip" onclick="toggleMobileAgendaExpand(event)">' +
+      '<div class="mobile-agenda-content" id="mobileAgendaContent"></div>' +
+      '<button class="agenda-variant-btn" id="btnAgendaVariant" onclick="toggleAgendaVariant(); event.stopPropagation();">' +
+        '<span class="agenda-variant-label">Today</span>' +
+      '</button>' +
+    '</div>' +
+    // Schedule pane wrapper — match-table-wrap will be moved in here
+    '<div class="mobile-schedule-pane" id="mobileSchedulePane">' +
+      '<div id="mobileSchedulePaneSlot"></div>' +
+    '</div>' +
+    // Slot for the expanded agenda panel (#agendaFitPanel moves here
+    // and is displayed only when the agenda strip is expanded).
+    '<div class="mobile-agenda-expand-slot" id="mobileAgendaExpandSlot" style="display:none;"></div>';
+  main.appendChild(shell);
+}
+
+function _wrapForMobileLayout() {
+  _buildMobileShellOnce();
+  if (_mobileWrapped) {
+    _updateMobileLayout();
+    return;
+  }
+  _mobileWrapped = true;
+  _mobileOriginals = {};
+
+  // Move the .match-table-wrap into the schedule pane slot.
+  var sched = document.querySelector('.match-table-wrap');
+  if (sched) {
+    _mobileOriginals['__sched'] = { parent: sched.parentNode, next: sched.nextSibling };
+    var slot = document.getElementById('mobileSchedulePaneSlot');
+    if (slot) slot.appendChild(sched);
+  }
+
+  // Move the agenda fit panel into the agenda expand slot. Stays
+  // hidden until the user taps the agenda strip.
+  var agenda = document.getElementById('agendaFitPanel');
+  if (agenda) {
+    _mobileOriginals['__agenda'] = { parent: agenda.parentNode, next: agenda.nextSibling };
+    var aslot = document.getElementById('mobileAgendaExpandSlot');
+    if (aslot) aslot.appendChild(agenda);
+  }
+
+  // Move team-card children into the Team tile body. The card label
+  // is left behind (the tile header replaces it).
+  var tc = document.getElementById('teamCard');
+  var tb = document.getElementById('mobileTeamBody');
+  if (tc && tb) {
+    Array.prototype.slice.call(tc.children).forEach(function(child) {
+      if (child.classList && child.classList.contains('card-label')) return;
+      tb.appendChild(child);
+    });
+    tc.setAttribute('data-mobile-moved', '1');
+  }
+
+  // Move field-status card children into the mobile field body.
+  // Tile header replaces the card label.
+  var fc = document.getElementById('nextMatchCard');
+  var fb = document.getElementById('mobileFieldBody');
+  if (fc && fb) {
+    Array.prototype.slice.call(fc.children).forEach(function(child) {
+      if (child.classList && child.classList.contains('card-label')) return;
+      fb.appendChild(child);
+    });
+    fc.setAttribute('data-mobile-moved', '1');
+  }
+
+  // Reveal the shell.
+  document.getElementById('mobileShell').style.display = '';
+
+  // Apply tile state + render summaries + render agenda strip.
+  _updateMobileLayout();
+}
+
+function _unwrapForMobileLayout() {
+  if (!_mobileWrapped) return;
+  _mobileWrapped = false;
+
+  var shell = document.getElementById('mobileShell');
+  if (shell) shell.style.display = 'none';
+
+  // Restore moved nodes from named slots.
+  function restoreFromSlot(slotId, key) {
+    var slot = document.getElementById(slotId);
+    var entry = _mobileOriginals && _mobileOriginals[key];
+    if (!slot || !entry) return;
+    while (slot.firstChild) {
+      if (entry.next && entry.next.parentNode === entry.parent) {
+        entry.parent.insertBefore(slot.firstChild, entry.next);
+      } else if (entry.parent) {
+        entry.parent.appendChild(slot.firstChild);
+      } else {
+        slot.removeChild(slot.firstChild);
+      }
+    }
+  }
+  restoreFromSlot('mobileSchedulePaneSlot', '__sched');
+  restoreFromSlot('mobileAgendaExpandSlot', '__agenda');
+
+  // Restore card children — anything still in #mobileTeamBody goes
+  // back to #teamCard; same for field. (We don't restore exact
+  // sibling order between mixed children, but it doesn't matter:
+  // these card bodies render purely top-to-bottom and the relative
+  // order of children is preserved from when we moved them.)
+  ['mobileTeamBody|teamCard', 'mobileFieldBody|nextMatchCard'].forEach(function(pair) {
+    var p = pair.split('|');
+    var src = document.getElementById(p[0]);
+    var dst = document.getElementById(p[1]);
+    if (!src || !dst) return;
+    while (src.firstChild) dst.appendChild(src.firstChild);
+    dst.removeAttribute('data-mobile-moved');
+  });
+
+  _mobileOriginals = null;
+}
+
+// Per-tile expand/collapse for Team and Cycle. Stored as data-expanded
+// on the tile element; CSS reveals the body element when set.
+function toggleMobileTile(name) {
+  var tile = document.querySelector('.m-tile[data-mtile="' + name + '"]');
+  var body = document.getElementById('mobile' +
+              (name === 'team' ? 'TeamBody' : 'CycleBody'));
+  if (!tile || !body) return;
+  var expanded = tile.getAttribute('data-expanded') === '1';
+  if (expanded) {
+    tile.removeAttribute('data-expanded');
+    body.removeAttribute('data-expanded');
+  } else {
+    tile.setAttribute('data-expanded', '1');
+    body.setAttribute('data-expanded', '1');
+  }
+}
+
+// Toggle expansion of the agenda strip — reveals the full agenda
+// panel inline below the strip. Strip stays visible; tapping again
+// collapses.
+function toggleMobileAgendaExpand(ev) {
+  // Ignore clicks bubbling up from the variant toggle button.
+  if (ev && ev.target && ev.target.closest('.agenda-variant-btn')) return;
+  var slot = document.getElementById('mobileAgendaExpandSlot');
+  if (!slot) return;
+  if (slot.style.display === 'none' || !slot.style.display) {
+    slot.style.display = '';
+  } else {
+    slot.style.display = 'none';
+  }
+}
+
+// Bundle of per-rerender mobile-layout updates: tile summaries, field
+// section header, agenda strip. Called from _wrapForMobileLayout (to
+// seed first paint) and from the end of rerender() (to refresh after
+// state changes).
+function _updateMobileLayout() {
+  if (!_mobileWrapped) return;
+  try { _renderMobileTileSummaries(); } catch(_) {}
+  try { _renderMobileFieldHeader();   } catch(_) {}
+  try { _renderMobileAgendaStrip();   } catch(_) {}
+  // ── 3-up override ────────────────────────────────────────────
+  // In mobile layout we want the 3-up grid visible whenever there's
+  // any candidate match, regardless of the State A/B/C/D dispatcher
+  // in updateFieldStatus. The dispatcher's State A path hides the
+  // 3-up when no live data is present and the next match is > 15 min
+  // away — but in mobile mode the Field section is the dominant
+  // status surface and we want rosters visible even far in advance.
+  //
+  // _renderFieldThreeUp itself checks _findFieldThreeUp() and decides
+  // whether to show or hide the wrap. We call it unconditionally
+  // (overriding whatever the dispatcher just set), and it does the
+  // right thing: rosters when a match is found, hidden otherwise.
+  // The call also runs in States B/C/D — idempotent re-renders are
+  // safe and the rosters get any updated live data.
+  if (typeof _renderFieldThreeUp === 'function') {
+    try { _renderFieldThreeUp(); } catch(_) {}
+  }
+}
+
+function _renderMobileTileSummaries() {
+  // Team tile — list selected teams (or "tap to set")
+  var ts = document.getElementById('mobileTeamSummary');
+  if (ts) {
+    if (!STATE.myTeams || STATE.myTeams.size === 0) {
+      ts.textContent = 'tap to set';
+      ts.classList.add('m-tile-summary-empty');
+    } else {
+      var list = Array.from(STATE.myTeams).slice(0, 4).join(', ');
+      if (STATE.myTeams.size > 4) list += ' +' + (STATE.myTeams.size - 4);
+      ts.textContent = list;
+      ts.classList.remove('m-tile-summary-empty');
+    }
+  }
+  // Cycle tile — show avg + delta when stats are available, else
+  // a friendly placeholder.
+  var cs = document.getElementById('mobileCycleSummary');
+  if (cs && typeof _computeCycleStats === 'function') {
+    try {
+      var stats = _computeCycleStats();
+      if (stats && stats.mean != null) {
+        var label = stats.mean.toFixed(1);
+        // Append the recent delta-vs-mean if it's meaningful.
+        if (stats.recentTrendMin != null && Math.abs(stats.recentTrendMin) >= 0.3) {
+          var arrow = stats.recentTrendMin > 0 ? '\u25B2' : '\u25BC';
+          label += ' ' + arrow + ' ' +
+                   (stats.recentTrendMin > 0 ? '+' : '') +
+                   stats.recentTrendMin.toFixed(1);
+        }
+        cs.textContent = label;
+        cs.classList.remove('m-tile-summary-empty');
+      } else {
+        cs.textContent = 'no data yet';
+        cs.classList.add('m-tile-summary-empty');
+      }
+    } catch(_) {
+      cs.textContent = 'no data yet';
+      cs.classList.add('m-tile-summary-empty');
+    }
+  }
+}
+
+function _renderMobileFieldHeader() {
+  // The mobile field header shows three signals:
+  //   - LIVE pulsing dot (Nexus or TBA actuals present)
+  //   - amber "STARTING SOON" pill (no live yet, match within 15 min)
+  //   - a context line ("Day 2 · Sat · Q1 in 2 min" or "Behind 4 min")
+  var liveDot = document.getElementById('mobileFieldLiveDot');
+  var pill    = document.getElementById('mobileFieldPill');
+  var ctx     = document.getElementById('mobileFieldCtx');
+  if (!liveDot || !pill || !ctx) return;
+
+  var hasLive = (typeof _hasAnyLiveData === 'function') && _hasAnyLiveData();
+  var msUntil = (typeof _msUntilNextScheduledMatch === 'function')
+              ? _msUntilNextScheduledMatch() : Infinity;
+  var startingSoon = !hasLive && msUntil <= 15 * 60 * 1000;
+
+  if (hasLive) {
+    liveDot.style.display = '';
+    pill.style.display = 'none';
+  } else if (startingSoon) {
+    liveDot.style.display = 'none';
+    pill.style.display = '';
+    pill.textContent = 'STARTING SOON';
+  } else {
+    liveDot.style.display = 'none';
+    pill.style.display = 'none';
+  }
+
+  // Context line — schedule delta when present, else day label.
+  var ctxText = '';
+  if (typeof _computeScheduleDelta === 'function') {
+    try {
+      var d = _computeScheduleDelta();
+      if (d && Math.abs(d.minutes) >= 1) {
+        var verb = d.minutes > 0 ? 'Behind' : 'Ahead';
+        ctxText = verb + ' ' + Math.round(Math.abs(d.minutes)) + ' min';
+        ctx.classList.toggle('warn', d.minutes > 0);
+      }
+    } catch(_) {}
+  }
+  if (!ctxText && msUntil < 60 * 60 * 1000 && msUntil > 0) {
+    // Within an hour of a scheduled match — show "in N min" hint.
+    var mins = Math.round(msUntil / 60000);
+    ctxText = 'next in ' + mins + ' min';
+    ctx.classList.remove('warn');
+  }
+  ctx.textContent = ctxText;
+}
+
+// Render the compact agenda strip. Variant 1 = today only (single bar +
+// stat); Variant 2 = all days stacked. Reads the same per-day data the
+// full renderAgendaFitView consumes from STATE.computed so colors,
+// proportions, and the "now" marker stay in sync.
+function _renderMobileAgendaStrip() {
+  var host = document.getElementById('mobileAgendaContent');
+  if (!host) return;
+  var variant = getAgendaVariant();
+
+  // Group STATE.computed into days (matching renderAgendaFitView).
+  var computed = STATE.computed || [];
+  var days = [];
+  var cur = null;
+  for (var i = 0; i < computed.length; i++) {
+    var e = computed[i];
+    if (e.type === 'day-divider') {
+      cur = {
+        dayNum: e.dayNum, label: e.label || ('Day ' + e.dayNum),
+        start: e.start, end: e.end,
+        entries: [],
+      };
+      days.push(cur);
+    } else if (cur) {
+      cur.entries.push(e);
+    }
+  }
+  if (!days.length) {
+    host.innerHTML = '<span class="m-agenda-empty">No schedule loaded</span>';
+    return;
+  }
+
+  // Compute "today" and "now" position. The day whose [start,end]
+  // bracket contains `nowMs` is today; if nowMs is before everything,
+  // today is days[0]; after everything, days[last]. (The full agenda
+  // renderer has more sophisticated logic; we keep it simple here
+  // because the strip is a glance, not the source of truth.)
+  var nowMs = Date.now();
+  var todayIdx = 0;
+  for (var d = 0; d < days.length; d++) {
+    if (days[d].start != null && days[d].end != null) {
+      if (nowMs >= days[d].start && nowMs <= days[d].end) { todayIdx = d; break; }
+      if (nowMs < days[d].start) { todayIdx = d; break; }
+      todayIdx = d;  // past this one; keep walking
+    }
+  }
+  var today = days[todayIdx];
+
+  // Build a list of (kind, weight) segments for a given day's entries.
+  function segmentsFor(day) {
+    if (!day || !day.entries.length) return [];
+    var segs = [];
+    var elapsed = day.start != null && nowMs >= day.start
+                ? Math.max(0, Math.min(nowMs, day.end || nowMs) - day.start)
+                : 0;
+    var total = (day.end != null && day.start != null)
+              ? Math.max(1, day.end - day.start)
+              : 0;
+    day.entries.forEach(function(e) {
+      var kind = 'match';
+      if (e.type === 'break') {
+        var sub = (e.subtype || '').toLowerCase();
+        var name = (e.name || '').toLowerCase();
+        if (sub === 'awards' || /award/.test(name))                              kind = 'awards';
+        else if (sub === 'alliance_selection' || /alliance/.test(name))         kind = 'alliance';
+        else if (sub === 'ceremony' || /ceremony|opening|closing/.test(name))   kind = 'ceremony';
+        else if (sub === 'playoff' || /playoff|finals?/.test(name))             kind = 'playoff';
+        else                                                                    kind = 'break';
+      } else if (e.type === 'match') {
+        kind = e.isPractice ? 'practice' : 'match';
+      } else {
+        return;
+      }
+      var minutes = (e.endMin != null && e.startMin != null)
+                  ? Math.max(0.5, e.endMin - e.startMin)
+                  : 1;
+      segs.push({ kind: kind, weight: minutes });
+    });
+    return { segs: segs, elapsedRatio: total ? Math.min(1, elapsed / total) : 0 };
+  }
+
+  // Stat string for the variant-1 right-side label: "Q22/48 · -4m"
+  function todayStat() {
+    var matchCount = 0;
+    var doneCount = 0;
+    days.forEach(function(d) {
+      d.entries.forEach(function(e) {
+        if (e.type !== 'match' || e.isPractice) return;
+        matchCount++;
+        var lv = STATE.liveByMatch && STATE.liveByMatch[e.matchNum];
+        if (lv && (lv.post_result_time || lv.actual_time)) doneCount++;
+      });
+    });
+    var stat = '';
+    if (matchCount) stat = 'Q' + doneCount + '/' + matchCount;
+    var delta = null;
+    if (typeof _computeScheduleDelta === 'function') {
+      try {
+        var d2 = _computeScheduleDelta();
+        if (d2 && Math.abs(d2.minutes) >= 1) delta = Math.round(d2.minutes);
+      } catch(_) {}
+    }
+    if (delta != null && delta !== 0) {
+      var sign = delta > 0 ? '−' : '+';   // behind shown as -, ahead as +
+      stat += ' · ' + sign + Math.abs(delta) + 'm';
+    }
+    return { html: stat, warn: delta != null && delta > 0 };
+  }
+
+  function segmentsHtml(info) {
+    if (!info || !info.segs || !info.segs.length) return '';
+    var totalW = info.segs.reduce(function(s, x) { return s + x.weight; }, 0);
+    var html = '';
+    var cumulative = 0;
+    info.segs.forEach(function(s) {
+      var pct = (s.weight / totalW * 100).toFixed(2);
+      var isElapsed = (cumulative + s.weight / 2) / totalW < info.elapsedRatio;
+      cumulative += s.weight;
+      html += '<span class="m-seg m-seg-' + s.kind +
+              (isElapsed ? ' m-seg-elapsed' : '') +
+              '" style="width:' + pct + '%"></span>';
+    });
+    return html;
+  }
+
+  if (variant === '1') {
+    // Today's bar only.
+    var info = segmentsFor(today);
+    var nowLeft = info && info.elapsedRatio != null
+                ? (info.elapsedRatio * 100).toFixed(2)
+                : null;
+    var stat = todayStat();
+    host.innerHTML =
+      '<span class="m-agenda-label">Today</span>' +
+      '<span class="m-agenda-bar">' +
+        segmentsHtml(info) +
+        (nowLeft != null
+          ? '<span class="m-agenda-now" style="left:' + nowLeft + '%"></span>'
+          : '') +
+      '</span>' +
+      '<span class="m-agenda-stat' + (stat.warn ? ' warn' : '') + '">' + stat.html + '</span>' +
+      '<span class="m-agenda-chev">\u25BE</span>';
+  } else {
+    // All days stacked.
+    var rows = days.map(function(day, idx) {
+      var info = segmentsFor(day);
+      var isToday = idx === todayIdx;
+      var nowLeft = (isToday && info && info.elapsedRatio != null)
+                  ? (info.elapsedRatio * 100).toFixed(2)
+                  : null;
+      var dayLabel = day.label.replace(/^Day\s+/i, 'D');
+      // Clip to "D1" / "D2" / etc.
+      var m = dayLabel.match(/^D\d+/);
+      if (m) dayLabel = m[0];
+      return '<div class="m-agenda-day-row">' +
+               '<span class="m-agenda-day-label">' + escapeHtml(dayLabel) + '</span>' +
+               '<span class="m-agenda-bar m-agenda-bar-thin">' +
+                 segmentsHtml(info) +
+                 (nowLeft != null
+                   ? '<span class="m-agenda-now" style="left:' + nowLeft + '%"></span>'
+                   : '') +
+               '</span>' +
+             '</div>';
+    }).join('');
+    host.innerHTML = '<div class="m-agenda-stacked">' + rows + '</div>';
+  }
+}
+
 // ── Selected-team color palette ────────────────────────────────────
 // Six hand-picked colors for distinguishing selected teams on the
 // agenda-fit bars. Order matches selection order in STATE.myTeams,
@@ -4139,6 +5034,14 @@ async function boot() {
   // localStorage. Safe to call after compact init since the two
   // layouts compose orthogonally.
   initSplitLayout();
+
+  // Initialize the mobile-first layout. When ON, wraps the same
+  // existing nodes into a compressed status region + scrolling
+  // schedule pane. Designed for phone screens; opt-in on desktop.
+  // Sets data-layout="mobile" (overriding split's "split" value if
+  // both were set — the toggles are mutually exclusive in practice
+  // but the html attribute is single-valued, so last-wins works).
+  initMobileLayout();
 
   // Sync the field/linear view toggle label to the saved preference
   // (frc_field_view_mode in localStorage). The button itself only
@@ -5933,6 +6836,10 @@ function rerender() {
   // collapsed tiles show fresh info. No-op when split layout is off
   // (the elements simply don't exist).
   try { _updateTileSummaries(); } catch(_) {}
+
+  // Mobile-layout updates — tile summaries, field section header,
+  // agenda strip. No-op when mobile layout is off.
+  try { _updateMobileLayout(); } catch(_) {}
 }
 
 // ── Agenda fit panel renderer ─────────────────────────────────────────
