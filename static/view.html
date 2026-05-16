@@ -4964,10 +4964,15 @@ function setStayCurrent(on) {
     if (lab) lab.textContent = on ? 'Stay current' : 'Stay current (off)';
   }
   if (on) {
-    // Re-engage immediately on a state change.
+    // Re-engage immediately on a state change. Pass null so
+    // _stayCurrentTargetRow falls through to phase-based detection
+    // (works during breaks too, not only during matches). The
+    // matchNum branch only activates when we're CURRENTLY in a
+    // match, and that's determined from STATE state at call time
+    // by the rerender hook below — not from a stale token.
     STATE._stayCurrentOverride = false;
-    if (STATE.liveMode && STATE._lastScrolledTo) {
-      setTimeout(function() { scrollToStayCurrent(STATE._lastScrolledTo); }, 0);
+    if (STATE.liveMode) {
+      setTimeout(function() { scrollToStayCurrent(null); }, 0);
     }
   }
 }
@@ -4995,21 +5000,70 @@ function _stayCurrentScrollContainer() {
 // at the top of the schedule pane (or near the top of the viewport
 // in non-mobile layouts). Skips when stay-current is off or when
 // the user has manually overridden.
+// Find the schedule row that should sit at the top of the schedule
+// pane right now. Logic:
+//
+//   1. If a qual match is actively playing (nowMatchNum is set),
+//      target the row BEFORE it (most recently completed match) so
+//      the user sees one completed + the on-field + upcoming.
+//   2. Otherwise (we're in a break / awards / alliance / ceremony /
+//      pre-event), consult _resolveAgendaPhase to find the previous
+//      qual match — the latest qual whose endMin <= the schedule
+//      position. That row sits at the top so the user sees the most
+//      recently completed match plus the upcoming ones below
+//      (skipping past the break).
+//   3. Pre-event (no posMin) — fall back to the first qual match.
+//
+// Returns the matched <tr> element, or null when no plausible
+// target exists.
+function _stayCurrentTargetRow(nowMatchNum) {
+  // Branch 1 — match in progress: previous-qual row.
+  if (nowMatchNum) {
+    var prevSel = 'tr[data-match-num="' + (nowMatchNum - 1) + '"]' +
+                  '[data-is-practice="0"]';
+    var curSel  = 'tr[data-match-num="' + nowMatchNum + '"]' +
+                  '[data-is-practice="0"]';
+    return document.querySelector(prevSel) ||
+           document.querySelector(curSel);
+  }
+
+  // Branch 2 — non-match phase: walk STATE.computed for the latest
+  // qual ending at or before posMin.
+  var phase = null;
+  if (typeof _resolveAgendaPhase === 'function') {
+    try { phase = _resolveAgendaPhase(); } catch(_) {}
+  }
+  var posMin = phase && phase.posMin != null ? phase.posMin : null;
+  if (posMin == null || !STATE.computed) {
+    // Branch 3 — no anchor at all: try the first qual match in the DOM.
+    var firstQ = document.querySelector('tr[data-is-practice="0"][data-match-num]');
+    return firstQ || null;
+  }
+
+  var prevMatchNum = null;
+  for (var i = 0; i < STATE.computed.length; i++) {
+    var e = STATE.computed[i];
+    if (e.type !== 'match' || e.isPractice) continue;
+    if (e.endMin != null && e.endMin <= posMin) {
+      prevMatchNum = e.matchNum;
+    } else if (e.startMin != null && e.startMin > posMin) {
+      break;   // we've walked past posMin; everything after is future
+    }
+  }
+  if (prevMatchNum != null) {
+    var sel = 'tr[data-match-num="' + prevMatchNum + '"][data-is-practice="0"]';
+    var row = document.querySelector(sel);
+    if (row) return row;
+  }
+  // Nothing matched (somehow). Last resort: first qual row.
+  return document.querySelector('tr[data-is-practice="0"][data-match-num]') || null;
+}
+
 function scrollToStayCurrent(nowMatchNum) {
   if (!getStayCurrent()) return;
   if (STATE._stayCurrentOverride) return;
-  if (!nowMatchNum) return;
 
-  // Locate the row before current. We prefer the immediately previous
-  // qual match (matchNum - 1). If that row isn't in the DOM (e.g.
-  // the current match is Q1 — no predecessor in the qual sequence),
-  // fall back to the current match itself.
-  var prevSelector = 'tr[data-match-num="' + (nowMatchNum - 1) + '"]' +
-                     '[data-is-practice="0"]';
-  var curSelector  = 'tr[data-match-num="' + nowMatchNum + '"]' +
-                     '[data-is-practice="0"]';
-  var target = document.querySelector(prevSelector) ||
-               document.querySelector(curSelector);
+  var target = _stayCurrentTargetRow(nowMatchNum);
   if (!target) return;
 
   var container = _stayCurrentScrollContainer();
@@ -7391,22 +7445,40 @@ function rerender() {
   //
   // The user can disable stay-current via the toolbar toggle. They
   // can also temporarily override it by manually scrolling — but the
-  // override only lasts until the next match number change, at which
-  // point auto-scroll re-engages (the user clearly wants currency
-  // when matches turn over). This balances "stay locked on now" with
-  // "let me browse past matches" without competing with each input.
+  // override only lasts until the next match number change OR phase
+  // change (e.g. matches → lunch → matches), at which point the
+  // override clears and auto-scroll re-engages.
+  //
+  // Non-match phases (lunch, awards, ceremony, etc.) also trigger
+  // a re-scroll. The scroll target is the latest qual completed
+  // before the current schedule position, so during lunch the user
+  // sees the last completed match at top and the next-after-break
+  // matches below.
   //
   // The scroll target in mobile-layout is .mobile-schedule-pane
   // (a scrollable container); outside mobile, it's the window itself.
-  if (STATE.liveMode && nowMatchNum && typeof scrollToStayCurrent === 'function') {
-    var matchChanged = nowMatchNum !== STATE._lastScrolledTo;
-    if (matchChanged) {
-      STATE._lastScrolledTo = nowMatchNum;
-      STATE._stayCurrentOverride = false;  // re-engage on match change
+  if (STATE.liveMode && typeof scrollToStayCurrent === 'function') {
+    // Compute a "phase token" to detect transitions. Match phases
+    // are tokenized by their match number ("Q23"); non-match phases
+    // by their kind+label ("break:Lunch break"). Any transition
+    // clears the manual-scroll override so auto-scroll re-engages.
+    var phaseToken = null;
+    if (nowMatchNum) {
+      phaseToken = 'Q' + nowMatchNum;
+    } else if (typeof _resolveAgendaPhase === 'function') {
+      try {
+        var pr = _resolveAgendaPhase();
+        if (pr && pr.kind) phaseToken = pr.kind + ':' + (pr.label || '');
+      } catch(_) {}
+    }
+    if (phaseToken && phaseToken !== STATE._lastScrolledTo) {
+      STATE._lastScrolledTo = phaseToken;
+      STATE._stayCurrentOverride = false;  // re-engage on phase change
     }
     // Always attempt the scroll when stay-current is on (and not
     // overridden by a manual scroll). The function itself decides
-    // whether the move is meaningful (skips if already on-target).
+    // whether the move is meaningful (skips if already on-target,
+    // chooses the right target via _stayCurrentTargetRow).
     setTimeout(function() { scrollToStayCurrent(nowMatchNum); }, 100);
   }
 

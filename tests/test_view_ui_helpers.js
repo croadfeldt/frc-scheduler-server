@@ -901,6 +901,43 @@ console.log('\nMobile field header phase label:');
   );
 }
 
+// ── Stay-current during non-match phases ────────────────────────
+//
+// scrollToStayCurrent originally fired only when a match was
+// actively playing (nowMatchNum != null). During breaks /
+// ceremonies / awards the table didn't scroll. Now it consults
+// _resolveAgendaPhase to find the previous match (latest qual
+// whose endMin <= posMin) and scrolls there.
+
+console.log('\nStay-current non-match phases:');
+{
+  check(
+    '_stayCurrentTargetRow helper exists',
+    /function\s+_stayCurrentTargetRow\s*\(/.test(VIEW),
+    'extracted helper picks target row based on phase or match'
+  );
+  check(
+    'target-row helper consults _resolveAgendaPhase when no matchNum',
+    /_stayCurrentTargetRow[\s\S]{0,1500}_resolveAgendaPhase/.test(VIEW),
+    'non-match phases need agenda-position lookup'
+  );
+  check(
+    'target-row helper walks STATE.computed for prev qual',
+    /_stayCurrentTargetRow[\s\S]{0,2000}prevMatchNum/.test(VIEW),
+    'walks computed entries to find last qual ending <= posMin'
+  );
+  check(
+    'call site fires during non-match phases',
+    /STATE\.liveMode\s*&&\s*typeof\s+scrollToStayCurrent[\s\S]{0,2000}phaseToken/.test(VIEW),
+    'gate must not require nowMatchNum — phase change re-engages too'
+  );
+  check(
+    'phase change clears override',
+    /phaseToken\s*&&\s*phaseToken\s*!==\s*STATE\._lastScrolledTo[\s\S]{0,200}_stayCurrentOverride\s*=\s*false/.test(VIEW),
+    'phase transition (Q→break, break→Q) should re-engage auto-scroll'
+  );
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();
