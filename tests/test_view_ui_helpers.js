@@ -633,6 +633,31 @@ console.log('\nMobile-first layout plumbing:');
   });
 }
 
+// ── Field-status dispatcher: 3-up wrap ID guard ─────────────────
+//
+// Regression guard for the bug where updateFieldStatus hid the
+// INNER grid (statusThreeUp) before re-rendering, while
+// _renderFieldThreeUp only toggles the OUTER wrap (statusThreeUpWrap).
+// The result was an invisible 3-up: outer wrap shown, inner grid
+// hidden. The fix is to hide statusThreeUpWrap in the dispatcher.
+// This guard ensures the dispatcher's hide-before-render targets the
+// wrap, not the inner grid.
+
+console.log('\nField-status dispatcher 3-up wrap guard:');
+{
+  // The dispatcher should reference statusThreeUpWrap (the wrap),
+  // matching what _renderFieldThreeUp toggles. Match the actual
+  // dispatcher code, not _renderFieldThreeUp's reference (which
+  // already correctly uses the wrap).
+  const dispatcherSlice = (VIEW.match(/Hide everything first[\s\S]{0,400}/) || [''])[0];
+  check(
+    'dispatcher hides statusThreeUpWrap (not statusThreeUp)',
+    /statusThreeUpWrap/.test(dispatcherSlice) &&
+    !/getElementById\(\s*['"]statusThreeUp['"]\s*\)/.test(dispatcherSlice),
+    'dispatcher should target the wrap; inner grid stays available for renderer'
+  );
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();

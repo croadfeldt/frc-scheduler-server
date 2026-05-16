@@ -1696,7 +1696,30 @@
       flex-wrap: wrap;
     }
     .match-table-header .title { font-size: 14px; }
-    .match-table-header .match-table-actions .btn {
+    /* Toolbar buttons — under 600px, allow the actions row to scroll
+       horizontally rather than overflow off-screen. The previous
+       behavior was that 6+ buttons (Completed dropdown, Roomy/Compact,
+       Split/Stacked, Mobile/Standard, Light/Dark, Print/Export, QR)
+       pushed off-edge and became unreachable on narrow viewports.
+       overflow-x:auto here makes them swipeable; flex-shrink:0 on the
+       children prevents them from collapsing into illegible widths.
+       The fading right edge hint is a subtle gradient on the parent
+       that says "more content over there." */
+    .match-table-header .match-table-actions {
+      flex: 1 1 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;          /* hide scrollbar Firefox */
+      mask-image: linear-gradient(to right, black 90%, transparent 100%);
+      padding-right: 0.5rem;          /* room for fade edge */
+    }
+    .match-table-header .match-table-actions::-webkit-scrollbar {
+      display: none;                  /* hide scrollbar WebKit */
+    }
+    .match-table-header .match-table-actions .btn,
+    .match-table-header .match-table-actions select,
+    .match-table-header .match-table-actions .completed-mode-control {
+      flex-shrink: 0;                 /* don't squish buttons */
       font-size: 12px;
       padding: 0.3rem 0.55rem;
     }
@@ -4715,12 +4738,37 @@ function _renderMobileAgendaStrip() {
   function todayStat() {
     var matchCount = 0;
     var doneCount = 0;
+    // Two ways to decide "done": (a) live data says so via
+    // post_result_time/actual_time, (b) the match's scheduled
+    // timestamp is in the past. We use both — (a) is authoritative,
+    // (b) is the fallback when live data is missing or stale, so the
+    // user's "Q22/48" reading matches what the schedule + clock
+    // would imply even when Nexus/TBA isn't reporting. Without (b),
+    // sim-only or unmonitored events surface as "Q0/48" forever
+    // because nothing ever flips post_result_time.
     days.forEach(function(d) {
       d.entries.forEach(function(e) {
         if (e.type !== 'match' || e.isPractice) return;
         matchCount++;
         var lv = STATE.liveByMatch && STATE.liveByMatch[e.matchNum];
-        if (lv && (lv.post_result_time || lv.actual_time)) doneCount++;
+        var doneByLive = lv && (lv.post_result_time || lv.actual_time);
+        var doneByClock = false;
+        if (!doneByLive) {
+          var ts = typeof _resolveMatchTimestamp === 'function'
+                 ? _resolveMatchTimestamp(e)
+                 : null;
+          if (ts != null) {
+            // Count as done if the match's end time has passed by
+            // its full cycle (start + endMin - startMin). Using
+            // just the start time would mark currently-on-field
+            // as done; we want only fully-elapsed slots.
+            var ctMin = (e.endMin != null && e.startMin != null)
+                      ? Math.max(1, e.endMin - e.startMin) : 8;
+            var endMs = ts + ctMin * 60000;
+            doneByClock = nowMs >= endMs;
+          }
+        }
+        if (doneByLive || doneByClock) doneCount++;
       });
     });
     var stat = '';
@@ -4733,8 +4781,8 @@ function _renderMobileAgendaStrip() {
       } catch(_) {}
     }
     if (delta != null && delta !== 0) {
-      var sign = delta > 0 ? '−' : '+';   // behind shown as -, ahead as +
-      stat += ' · ' + sign + Math.abs(delta) + 'm';
+      var sign = delta > 0 ? '\u2212' : '+';   // behind shown as -, ahead as +
+      stat += ' \u00b7 ' + sign + Math.abs(delta) + 'm';
     }
     return { html: stat, warn: delta != null && delta > 0 };
   }
@@ -9485,16 +9533,25 @@ function updateFieldStatus() {
   try { _renderFieldStatusContext();} catch(_) {}
 
   // Hide everything first, then enable per-state.
-  var threeUp     = document.getElementById('statusThreeUp');
+  //
+  // The 3-up's outer wrap (statusThreeUpWrap) is what _renderFieldThreeUp
+  // toggles via wrap.style.display. Previously this code hid the INNER
+  // grid (statusThreeUp) — which meant when _renderFieldThreeUp later
+  // showed the wrap, the inner grid was still hidden, so users saw an
+  // empty wrap and no rosters. The fix is to hide the wrap here so
+  // _renderFieldThreeUp's wrap.style.display='' actually reveals
+  // something visible. The inner-grid ID stays unchanged for the
+  // rendering code that writes match numbers / metas into it by ID.
+  var threeUpWrap = document.getElementById('statusThreeUpWrap');
   var nextOnly    = document.getElementById('statusNextOnly');
   var deltaBox    = document.getElementById('statusDeltaBox');
   var cycleStats  = document.getElementById('statusCycleStats');
   var cycleEmpty  = document.getElementById('statusCycleEmpty');
-  if (threeUp)    threeUp.style.display    = 'none';
-  if (nextOnly)   nextOnly.style.display   = 'none';
-  if (deltaBox)   deltaBox.style.display   = 'none';
-  if (cycleStats) cycleStats.style.display = 'none';
-  if (cycleEmpty) cycleEmpty.style.display = 'none';
+  if (threeUpWrap) threeUpWrap.style.display = 'none';
+  if (nextOnly)    nextOnly.style.display    = 'none';
+  if (deltaBox)    deltaBox.style.display    = 'none';
+  if (cycleStats)  cycleStats.style.display  = 'none';
+  if (cycleEmpty)  cycleEmpty.style.display  = 'none';
 
   var hasLive       = _hasAnyLiveData();
   var hasNexusQueue = _hasNexusQueueData();
