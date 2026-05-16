@@ -3053,25 +3053,29 @@
 </style>
 <script>
   // Theme bootstrap — runs before <body> renders to avoid a flash
-  // of the wrong theme. Reads localStorage; falls back to OS
-  // preference only when the user hasn't made a choice. Light is
-  // the default per product spec, so no-preference + non-dark-OS
-  // means data-theme="light" gets set explicitly to override the
-  // prefers-color-scheme media query.
+  // of the wrong theme. Three states:
+  //
+  //   - No saved preference  → AUTO (no data-theme set); CSS
+  //                            prefers-color-scheme media query
+  //                            governs (light or dark per OS).
+  //   - frc_view_theme='dark'  → manual override to dark.
+  //   - frc_view_theme='light' → manual override to light.
+  //
+  // The toolbar toggle cycles Auto → Light → Dark → Auto. In Auto
+  // mode the data-theme attribute is REMOVED, letting CSS follow
+  // the OS automatically. Earlier versions defaulted to light
+  // explicitly, which overrode prefers-color-scheme for OS-dark
+  // users — a small surprise. Now first-visit users see whatever
+  // their OS prefers.
   (function() {
     try {
       var saved = localStorage.getItem('frc_view_theme'); // 'light' | 'dark' | null
       if (saved === 'dark' || saved === 'light') {
         document.documentElement.setAttribute('data-theme', saved);
-      } else {
-        // No saved preference — default to light. Set the attribute
-        // explicitly so the prefers-color-scheme dark fallback
-        // doesn't apply on dark-mode-OS systems.
-        document.documentElement.setAttribute('data-theme', 'light');
       }
-    } catch(_) {
-      document.documentElement.setAttribute('data-theme', 'light');
-    }
+      // No saved preference → leave data-theme unset so the CSS
+      // prefers-color-scheme media query governs.
+    } catch(_) {}
   })();
 </script>
 </head>
@@ -3732,34 +3736,85 @@
 // Manual day/night switch. Persists in localStorage as 'frc_view_theme'.
 // The bootstrap script in <head> sets the initial data-theme; this
 // function flips it on user click and syncs the button label.
+// Resolve "what theme is actually rendering right now" — used by
+// syncThemeButton to pick an icon. When the user is in auto mode,
+// we ask the OS via matchMedia. When they've manually picked, the
+// data-theme attribute tells us directly.
+function _effectiveTheme() {
+  var dt = document.documentElement.getAttribute('data-theme');
+  if (dt === 'dark' || dt === 'light') return dt;
+  // No manual override — follow OS.
+  try {
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+  } catch(_) {}
+  return 'light';
+}
+
+// Cycle: auto → light → dark → auto. In auto mode the data-theme
+// attribute is removed (CSS prefers-color-scheme governs). In
+// light/dark mode it's set and persisted so the choice survives
+// reloads.
 function toggleTheme() {
-  var current = document.documentElement.getAttribute('data-theme') || 'light';
-  var next = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  try { localStorage.setItem('frc_view_theme', next); } catch(_) {}
+  var saved = null;
+  try { saved = localStorage.getItem('frc_view_theme'); } catch(_) {}
+  var next;
+  if (saved === null)        next = 'light';   // auto → light
+  else if (saved === 'light') next = 'dark';   // light → dark
+  else                        next = null;     // dark → auto
+
+  if (next === null) {
+    document.documentElement.removeAttribute('data-theme');
+    try { localStorage.removeItem('frc_view_theme'); } catch(_) {}
+  } else {
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('frc_view_theme', next); } catch(_) {}
+  }
   syncThemeButton();
 }
 
-// Update the toolbar button to reflect the current theme. The icon
-// shows what you'll switch TO when clicked — sun = "switch to light",
-// moon = "switch to dark" — same affordance as most apps. Called
-// from page init AND from toggleTheme so the label stays in sync.
+// Update the toolbar button to reflect the current theme. Three
+// modes — auto / light / dark — each gets its own icon. The icon
+// represents what's ACTIVE, not what you'll switch TO (consistent
+// with macOS / iOS appearance pickers). The next-mode hint goes
+// in the tooltip.
 function syncThemeButton() {
   var btn = document.getElementById('btnThemeToggle');
   if (!btn) return;
-  var current = document.documentElement.getAttribute('data-theme') || 'light';
+  var saved = null;
+  try { saved = localStorage.getItem('frc_view_theme'); } catch(_) {}
   var iconEl  = document.getElementById('themeIcon');
   var labelEl = document.getElementById('themeLabel');
-  if (current === 'dark') {
-    if (iconEl)  iconEl.innerHTML  = '\u2600';      // sun (click to go light)
-    if (labelEl) labelEl.textContent = 'Light';
-    btn.title = 'Switch to light theme';
-  } else {
-    if (iconEl)  iconEl.innerHTML  = '\u263d';      // moon (click to go dark)
+  if (saved === 'dark') {
+    if (iconEl)  iconEl.innerHTML  = '\u263d';      // moon
     if (labelEl) labelEl.textContent = 'Dark';
-    btn.title = 'Switch to dark theme';
+    btn.title = 'Theme: Dark — click for Auto (follow system)';
+  } else if (saved === 'light') {
+    if (iconEl)  iconEl.innerHTML  = '\u2600';      // sun
+    if (labelEl) labelEl.textContent = 'Light';
+    btn.title = 'Theme: Light — click for Dark';
+  } else {
+    // Auto mode — show a half-disc to indicate "follows system".
+    if (iconEl)  iconEl.innerHTML  = '\u25D1';      // ◑
+    if (labelEl) labelEl.textContent = 'Auto';
+    btn.title = 'Theme: Auto (follows system) — click for Light';
   }
 }
+
+// Listen for OS theme changes. In auto mode this changes the
+// rendered theme via CSS automatically (the prefers-color-scheme
+// media query re-evaluates), but the button icon needs a nudge
+// to update its tooltip. Manual modes don't care about OS changes.
+(function() {
+  try {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    var handler = function() {
+      // Only update the button — CSS handles the actual repaint.
+      syncThemeButton();
+    };
+    if (mq.addEventListener) mq.addEventListener('change', handler);
+    else if (mq.addListener) mq.addListener(handler);  // Safari < 14
+  } catch(_) {}
+})();
 
 // ── Completed-row layout mode ──────────────────────────────────────
 //

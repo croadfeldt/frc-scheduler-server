@@ -1025,6 +1025,55 @@ console.log('\nToday-detection bracket fallback:');
   );
 }
 
+// ── Theme: auto / light / dark with system sync ─────────────────
+//
+// Three-state cycle: auto → light → dark → auto. Auto mode means
+// data-theme attribute is REMOVED so CSS prefers-color-scheme
+// governs. Light/dark mode means data-theme set explicitly and
+// persisted. The bootstrap reads frc_view_theme localStorage key
+// before <body> renders to avoid theme flash.
+
+console.log('\nTheme system sync:');
+{
+  check(
+    'bootstrap leaves data-theme unset when no saved preference',
+    /No saved preference[\s\S]{0,200}prefers-color-scheme/.test(VIEW),
+    'first-visit users should follow OS, not default to light'
+  );
+  check(
+    '_effectiveTheme helper exists',
+    /function\s+_effectiveTheme\s*\(/.test(VIEW),
+    'helper resolves what theme is actually rendering (manual or OS)'
+  );
+  check(
+    '_effectiveTheme consults matchMedia for auto-mode',
+    /_effectiveTheme[\s\S]{0,500}matchMedia\(['"]\(prefers-color-scheme:\s*dark\)['"]\)/.test(VIEW),
+    'auto mode resolves via matchMedia query'
+  );
+  check(
+    'toggleTheme cycles auto → light → dark → auto',
+    /saved\s*===\s*null[\s\S]{0,200}saved\s*===\s*['"]light['"][\s\S]{0,400}removeAttribute\(['"]data-theme['"]\)/.test(VIEW),
+    'cycle must include the auto state (no data-theme)'
+  );
+  check(
+    'toggleTheme removeItem frc_view_theme on entering auto',
+    /removeItem\(['"]frc_view_theme['"]\)/.test(VIEW),
+    'auto state must clear the persisted preference, not just data-theme'
+  );
+  check(
+    'syncThemeButton shows three labels (Auto / Light / Dark)',
+    /labelEl\.textContent\s*=\s*['"]Auto['"]/.test(VIEW)
+    && /labelEl\.textContent\s*=\s*['"]Light['"]/.test(VIEW)
+    && /labelEl\.textContent\s*=\s*['"]Dark['"]/.test(VIEW),
+    'button must surface all three states in its label'
+  );
+  check(
+    'matchMedia change listener wired',
+    /matchMedia[\s\S]{0,400}addEventListener\(['"]change['"]/.test(VIEW),
+    'in auto mode the button tooltip should update when OS theme flips'
+  );
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();
