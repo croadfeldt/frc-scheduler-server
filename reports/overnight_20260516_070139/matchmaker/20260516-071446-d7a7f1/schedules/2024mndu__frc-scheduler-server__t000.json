@@ -1,0 +1,1928 @@
+{
+  "fixture_id": "2024mndu",
+  "adapter_name": "frc-scheduler-server",
+  "matches": [
+    {
+      "match_num": 1,
+      "blue": [
+        2503,
+        2861,
+        7864
+      ],
+      "red": [
+        5278,
+        7068,
+        3291
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 2,
+      "blue": [
+        2977,
+        4778,
+        7797
+      ],
+      "red": [
+        4511,
+        930,
+        2052
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 3,
+      "blue": [
+        93,
+        5348,
+        4181
+      ],
+      "red": [
+        9532,
+        5826,
+        5903
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 4,
+      "blue": [
+        6421,
+        4021,
+        5690
+      ],
+      "red": [
+        2531,
+        7915,
+        5143
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 5,
+      "blue": [
+        4741,
+        1732,
+        6318
+      ],
+      "red": [
+        1816,
+        6217,
+        4174
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 6,
+      "blue": [
+        8422,
+        3267,
+        3197
+      ],
+      "red": [
+        6709,
+        2526,
+        5914
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 7,
+      "blue": [
+        6160,
+        3291,
+        2503
+      ],
+      "red": [
+        2823,
+        4011,
+        8298
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 8,
+      "blue": [
+        8836,
+        2847,
+        4624
+      ],
+      "red": [
+        4778,
+        3055,
+        2052
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 9,
+      "blue": [
+        2239,
+        2977,
+        2861
+      ],
+      "red": [
+        6381,
+        4009,
+        93
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 10,
+      "blue": [
+        2531,
+        9532,
+        4656
+      ],
+      "red": [
+        5826,
+        5253,
+        4693
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 11,
+      "blue": [
+        4181,
+        3294,
+        4174
+      ],
+      "red": [
+        8516,
+        5278,
+        7915
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 12,
+      "blue": [
+        7068,
+        1816,
+        5914
+      ],
+      "red": [
+        6421,
+        6709,
+        7864
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 13,
+      "blue": [
+        1732,
+        8422,
+        2526
+      ],
+      "red": [
+        2181,
+        4021,
+        4741
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 14,
+      "blue": [
+        3267,
+        2823,
+        4511
+      ],
+      "red": [
+        5653,
+        5348,
+        6318
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 15,
+      "blue": [
+        8298,
+        5903,
+        7038
+      ],
+      "red": [
+        2861,
+        6381,
+        3055
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 16,
+      "blue": [
+        2503,
+        8836,
+        4778
+      ],
+      "red": [
+        93,
+        2977,
+        5253
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 17,
+      "blue": [
+        4656,
+        4011,
+        4624
+      ],
+      "red": [
+        2239,
+        3197,
+        5278
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        true,
+        false
+      ]
+    },
+    {
+      "match_num": 18,
+      "blue": [
+        7797,
+        4009,
+        4693
+      ],
+      "red": [
+        6421,
+        5143,
+        3294
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 19,
+      "blue": [
+        5690,
+        6217,
+        2847
+      ],
+      "red": [
+        8422,
+        1816,
+        4181
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 20,
+      "blue": [
+        2052,
+        5653,
+        2823
+      ],
+      "red": [
+        4174,
+        4741,
+        3267
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 21,
+      "blue": [
+        7864,
+        5914,
+        930
+      ],
+      "red": [
+        1732,
+        7915,
+        5903
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 22,
+      "blue": [
+        6381,
+        2526,
+        9532
+      ],
+      "red": [
+        4778,
+        8298,
+        4511
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 23,
+      "blue": [
+        2861,
+        7038,
+        5253
+      ],
+      "red": [
+        6160,
+        2239,
+        6709
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 24,
+      "blue": [
+        8516,
+        6421,
+        2531
+      ],
+      "red": [
+        93,
+        4011,
+        8836
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 25,
+      "blue": [
+        3294,
+        2181,
+        6217
+      ],
+      "red": [
+        4624,
+        5348,
+        5826
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 26,
+      "blue": [
+        4181,
+        3055,
+        4021
+      ],
+      "red": [
+        5143,
+        2503,
+        4009
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 27,
+      "blue": [
+        4174,
+        4693,
+        3291
+      ],
+      "red": [
+        5903,
+        2052,
+        8422
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 28,
+      "blue": [
+        4511,
+        5914,
+        7797
+      ],
+      "red": [
+        930,
+        5690,
+        4656
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 29,
+      "blue": [
+        2823,
+        2977,
+        7068
+      ],
+      "red": [
+        2239,
+        8298,
+        2847
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 30,
+      "blue": [
+        7038,
+        3197,
+        4778
+      ],
+      "red": [
+        5278,
+        8836,
+        2531
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 31,
+      "blue": [
+        2181,
+        6381,
+        5826
+      ],
+      "red": [
+        1816,
+        6160,
+        6421
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 32,
+      "blue": [
+        3294,
+        2861,
+        4741
+      ],
+      "red": [
+        4181,
+        5253,
+        9532
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 33,
+      "blue": [
+        6709,
+        7915,
+        6217
+      ],
+      "red": [
+        8516,
+        93,
+        4021
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 34,
+      "blue": [
+        7864,
+        7797,
+        5348
+      ],
+      "red": [
+        4693,
+        4656,
+        2503
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "match_num": 35,
+      "blue": [
+        5653,
+        4624,
+        3267
+      ],
+      "red": [
+        3291,
+        4511,
+        8422
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 36,
+      "blue": [
+        5143,
+        6318,
+        2239
+      ],
+      "red": [
+        2526,
+        2823,
+        7038
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 37,
+      "blue": [
+        5278,
+        5826,
+        2052
+      ],
+      "red": [
+        3197,
+        5914,
+        6381
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 38,
+      "blue": [
+        2531,
+        3294,
+        4011
+      ],
+      "red": [
+        4741,
+        2977,
+        4181
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 39,
+      "blue": [
+        5903,
+        4778,
+        5690
+      ],
+      "red": [
+        6160,
+        2181,
+        930
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 40,
+      "blue": [
+        3055,
+        7068,
+        1732
+      ],
+      "red": [
+        4009,
+        8516,
+        2861
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 41,
+      "blue": [
+        4624,
+        8422,
+        9532
+      ],
+      "red": [
+        4656,
+        2847,
+        7915
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 42,
+      "blue": [
+        4021,
+        5653,
+        8298
+      ],
+      "red": [
+        6318,
+        7797,
+        8836
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 43,
+      "blue": [
+        93,
+        2503,
+        4511
+      ],
+      "red": [
+        5253,
+        2239,
+        1816
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 44,
+      "blue": [
+        5278,
+        6709,
+        5143
+      ],
+      "red": [
+        4011,
+        2052,
+        6217
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 45,
+      "blue": [
+        5348,
+        930,
+        4174
+      ],
+      "red": [
+        7864,
+        2531,
+        6160
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 46,
+      "blue": [
+        3267,
+        7038,
+        1732
+      ],
+      "red": [
+        5903,
+        3291,
+        3197
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 47,
+      "blue": [
+        5914,
+        4656,
+        6421
+      ],
+      "red": [
+        2847,
+        4778,
+        2526
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 48,
+      "blue": [
+        9532,
+        4693,
+        2977
+      ],
+      "red": [
+        2861,
+        7068,
+        4624
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 49,
+      "blue": [
+        1816,
+        8298,
+        8516
+      ],
+      "red": [
+        2181,
+        5653,
+        5253
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 50,
+      "blue": [
+        8836,
+        4741,
+        6709
+      ],
+      "red": [
+        5690,
+        6318,
+        2503
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 51,
+      "blue": [
+        7915,
+        4011,
+        8422
+      ],
+      "red": [
+        3055,
+        2823,
+        5348
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 52,
+      "blue": [
+        7797,
+        2239,
+        93
+      ],
+      "red": [
+        6217,
+        1732,
+        3197
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 53,
+      "blue": [
+        2847,
+        5826,
+        6160
+      ],
+      "red": [
+        4021,
+        7038,
+        4009
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 54,
+      "blue": [
+        2526,
+        5278,
+        6421
+      ],
+      "red": [
+        2052,
+        2531,
+        3291
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 55,
+      "blue": [
+        2861,
+        4656,
+        4181
+      ],
+      "red": [
+        3267,
+        7864,
+        7068
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 56,
+      "blue": [
+        4778,
+        5253,
+        930
+      ],
+      "red": [
+        8298,
+        4174,
+        6318
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 57,
+      "blue": [
+        5690,
+        8516,
+        6709
+      ],
+      "red": [
+        2823,
+        3294,
+        9532
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 58,
+      "blue": [
+        5348,
+        1816,
+        6381
+      ],
+      "red": [
+        5143,
+        3197,
+        7797
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 59,
+      "blue": [
+        3055,
+        6160,
+        7915
+      ],
+      "red": [
+        8836,
+        5653,
+        2977
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 60,
+      "blue": [
+        2239,
+        2503,
+        2181
+      ],
+      "red": [
+        5914,
+        4741,
+        5278
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 61,
+      "blue": [
+        4021,
+        2531,
+        5826
+      ],
+      "red": [
+        4011,
+        3267,
+        2847
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 62,
+      "blue": [
+        5253,
+        4174,
+        5903
+      ],
+      "red": [
+        7068,
+        6421,
+        6217
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 63,
+      "blue": [
+        4009,
+        5690,
+        3291
+      ],
+      "red": [
+        4656,
+        7038,
+        8516
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 64,
+      "blue": [
+        930,
+        8298,
+        6381
+      ],
+      "red": [
+        6709,
+        4693,
+        4624
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 65,
+      "blue": [
+        2823,
+        7864,
+        1816
+      ],
+      "red": [
+        4511,
+        2861,
+        2526
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        true,
+        false
+      ]
+    },
+    {
+      "match_num": 66,
+      "blue": [
+        7915,
+        4181,
+        6318
+      ],
+      "red": [
+        5348,
+        5914,
+        1732
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 67,
+      "blue": [
+        6160,
+        4021,
+        3197
+      ],
+      "red": [
+        2503,
+        3055,
+        2977
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 68,
+      "blue": [
+        5826,
+        93,
+        7068
+      ],
+      "red": [
+        4174,
+        5143,
+        5653
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 69,
+      "blue": [
+        4009,
+        2181,
+        8422
+      ],
+      "red": [
+        8836,
+        9532,
+        8516
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 70,
+      "blue": [
+        5253,
+        2847,
+        3294
+      ],
+      "red": [
+        930,
+        3291,
+        3267
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 71,
+      "blue": [
+        4693,
+        7864,
+        5278
+      ],
+      "red": [
+        7797,
+        4624,
+        5690
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 72,
+      "blue": [
+        2526,
+        2052,
+        4656
+      ],
+      "red": [
+        7038,
+        4181,
+        2239
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 73,
+      "blue": [
+        4741,
+        5903,
+        6160
+      ],
+      "red": [
+        2977,
+        6381,
+        4011
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 74,
+      "blue": [
+        1732,
+        4511,
+        5653
+      ],
+      "red": [
+        2503,
+        6709,
+        7068
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 75,
+      "blue": [
+        8298,
+        3197,
+        3055
+      ],
+      "red": [
+        6318,
+        2181,
+        4778
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 76,
+      "blue": [
+        6217,
+        4009,
+        8836
+      ],
+      "red": [
+        3294,
+        1816,
+        5826
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 77,
+      "blue": [
+        3291,
+        5143,
+        2847
+      ],
+      "red": [
+        7915,
+        5690,
+        4693
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 78,
+      "blue": [
+        8516,
+        5348,
+        3267
+      ],
+      "red": [
+        4624,
+        930,
+        4021
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 79,
+      "blue": [
+        4011,
+        9532,
+        4741
+      ],
+      "red": [
+        5914,
+        5903,
+        2861
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 80,
+      "blue": [
+        4511,
+        6381,
+        2531
+      ],
+      "red": [
+        1732,
+        6421,
+        4174
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 81,
+      "blue": [
+        6318,
+        3055,
+        7038
+      ],
+      "red": [
+        7864,
+        93,
+        2181
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 82,
+      "blue": [
+        3197,
+        2526,
+        4009
+      ],
+      "red": [
+        3294,
+        7797,
+        5653
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "match_num": 83,
+      "blue": [
+        5143,
+        2052,
+        4693
+      ],
+      "red": [
+        6217,
+        8422,
+        2823
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ]
+    }
+  ],
+  "generation_seconds": 21.441444362979382,
+  "seed": null,
+  "adapter_diagnostics": {
+    "score": -100570,
+    "sa_iterations": 500000,
+    "ideal_gap": 6,
+    "ideal_gap_source": "fixture_floors.cooldown_max",
+    "cpsat_post_pass_budget_s": 120.0,
+    "cpsat_available": true,
+    "weights": "default",
+    "trial": 0
+  },
+  "generated_at": "2026-05-16T12:14:45.985576+00:00"
+}

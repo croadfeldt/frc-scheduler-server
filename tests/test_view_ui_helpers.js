@@ -448,6 +448,52 @@ console.log('\nMargin tag conditional emission:');
         /r\s*!=\s*null\s*&&\s*b\s*!=\s*null/.test(VIEW));
 }
 
+// ── Compact view toggle plumbing ────────────────────────────────
+//
+// The compact-view toggle is a body-level CSS hook with two
+// activation paths:
+//   1. html[data-compact="1"] — opt-in via the toolbar button
+//   2. @media (max-width: 750px) — automatic on phones
+// Both should hit the same CSS rules. Test that the source carries
+// the expected key behaviors:
+//   - getCompactView / setCompactView / toggleCompactView functions
+//   - localStorage key 'frc_view_compact'
+//   - The "Compact" toolbar button exists
+//   - initCompactView is called from boot
+//   - CSS rules exist for both activation paths
+
+console.log('\nCompact view toggle:');
+{
+  const guards = [
+    /function\s+getCompactView\s*\(/,
+    /function\s+setCompactView\s*\(/,
+    /function\s+toggleCompactView\s*\(/,
+    /function\s+initCompactView\s*\(/,
+    /COMPACT_KEY\s*=\s*['"]frc_view_compact['"]/,
+    /id="btnCompactToggle"/,
+    /id="compactLabel"/,
+    /initCompactView\(\);/,
+    // CSS — both paths must hit the brand-header
+    /@media\s*\(max-width:\s*750px\)[\s\S]{0,200}\.brand-header/,
+    /html\[data-compact="1"\]\s*\.brand-header/,
+    // Status section header hidden in both
+    /@media\s*\(max-width:\s*750px\)\s*\{\s*\.status-section-header\s*\{\s*display:\s*none/,
+    /html\[data-compact="1"\]\s*\.status-section-header\s*\{\s*display:\s*none/,
+    // Empty team-next-section hidden in both
+    /\.team-next-section\.empty\s*\{\s*display:\s*none/,
+    // Delta-ok class added at the < 5min threshold
+    /absMin\s*<\s*5\.0/,
+    /box\.classList\.add\(\s*['"]delta-ok['"]/,
+    // Field-view toggle relocator
+    /_relocateFieldViewToggle/,
+  ];
+  guards.forEach((re, i) => {
+    check('compact-view guard #' + (i + 1) + ': ' + re.source.slice(0, 60),
+          re.test(VIEW),
+          'did not match production source');
+  });
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();

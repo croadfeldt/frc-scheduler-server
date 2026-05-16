@@ -1,0 +1,3674 @@
+{
+  "started": "2026-05-16T07:14:24.123678",
+  "elapsed_s": 763.0,
+  "n_seeds": 5,
+  "sa_iterations": 500000,
+  "strict": false,
+  "n_fixtures": 5,
+  "n_pass": 5,
+  "n_warn": 0,
+  "n_fail": 0,
+  "overall_verdict": "pass",
+  "per_fixture": [
+    {
+      "fixture": "12x6_cd2",
+      "shape": [
+        12,
+        6,
+        3,
+        2
+      ],
+      "bars": {
+        "hard_requirements": {
+          "is_valid_paramount": true,
+          "cooldown_score_min": 100.0
+        },
+        "soft_thresholds": {
+          "composite_min": 85.0,
+          "per_criterion_min": 50.0
+        },
+        "notes": "Structural cooldown=2 gap on par_quad. Best-known floor scoring used to give meaningful bars."
+      },
+      "n_seeds": 5,
+      "successful_seeds": 5,
+      "median_composite": 97.3,
+      "composite_range": [
+        97.3,
+        97.3
+      ],
+      "per_criterion_medians": {
+        "cooldown": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "partner": {
+          "median": 94.7,
+          "min": 94.7,
+          "max": 94.7
+        },
+        "opponent": {
+          "median": 93.3,
+          "min": 93.3,
+          "max": 93.3
+        },
+        "surrogate": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "color": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "station": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        }
+      },
+      "canonical_composite": null,
+      "canonical_gap": null,
+      "verdict": "pass",
+      "reason": "",
+      "hard_failures": [],
+      "soft_warnings": [],
+      "seed_results": [
+        {
+          "seed": 2792900,
+          "attempt_seed": 2800819,
+          "attempts": 2,
+          "wall_clock_s": 4.64,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              192,
+              408,
+              0,
+              34,
+              8,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 192,
+                "floor": 84,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 108,
+                "matches_floor": false
+              },
+              "opp_quad": {
+                "value": 408,
+                "floor": 192,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 216,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 2,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 192,
+                  "floor": 156,
+                  "score": 94.7,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 408,
+                  "floor": 324,
+                  "score": 93.3,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.3,
+              "composite_uncapped": 97.3,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 2792901,
+          "attempt_seed": 2792901,
+          "attempts": 1,
+          "wall_clock_s": 4.52,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              192,
+              408,
+              0,
+              34,
+              10,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 192,
+                "floor": 84,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 108,
+                "matches_floor": false
+              },
+              "opp_quad": {
+                "value": 408,
+                "floor": 192,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 216,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 2,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 192,
+                  "floor": 156,
+                  "score": 94.7,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 408,
+                  "floor": 324,
+                  "score": 93.3,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.3,
+              "composite_uncapped": 97.3,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 2792902,
+          "attempt_seed": 2792902,
+          "attempts": 1,
+          "wall_clock_s": 4.46,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              192,
+              408,
+              0,
+              34,
+              8,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 192,
+                "floor": 84,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 108,
+                "matches_floor": false
+              },
+              "opp_quad": {
+                "value": 408,
+                "floor": 192,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 216,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 2,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 192,
+                  "floor": 156,
+                  "score": 94.7,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 408,
+                  "floor": 324,
+                  "score": 93.3,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.3,
+              "composite_uncapped": 97.3,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 2792903,
+          "attempt_seed": 2792903,
+          "attempts": 1,
+          "wall_clock_s": 4.53,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              192,
+              408,
+              0,
+              36,
+              8,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 192,
+                "floor": 84,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 108,
+                "matches_floor": false
+              },
+              "opp_quad": {
+                "value": 408,
+                "floor": 192,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 216,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 2,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 192,
+                  "floor": 156,
+                  "score": 94.7,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 408,
+                  "floor": 324,
+                  "score": 93.3,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.3,
+              "composite_uncapped": 97.3,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 2792904,
+          "attempt_seed": 2792904,
+          "attempts": 1,
+          "wall_clock_s": 4.52,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              192,
+              408,
+              0,
+              32,
+              8,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 192,
+                "floor": 84,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 108,
+                "matches_floor": false
+              },
+              "opp_quad": {
+                "value": 408,
+                "floor": 192,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 216,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 2,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 192,
+                  "floor": 156,
+                  "score": 94.7,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 408,
+                  "floor": 324,
+                  "score": 93.3,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.3,
+              "composite_uncapped": 97.3,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        }
+      ]
+    },
+    {
+      "fixture": "20x8_cd2",
+      "shape": [
+        20,
+        8,
+        3,
+        2
+      ],
+      "bars": {
+        "hard_requirements": {
+          "is_valid_paramount": true,
+          "cooldown_score_min": 100.0
+        },
+        "soft_thresholds": {
+          "composite_min": 75.0,
+          "per_criterion_min": 50.0
+        },
+        "notes": "Surrogate-required (2 slots). par_quad/opp_quad floors tight; rb/station post-passes may not reach floor at default iterations."
+      },
+      "n_seeds": 5,
+      "successful_seeds": 5,
+      "median_composite": 97.2,
+      "composite_range": [
+        88.9,
+        100.0
+      ],
+      "per_criterion_medians": {
+        "cooldown": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "partner": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "opponent": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "surrogate": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "color": {
+          "median": 75.0,
+          "min": 50.0,
+          "max": 100.0
+        },
+        "station": {
+          "median": 75.0,
+          "min": 50.0,
+          "max": 100.0
+        }
+      },
+      "canonical_composite": null,
+      "canonical_gap": null,
+      "verdict": "pass",
+      "reason": "",
+      "hard_failures": [],
+      "soft_warnings": [],
+      "seed_results": [
+        {
+          "seed": 1484400,
+          "attempt_seed": 1484400,
+          "attempts": 1,
+          "wall_clock_s": 12.96,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              174,
+              479,
+              2,
+              82,
+              22,
+              180,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 174,
+                "floor": 160,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 14,
+                "matches_floor": false
+              },
+              "opp_quad": {
+                "value": 479,
+                "floor": 340,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 139,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 2,
+                "floor": 2,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 4,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 4,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 3,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 2,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 174,
+                  "floor": 182,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 479,
+                  "floor": 497,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 4,
+                  "floor": 2,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 3,
+                  "floor": 1,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 88.9,
+              "composite_uncapped": 88.9,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 1484401,
+          "attempt_seed": 1484401,
+          "attempts": 1,
+          "wall_clock_s": 12.89,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              176,
+              489,
+              2,
+              76,
+              21,
+              180,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 176,
+                "floor": 160,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 16,
+                "matches_floor": false
+              },
+              "opp_quad": {
+                "value": 489,
+                "floor": 340,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 149,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 2,
+                "floor": 2,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 1,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 2,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 176,
+                  "floor": 182,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 489,
+                  "floor": 497,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 1,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.2,
+              "composite_uncapped": 97.2,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 1484402,
+          "attempt_seed": 1484402,
+          "attempts": 1,
+          "wall_clock_s": 12.96,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              178,
+              475,
+              2,
+              67,
+              20,
+              180,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 178,
+                "floor": 160,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 18,
+                "matches_floor": false
+              },
+              "opp_quad": {
+                "value": 475,
+                "floor": 340,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 135,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 2,
+                "floor": 2,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 3,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 3,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 1,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 178,
+                  "floor": 182,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 475,
+                  "floor": 497,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 3,
+                  "floor": 2,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 1,
+                  "floor": 1,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.2,
+              "composite_uncapped": 97.2,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 1484403,
+          "attempt_seed": 1484403,
+          "attempts": 1,
+          "wall_clock_s": 13.07,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              176,
+              471,
+              2,
+              83,
+              20,
+              180,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 176,
+                "floor": 160,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 16,
+                "matches_floor": false
+              },
+              "opp_quad": {
+                "value": 471,
+                "floor": 340,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 131,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 2,
+                "floor": 2,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 1,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 176,
+                  "floor": 182,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 471,
+                  "floor": 497,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 1,
+                  "floor": 1,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 100.0,
+              "composite_uncapped": 100.0,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 1484404,
+          "attempt_seed": 1484404,
+          "attempts": 1,
+          "wall_clock_s": 13.17,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              176,
+              457,
+              2,
+              87,
+              21,
+              180,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 176,
+                "floor": 160,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 16,
+                "matches_floor": false
+              },
+              "opp_quad": {
+                "value": 457,
+                "floor": 340,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 117,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 2,
+                "floor": 2,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 4,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 4,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 1,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 2,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 176,
+                  "floor": 182,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 457,
+                  "floor": 497,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 4,
+                  "floor": 2,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 1,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 91.7,
+              "composite_uncapped": 91.7,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        }
+      ]
+    },
+    {
+      "fixture": "24x8_cd2",
+      "shape": [
+        24,
+        8,
+        3,
+        2
+      ],
+      "bars": {
+        "hard_requirements": {
+          "is_valid_paramount": true,
+          "cooldown_score_min": 100.0
+        },
+        "soft_thresholds": {
+          "composite_min": 80.0,
+          "per_criterion_min": 50.0
+        },
+        "notes": ""
+      },
+      "n_seeds": 5,
+      "successful_seeds": 5,
+      "median_composite": 100.0,
+      "composite_range": [
+        91.7,
+        100.0
+      ],
+      "per_criterion_medians": {
+        "cooldown": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "partner": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "opponent": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "surrogate": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "color": {
+          "median": 100.0,
+          "min": 50.0,
+          "max": 100.0
+        },
+        "station": {
+          "median": 100.0,
+          "min": 75.0,
+          "max": 100.0
+        }
+      },
+      "canonical_composite": null,
+      "canonical_gap": null,
+      "verdict": "pass",
+      "reason": "",
+      "hard_failures": [],
+      "soft_warnings": [],
+      "seed_results": [
+        {
+          "seed": 1356600,
+          "attempt_seed": 1356600,
+          "attempts": 1,
+          "wall_clock_s": 17.33,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              192,
+              486,
+              0,
+              2,
+              24,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 192,
+                "floor": 192,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 486,
+                "floor": 312,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 174,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 1,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 4,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 192,
+                  "floor": 192,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 486,
+                  "floor": 502,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 1,
+                  "floor": 1,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 100.0,
+              "composite_uncapped": 100.0,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 1356601,
+          "attempt_seed": 1356601,
+          "attempts": 1,
+          "wall_clock_s": 17.26,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              192,
+              494,
+              0,
+              4,
+              25,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 192,
+                "floor": 192,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 494,
+                "floor": 312,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 182,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 4,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 4,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 1,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 192,
+                  "floor": 192,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 494,
+                  "floor": 502,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 4,
+                  "floor": 2,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 1,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 91.7,
+              "composite_uncapped": 91.7,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 1356602,
+          "attempt_seed": 1356602,
+          "attempts": 1,
+          "wall_clock_s": 17.27,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              192,
+              490,
+              0,
+              2,
+              24,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 192,
+                "floor": 192,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 490,
+                "floor": 312,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 178,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 1,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 4,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 192,
+                  "floor": 192,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 490,
+                  "floor": 502,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 1,
+                  "floor": 1,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 100.0,
+              "composite_uncapped": 100.0,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 1356603,
+          "attempt_seed": 1356603,
+          "attempts": 1,
+          "wall_clock_s": 17.42,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              192,
+              486,
+              0,
+              2,
+              24,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 192,
+                "floor": 192,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 486,
+                "floor": 312,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 174,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 1,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 4,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 192,
+                  "floor": 192,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 486,
+                  "floor": 502,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 1,
+                  "floor": 1,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 100.0,
+              "composite_uncapped": 100.0,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 1356604,
+          "attempt_seed": 1356604,
+          "attempts": 1,
+          "wall_clock_s": 17.28,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              192,
+              470,
+              0,
+              2,
+              25,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 192,
+                "floor": 192,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 470,
+                "floor": 312,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 158,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 1,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 192,
+                  "floor": 192,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 470,
+                  "floor": 502,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 1,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.2,
+              "composite_uncapped": 97.2,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        }
+      ]
+    },
+    {
+      "fixture": "36x7_cd2",
+      "shape": [
+        36,
+        7,
+        3,
+        2
+      ],
+      "bars": {
+        "hard_requirements": {
+          "is_valid_paramount": true,
+          "cooldown_score_min": 100.0
+        },
+        "soft_thresholds": {
+          "composite_min": 85.0,
+          "per_criterion_min": 50.0
+        },
+        "notes": "2026mnst production shape. par_quad floor=252 is achievable; rb/station post-pass weakness drags composite at default iter budget."
+      },
+      "n_seeds": 5,
+      "successful_seeds": 5,
+      "median_composite": 94.4,
+      "composite_range": [
+        91.7,
+        97.2
+      ],
+      "per_criterion_medians": {
+        "cooldown": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "partner": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "opponent": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "surrogate": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "color": {
+          "median": 100.0,
+          "min": 50.0,
+          "max": 100.0
+        },
+        "station": {
+          "median": 75.0,
+          "min": 50.0,
+          "max": 75.0
+        }
+      },
+      "canonical_composite": null,
+      "canonical_gap": null,
+      "verdict": "pass",
+      "reason": "",
+      "hard_failures": [],
+      "soft_warnings": [],
+      "seed_results": [
+        {
+          "seed": 915200,
+          "attempt_seed": 915200,
+          "attempts": 1,
+          "wall_clock_s": 33.52,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              252,
+              418,
+              0,
+              3,
+              45,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 252,
+                "floor": 252,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 418,
+                "floor": 378,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 40,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 3,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 1,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 252,
+                  "floor": 252,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 418,
+                  "floor": 432,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 3,
+                  "floor": 1,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 1,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 91.7,
+              "composite_uncapped": 91.7,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 915201,
+          "attempt_seed": 915201,
+          "attempts": 1,
+          "wall_clock_s": 33.34,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              252,
+              426,
+              0,
+              1,
+              39,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 252,
+                "floor": 252,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 426,
+                "floor": 378,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 48,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 1,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "station_per_team_spread": {
+                "value": 3,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 4,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 252,
+                  "floor": 252,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 426,
+                  "floor": 432,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 1,
+                  "floor": 1,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 3,
+                  "floor": 1,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 94.4,
+              "composite_uncapped": 94.4,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 915202,
+          "attempt_seed": 915202,
+          "attempts": 1,
+          "wall_clock_s": 33.5,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              252,
+              422,
+              0,
+              1,
+              44,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 252,
+                "floor": 252,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 422,
+                "floor": 378,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 44,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 1,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 1,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 4,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 252,
+                  "floor": 252,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 422,
+                  "floor": 432,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 1,
+                  "floor": 1,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 1,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.2,
+              "composite_uncapped": 97.2,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 915203,
+          "attempt_seed": 915203,
+          "attempts": 1,
+          "wall_clock_s": 33.83,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              252,
+              416,
+              0,
+              1,
+              41,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 252,
+                "floor": 252,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 416,
+                "floor": 378,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 38,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 1,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 1,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 4,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 252,
+                  "floor": 252,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 416,
+                  "floor": 432,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 1,
+                  "floor": 1,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 1,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.2,
+              "composite_uncapped": 97.2,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 915204,
+          "attempt_seed": 915204,
+          "attempts": 1,
+          "wall_clock_s": 33.57,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              252,
+              412,
+              0,
+              3,
+              44,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 252,
+                "floor": 252,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 412,
+                "floor": 378,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 34,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 3,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 1,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 1,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 252,
+                  "floor": 252,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 412,
+                  "floor": 432,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 3,
+                  "floor": 1,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 1,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 91.7,
+              "composite_uncapped": 91.7,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        }
+      ]
+    },
+    {
+      "fixture": "60x12_cd2",
+      "shape": [
+        60,
+        12,
+        3,
+        2
+      ],
+      "bars": {
+        "hard_requirements": {
+          "is_valid_paramount": true,
+          "cooldown_score_min": 100.0
+        },
+        "soft_thresholds": {
+          "composite_min": 80.0,
+          "per_criterion_min": 50.0
+        },
+        "notes": "Largest fixture (120 matches). SA-only generation. par_quad routinely hits floor; rb_per_team often above."
+      },
+      "n_seeds": 5,
+      "successful_seeds": 5,
+      "median_composite": 91.7,
+      "composite_range": [
+        88.9,
+        97.2
+      ],
+      "per_criterion_medians": {
+        "cooldown": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "partner": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "opponent": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "surrogate": {
+          "median": 100.0,
+          "min": 100.0,
+          "max": 100.0
+        },
+        "color": {
+          "median": 50.0,
+          "min": 50.0,
+          "max": 100.0
+        },
+        "station": {
+          "median": 75.0,
+          "min": 50.0,
+          "max": 100.0
+        }
+      },
+      "canonical_composite": null,
+      "canonical_gap": null,
+      "verdict": "pass",
+      "reason": "",
+      "hard_failures": [],
+      "soft_warnings": [],
+      "seed_results": [
+        {
+          "seed": 2499600,
+          "attempt_seed": 2499600,
+          "attempts": 1,
+          "wall_clock_s": 83.74,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              720,
+              1250,
+              0,
+              2,
+              80,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 720,
+                "floor": 720,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 1250,
+                "floor": 1080,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 170,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 3,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 3,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 720,
+                  "floor": 720,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 1250,
+                  "floor": 1344,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 3,
+                  "floor": 2,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 97.2,
+              "composite_uncapped": 97.2,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 2499601,
+          "attempt_seed": 2499601,
+          "attempts": 1,
+          "wall_clock_s": 84.37,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              720,
+              1276,
+              0,
+              4,
+              84,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 720,
+                "floor": 720,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 1276,
+                "floor": 1080,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 196,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 4,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 4,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 3,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 3,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 720,
+                  "floor": 720,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 1276,
+                  "floor": 1344,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 4,
+                  "floor": 2,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 3,
+                  "floor": 2,
+                  "score": 75.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 91.7,
+              "composite_uncapped": 91.7,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 2499602,
+          "attempt_seed": 2499602,
+          "attempts": 1,
+          "wall_clock_s": 84.35,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              720,
+              1260,
+              0,
+              4,
+              74,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 720,
+                "floor": 720,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 1260,
+                "floor": 1080,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 180,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 4,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 4,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 4,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 4,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 720,
+                  "floor": 720,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 1260,
+                  "floor": 1344,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 4,
+                  "floor": 2,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 4,
+                  "floor": 2,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 88.9,
+              "composite_uncapped": 88.9,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 2499603,
+          "attempt_seed": 2499603,
+          "attempts": 1,
+          "wall_clock_s": 84.24,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              720,
+              1272,
+              0,
+              4,
+              78,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 720,
+                "floor": 720,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 1272,
+                "floor": 1080,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 192,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 4,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 4,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 2,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 2,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 720,
+                  "floor": 720,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 1272,
+                  "floor": 1344,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 4,
+                  "floor": 2,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 2,
+                  "floor": 2,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 94.4,
+              "composite_uncapped": 94.4,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        },
+        {
+          "seed": 2499604,
+          "attempt_seed": 2499604,
+          "attempts": 1,
+          "wall_clock_s": 84.15,
+          "quality_report": {
+            "achieved_lex_tuple": [
+              0,
+              720,
+              1280,
+              0,
+              4,
+              77,
+              0,
+              0
+            ],
+            "is_valid_paramount": true,
+            "metrics": {
+              "cooldown_violations": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "par_quad": {
+                "value": 720,
+                "floor": 720,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "opp_quad": {
+                "value": 1280,
+                "floor": 1080,
+                "floor_confidence": "proven_lower_bound",
+                "distance_from_floor": 200,
+                "matches_floor": false
+              },
+              "surrogate_count": {
+                "value": 0,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 0,
+                "matches_floor": true
+              },
+              "rb_per_team": {
+                "value": 4,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 4,
+                "matches_floor": false
+              },
+              "station_per_team_spread": {
+                "value": 4,
+                "floor": 0,
+                "floor_confidence": "proven_optimal",
+                "distance_from_floor": 4,
+                "matches_floor": false
+              }
+            },
+            "summary": {
+              "all_proven_floors_matched": false,
+              "n_metrics_at_floor": 3,
+              "n_metrics_total": 6
+            },
+            "scores": {
+              "weights_used": {
+                "cooldown": 1.0,
+                "partner": 1.0,
+                "opponent": 1.0,
+                "surrogate": 0.5,
+                "color": 0.5,
+                "station": 0.5
+              },
+              "per_criterion": {
+                "cooldown": {
+                  "metric": "cooldown_violations",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "binary"
+                },
+                "partner": {
+                  "metric": "par_quad",
+                  "value": 720,
+                  "floor": 720,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "opponent": {
+                  "metric": "opp_quad",
+                  "value": 1280,
+                  "floor": 1344,
+                  "score": 100.0,
+                  "weight": 1.0,
+                  "curve": "quadratic"
+                },
+                "surrogate": {
+                  "metric": "surrogate_count",
+                  "value": 0,
+                  "floor": 0,
+                  "score": 100.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "color": {
+                  "metric": "rb_per_team",
+                  "value": 4,
+                  "floor": 2,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                },
+                "station": {
+                  "metric": "station_per_team_spread",
+                  "value": 4,
+                  "floor": 2,
+                  "score": 50.0,
+                  "weight": 0.5,
+                  "curve": "linear"
+                }
+              },
+              "composite": 88.9,
+              "composite_uncapped": 88.9,
+              "is_valid_paramount": true,
+              "best_known_floors_used": true
+            }
+          },
+          "ok": true
+        }
+      ]
+    }
+  ]
+}

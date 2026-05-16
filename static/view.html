@@ -112,6 +112,157 @@
     .brand-header .logo { width: 44px; height: 44px; font-size: 14px; }
   }
 
+  /* ── Compact view — vertical-density bundle ──────────────────────────
+     A set of rules that recover above-the-fold space on the view page.
+     Two activation paths share the same rules:
+       • @media (max-width: 750px) — phones always get density
+       • html[data-compact="1"] — manual opt-in for wider devices
+         (audience monitors, side-mounted screens, etc.) via the
+         "Compact" button in the toolbar.
+
+     Most of these are mobile-only by design — at desktop widths there's
+     plenty of room and the roomier defaults read better. The opt-in
+     handle lets users override that judgment per-device. Each rule is
+     listed with the audit proposal number that motivated it (see
+     vertical-density-audit.md).
+
+     Listed in source-order with brief rationale; the activation
+     selectors are combined via :is(...) so each rule appears once. */
+
+  /* (#1) Brand header — tighter on phones AND in opt-in compact. The
+     hero band is mostly negative space; shaving 35-40px here is free. */
+  @media (max-width: 750px) {
+    .brand-header { padding: 0.65rem 1rem; margin: 0 -1rem 0.6rem; gap: 0.75rem; }
+    .brand-header h1 { font-size: 17px; }
+    .brand-header .subtitle { font-size: 11px; margin-top: 2px; }
+    .brand-header .logo { width: 36px; height: 36px; font-size: 13px; }
+    .brand-header .logo img { max-width: 36px; max-height: 36px; }
+  }
+  html[data-compact="1"] .brand-header { padding: 0.55rem 1rem; margin: 0 -1rem 0.5rem; gap: 0.85rem; }
+  html[data-compact="1"] .brand-header h1 { font-size: 18px; }
+  html[data-compact="1"] .brand-header .subtitle { font-size: 12px; margin-top: 2px; }
+  html[data-compact="1"] .brand-header .logo { width: 40px; height: 40px; font-size: 14px; }
+  html[data-compact="1"] .brand-header .logo img { max-width: 40px; max-height: 40px; }
+
+  /* (#2) Status section header — hidden on mobile and in compact mode.
+     The "Field view" toggle button it carries moves to the field-status
+     card-label row via a flex order trick below. The horizontal divider
+     and "Status" word together eat ~38px for zero information once the
+     user understands the page. */
+  @media (max-width: 750px) {
+    .status-section-header { display: none; }
+  }
+  html[data-compact="1"] .status-section-header { display: none; }
+  /* When the section header is hidden, move the "Field view" button
+     into the field-status card's label row. The button itself lives
+     inside .status-section-actions in the DOM; absolutely positioning
+     it on top of the card label is brittle, so instead we re-flow the
+     button into the card via JS at boot when compact is active. (See
+     `_relocateFieldViewToggle` in the boot path.) The CSS only adjusts
+     its appearance once it lands in the card label. */
+  .card-label .status-section-actions {
+    margin-left: auto;
+  }
+  .card-label .status-section-actions .btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 11px;
+  }
+
+  /* (#3A) Team-next-section — when no team is selected, the section
+     shows "Enter your team number…" italic placeholder taking ~80px.
+     That's wasted space — the input field above already implies the
+     action. Hide the whole section on mobile / compact when empty. */
+  @media (max-width: 750px) {
+    .team-next-section.empty { display: none; }
+  }
+  html[data-compact="1"] .team-next-section.empty { display: none; }
+
+  /* (#4) Cycle stats — collapse the 2×2 grid into a single horizontal
+     strip. Same data, no value/sub hierarchy. The strip uses tabular
+     numerals so columns align even without grid structure. */
+  @media (max-width: 750px) {
+    .status-cycle-stats {
+      grid-template-columns: 1fr;          /* stack into one row */
+      gap: 0.25rem;
+      padding: 0.35rem 0.55rem;
+      margin-bottom: 0.5rem;
+    }
+    .status-cycle-stats .status-cycle-cell {
+      flex-direction: row;
+      align-items: baseline;
+      gap: 6px;
+    }
+    .status-cycle-stats .status-cycle-cell-label::after { content: ":"; }
+    .status-cycle-stats .status-cycle-cell-value { font-size: 13px; }
+    .status-cycle-stats .status-cycle-cell-sub { font-size: 10px; }
+  }
+  html[data-compact="1"] .status-cycle-stats {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.5rem;
+  }
+  html[data-compact="1"] .status-cycle-stats .status-cycle-cell {
+    flex-direction: row; align-items: baseline; gap: 6px;
+  }
+  html[data-compact="1"] .status-cycle-stats .status-cycle-cell-label::after { content: ":"; }
+
+  /* (#5) Schedule delta box — when the row reads "On time" or near it,
+     the entire 60-80px block is non-actionable noise. Two changes:
+       a) make the box itself shorter in all density modes
+       b) when the box carries the class .delta-ok (added by
+          _renderScheduleDelta when |drift| < 5 min), collapse it to
+          a single tight line. */
+  .status-delta-box {
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+  }
+  .status-delta-box.delta-ok .status-delta-headline { font-size: 13px; }
+  .status-delta-box.delta-ok .status-delta-sub { font-size: 11px; }
+  @media (max-width: 750px) {
+    .status-delta-box { padding: 0.35rem 0.55rem; }
+    .status-delta-box .status-delta-headline { font-size: 14px; }
+    .status-delta-box .status-delta-sub { font-size: 11px; margin-top: 1px; }
+    .status-delta-box.delta-ok .status-delta-headline { font-size: 12px; }
+    .status-delta-box.delta-ok .status-delta-sub { display: none; }
+  }
+  html[data-compact="1"] .status-delta-box { padding: 0.4rem 0.65rem; }
+  html[data-compact="1"] .status-delta-box.delta-ok .status-delta-sub { display: none; }
+
+  /* (#8) Card padding tightening — modest but applies across multiple
+     cards. Mobile/compact only. */
+  @media (max-width: 750px) {
+    .card { padding: 0.45rem 0.7rem; }
+    .card-label { margin-bottom: 0.2rem; font-size: 10px; }
+    .action-grid { gap: 0.6rem; margin-bottom: 0.6rem; }
+    .filter-row { margin-top: 0.4rem; font-size: 12px; }
+  }
+  html[data-compact="1"] .card { padding: 0.5rem 0.75rem; }
+  html[data-compact="1"] .card-label { margin-bottom: 0.25rem; }
+  html[data-compact="1"] .action-grid { gap: 0.7rem; margin-bottom: 0.7rem; }
+
+  /* Status footer links — in mobile/compact, the two links sit closer
+     and use smaller text so the card footer doesn't take its full
+     ~45px chunk. */
+  @media (max-width: 750px) {
+    .status-links { gap: 0.4rem; margin-top: 0.35rem; }
+    .status-links .status-link { padding: 0.25rem 0.55rem; font-size: 11px; }
+  }
+  html[data-compact="1"] .status-links { gap: 0.5rem; }
+  html[data-compact="1"] .status-links .status-link { padding: 0.3rem 0.65rem; font-size: 12px; }
+
+  /* Field status 3-up cells — slightly tighter padding so the card
+     overall shrinks even when 3-up is the dominant content. */
+  @media (max-width: 750px) {
+    .status-three-up { gap: 0.35rem; }
+    .status-stage { padding: 0.35rem 0.45rem; }
+    .status-stage-label { font-size: 10px; }
+    .status-stage-match { font-size: 16px; }
+    .status-stage-meta { font-size: 10px; }
+  }
+  html[data-compact="1"] .status-three-up { gap: 0.45rem; }
+  html[data-compact="1"] .status-stage { padding: 0.4rem 0.55rem; }
+
   /* ── Status section header — sits above the .action-grid and
        names the two-card row as "Status" with the field/linear
        toggle anchored to the right. Lightweight: no wrapper element,
@@ -2692,6 +2843,20 @@
                but unobtrusive. Icon + label flips on toggle. Initial
                state is set by the head-of-document script that runs
                before render to avoid a flash of wrong theme. -->
+          <!-- Compact-view toggle. Density switch — when ON, applies
+               mobile-style tight spacing globally. Useful on audience
+               screens or sideline monitors where the device is wide
+               but vertical real estate is the limit. Phones < 750px
+               wide get the same density automatically via CSS media
+               query, so this toggle is mostly for desktop/tablet
+               opt-in. Persists in localStorage. -->
+          <button class="btn btn-secondary" id="btnCompactToggle"
+                  onclick="toggleCompactView()"
+                  aria-pressed="false"
+                  title="Toggle compact (denser) layout — useful on small screens or audience monitors">
+            <span id="compactIcon">&#x21F5;</span>
+            <span id="compactLabel">Compact</span>
+          </button>
           <button class="btn btn-secondary" id="btnThemeToggle"
                   onclick="toggleTheme()"
                   title="Switch between light and dark theme">
@@ -3057,6 +3222,98 @@ function initCompletedMode() {
   if (sel) sel.value = mode;
 }
 
+// ── Compact view toggle ──────────────────────────────────────────────
+// A user-controlled density switch. When ON, the page applies a
+// bundle of mobile-style space-saving rules globally — useful for
+// audience screens where the device is wide but vertical real estate
+// is constrained (e.g. side-mounted monitor near the field). The
+// same rules ALSO apply automatically on devices under 750px wide
+// via @media query, so phone users get density without opting in.
+//
+// Mechanism: toggling sets html[data-compact="1"]. CSS hooks select
+// either `html[data-compact="1"] ...` (opt-in) or
+// `@media (max-width: 750px) ...` (auto-mobile) for each compact rule.
+//
+// Persisted under frc_view_compact in localStorage so the choice
+// survives reloads — important since this controls layout, not
+// transient state.
+
+var COMPACT_KEY = 'frc_view_compact';
+
+function getCompactView() {
+  try { return localStorage.getItem(COMPACT_KEY) === '1'; } catch(_) { return false; }
+}
+
+function setCompactView(on) {
+  on = !!on;
+  try { localStorage.setItem(COMPACT_KEY, on ? '1' : '0'); } catch(_) {}
+  if (on) document.documentElement.setAttribute('data-compact', '1');
+  else    document.documentElement.removeAttribute('data-compact');
+  // Sync the button label so the user sees their choice reflected.
+  var lab = document.getElementById('compactLabel');
+  if (lab) lab.textContent = on ? 'Roomy' : 'Compact';
+  var btn = document.getElementById('btnCompactToggle');
+  if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
+function toggleCompactView() {
+  setCompactView(!getCompactView());
+}
+
+// Init from localStorage at boot. Safe to call before DOMContentLoaded
+// for the html-attr part (button sync happens once #btnCompactToggle
+// exists; initCompactView is called from boot() to handle that path).
+function initCompactView() {
+  setCompactView(getCompactView());
+  _relocateFieldViewToggle();
+  // Re-evaluate on resize so a rotation/resize crossing the 750px
+  // boundary moves the button to the right home.
+  if (!_relocateFieldViewToggleResizeBound) {
+    _relocateFieldViewToggleResizeBound = true;
+    window.addEventListener('resize', _relocateFieldViewToggle);
+  }
+}
+
+// When the .status-section-header is hidden (mobile or compact mode),
+// the "Field view" toggle button it normally contains becomes
+// inaccessible. We relocate the button into the .field-status-card's
+// .card-label row so it stays one tap away. Restoring the desktop /
+// roomy layout reverses the move.
+//
+// Implementation: we don't actually duplicate the button — moving
+// the same DOM node preserves its event handlers and state. The
+// .status-section-header may be display:none, but its child is still
+// in the document tree and can be re-parented freely.
+var _relocateFieldViewToggleResizeBound = false;
+function _relocateFieldViewToggle() {
+  var btn = document.getElementById('btnFieldViewToggle');
+  if (!btn) return;
+  var srcParent = document.querySelector('.status-section-header .status-section-actions');
+  var dstParent = document.querySelector('.field-status-card .card-label');
+  if (!srcParent || !dstParent) return;
+  // Decide where the button should live: when the section header is
+  // hidden (mobile media query OR compact opt-in), move into card.
+  var isCompact = document.documentElement.getAttribute('data-compact') === '1';
+  var isMobile  = window.matchMedia('(max-width: 750px)').matches;
+  var wantInCard = isCompact || isMobile;
+  // Wrap the button in a .status-section-actions span when in card,
+  // so the existing CSS scope (.card-label .status-section-actions)
+  // applies. Restore to the original parent on the way back.
+  if (wantInCard && btn.parentElement !== _cardLabelActionsWrap(dstParent)) {
+    _cardLabelActionsWrap(dstParent).appendChild(btn);
+  } else if (!wantInCard && btn.parentElement !== srcParent) {
+    srcParent.appendChild(btn);
+  }
+}
+function _cardLabelActionsWrap(cardLabel) {
+  var existing = cardLabel.querySelector(':scope > .status-section-actions');
+  if (existing) return existing;
+  var wrap = document.createElement('span');
+  wrap.className = 'status-section-actions';
+  cardLabel.appendChild(wrap);
+  return wrap;
+}
+
 // ── Selected-team color palette ────────────────────────────────────
 // Six hand-picked colors for distinguishing selected teams on the
 // agenda-fit bars. Order matches selection order in STATE.myTeams,
@@ -3278,6 +3535,14 @@ async function boot() {
   // hooks and syncs the <select> value so the dropdown reflects
   // the persisted choice on first paint.
   initCompletedMode();
+
+  // Initialize the Compact-view toggle from localStorage. Same
+  // pattern as the theme + completed-mode init: applies the
+  // data-compact attribute on <html> and syncs the button label.
+  // CSS hooks under html[data-compact="1"] are independent from the
+  // @media (max-width: 750px) hooks, so phones get density
+  // automatically and wide screens can opt in via this toggle.
+  initCompactView();
 
   // Sync the field/linear view toggle label to the saved preference
   // (frc_field_view_mode in localStorage). The button itself only
@@ -6380,7 +6645,7 @@ function _renderScheduleDelta() {
   }
   box.style.display = '';
   // Reset variant classes
-  box.classList.remove('behind', 'ontime', 'ahead');
+  box.classList.remove('behind', 'ontime', 'ahead', 'delta-ok');
 
   var absMin = Math.abs(d.minutes);
   var headline, variant;
@@ -6395,6 +6660,11 @@ function _renderScheduleDelta() {
     headline = 'Ahead by ' + Math.round(absMin) + ' min';
   }
   box.classList.add(variant);
+  // Compact-mode collapse hook: when drift is small (< 5 min in
+  // either direction), CSS uses the .delta-ok class to drop the
+  // subtitle on mobile / compact view. The headline stays visible
+  // because users still want to see "Behind by 3 min" at a glance.
+  if (absMin < 5.0) box.classList.add('delta-ok');
   headEl.textContent = headline;
 
   // Subtitle: "Q34 finished at 2:23 PM, scheduled 2:11 PM · last cycle 9.2 min (sched 8.0)"

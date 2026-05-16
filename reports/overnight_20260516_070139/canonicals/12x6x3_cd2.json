@@ -1,0 +1,369 @@
+{
+  "n_teams": 12,
+  "matches_per_team": 6,
+  "teams_per_alliance": 3,
+  "cooldown": 2,
+  "confidence": "best_known",
+  "matches": [
+    {
+      "red": [
+        5,
+        8,
+        1
+      ],
+      "blue": [
+        4,
+        9,
+        7
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        6,
+        3,
+        12
+      ],
+      "blue": [
+        10,
+        11,
+        2
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        9,
+        1,
+        4
+      ],
+      "blue": [
+        5,
+        7,
+        8
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        12,
+        10,
+        6
+      ],
+      "blue": [
+        2,
+        3,
+        11
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        4,
+        5,
+        9
+      ],
+      "blue": [
+        7,
+        8,
+        1
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        10,
+        2,
+        3
+      ],
+      "blue": [
+        11,
+        6,
+        12
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        9,
+        7,
+        5
+      ],
+      "blue": [
+        8,
+        1,
+        4
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        12,
+        11,
+        2
+      ],
+      "blue": [
+        6,
+        3,
+        10
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        1,
+        4,
+        7
+      ],
+      "blue": [
+        8,
+        5,
+        9
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        11,
+        12,
+        10
+      ],
+      "blue": [
+        3,
+        2,
+        6
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        7,
+        9,
+        8
+      ],
+      "blue": [
+        1,
+        4,
+        5
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "red": [
+        2,
+        6,
+        11
+      ],
+      "blue": [
+        3,
+        10,
+        12
+      ],
+      "red_surrogate": [
+        false,
+        false,
+        false
+      ],
+      "blue_surrogate": [
+        false,
+        false,
+        false
+      ]
+    }
+  ],
+  "achieved_lex_tuple": [
+    0,
+    192,
+    408,
+    0,
+    32,
+    8,
+    0,
+    0
+  ],
+  "quality_report": {
+    "achieved_lex_tuple": [
+      0,
+      192,
+      408,
+      0,
+      32,
+      8,
+      0,
+      0
+    ],
+    "is_valid_paramount": true,
+    "metrics": {
+      "cooldown_violations": {
+        "value": 0,
+        "floor": 0,
+        "floor_confidence": "proven_optimal",
+        "distance_from_floor": 0,
+        "matches_floor": true
+      },
+      "par_quad": {
+        "value": 192,
+        "floor": 84,
+        "floor_confidence": "proven_lower_bound",
+        "distance_from_floor": 108,
+        "matches_floor": false
+      },
+      "opp_quad": {
+        "value": 408,
+        "floor": 192,
+        "floor_confidence": "proven_lower_bound",
+        "distance_from_floor": 216,
+        "matches_floor": false
+      },
+      "surrogate_count": {
+        "value": 0,
+        "floor": 0,
+        "floor_confidence": "proven_optimal",
+        "distance_from_floor": 0,
+        "matches_floor": true
+      },
+      "rb_per_team": {
+        "value": 2,
+        "floor": 0,
+        "floor_confidence": "proven_optimal",
+        "distance_from_floor": 2,
+        "matches_floor": false
+      },
+      "station_per_team_spread": {
+        "value": 2,
+        "floor": 0,
+        "floor_confidence": "proven_optimal",
+        "distance_from_floor": 2,
+        "matches_floor": false
+      }
+    },
+    "summary": {
+      "all_proven_floors_matched": false,
+      "n_metrics_at_floor": 2,
+      "n_metrics_total": 6
+    }
+  },
+  "provenance": {
+    "method": "sa_best_of_n",
+    "sa_iterations": 2000000,
+    "n_seeds": 20,
+    "successes": 19,
+    "failures": 1,
+    "best_seed": 45838,
+    "wall_clock_s": 337.6,
+    "cpsat_post_pass": {
+      "budget_s": 600.0,
+      "rb_budget_s": 60.0,
+      "station_budget_s": 540.0,
+      "rb_status": "OPTIMAL",
+      "rb_wall_s": 0.009503818,
+      "rb_max_before": 2,
+      "rb_max_after": 2,
+      "station_status": "OPTIMAL",
+      "station_wall_s": 0.050417290000000003,
+      "station_max_before": 2,
+      "station_max_after": 2
+    },
+    "generated_at": "2026-05-16T07:20:24.391968-05:00",
+    "git_commit": "c51cd04"
+  }
+}
