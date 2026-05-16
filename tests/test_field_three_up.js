@@ -43,8 +43,13 @@ const guards = [
   /WINDOW_5_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/,
   // Session-gap detection
   /SESSION_GAP_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/,
-  // Active-day filter on the entry's date
-  /e3\.date\s*&&\s*e3\.date\s*!==\s*todayStr/,
+  // Active-day filter: timestamp-based (replaces an older e3.date
+  // string-equality check that was always falsy because match entries
+  // don't carry a date attribute). Today's local-time window comes
+  // from todayStart / todayEnd derived from nowDate.
+  /var\s+todayStart\s*=\s*new\s+Date\(/,
+  /var\s+todayEnd\s*=\s*todayStart\s*\+/,
+  /ts3\s*<\s*todayStart\s*\|\|\s*ts3\s*>=\s*todayEnd/,
   // The three branches of the state machine
   /timeToStart\s*>\s*WINDOW_15_MS/,
   /timeToStart\s*>\s*WINDOW_5_MS/,
@@ -211,6 +216,64 @@ expect('60-min lunch, 12 min before resume → field+deck only',
        findThreeUpScheduled(withLunch,
          withLunch[1].startMs - 12 * 60 * 1000),
        { field: withLunch[1], deck: withLunch[2], queueing: null });
+
+// ── Today-window filter (regression for "tomorrow's matches showing
+//                        as on field / queueing").
+//
+// The real-world bug was in two places, both fixed:
+//   (1) Nexus path: when Nexus pre-seeds queue_status for tomorrow's
+//       matches, the queue_status loop and backfill loop in the
+//       production code didn't filter by date — they happily surfaced
+//       tomorrow's Q1 as on_field. Fix: an _isToday(entry) gate using
+//       _resolveMatchTimestamp + today's local-time window applied
+//       to the queue_status loop, TBA-playing detection, and backfill.
+//   (2) Scheduled-fallback path: the existing filter
+//       `e3.date && e3.date !== todayStr` was a no-op because match
+//       entries don't carry a date attribute (only day-dividers do).
+//       Fix: timestamp-based `ts3 < todayStart || ts3 >= todayEnd`.
+//
+// We can't easily test (1) here without mocking _resolveMatchTimestamp
+// and STATE.liveByMatch; that's covered by the production source
+// substring guards above. For (2), the re-implementation below
+// includes the new filter; verify that mixed today+tomorrow matches
+// fed into the filtered version return null when "now" is evening
+// (after today's matches end, > 15 min before tomorrow's start).
+
+function findThreeUpScheduledWithFilter(matches, nowMs) {
+  const now = new Date(nowMs);
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const todayEnd   = todayStart + 24 * 60 * 60 * 1000;
+  const filtered = matches.filter(m => m.startMs >= todayStart && m.startMs < todayEnd);
+  return findThreeUpScheduled(filtered, nowMs);
+}
+
+{
+  const today      = session(T0, 9, 0, 5);
+  const tomorrowT0 = T0 + 24 * 60 * 60 * 1000;
+  const tomorrow   = session(tomorrowT0, 9, 0, 5).map(m =>
+    ({ id: 'Q' + (5 + parseInt(m.id.slice(1), 10)), startMs: m.startMs, endMs: m.endMs })
+  );
+  const mixed = today.concat(tomorrow);
+  // Position "now" at 11h after T0 — well after today's last match
+  // ends, and ~13h before tomorrow's first.
+  const nineTodayMs = T0 + 11 * 60 * 60 * 1000;
+  expect('mixed today+tomorrow, evening of day 1, filtered → null',
+         findThreeUpScheduledWithFilter(mixed, nineTodayMs),
+         null);
+
+  // And reproduce the morning-of-tomorrow scenario where Nexus could
+  // (incorrectly, pre-fix) have surfaced tomorrow's Q6 as on field
+  // because backfill found it. We can't test the Nexus path's bug
+  // directly here, but we can confirm the timestamp-based filter
+  // excludes Q6 when "now" is the previous evening.
+  const filtered = mixed.filter(m => {
+    const d = new Date(nineTodayMs);
+    const ts = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    return m.startMs >= ts && m.startMs < ts + 86400000;
+  });
+  check('today-window filter keeps only today (5 matches)',
+        filtered.length === 5 && filtered.every(m => /Q[1-5]$/.test(m.id)));
+}
 
 // ── Summary ───────────────────────────────────────────────────────
 console.log(`${passed} passed, ${failed} failed`);

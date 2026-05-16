@@ -386,6 +386,17 @@
     white-space: normal;
     overflow: visible;
   }
+  /* Tiny "in ~5 min" / "scheduled HH:MM" line under the alliance
+     rosters in scheduled-fallback (muted) mode. Smaller and dimmer
+     than the rosters so the rosters read first; the time is a
+     secondary cue. The data-countdown-to span inside ticks live
+     via the 1Hz walker. */
+  .status-stage-meta-time {
+    margin-top: 2px;
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.2;
+  }
   /* Mobile: stack the 3-up vertically when narrow */
   @media (max-width: 480px) {
     .status-three-up { grid-template-columns: 1fr; }
@@ -5981,6 +5992,23 @@ function _findFieldThreeUp() {
     if (e.type === 'match' && !e.isPractice) byNum[e.matchNum] = e;
   });
 
+  // Today's local-time window. Both the Nexus path (below) and the
+  // scheduled-fallback path (further down) filter candidates to
+  // matches whose resolved timestamp falls in this window. Without
+  // this, Nexus's pre-event seeding of tomorrow's queue_status, or
+  // backfill walking past today's completed quals into tomorrow's
+  // pending ones, can surface "tomorrow's match" as on-field /
+  // queueing — a confusing display for end users.
+  var _nowMsForDay = Date.now();
+  var _nowD = new Date(_nowMsForDay);
+  var _todayStart = new Date(_nowD.getFullYear(), _nowD.getMonth(), _nowD.getDate()).getTime();
+  var _todayEnd   = _todayStart + 24 * 60 * 60 * 1000;
+  function _isToday(entry) {
+    if (!entry) return false;
+    var t = _resolveMatchTimestamp(entry);
+    return t != null && t >= _todayStart && t < _todayEnd;
+  }
+
   var nexusField = null, nexusDeck = null, nexusQueueing = null;
   var anyNexus = false;
   for (var k in (STATE.liveByMatch || {})) {
@@ -5988,6 +6016,11 @@ function _findFieldThreeUp() {
     if (!live || live.comp_level !== 'qm') continue;
     var entry = byNum[live.match_number];
     if (!entry) continue;
+    // Only consider live entries whose match falls on today's date.
+    // Nexus often seeds queue_status for tomorrow's first matches
+    // during pre-event prep; without this gate they'd surface in
+    // today's 3-up.
+    if (!_isToday(entry)) continue;
     var qs = live.queue_status;
     if (!qs) continue;
     anyNexus = true;
@@ -6003,7 +6036,14 @@ function _findFieldThreeUp() {
       var lv = STATE.liveByMatch[kk];
       if (!lv || lv.comp_level !== 'qm') continue;
       if (lv.actual_time && !lv.post_result_time) {
-        if (byNum[lv.match_number]) { nexusField = byNum[lv.match_number]; break; }
+        var lvEntry = byNum[lv.match_number];
+        // Same today gate as the queue_status loop above. TBA's
+        // actual_time is set when the FMS reports the match start —
+        // a match playing right now is by definition today. But a
+        // replay / stale data edge case could theoretically surface
+        // yesterday's match as "still playing"; the gate also
+        // protects against that.
+        if (lvEntry && _isToday(lvEntry)) { nexusField = lvEntry; break; }
       }
     }
   }
@@ -6012,7 +6052,10 @@ function _findFieldThreeUp() {
     // Backfill any missing stage with the next-not-completed scheduled
     // match, so the 3-up always shows three slots when there's any
     // live activity. Walk the schedule in order, skipping completed
-    // and already-claimed entries.
+    // and already-claimed entries. Backfill candidates must also be
+    // today — without the today gate, backfill walks past today's
+    // completed quals into tomorrow's pending ones and surfaces
+    // them as deck / queueing.
     var claimedNums = {};
     [nexusField, nexusDeck, nexusQueueing].forEach(function(x) {
       if (x) claimedNums[x.matchNum] = true;
@@ -6022,6 +6065,7 @@ function _findFieldThreeUp() {
       var e2 = STATE.computed[i2];
       if (e2.type !== 'match' || e2.isPractice) continue;
       if (claimedNums[e2.matchNum]) continue;
+      if (!_isToday(e2)) continue;                   // today gate
       var l2 = STATE.liveByMatch[e2.matchNum];
       if (l2 && l2.post_result_time) continue;       // skip completed
       fillCandidates.push(e2);
@@ -6069,15 +6113,30 @@ function _findFieldThreeUp() {
   var WINDOW_5_MS     =  5 * 60 * 1000;
   var SESSION_GAP_MS  =  5 * 60 * 1000;  // ≤5 min gap = same session
 
+  // Today's local-time bounds (midnight to midnight). Used to filter
+  // matches by *resolved timestamp*, not by an `e.date` attribute —
+  // match entries don't carry a date attribute (only day-dividers do),
+  // so the previous `if (e3.date && e3.date !== todayStr) continue`
+  // was no-op for match entries and let tomorrow's matches into the
+  // 3-up. _resolveMatchTimestamp does carry the right date via the
+  // schedule's day_config + event.start_date plumbing, so anchoring
+  // on the timestamp is the correct way to ask "is this match today".
+  var todayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+  var todayEnd   = todayStart + 24 * 60 * 60 * 1000;
+
   // Build today's full match list (past + current + future) sorted
   // by start time. Need past matches to detect session continuity.
   var todayMatches = [];
   for (var i3 = 0; i3 < STATE.computed.length; i3++) {
     var e3 = STATE.computed[i3];
     if (e3.type !== 'match') continue;
-    if (e3.date && e3.date !== todayStr) continue;
     var ts3 = _resolveMatchTimestamp(e3);
     if (ts3 == null) continue;  // need timestamps to reason about timing
+    // Anchor: timestamp must fall within today's local-time window.
+    // This replaces the previous `e3.date` check (which never fired
+    // because match entries don't have a date attribute) and correctly
+    // excludes tomorrow's matches from the 3-up.
+    if (ts3 < todayStart || ts3 >= todayEnd) continue;
     todayMatches.push({ entry: e3, startMs: ts3 });
   }
   if (!todayMatches.length) {
@@ -6213,11 +6272,20 @@ function _renderFieldThreeUp() {
       // Meta line: prefer the alliance-line layout (tinted blue +
       // red blocks, station numbers, selected-team highlights) when
       // the entry has full rosters. Falls back to a planned-time
-      // hint when only schedule data is available. Compact mode
-      // stacks the two alliance blocks vertically since the 3-up
-      // cells are ~110px wide each.
+      // hint only when rosters are missing — entries that come from
+      // STATE.computed always have rosters, so this fallback is rare
+      // (only triggers if the scheduled-fallback path somehow yields
+      // an entry without complete red/blue arrays).
+      //
+      // Why we render rosters even in `muted` (scheduled-source) mode:
+      // the rosters are valuable context (who's playing soon) and the
+      // entry already has the data. The .muted class on stageEl
+      // continues to dim the whole cell visually, which is the right
+      // signal for "this is from schedule, not from live queue data".
+      // Hiding the rosters in that mode left users with just a
+      // countdown and no team context — fixed.
       var meta = '';
-      if (!muted && s.match.red && s.match.blue && s.match.red.length === 3) {
+      if (s.match.red && s.match.blue && s.match.red.length === 3) {
         // Layout mode picks which alliance HTML helper to use:
         //   field  → rotated top-down field view (vertical stacks,
         //            scoring-table line at bottom)
@@ -6226,6 +6294,26 @@ function _renderFieldThreeUp() {
           meta = _buildAllianceFieldHtml(s.match, { compact: true });
         } else {
           meta = _buildAllianceLineHtml(s.match, { compact: true });
+        }
+        // When the entry is from the scheduled-fallback path (muted),
+        // also show a small countdown line beneath the rosters so the
+        // audience has timing context. Nexus-source entries get this
+        // from queue_status meta elsewhere; scheduled needs an
+        // explicit hint.
+        if (muted) {
+          var tsM = _resolveMatchTimestamp(s.match);
+          if (tsM != null) {
+            var relM = tsM - Date.now();
+            if (relM > 0 && relM < 60 * 60 * 1000) {
+              meta += '<div class="status-stage-meta-time"><em>'
+                    + '<span data-countdown-to="' + tsM
+                    + '" data-countdown-format="tilde">'
+                    + _formatCountdownTilde(relM) + '</span></em></div>';
+            } else if (relM > 0) {
+              meta += '<div class="status-stage-meta-time"><em>scheduled '
+                    + _formatTimeOnly(tsM) + '</em></div>';
+            }
+          }
         }
       } else {
         var ts = _resolveMatchTimestamp(s.match);
