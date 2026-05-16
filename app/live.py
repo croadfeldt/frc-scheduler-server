@@ -165,16 +165,28 @@ async def _upsert_matches(db: AsyncSession, event_id: int, tba_matches: list[dic
             )
             db.add(row)
 
-        row.actual_time      = m.get("actual_time")
-        row.predicted_time   = m.get("predicted_time")
-        row.post_result_time = m.get("post_result_time")
+        # Field-by-field merge: only OVERWRITE when the incoming value
+        # is non-null. Without this guard, a TBA payload that returned
+        # the same matches with actual_time / post_result_time / scores
+        # stripped (TBA hiccup, partial sync, FMS upload lag) would
+        # clobber data that we'd previously stored. Symptom in the
+        # wild: completed-row stats (cycle, margin, drift, "N ago")
+        # vanish on a page refresh because the refresh triggers a TBA
+        # pull that returns blanks. Once a value is set, we keep it
+        # unless a non-null replacement arrives. Team rosters are
+        # special-cased: ALWAYS overwrite (even with empty lists)
+        # because alliance shuffles between matches are legitimate
+        # data, not gaps in reporting.
+        if m.get("actual_time")      is not None: row.actual_time      = m.get("actual_time")
+        if m.get("predicted_time")   is not None: row.predicted_time   = m.get("predicted_time")
+        if m.get("post_result_time") is not None: row.post_result_time = m.get("post_result_time")
         row.red_teams        = red_teams
         row.blue_teams       = blue_teams
-        row.red_score        = rs
-        row.blue_score       = bs
-        row.winning_alliance = winning
-        row.score_breakdown  = m.get("score_breakdown")
-        row.videos           = m.get("videos") or []
+        if rs               is not None: row.red_score        = rs
+        if bs               is not None: row.blue_score       = bs
+        if winning          is not None: row.winning_alliance = winning
+        if m.get("score_breakdown") is not None: row.score_breakdown = m.get("score_breakdown")
+        row.videos           = m.get("videos") or row.videos or []
         row.fetched_at       = datetime.now(timezone.utc)
         count += 1
 
