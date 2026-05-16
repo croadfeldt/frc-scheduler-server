@@ -55,3 +55,24 @@
 [16:41:23]   Building new canonical: 61×7 cd=2 → reports/overnight_20260515_091412/canonicals/new_61x7_cd2.log
 [18:11:48]   ✓ 61x7 cd=2  elapsed=5425s
 [18:11:48]   Building new canonical: 61×8 cd=2 → reports/overnight_20260515_091412/canonicals/new_61x8_cd2.log
+[19:46:24]   ✓ 61x8 cd=2  elapsed=5676s
+[19:46:24] ─── DONE  Job 4  5/5 succeeded  elapsed=419m ───
+[19:46:24] 
+[19:46:24] ═══════════════════════════════════════════════════════════════
+[19:46:24] Overnight run complete. Output dir: reports/overnight_20260515_091412
+[19:46:24] 
+[19:46:24] Artifacts of interest:
+[19:46:24]   Master log:   reports/overnight_20260515_091412/overnight.log
+[19:46:24]   Standards:    reports/overnight_20260515_091412/standards/
+[19:46:24]   MM compare:   reports/overnight_20260515_091412/matchmaker/
+[19:46:24]   Canonicals:   reports/overnight_20260515_091412/canonicals/
+[19:46:24] 
+[19:46:24] Review steps when you return:
+[19:46:24]   1. cat reports/overnight_20260515_091412/overnight.log
+[19:46:24]   2. Compare existing canonicals (Job 3 output) to current app/:
+[19:46:24]        diff -q app/canonical_schedules/ reports/overnight_20260515_091412/canonicals/
+[19:46:24]   3. Inspect new canonicals (Job 4 output):
+[19:46:24]        ls -la reports/overnight_20260515_091412/canonicals/new_*.json
+[19:46:24]   4. If new canonicals look good, copy them into app/ and commit.
+[19:46:24] ═══════════════════════════════════════════════════════════════
+[19:46:24] OVERALL: SUCCESS

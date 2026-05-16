@@ -1704,7 +1704,146 @@
     html:not([data-theme]) .queue-on_deck       { background: rgba(102,187,106,0.20); color: #8fd896; border-color: rgba(102,187,106,0.55); }
   }
 
-  /* Completed match: replace 6 team cells with two big score blocks */
+  /* ────────────────────────────────────────────────────────────────
+     Completed rows — three layout modes selectable via the toolbar
+     "Completed look" dropdown. The dropdown writes
+     html[data-completed-mode="a"|"b"|"c"] (default c) which CSS
+     hooks below; the rerender also emits per-mode DOM so layouts A
+     and B can use their own structure.
+
+       Mode A — two-row unit: score row + dedicated stats strip below
+       Mode B — single conceptual row: team list + score-and-stats row
+       Mode C — score block with a stats strip beneath (default)
+
+     All three share a common "more obvious greyed-out" base treatment
+     so completed matches read as DONE from across the room, not just
+     a barely-tinted alpha-0.04 like the prior production styling.
+     The result-red / result-blue / result-tie alpha sits on top of
+     the base grey. */
+
+  /* Common: stronger grey base + tints. result-tie no longer needed
+     in the prior alpha-0.04 form — supersede with alpha-0.10. */
+  tr.completed                { background: #eaecef !important; }
+  tr.completed.result-blue    { background: rgba(9,105,218,0.10) !important; }
+  tr.completed.result-red     { background: rgba(209,36,47,0.10) !important; }
+  tr.completed.result-tie     { background: rgba(150,150,150,0.10) !important; }
+  tr.completed-stats          { background: inherit; }
+  tr.completed-stats.result-blue { background: rgba(9,105,218,0.10) !important; }
+  tr.completed-stats.result-red  { background: rgba(209,36,47,0.10) !important; }
+  tr.completed-stats.result-tie  { background: rgba(150,150,150,0.10) !important; }
+  /* Dark mode — slightly different alpha so the row reads as muted
+     against the dark surface rather than washing into the background. */
+  html[data-theme="dark"] tr.completed             { background: rgba(255,255,255,0.04) !important; }
+  html[data-theme="dark"] tr.completed.result-blue { background: rgba(88,166,255,0.14) !important; }
+  html[data-theme="dark"] tr.completed.result-red  { background: rgba(248,81,73,0.14) !important; }
+  html[data-theme="dark"] tr.completed.result-tie  { background: rgba(180,180,180,0.10) !important; }
+  html[data-theme="dark"] tr.completed-stats.result-blue { background: rgba(88,166,255,0.14) !important; }
+  html[data-theme="dark"] tr.completed-stats.result-red  { background: rgba(248,81,73,0.14) !important; }
+  html[data-theme="dark"] tr.completed-stats.result-tie  { background: rgba(180,180,180,0.10) !important; }
+  /* Visually join the score row and the stats strip: drop the bottom
+     border of the score row when a stats strip follows. */
+  tr.completed.has-stats-strip td { border-bottom: none; }
+  tr.completed .col-time .actual-time { color: var(--text-muted); }
+  tr.completed .col-time .playing-time { color: var(--next-match-accent); font-weight: 700; }
+  tr.completed .col-match { color: var(--text-muted); }
+
+  /* Tiny green check after the match number on completed rows.
+     Reinforces "done" with a recognizable symbol. */
+  tr.completed .completed-check {
+    color: var(--secondary);
+    margin-left: 4px;
+    font-weight: 700;
+  }
+
+  /* ── Stats strip (used by modes A and C; mode B uses inline tags) ── */
+  tr.completed-stats td {
+    padding: 0.2rem 0.75rem 0.45rem 0.75rem;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .completed-stat-strip {
+    display: flex; gap: 0.5rem 1rem; flex-wrap: wrap; align-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .completed-stat-strip .stat-item {
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .completed-stat-strip .stat-label {
+    color: var(--text-muted);
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    font-size: 10px;
+  }
+  .completed-stat-strip .stat-value { font-weight: 600; color: var(--text); }
+  .completed-stat-strip .stat-value.muted { color: var(--text-muted); font-weight: 500; }
+  .completed-stat-strip .stat-arrow-up   { color: #d97706; }
+  .completed-stat-strip .stat-arrow-down { color: var(--secondary); }
+  .completed-stat-strip .stat-divider    { color: var(--border); }
+  .completed-stat-strip .margin-tag {
+    padding: 1px 6px; border-radius: 3px; font-weight: 700;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .completed-stat-strip .margin-tag.blue { background: rgba(9,105,218,0.12); color: var(--blue-alliance); }
+  .completed-stat-strip .margin-tag.red  { background: rgba(209,36,47,0.12); color: var(--red-alliance); }
+  .completed-stat-strip .margin-tag.tie  { background: rgba(150,150,150,0.18); color: var(--text-muted); }
+  html[data-theme="dark"] .completed-stat-strip .margin-tag.blue { background: rgba(88,166,255,0.20); }
+  html[data-theme="dark"] .completed-stat-strip .margin-tag.red  { background: rgba(248,81,73,0.20); }
+
+  /* Mode-A specifics: larger stat strip text, more vertical breathing
+     room. Same DOM as mode C, just sizing nudges so an audience seeing
+     the page on a projector can read it from across the room.
+     Triggered by html[data-completed-mode="a"]. */
+  html[data-completed-mode="a"] tr.completed-stats td {
+    padding: 0.5rem 0.75rem 0.6rem 0.75rem;
+    font-size: 12px;
+  }
+  html[data-completed-mode="a"] .completed-stat-strip { gap: 0.6rem 1.4rem; }
+  html[data-completed-mode="a"] .completed-stat-strip .stat-label { font-size: 11px; }
+  html[data-completed-mode="a"] .completed-stat-strip .stat-value { font-size: 13px; }
+  html[data-completed-mode="a"] .completed-stat-strip .margin-tag {
+    font-size: 11px; padding: 2px 8px;
+  }
+  /* Mode-C — same DOM as A but compact (default) — explicit baseline
+     overrides nothing here, just documenting that the unprefixed
+     .completed-stat-strip rules above are the mode-C defaults. */
+
+  /* ── Mode B specifics: inline stat tags on the team-list row ── */
+  /* In mode B, the team list takes a single row with team numbers,
+     then a second row carries score + inline stat tags. Team row
+     uses muted colors since the action has moved to the stats row. */
+  tr.completed.mode-b .alliance-teams-row {
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  tr.completed.mode-b .alliance-teams-row.blue { color: var(--blue-alliance); opacity: 0.85; }
+  tr.completed.mode-b .alliance-teams-row.red  { color: var(--red-alliance);  opacity: 0.85; }
+  tr.completed.mode-b .b-score-cell {
+    font-size: 16px; font-weight: 700;
+    padding: 0.4rem 0.5rem;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+    text-align: right;
+  }
+  tr.completed.mode-b .b-score-cell .s-blue { color: var(--blue-alliance); }
+  tr.completed.mode-b .b-score-cell .s-red  { color: var(--red-alliance); }
+  tr.completed.mode-b .b-score-cell .winner-side {
+    text-decoration: underline; text-decoration-thickness: 2px;
+  }
+  tr.completed.mode-b .b-score-cell .dash {
+    color: var(--text-muted); margin: 0 0.25rem;
+  }
+  tr.completed.mode-b .b-inline-stats {
+    display: inline-flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;
+    font-size: 11px; font-weight: 500; color: var(--text-muted);
+    margin-left: 0.5rem;
+  }
+  tr.completed.mode-b .b-inline-stats .stat-tag {
+    background: rgba(0,0,0,0.04);
+    padding: 1px 6px; border-radius: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  html[data-theme="dark"] tr.completed.mode-b .b-inline-stats .stat-tag { background: rgba(255,255,255,0.06); }
+
+  /* Original score-block styling preserved for modes A and C. */
   .score-block {
     padding: 0.4rem 0.75rem !important; vertical-align: middle;
     font-variant-numeric: tabular-nums;
@@ -1721,6 +1860,11 @@
     background: var(--secondary); color: #fff; font-size: 10px;
     font-weight: 700; border-radius: 3px;
   }
+  /* Alliance-score color in modes A and C — uses the per-alliance
+     accent color so the score reads as red/blue at a glance. The
+     winner gets a slightly larger size as before. */
+  tr.completed .col-blue.score-block .alliance-score { color: var(--blue-alliance); }
+  tr.completed .col-red.score-block  .alliance-score { color: var(--red-alliance); }
 
   /* Now-playing: more obvious pulse */
   tr.now-playing { background: rgba(251,133,0,0.10) !important; box-shadow: inset 4px 0 0 var(--next-match-accent); }
@@ -1729,14 +1873,37 @@
     animation: pulse-dot 1s infinite;
   }
 
-  /* Win/loss tinting on completed rows (subtle, doesn't overpower score block) */
-  tr.completed.result-red { background: rgba(209,36,47,0.04); }
-  tr.completed.result-blue { background: rgba(9,105,218,0.04); }
-  tr.completed.result-tie  { background: rgba(150,150,150,0.04); }
-  tr.completed.alt.result-red  { background: rgba(209,36,47,0.07); }
-  tr.completed.alt.result-blue { background: rgba(9,105,218,0.07); }
-  tr.completed .col-time .actual-time { color: var(--text-muted); }
-  tr.completed .col-time .playing-time { color: var(--next-match-accent); font-weight: 700; }
+  /* Print rules: in print, force mode C (compact score + stats) so
+     the page is dense enough to fit. Hides nothing — the stats are
+     useful in the printed reference. */
+  @media print {
+    .completed-mode-control { display: none !important; }
+  }
+
+  /* Completed-look dropdown in the table-header toolbar. Matches the
+     visual weight of the adjacent .btn-secondary buttons so the
+     control row reads as one cohesive group. */
+  .completed-mode-control {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-size: 12px; color: var(--text-muted);
+    padding: 0 0.25rem;
+  }
+  .completed-mode-control .completed-mode-label {
+    text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
+  }
+  .completed-mode-control select {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 6px; font-size: 12px;
+    font-family: inherit; cursor: pointer;
+  }
+  .completed-mode-control select:hover { background: var(--bg-alt); }
+  /* On narrower viewports, keep the dropdown but hide the "Completed:"
+     prefix label to save horizontal space. The dropdown's option
+     text ("C · Compact", etc.) is self-describing. */
+  @media (max-width: 640px) {
+    .completed-mode-control .completed-mode-label { display: none; }
+  }
 
   /* Alliance roster — two-row Blue/Red display in the next-match
      card. Each row shows three station cells (1/2/3) with the
@@ -2506,6 +2673,20 @@
              row as the table title. Auto-hides on print via no-print
              class. flex:1 spacer pushes Share to the right edge. -->
         <span class="match-table-actions no-print">
+          <!-- Completed-row layout selector — three modes, persisted
+               in localStorage. Default 'c' = compact score block
+               with a stats strip beneath. The dropdown writes
+               html[data-completed-mode] which CSS uses to switch
+               layout, and triggers rerender() so the per-mode DOM
+               emission picks up the change. -->
+          <label class="completed-mode-control" title="How completed matches are displayed">
+            <span class="completed-mode-label">Completed:</span>
+            <select id="completedModeSel" onchange="setCompletedMode(this.value)">
+              <option value="c">C · Compact (default)</option>
+              <option value="a">A · Two-row stats</option>
+              <option value="b">B · Inline tags</option>
+            </select>
+          </label>
           <!-- Day/night theme toggle. Default light; persists per-user
                in localStorage. Inline in the toolbar so it's discoverable
                but unobtrusive. Icon + label flips on toggle. Initial
@@ -2820,6 +3001,62 @@ function syncThemeButton() {
   }
 }
 
+// ── Completed-row layout mode ──────────────────────────────────────
+//
+// Three modes selectable via the toolbar dropdown, persisted in
+// localStorage so the audience's preference survives page reloads:
+//
+//   c — Compact (default). Original score block on one row; small
+//       stats strip beneath with margin · cycle · drift · "N ago".
+//   a — Two-row stats. Score row keeps the score block; below it
+//       sits a fuller stats strip with bigger labels. Highest
+//       readability for an audience screen.
+//   b — Inline tags. Team list on one row, score+stat-tags on a
+//       second row. Most compact while still showing every stat.
+//
+// Mode picks both CSS (via html[data-completed-mode]) and DOM
+// emission (the renderTable code branches on the mode for modes
+// A and B which restructure the row content).
+
+var COMPLETED_MODE_KEY = 'frc_view_completed_mode';
+var COMPLETED_MODE_DEFAULT = 'c';
+var COMPLETED_MODE_VALID = { a: 1, b: 1, c: 1 };
+
+// Read the current mode (one of 'a' / 'b' / 'c'). Falls back to the
+// default on missing or invalid storage. Pure function — no side
+// effects so callers can use it during render without worrying.
+function getCompletedMode() {
+  var m = null;
+  try { m = localStorage.getItem(COMPLETED_MODE_KEY); } catch(_) {}
+  if (m && COMPLETED_MODE_VALID[m]) return m;
+  return COMPLETED_MODE_DEFAULT;
+}
+
+// Persist + apply a mode. Called from the dropdown's onchange.
+// Triggers a rerender since modes A and B emit different DOM
+// (mode C is reachable via CSS-only swap from the others, but a
+// rerender is the simplest path that handles every direction).
+function setCompletedMode(mode) {
+  if (!COMPLETED_MODE_VALID[mode]) mode = COMPLETED_MODE_DEFAULT;
+  try { localStorage.setItem(COMPLETED_MODE_KEY, mode); } catch(_) {}
+  document.documentElement.setAttribute('data-completed-mode', mode);
+  // Sync the select control if the change came from elsewhere.
+  var sel = document.getElementById('completedModeSel');
+  if (sel && sel.value !== mode) sel.value = mode;
+  // Re-render the table so per-mode DOM emission picks up the
+  // change. rerender() is idempotent and cheap.
+  if (typeof rerender === 'function') rerender();
+}
+
+// Initialize from localStorage on page load. Called once from the
+// boot-time init flow alongside syncThemeButton.
+function initCompletedMode() {
+  var mode = getCompletedMode();
+  document.documentElement.setAttribute('data-completed-mode', mode);
+  var sel = document.getElementById('completedModeSel');
+  if (sel) sel.value = mode;
+}
+
 // ── Selected-team color palette ────────────────────────────────────
 // Six hand-picked colors for distinguishing selected teams on the
 // agenda-fit bars. Order matches selection order in STATE.myTeams,
@@ -3035,6 +3272,12 @@ async function boot() {
   // theme. (The actual theme was applied in the head script before
   // first paint to avoid flash.)
   syncThemeButton();
+
+  // Initialize the Completed-row layout dropdown from localStorage.
+  // Applies the data-completed-mode attribute on <html> for CSS
+  // hooks and syncs the <select> value so the dropdown reflects
+  // the persisted choice on first paint.
+  initCompletedMode();
 
   // Sync the field/linear view toggle label to the saved preference
   // (frc_field_view_mode in localStorage). The button itself only
@@ -4424,28 +4667,224 @@ function rerender() {
         matchCell += ' <span class="' + pillCls + '">' + formatQueueStatus(queue.status) + '</span>';
       }
 
-      // Score row — when completed, replace the alliance cells with score blocks
+      // Score row — when completed, layout depends on the user's
+      // selected mode (toolbar dropdown). All three modes share:
+      //   - the stronger grey-out (.completed class on the row +
+      //     base CSS bg #eaecef with result-tint on top)
+      //   - the same stats (margin, cycle, drift, "N ago") — they
+      //     just sit in different places.
+      //
+      //   c → score block + small stats strip beneath (default).
+      //       Two TRs per completed match (.completed + .completed-stats),
+      //       so a single body CSS rule could hide the strip if
+      //       needed.
+      //   a → same score block but a fuller stats strip beneath
+      //       with bigger labels (better for projector / audience
+      //       view).
+      //   b → team-list row + score-and-tags row. Two TRs per
+      //       completed match (.completed.mode-b for both).
       if (status === 'completed') {
         const r = live.red_score, b = live.blue_score;
         const winRed  = live.winning_alliance === 'red';
         const winBlue = live.winning_alliance === 'blue';
-        // Render team list with pipe separators inside score block
         const blueTeams = entry.blue.join(' · ');
         const redTeams  = entry.red.join(' · ');
-        html += '<tr class="' + cls.join(' ') + '"' + rowStyle + '>' +
-                '<td class="col-time">' + timeCell + '</td>' +
-                '<td class="col-match">' + matchCell + '</td>' +
-                '<td colspan="3" class="col-blue score-block' + (winBlue ? ' winner' : '') + '">' +
-                '  <span class="alliance-score">' + (b ?? '—') + '</span>' +
-                '  <span class="alliance-teams">' + escapeHtml(blueTeams) + '</span>' +
-                '  ' + (winBlue ? '<span class="winner-badge">W</span>' : '') +
-                '</td>' +
-                '<td colspan="3" class="col-red score-block' + (winRed ? ' winner' : '') + '">' +
-                '  <span class="alliance-score">' + (r ?? '—') + '</span>' +
-                '  <span class="alliance-teams">' + escapeHtml(redTeams) + '</span>' +
-                '  ' + (winRed ? '<span class="winner-badge">W</span>' : '') +
-                '</td>' +
-                '</tr>';
+        var _mode = getCompletedMode();
+
+        // ── Build the stats payload once; modes consume it ──
+        // Score margin: +N for the winning alliance, blank on tie or
+        // when scores are missing (live data sometimes lags).
+        var _marginHtml = '';
+        if (r != null && b != null) {
+          var diff = Math.abs(b - r);
+          if (diff === 0) {
+            _marginHtml = '<span class="margin-tag tie">TIE</span>';
+          } else if (winBlue) {
+            _marginHtml = '<span class="margin-tag blue">Blue +' + diff + '</span>';
+          } else if (winRed) {
+            _marginHtml = '<span class="margin-tag red">Red +' + diff + '</span>';
+          }
+        }
+        // Cycle — use the per-match map built earlier in renderTable.
+        // Skip first-of-event, replays, and post-break (those aren't
+        // operational cycles).
+        var _cycleHtml = '';
+        var _cyc = _perMatchCycles[entry.matchNum];
+        if (_cyc && !_cyc.isReplay && !_cyc.isBreak && !entry.isPractice) {
+          var _cyMin = _cyc.cycleMin;
+          var _cyDelta = _cyc.deltaVsMeanMin;
+          var _cyArrow = '';
+          var _cyCls = '';
+          if (_cyDelta < -0.5)      { _cyArrow = '\u25BC'; _cyCls = 'stat-arrow-down'; }
+          else if (_cyDelta > 0.5)  { _cyArrow = '\u25B2'; _cyCls = 'stat-arrow-up'; }
+          var _cyDeltaLbl = (_cyDelta >= 0 ? '+' : '') + _fmtMSS(_cyDelta);
+          _cycleHtml =
+            '<span class="stat-item">' +
+              '<span class="stat-label">Cycle</span>' +
+              '<span class="stat-value">' + _fmtMSS(_cyMin) + '</span>' +
+              (_cyArrow ? '<span class="' + _cyCls + '">' + _cyArrow + '</span>' : '') +
+              '<span class="stat-value muted">' + _cyDeltaLbl + '</span>' +
+            '</span>';
+        }
+        // Drift — schedule-clock vs actual_time, in minutes. Practice
+        // matches don't have live data so they don't get a drift stat;
+        // quals do.
+        var _driftHtml = '';
+        if (!entry.isPractice && live.actual_time) {
+          var _dr = matchDriftMinutes(entry.matchNum, entry.startMin);
+          if (_dr != null) {
+            var _drRounded = Math.round(_dr);
+            var _drLabel = _drRounded === 0 ? 'on time'
+                          : (_drRounded > 0 ? '+' + _drRounded + ' min late'
+                                            : _drRounded + ' min early');
+            _driftHtml =
+              '<span class="stat-item">' +
+                '<span class="stat-label">Drift</span>' +
+                '<span class="stat-value">' + _drLabel + '</span>' +
+              '</span>';
+          }
+        }
+        // "Played N ago" — coarse relative time from actual_time to now.
+        // Updates only on rerender; live ticker would require yet
+        // another data-attribute span, and "2h 14m ago" doesn't need
+        // sub-minute precision.
+        var _agoHtml = '';
+        if (live.actual_time) {
+          var _agoSec = Math.max(0, (Date.now() / 1000) - live.actual_time);
+          var _agoLbl;
+          if (_agoSec < 60)               _agoLbl = '<1 min ago';
+          else if (_agoSec < 60 * 60)     _agoLbl = Math.round(_agoSec / 60) + ' min ago';
+          else if (_agoSec < 24 * 60 * 60) {
+            var _h = Math.floor(_agoSec / 3600);
+            var _m = Math.round((_agoSec - _h * 3600) / 60);
+            _agoLbl = _h + 'h' + (_m > 0 ? ' ' + _m + 'm' : '') + ' ago';
+          } else {
+            _agoLbl = Math.floor(_agoSec / 86400) + 'd ago';
+          }
+          _agoHtml =
+            '<span class="stat-item">' +
+              '<span class="stat-label">Played</span>' +
+              '<span class="stat-value muted">' + _agoLbl + '</span>' +
+            '</span>';
+        }
+
+        // Compose the stats strip (modes A and C). The bits are
+        // joined by middle-dot dividers so the strip reads as a
+        // single line of facts even when one piece is missing.
+        function _composeStrip() {
+          var parts = [];
+          if (_marginHtml) parts.push(_marginHtml);
+          if (_cycleHtml)  parts.push(_cycleHtml);
+          if (_driftHtml)  parts.push(_driftHtml);
+          if (_agoHtml)    parts.push(_agoHtml);
+          if (!parts.length) return '';
+          return '<div class="completed-stat-strip">' +
+                 parts.join('<span class="stat-divider">\u00b7</span>') +
+                 '</div>';
+        }
+
+        // Result class for the stats-row tint (needs to match the
+        // score row so the grey extends across both).
+        var _resultCls = live.winning_alliance
+                       ? ('result-' + live.winning_alliance) : '';
+
+        var _matchCellWithCheck = matchCell + '<span class="completed-check">\u2713</span>';
+
+        if (_mode === 'b') {
+          // ── Mode B: team list on row 1, score+tags on row 2 ──
+          // Both rows carry the .completed.mode-b base + the result
+          // tint so the greyed background covers both visually.
+          var _tagsHtml = '';
+          if (_marginHtml || _cycleHtml || _driftHtml || _agoHtml) {
+            var tagParts = [];
+            if (_marginHtml) {
+              // The margin-tag from _marginHtml uses .margin-tag.blue
+              // etc. — re-use directly inside the b-inline-stats wrapper.
+              tagParts.push(_marginHtml);
+            }
+            // Cycle as a compact tag
+            if (_cyc && !_cyc.isReplay && !_cyc.isBreak && !entry.isPractice) {
+              var _cArrow = '';
+              if (_cyc.deltaVsMeanMin < -0.5) _cArrow = ' <span class="stat-arrow-down">\u25BC</span>';
+              else if (_cyc.deltaVsMeanMin > 0.5) _cArrow = ' <span class="stat-arrow-up">\u25B2</span>';
+              var _cDeltaLbl = (_cyc.deltaVsMeanMin >= 0 ? '+' : '') + _fmtMSS(_cyc.deltaVsMeanMin);
+              tagParts.push('<span class="stat-tag">Cycle ' + _fmtMSS(_cyc.cycleMin) + _cArrow + ' ' + _cDeltaLbl + '</span>');
+            }
+            if (!entry.isPractice && live.actual_time) {
+              var _drB = matchDriftMinutes(entry.matchNum, entry.startMin);
+              if (_drB != null) {
+                var _drBR = Math.round(_drB);
+                var _drBL = _drBR === 0 ? 'on time' : (_drBR > 0 ? '+' + _drBR + 'm late' : _drBR + 'm early');
+                tagParts.push('<span class="stat-tag">Drift ' + _drBL + '</span>');
+              }
+            }
+            if (live.actual_time) {
+              var _agoSecB = Math.max(0, (Date.now() / 1000) - live.actual_time);
+              var _agoLblB;
+              if (_agoSecB < 60)               _agoLblB = '<1m ago';
+              else if (_agoSecB < 60 * 60)     _agoLblB = Math.round(_agoSecB / 60) + 'm ago';
+              else if (_agoSecB < 24 * 60 * 60) {
+                var _hB = Math.floor(_agoSecB / 3600);
+                var _mB = Math.round((_agoSecB - _hB * 3600) / 60);
+                _agoLblB = _hB + 'h' + (_mB > 0 ? ' ' + _mB + 'm' : '') + ' ago';
+              } else {
+                _agoLblB = Math.floor(_agoSecB / 86400) + 'd ago';
+              }
+              tagParts.push('<span class="stat-tag">' + _agoLblB + '</span>');
+            }
+            _tagsHtml = '<span class="b-inline-stats">' + tagParts.join('') + '</span>';
+          }
+          // Score "76–58" with the winning side underlined.
+          var _scoreCell =
+            '<span class="s-blue' + (winBlue ? ' winner-side' : '') + '">' + (b ?? '—') + '</span>' +
+            '<span class="dash">\u2013</span>' +
+            '<span class="s-red'  + (winRed  ? ' winner-side' : '') + '">' + (r ?? '—') + '</span>';
+
+          var _baseCls = cls.concat(['mode-b', 'has-stats-strip']).join(' ');
+          html += '<tr class="' + _baseCls + '"' + rowStyle + '>' +
+                  '<td class="col-time">' + timeCell + '</td>' +
+                  '<td class="col-match">' + _matchCellWithCheck + '</td>' +
+                  '<td colspan="3" class="col-blue alliance-teams-row blue">' +
+                    escapeHtml(blueTeams) +
+                  '</td>' +
+                  '<td colspan="3" class="col-red alliance-teams-row red">' +
+                    escapeHtml(redTeams) +
+                  '</td>' +
+                  '</tr>';
+          // Second row — note completed-stats + result class so the
+          // base CSS extends the grey + tint across both rows.
+          html += '<tr class="completed-stats mode-b ' + _resultCls + '">' +
+                  '<td colspan="2" class="b-score-cell">' + _scoreCell + '</td>' +
+                  '<td colspan="6">' + _tagsHtml + '</td>' +
+                  '</tr>';
+
+        } else {
+          // ── Modes A and C: score block + stats strip beneath ──
+          // Identical DOM emission for A and C; the visual difference
+          // is purely CSS (mode A's stats strip is taller / larger).
+          var _stripHtml = _composeStrip();
+          var _scoreRowCls = cls.slice();
+          if (_stripHtml) _scoreRowCls.push('has-stats-strip');
+          html += '<tr class="' + _scoreRowCls.join(' ') + '"' + rowStyle + '>' +
+                  '<td class="col-time">' + timeCell + '</td>' +
+                  '<td class="col-match">' + _matchCellWithCheck + '</td>' +
+                  '<td colspan="3" class="col-blue score-block' + (winBlue ? ' winner' : '') + '">' +
+                  '  <span class="alliance-score">' + (b ?? '—') + '</span>' +
+                  '  <span class="alliance-teams">' + escapeHtml(blueTeams) + '</span>' +
+                  '  ' + (winBlue ? '<span class="winner-badge">W</span>' : '') +
+                  '</td>' +
+                  '<td colspan="3" class="col-red score-block' + (winRed ? ' winner' : '') + '">' +
+                  '  <span class="alliance-score">' + (r ?? '—') + '</span>' +
+                  '  <span class="alliance-teams">' + escapeHtml(redTeams) + '</span>' +
+                  '  ' + (winRed ? '<span class="winner-badge">W</span>' : '') +
+                  '</td>' +
+                  '</tr>';
+          if (_stripHtml) {
+            html += '<tr class="completed-stats ' + _resultCls + '">' +
+                    '<td colspan="8">' + _stripHtml + '</td>' +
+                    '</tr>';
+          }
+        }
       } else {
         html += '<tr class="' + cls.join(' ') + '"' + rowStyle + '>' +
                 '<td class="col-time">' + timeCell + '</td>' +

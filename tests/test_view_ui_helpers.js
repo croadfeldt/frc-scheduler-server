@@ -374,6 +374,80 @@ console.log('\nProduction source guards (P-vs-Q pill disambiguation):');
   });
 }
 
+// ── Completed-row layout mode (toolbar dropdown + persistence) ────
+//
+// The "Completed:" dropdown in the table-actions toolbar offers
+// three layouts (A / B / C). Choice is persisted to localStorage
+// under 'frc_view_completed_mode' and applied as data-completed-mode
+// on <html>. Default is 'c' (compact). Verify the production
+// source carries:
+//   - the dropdown element + onchange handler
+//   - the helper functions (get/set/init)
+//   - the storage key + valid-set + default
+//   - the three mode branches in the render emission
+//   - CSS hooks for all three modes
+
+console.log('\nCompleted-mode dropdown + mode-aware render:');
+{
+  const guards = [
+    // Toolbar dropdown
+    /<select\s+id="completedModeSel"\s+onchange="setCompletedMode\(this\.value\)"/,
+    /<option value="a"/,
+    /<option value="b"/,
+    /<option value="c"/,
+    // Helper plumbing
+    /COMPLETED_MODE_KEY\s*=\s*['"]frc_view_completed_mode['"]/,
+    /COMPLETED_MODE_DEFAULT\s*=\s*['"]c['"]/,
+    /COMPLETED_MODE_VALID\s*=\s*\{\s*a:\s*1,\s*b:\s*1,\s*c:\s*1\s*\}/,
+    /function getCompletedMode\s*\(/,
+    /function setCompletedMode\s*\(\s*mode\s*\)/,
+    /function initCompletedMode\s*\(/,
+    // initCompletedMode called from boot
+    /initCompletedMode\(\)/,
+    // Mode is read from getCompletedMode() inside renderTable's
+    // completed branch
+    /var\s+_mode\s*=\s*getCompletedMode\(\);/,
+    // Mode B has a dedicated branch with a team-list row and a
+    // score+tags row. Source string check both pieces:
+    /class="b-score-cell"/,
+    /class="b-inline-stats"/,
+    /class="col-blue alliance-teams-row blue"/,
+    // Mode A/C emit the stats strip
+    /class="completed-stat-strip"/,
+    // CSS hooks per mode
+    /html\[data-completed-mode="a"\]/,
+    /tr\.completed\.mode-b/,
+  ];
+  guards.forEach((re, i) => {
+    check('mode dropdown guard #' + (i + 1) + ': ' + re.source.slice(0, 50),
+          re.test(VIEW),
+          'did not match production source');
+  });
+}
+
+// ── Margin computation (sanity) ─────────────────────────────────
+//
+// The completed-stats strip uses Math.abs(b - r) for margin. Verify
+// the source emits the right tag class for each outcome (blue win,
+// red win, tie). Substring-level — actual margin numbers are part
+// of the runtime DOM.
+
+console.log('\nMargin tag conditional emission:');
+{
+  // Blue win: winBlue branch attaches .margin-tag.blue
+  check('source emits "margin-tag blue" for Blue wins',
+        /margin-tag blue/.test(VIEW));
+  check('source emits "margin-tag red" for Red wins',
+        /margin-tag red/.test(VIEW));
+  check('source emits "margin-tag tie" for ties',
+        /margin-tag tie/.test(VIEW));
+  // The formula is Math.abs(b - r) and gates on r != null && b != null
+  check('margin uses Math.abs(b - r)',
+        /Math\.abs\(b\s*-\s*r\)/.test(VIEW));
+  check('margin gates on r != null && b != null',
+        /r\s*!=\s*null\s*&&\s*b\s*!=\s*null/.test(VIEW));
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();
