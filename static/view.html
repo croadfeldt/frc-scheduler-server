@@ -5080,10 +5080,15 @@ function scrollToStayCurrent(nowMatchNum) {
     if (Math.abs(rel - container.scrollTop) >= 8) {
       // Suppress the scroll listener's "user scrolled" detection
       // during this programmatic scroll. The listener uses a sticky
-      // bit cleared by a microtask after the scroll completes.
+      // bit; we use a generous 1500ms window because smooth-scroll
+      // animations from far-away rows can take longer than the
+      // browser's default 300-500ms ease, and a too-short window
+      // lets intermediate scroll events fire and trip the override.
+      // (Modern browsers expose `scrollend`, but support is uneven —
+      // the timer is the safe lower bound.)
       STATE._stayCurrentProgrammaticScroll = true;
       container.scrollTo({ top: rel, behavior: 'smooth' });
-      setTimeout(function() { STATE._stayCurrentProgrammaticScroll = false; }, 500);
+      setTimeout(function() { STATE._stayCurrentProgrammaticScroll = false; }, 1500);
     }
   } else {
     // Non-mobile: scroll the document. Use scrollIntoView with
@@ -5095,7 +5100,7 @@ function scrollToStayCurrent(nowMatchNum) {
     if (Math.abs(desiredTop - window.pageYOffset) >= 8) {
       STATE._stayCurrentProgrammaticScroll = true;
       window.scrollTo({ top: desiredTop, behavior: 'smooth' });
-      setTimeout(function() { STATE._stayCurrentProgrammaticScroll = false; }, 500);
+      setTimeout(function() { STATE._stayCurrentProgrammaticScroll = false; }, 1500);
     }
   }
 }
@@ -8783,6 +8788,71 @@ function _computeScheduleDelta() {
   var actualTs = liveLast.actual_time * 1000;
   var deltaMs = actualTs - schedTs;
   var deltaMin = deltaMs / 60000;
+
+  // ── Break-end anchor reset ───────────────────────────────────
+  //
+  // When a scheduled break (lunch, awards, ceremony, alliance
+  // selection, playoff block) has ended BETWEEN the last completed
+  // match and now, the break has effectively absorbed the lateness:
+  // matches weren't running during the break anyway, so by the time
+  // it scheduled-ends, we're "back on time" relative to that anchor.
+  //
+  // Concretely: if Q22 ended 14 min late at 11:08 and lunch was
+  // scheduled 11:30 – 12:30, then at 12:35 (5 min after lunch's
+  // scheduled end) we're "5 min behind" against the break-end
+  // anchor, not "14 min behind" against Q22's anchor.
+  //
+  // Rule: find the latest break entry whose scheduled END is on or
+  // before nowMs AND after the last completed match's scheduled
+  // end. If found, override deltaMin with (now - breakEndMs).
+  //
+  // We use unix-ms throughout for compatibility with schedTs which
+  // is already in unix-ms. Break entries carry `start`/`end` as
+  // minutes-since-local-midnight, so we project them onto today
+  // (or the relevant day) via _resolveDayDateMs which gives us
+  // the midnight epoch for the entry's day.
+  try {
+    var nowMs = Date.now();
+    var lastSchedMs = schedTs;
+    var breakAnchorMs = null;
+    // Walk computed in order. Day-divider entries delimit each day
+    // and carry a `date` (YYYY-MM-DD); break entries carry start/end
+    // as minutes-since-local-midnight relative to that day.
+    var curDayMs = null;
+    for (var bi = 0; bi < STATE.computed.length; bi++) {
+      var be = STATE.computed[bi];
+      if (be.type === 'day-divider') {
+        if (be.date) {
+          // Parse 'YYYY-MM-DD' as local-midnight epoch ms.
+          var parts = be.date.split('-');
+          if (parts.length === 3) {
+            var dt = new Date(+parts[0], +parts[1] - 1, +parts[2], 0, 0, 0);
+            curDayMs = dt.getTime();
+          } else {
+            curDayMs = null;
+          }
+        } else {
+          curDayMs = null;
+        }
+        continue;
+      }
+      if (be.type !== 'break') continue;
+      if (curDayMs == null) continue;
+      if (be.end == null) continue;
+      var endMs = curDayMs + be.end * 60000;
+      // Must already be past the break's scheduled end AND the
+      // break-end must be more recent than the last match's
+      // scheduled end. Otherwise it's not a useful anchor.
+      if (endMs > nowMs) continue;
+      if (endMs <= lastSchedMs) continue;
+      breakAnchorMs = endMs;   // keep the LATEST applicable break
+    }
+    if (breakAnchorMs != null) {
+      deltaMs  = nowMs - breakAnchorMs;
+      deltaMin = deltaMs / 60000;
+    }
+  } catch(_) {}
+  // ── End break-end anchor reset ───────────────────────────────
 
   // Last cycle — only meaningful if previous match also completed.
   var lastCycleMin = null;

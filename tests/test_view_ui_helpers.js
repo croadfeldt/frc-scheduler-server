@@ -938,6 +938,45 @@ console.log('\nStay-current non-match phases:');
   );
 }
 
+// ── Schedule-delta break-end anchor reset ───────────────────────
+//
+// When a scheduled break has ended between the last completed match
+// and now, the break absorbed the lateness (no matches were running
+// during it anyway). _computeScheduleDelta walks STATE.computed for
+// the latest break whose scheduled end has passed AND is after the
+// last completed match's scheduled end; if found, it overrides the
+// match-based delta with (now - break.end).
+
+console.log('\nSchedule-delta break-end anchor reset:');
+{
+  // Whole-file substring is fine — these terms appear nowhere else.
+  check(
+    'break-end anchor block exists in _computeScheduleDelta',
+    /Break-end anchor reset/.test(VIEW),
+    'fix block must be present and named'
+  );
+  check(
+    'walks STATE.computed for type==="break" entries',
+    /be\.type\s*!==\s*['"]break['"]/.test(VIEW),
+    'should iterate breaks to find applicable anchor'
+  );
+  check(
+    'requires break.end already in the past (endMs <= nowMs)',
+    /endMs\s*>\s*nowMs[\s\S]{0,200}continue/.test(VIEW),
+    'break must already be scheduled-ended for the reset to apply'
+  );
+  check(
+    'requires break.end after last match\'s scheduled end',
+    /endMs\s*<=\s*lastSchedMs[\s\S]{0,200}continue/.test(VIEW),
+    'old breaks before the last completed match should not apply'
+  );
+  check(
+    'overrides deltaMs/deltaMin when applicable',
+    /breakAnchorMs\s*!=\s*null[\s\S]{0,300}deltaMs\s*=\s*nowMs\s*-\s*breakAnchorMs/.test(VIEW),
+    'must rewrite deltaMs and deltaMin so consumers see the reset value'
+  );
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();
