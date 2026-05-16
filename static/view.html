@@ -4463,7 +4463,12 @@ function _buildMobileShellOnce() {
       '<div class="mobile-field-header">' +
         '<span class="mobile-field-live-dot" id="mobileFieldLiveDot" style="display:none;"></span>' +
         '<span class="mobile-field-pill"     id="mobileFieldPill"    style="display:none;"></span>' +
-        '<span class="mobile-field-title">Field</span>' +
+        // Phase label — derived from _resolveAgendaPhase(). Defaults
+        // to "Field" until the first render fills it in. During a
+        // match, this stays "Field" (the 3-up already shows match
+        // detail); during a break / awards / alliance selection /
+        // ceremony, it shows the phase name (e.g. "Lunch break").
+        '<span class="mobile-field-title" id="mobileFieldPhase">Field</span>' +
         '<span class="mobile-field-ctx"      id="mobileFieldCtx"></span>' +
       '</div>' +
       '<div class="mobile-field-body" id="mobileFieldBody"></div>' +
@@ -4686,13 +4691,136 @@ function _renderMobileTileSummaries() {
   }
 }
 
+// ── Agenda phase detection ─────────────────────────────────────────
+//
+// Walk STATE.computed to determine which entry (match / break /
+// ceremony / awards / alliance selection / playoff) the event is
+// currently inside, plus the next-upcoming match. The "position" is
+// computed from the schedule-delta where possible (event-actual
+// position; lags the wall clock when running behind) and falls back
+// to wall-clock when no schedule delta is known (pre-event).
+//
+// This drives the mobile field-section header — instead of just
+// showing "Behind 14 min", it can say "Lunch break · next: Q23 in
+// 4 min" or "Awards · next: alliance selection in 12 min".
+//
+// Returns:
+//   {
+//     kind:        'match'|'break'|'ceremony'|'awards'|'alliance'|
+//                  'playoff'|'gap'|null,
+//     label:       human-readable phase label (e.g. "Lunch break"),
+//     currentEntry: STATE.computed entry that contains position,
+//                  or null if in a gap / no data,
+//     nextMatch:   next non-practice match entry after position,
+//                  or null,
+//     nextNonMatch: next non-match entry (break/ceremony/etc.)
+//                  after position, or null,
+//   }
+//
+// Returns null when STATE.computed is empty or we can't anchor a
+// position at all (no today match, no delta).
+function _resolveAgendaPhase() {
+  if (!STATE || !STATE.computed || !STATE.computed.length) return null;
+  // We work in minutes-since-midnight (matches day-divider start/end).
+  var nowD = new Date();
+  var todayStr = nowD.getFullYear() + '-' +
+                 String(nowD.getMonth() + 1).padStart(2, '0') + '-' +
+                 String(nowD.getDate()).padStart(2, '0');
+  var nowMin = nowD.getHours() * 60 + nowD.getMinutes() + nowD.getSeconds() / 60;
+
+  // Prefer the schedule-position (where the event ACTUALLY is) when
+  // a delta is known; fall back to wall-clock. The blue line in the
+  // agenda strip reflects this position too — keeping them in sync.
+  var posMin = nowMin;
+  if (typeof _computeScheduleDelta === 'function') {
+    try {
+      var sd = _computeScheduleDelta();
+      if (sd && typeof sd.minutes === 'number') posMin = nowMin - sd.minutes;
+    } catch(_) {}
+  }
+
+  // Walk entries, scoped to today's day-divider. Match entries carry
+  // startMin/endMin; break entries carry start/end. Day-divider entries
+  // delimit but we only inspect the day matching today's date.
+  var inToday = false;
+  var currentEntry = null;
+  var nextMatch    = null;
+  var nextNonMatch = null;
+  for (var i = 0; i < STATE.computed.length; i++) {
+    var e = STATE.computed[i];
+    if (e.type === 'day-divider') {
+      if (e.date && e.date === todayStr)        inToday = true;
+      else if (inToday)                          break;  // hit the next day
+      continue;
+    }
+    if (!inToday) continue;
+
+    var s = null, ed = null;
+    if (e.type === 'match' && e.startMin != null && e.endMin != null) {
+      s = e.startMin; ed = e.endMin;
+    } else if (e.type === 'break' && e.start != null && e.end != null) {
+      s = e.start; ed = e.end;
+    }
+    if (s == null || ed == null) continue;
+
+    if (currentEntry == null && posMin >= s && posMin < ed) {
+      currentEntry = e;
+    } else if (posMin < s) {
+      if (e.type === 'match' && !e.isPractice && !nextMatch) nextMatch = e;
+      else if (e.type !== 'match' && !nextNonMatch)          nextNonMatch = e;
+      // Continue walking so we can fill both nextMatch and nextNonMatch.
+    }
+    if (currentEntry && nextMatch && nextNonMatch) break;
+  }
+
+  // Classify the current entry. Match: kind='match'. Breaks: branch
+  // on subtype/name to surface a friendly label.
+  function classify(entry) {
+    if (!entry) return { kind: 'gap', label: 'Between events' };
+    if (entry.type === 'match') {
+      if (entry.isPractice) return { kind: 'match', label: 'P' + entry.matchNum + ' on field' };
+      return { kind: 'match', label: 'Q' + entry.matchNum + ' on field' };
+    }
+    if (entry.type === 'break') {
+      var sub = (entry.subtype || '').toLowerCase();
+      var name = (entry.name || '').toLowerCase();
+      if (sub === 'awards' || /award/.test(name))                              return { kind: 'awards',   label: 'Awards' };
+      if (sub === 'alliance_selection' || /alliance/.test(name))               return { kind: 'alliance', label: 'Alliance selection' };
+      if (sub === 'ceremony' || /ceremony|opening|closing/.test(name)) {
+        // Prefer the original name (e.g. "Opening ceremony") for
+        // specificity over a generic "Ceremony" label.
+        return { kind: 'ceremony', label: entry.name || 'Ceremony' };
+      }
+      if (sub === 'playoff' || /playoff|finals?/.test(name))                   return { kind: 'playoff',  label: entry.name || 'Playoffs' };
+      // Generic break — keep the name when present (e.g. "Lunch break").
+      return { kind: 'break', label: entry.name || 'Break' };
+    }
+    return { kind: 'gap', label: 'Between events' };
+  }
+
+  var c = classify(currentEntry);
+  return {
+    kind:         c.kind,
+    label:        c.label,
+    currentEntry: currentEntry,
+    nextMatch:    nextMatch,
+    nextNonMatch: nextNonMatch,
+    posMin:       posMin,
+  };
+}
+
 function _renderMobileFieldHeader() {
-  // The mobile field header shows three signals:
+  // The mobile field header shows four signals:
   //   - LIVE pulsing dot (Nexus or TBA actuals present)
   //   - amber "STARTING SOON" pill (no live yet, match within 15 min)
-  //   - a context line ("Day 2 · Sat · Q1 in 2 min" or "Behind 4 min")
+  //   - a PHASE label derived from _resolveAgendaPhase (where we are
+  //     in the agenda — "Lunch break" / "Awards" / etc); collapses
+  //     to "Field" during a match because the 3-up already shows
+  //     match detail.
+  //   - a context line ("Behind 4 min" / "next Q23 in 8 min" / etc).
   var liveDot = document.getElementById('mobileFieldLiveDot');
   var pill    = document.getElementById('mobileFieldPill');
+  var phase   = document.getElementById('mobileFieldPhase');
   var ctx     = document.getElementById('mobileFieldCtx');
   if (!liveDot || !pill || !ctx) return;
 
@@ -4713,25 +4841,82 @@ function _renderMobileFieldHeader() {
     pill.style.display = 'none';
   }
 
-  // Context line — schedule delta when present, else day label.
-  var ctxText = '';
+  // Resolve the current phase from the agenda. The label is what the
+  // event IS doing right now — if we're in a break, name it; if we're
+  // in a match, stay generic ("Field") because the 3-up below this
+  // header shows the match identity prominently and we don't want
+  // to repeat it.
+  //
+  // The ctx line splits roles: when in a non-match phase, it carries
+  // "next: Q23 in N min" so the user knows what's coming. When in a
+  // match, it stays as the schedule-delta ("Behind 14 min") since
+  // the next-match info is already covered by the 3-up on-deck cell.
+  var phaseLabel = 'Field';
+  var ctxText    = '';
+  var ctxWarn    = false;
+  var phaseRes = null;
+  if (typeof _resolveAgendaPhase === 'function') {
+    try { phaseRes = _resolveAgendaPhase(); } catch(_) {}
+  }
+
+  // Schedule delta (used in both branches). Computed once here.
+  var delta = null;
   if (typeof _computeScheduleDelta === 'function') {
     try {
-      var d = _computeScheduleDelta();
-      if (d && Math.abs(d.minutes) >= 1) {
-        var verb = d.minutes > 0 ? 'Behind' : 'Ahead';
-        ctxText = verb + ' ' + Math.round(Math.abs(d.minutes)) + ' min';
-        ctx.classList.toggle('warn', d.minutes > 0);
+      var dRes = _computeScheduleDelta();
+      if (dRes && typeof dRes.minutes === 'number'
+          && Math.abs(dRes.minutes) >= 1) {
+        delta = Math.round(dRes.minutes);
       }
     } catch(_) {}
   }
-  if (!ctxText && msUntil < 60 * 60 * 1000 && msUntil > 0) {
-    // Within an hour of a scheduled match — show "in N min" hint.
-    var mins = Math.round(msUntil / 60000);
-    ctxText = 'next in ' + mins + ' min';
-    ctx.classList.remove('warn');
+
+  function _formatNextMatchTeaser(nextMatch, phaseRes) {
+    if (!nextMatch) return '';
+    var prefix = nextMatch.isPractice ? 'P' : 'Q';
+    // Minutes-until is derived from the phase position so the teaser
+    // matches what the blue line implies. nextMatch.startMin is in
+    // minutes-since-midnight; phaseRes.posMin is in the same scale.
+    if (nextMatch.startMin != null && phaseRes && phaseRes.posMin != null) {
+      var mins = Math.max(0, Math.round(nextMatch.startMin - phaseRes.posMin));
+      if (mins <= 0) return prefix + nextMatch.matchNum + ' next';
+      return prefix + nextMatch.matchNum + ' in ' + mins + ' min';
+    }
+    return prefix + nextMatch.matchNum + ' next';
   }
+
+  if (phaseRes && phaseRes.kind && phaseRes.kind !== 'match') {
+    // Non-match phase: surface the phase name and the next match.
+    phaseLabel = phaseRes.label;
+    var teaser = _formatNextMatchTeaser(phaseRes.nextMatch, phaseRes);
+    if (teaser && delta != null) {
+      // Both pieces are useful — keep them concise.
+      var verb = delta > 0 ? 'behind' : 'ahead';
+      ctxText = teaser + ' \u00b7 ' + Math.abs(delta) + 'm ' + verb;
+      ctxWarn = delta > 0;
+    } else if (teaser) {
+      ctxText = teaser;
+    } else if (delta != null) {
+      ctxText = (delta > 0 ? 'Behind ' : 'Ahead ') + Math.abs(delta) + ' min';
+      ctxWarn = delta > 0;
+    }
+  } else {
+    // Match phase (or unknown): keep "Field" + schedule delta. The
+    // 3-up below already names the on-field match, so repeating it
+    // in the header would be noise.
+    phaseLabel = 'Field';
+    if (delta != null) {
+      ctxText = (delta > 0 ? 'Behind ' : 'Ahead ') + Math.abs(delta) + ' min';
+      ctxWarn = delta > 0;
+    } else if (msUntil < 60 * 60 * 1000 && msUntil > 0) {
+      var mins2 = Math.round(msUntil / 60000);
+      ctxText = 'next in ' + mins2 + ' min';
+    }
+  }
+
+  if (phase) phase.textContent = phaseLabel;
   ctx.textContent = ctxText;
+  ctx.classList.toggle('warn', ctxWarn);
 }
 
 // Render the compact agenda strip. Variant 1 = today only (single bar +

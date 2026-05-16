@@ -842,6 +842,65 @@ console.log('\nMobile agenda dual-line indicators:');
   );
 }
 
+// ── Agenda phase resolver + field header ────────────────────────
+//
+// _resolveAgendaPhase walks STATE.computed to find which entry the
+// event's schedule-position falls into. The mobile field header uses
+// it to surface "Lunch break · Q23 in 4 min" instead of just
+// "Behind 14 min".
+
+console.log('\nAgenda phase resolver:');
+{
+  check(
+    '_resolveAgendaPhase function exists',
+    /function\s+_resolveAgendaPhase\s*\(/.test(VIEW),
+    'phase resolver should be defined'
+  );
+  check(
+    'phase resolver uses schedule-delta for position',
+    /_computeScheduleDelta\(\)[\s\S]{0,500}posMin\s*=\s*nowMin\s*-/.test(VIEW),
+    'position = nowMin - schedDelta (matches blue line in agenda)'
+  );
+  check(
+    'phase resolver scopes to today via date string',
+    /e\.date\s*===\s*todayStr/.test(VIEW),
+    'must skip yesterday/tomorrow day-dividers'
+  );
+  check(
+    'phase resolver detects awards / alliance / ceremony / playoff / break',
+    /kind:\s*'awards'/.test(VIEW)
+    && /kind:\s*'alliance'/.test(VIEW)
+    && /kind:\s*'ceremony'/.test(VIEW)
+    && /kind:\s*'playoff'/.test(VIEW)
+    && /kind:\s*'break'/.test(VIEW),
+    'should classify all five non-match phase types'
+  );
+}
+
+console.log('\nMobile field header phase label:');
+{
+  check(
+    'phase span exists in shell markup',
+    /id="mobileFieldPhase"/.test(VIEW),
+    'header needs the phase-name slot for the renderer to write to'
+  );
+  check(
+    'renderer consults _resolveAgendaPhase',
+    /_resolveAgendaPhase\(\)/.test(VIEW),
+    'header should derive phase from the resolver, not just from delta'
+  );
+  check(
+    'header stays "Field" during a match',
+    /3-up below[\s\S]{0,200}phaseLabel\s*=\s*'Field'/.test(VIEW),
+    "in-match phase deliberately stays generic so it doesn't duplicate the 3-up"
+  );
+  check(
+    'next-match teaser uses match-num',
+    /_formatNextMatchTeaser/.test(VIEW),
+    'should format "Q23 in N min" for non-match phases'
+  );
+}
+
 // ── Summary ─────────────────────────────────────────────────────
 
 console.log();
