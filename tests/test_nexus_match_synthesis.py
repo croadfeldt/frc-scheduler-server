@@ -97,6 +97,37 @@ check(
     "practice matches should not get synthesized as quals",
 )
 
+# 8. queue_time must be stored as int (unix seconds), not datetime —
+# the queue_status.queue_time column is BigInteger. Storing a
+# datetime causes asyncpg DataError ("'datetime.datetime' object
+# cannot be interpreted as an integer") which rolls back the
+# transaction and cascades into PendingRollbackError on the next
+# query, taking down the /live endpoint.
+check(
+    'queue_time stored as int (unix seconds) not datetime',
+    "queue_time = int(int(queue_time_ms) / 1000)" in LIVE_PY,
+    "queue_status.queue_time is BigInteger; datetime would fail asyncpg type check"
+)
+check(
+    'queue_time conversion does NOT call datetime.fromtimestamp',
+    "queue_time = datetime.fromtimestamp" not in LIVE_PY,
+    "earlier bug used datetime for a BigInteger column; the fromtimestamp path must be gone"
+)
+
+# 9. Error-handler hardening: read event.key BEFORE the try block
+# so a failed nexus pull doesn't trigger PendingRollbackError when
+# the warning log tries to autoflush an expired attribute.
+check(
+    'event.key captured before nexus_pull_event try block',
+    "_evkey = event.key" in LIVE_PY,
+    "must capture event.key while session is healthy; reading inside except triggers autoflush"
+)
+check(
+    'except clause rolls back session before logging',
+    "await db.rollback()" in LIVE_PY,
+    "nexus_pull_event failures may leave session rolled-back; explicit rollback unblocks the caller"
+)
+
 if _failures:
     print(f"\n{_failures} failure(s).")
     raise SystemExit(1)

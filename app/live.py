@@ -115,10 +115,25 @@ async def refresh_event(db: AsyncSession, event: Event, *, force: bool = False) 
     # throttle inside nexus_pull_event will skip the pull if push events
     # are arriving frequently.
     if os.environ.get("NEXUS_API_KEY", "").strip():
+        # Capture the event key BEFORE the try block. If nexus_pull_event
+        # leaves the session in a failed/rolled-back state, attempting to
+        # access event.key inside the except clause triggers an autoflush,
+        # which fails with PendingRollbackError and masks the real error.
+        # Read the key now (cheap if attribute is fresh, otherwise this
+        # is a clean fetch before any rollback condition exists).
+        _evkey = event.key
         try:
             await nexus_pull_event(db, event)
         except Exception as e:
-            log.warning("nexus pull failed (non-fatal) for %s: %s", event.key, e)
+            # If the failure was a DB-level error, the session may be in
+            # a rolled-back state — roll it back explicitly here so the
+            # caller can continue using the session without tripping
+            # PendingRollbackError on the next query.
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            log.warning("nexus pull failed (non-fatal) for %s: %s", _evkey, e)
 
     return {
         "ok": err is None, "source": "tba", "fetched_at": sync.tba_last_fetched,
@@ -825,14 +840,19 @@ async def _process_nexus_match_status(db: AsyncSession, event_id: int, match: di
         return
 
     # Pull queue time. Prefer actualQueueTime (real event), fall back to
-    # estimatedQueueTime (pre-event). Nexus uses Unix milliseconds; convert
-    # to datetime for our DB.
+    # estimatedQueueTime (pre-event). Nexus uses Unix milliseconds; the
+    # queue_status.queue_time column is BigInteger (unix SECONDS), so
+    # convert and round. An earlier version stored a datetime here
+    # which made asyncpg reject the INSERT with a type mismatch
+    # ("'datetime.datetime' object cannot be interpreted as an integer")
+    # and cascaded into a PendingRollbackError that took down the live
+    # endpoint.
     times = match.get("times") or {}
     queue_time_ms = times.get("actualQueueTime") or times.get("estimatedQueueTime")
     queue_time = None
     if queue_time_ms:
         try:
-            queue_time = datetime.fromtimestamp(int(queue_time_ms) / 1000.0, tz=timezone.utc)
+            queue_time = int(int(queue_time_ms) / 1000)
         except (TypeError, ValueError, OverflowError):
             queue_time = None
 
