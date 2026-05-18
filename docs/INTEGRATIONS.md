@@ -383,36 +383,79 @@ auto-detected and routed to the appropriate extractor.
 
 **Setup — endpoint side:**
 
-You need a **vision-capable** OpenAI-compatible endpoint. The recommended
-self-hosted option is **vLLM serving Qwen2.5-VL-7B-Instruct-AWQ**:
+The scheduler talks to any **OpenAI-compatible** vision-capable endpoint.
+It doesn't care what's behind it. You configure three env vars
+(`LLM_ENDPOINT`, `LLM_MODEL`, `LLM_API_KEY`) and the integration just
+works. Some options, roughly ordered from "most control" to "least
+setup":
 
-```sh
-vllm serve Qwen/Qwen2.5-VL-7B-Instruct-AWQ \
-  --quantization awq_marlin \
-  --max-model-len 8192 \
-  --trust-remote-code \
-  --gpu-memory-utilization 0.90
-```
+1. **Self-hosted vLLM via [`vllm-inference`](../../vllm-inference) repo**
+   — hand-rolled OpenShift manifests. Runs `Qwen2.5-VL-7B-Instruct-AWQ`
+   by default. Best if you want full control and don't have OpenShift AI
+   on your cluster.
 
-The deployment manifests in `openshift/vllm/` set this up on a GPU node.
-Any other vision-capable OpenAI-compatible endpoint also works (Anthropic,
-OpenAI, Google).
+2. **Self-hosted via OpenShift AI** — `InferenceService` CR using the
+   built-in `vllm-runtime`. Same vLLM under the hood, but managed by the
+   platform (autoscaling, observability, model registry integration).
+   Best if your cluster already has OpenShift AI installed and you want
+   to use it.
 
-**Why vision-capable:** the consolidated client uses one endpoint for both
+3. **Anthropic Claude** — point `LLM_ENDPOINT` at
+   `https://api.anthropic.com/v1` with an API key. No self-hosting,
+   highest quality on hard PDFs. Costs money per request. Note: Anthropic's
+   OpenAI-compatibility layer requires the right model name and may need
+   minor request adjustments — verify with a smoke test before relying on it.
+
+4. **OpenAI** — point at `https://api.openai.com/v1` with a key, model
+   `gpt-4o` or `gpt-4o-mini`. Works out of the box; costs money.
+
+5. **Anything else OpenAI-compatible** — Mistral La Plateforme, Groq,
+   Ollama on a desktop, llama.cpp, LM Studio. If it speaks the OpenAI
+   chat-completions API and accepts `image_url` content blocks, it works.
+
+**Why vision-capable:** the client uses one endpoint for both
 text-only prompts (day-plan extraction, schedule extraction from
-pdfplumber/OCR text) and image input (vision strategy when text extraction
-returns nothing). Vision models handle text-only prompts fine, and a 7B
-vision model is typically faster than a larger text-only model for short
-structured-extraction tasks.
+pdfplumber/OCR text) and image input (vision strategy when text
+extraction returns nothing). Vision models handle text-only prompts
+fine, and a 7B vision model is typically faster than a larger text-only
+model for short structured-extraction tasks. If you point at a text-only
+endpoint, text-extraction paths still work; the vision fallback for
+scanned PDFs won't.
 
 **Setup — scheduler side:**
 
+Three env vars in your `01-secrets.yaml` (or whatever Secret backs your
+deployment's `envFrom`):
+
 ```yaml
-# openshift/01-secrets.yaml
 stringData:
-  LLM_ENDPOINT:  "http://vllm-vision.vllm-vision.svc.cluster.local:8000/v1"
-  LLM_MODEL:     "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
-  LLM_API_KEY:   ""            # leave empty for self-hosted vLLM
+  LLM_ENDPOINT:  "<the /v1 base URL of your chosen endpoint>"
+  LLM_MODEL:     "<the model id that endpoint expects>"
+  LLM_API_KEY:   "<optional; required for hosted APIs, empty for self-host>"
+```
+
+Examples:
+
+```yaml
+# Option 1: self-hosted vLLM via the vllm-inference repo
+LLM_ENDPOINT:  "http://vllm-qwen25-vl-7b.vllm-inference.svc.cluster.local:8000/v1"
+LLM_MODEL:     "qwen2.5-vl-7b"
+LLM_API_KEY:   ""
+
+# Option 2: OpenShift AI InferenceService
+LLM_ENDPOINT:  "https://qwen25-vl-7b-vllm-inference.apps.<cluster>.<domain>/v1"
+LLM_MODEL:     "qwen25-vl-7b"
+LLM_API_KEY:   "<service-account token if auth enabled>"
+
+# Option 3: Anthropic
+LLM_ENDPOINT:  "https://api.anthropic.com/v1"
+LLM_MODEL:     "claude-sonnet-4-5"
+LLM_API_KEY:   "sk-ant-..."
+
+# Option 4: OpenAI
+LLM_ENDPOINT:  "https://api.openai.com/v1"
+LLM_MODEL:     "gpt-4o"
+LLM_API_KEY:   "sk-..."
 ```
 
 Apply secrets and restart:
@@ -420,6 +463,14 @@ Apply secrets and restart:
 ```sh
 oc apply -f openshift/01-secrets.yaml
 oc rollout restart deployment/frc-scheduler-server -n frc-scheduler-server
+```
+
+**Optional tuning** (have sensible defaults; only set if you need to override):
+
+```yaml
+LLM_TEMPERATURE:        "0.0"   # 0 = greedy, deterministic
+LLM_TOP_P:              "1.0"
+LLM_REPETITION_PENALTY: "1.0"   # 1.0 = no penalty (omitted from request)
 ```
 
 **Verifying:**
