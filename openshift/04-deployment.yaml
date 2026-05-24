@@ -12,10 +12,7 @@ spec:
     matchLabels:
       app: NAMESPACE_PLACEHOLDER-git
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+    type: Recreate
   template:
     metadata:
       labels:
@@ -24,7 +21,7 @@ spec:
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: DoNotSchedule
+          whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
               app: NAMESPACE_PLACEHOLDER-git
@@ -286,14 +283,3 @@ spec:
     - name: https
       port: 8088
       targetPort: 8443
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: NAMESPACE_PLACEHOLDER-pdb
-  namespace: NAMESPACE_PLACEHOLDER
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: NAMESPACE_PLACEHOLDER-git
